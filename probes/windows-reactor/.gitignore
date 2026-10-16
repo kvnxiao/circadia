@@ -1,0 +1,4 @@
+/target/
+/development/target/
+/results/*.json
+/results/*.png
