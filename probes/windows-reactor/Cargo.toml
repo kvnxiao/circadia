@@ -1,5 +1,5 @@
 [package]
-name = "circadia-reactor-probe"
+name = "circadia-reactor-lifecycle-probe"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
@@ -7,10 +7,16 @@ publish = false
 
 [dependencies]
 num-traits = "0.2"
-windows-reactor = "0.100"
+anyhow = "1"
+winsafe = { version = "=0.0.29", features = ["shell"] }
+windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "722f202100c3bd428627941d3834d87ad6679d1c" }
 
-[dev-dependencies]
-windows = { version = "0.62.2", features = ["Devices_Geolocation", "Storage_Pickers", "Win32_UI_Shell"] }
+[build-dependencies]
+anyhow = "1"
+windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "722f202100c3bd428627941d3834d87ad6679d1c", optional = true }
+
+[features]
+self-contained = ["dep:windows-reactor-setup"]
 
 [lints.rust]
 unsafe_code = "forbid"

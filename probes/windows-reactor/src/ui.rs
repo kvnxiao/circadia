@@ -4,22 +4,16 @@ use crate::curve::Point;
 use crate::curve::Temperature;
 use crate::curve::WIDTH;
 use crate::curve::{self};
-use windows_reactor::AutomationExt;
 use windows_reactor::Border;
 use windows_reactor::Button;
 use windows_reactor::Canvas;
-use windows_reactor::CanvasChildExt;
-use windows_reactor::ChildrenControl;
 use windows_reactor::Color;
 use windows_reactor::ComboBox;
 use windows_reactor::Component;
 use windows_reactor::ComponentContext;
-use windows_reactor::ContentControl;
 use windows_reactor::Ellipse;
 use windows_reactor::InfoBar;
-use windows_reactor::LayoutControl;
 use windows_reactor::Line;
-use windows_reactor::NumberBox;
 use windows_reactor::Orientation;
 use windows_reactor::PointerEventInfo;
 use windows_reactor::Rectangle;
@@ -85,8 +79,8 @@ impl Component for Probe {
         self.apply(message);
     }
 
-    fn view(&self, (): &(), context: &mut ViewContext<Self>) -> View {
-        context.window_title("Circadia Reactor 0.100.0 UI probe");
+    fn view(&self, (): &(), context: &mut ViewContext<'_, Self>) -> View {
+        context.window_title("Circadia pinned Reactor graph fixture");
         context.window_visuals(
             WindowVisuals::new()
                 .client_size(760.0, 700.0)
@@ -109,7 +103,7 @@ impl Component for Probe {
             )),
             self.graph(context),
             TextBlock::new().text(self.pointer_hint()).automation_id("pointer-hint"),
-            StackPanel::new().orientation(Orientation::Horizontal).spacing(8.0).keyed_children(self.points.iter().map(|point| (
+            StackPanel::new().orientation(Orientation::Horizontal).spacing(8.0).keyed_children(self.points.iter().map(|point| windows_reactor::keyed(
                 point.id,
                 Button::new().on_click(context.message(Message::Select(point.id))).content(format!("Point {}", point.id)),
             ))),
@@ -119,10 +113,10 @@ impl Component for Probe {
                     .selected_index(point.map(|point| point.anchor.index()))
                     .automation_id("point-anchor").automation_name("Point anchor").on_selection_changed(context.callback(Message::Anchor)),
                 TextBox::new().width(180.0).text(self.offset_input.clone()).automation_id("offset-input")
-                    .automation_name("Offset in whole minutes").on_text_changed(context.callback(Message::OffsetDraft)),
+                    .automation_name("Offset in whole minutes").on_text_changed(context.callback(|text: std::rc::Rc<str>| Message::OffsetDraft(text.to_string()))),
                 TextBox::new().width(100.0).text(self.kelvin_input.clone()).automation_id("kelvin-input")
                     .automation_name("Temperature in kelvin, rounded to 10 K on apply")
-                    .on_text_changed(context.callback(Message::KelvinDraft)),
+                    .on_text_changed(context.callback(|text: std::rc::Rc<str>| Message::KelvinDraft(text.to_string()))),
                 Button::new().automation_id("apply-values").on_click(context.message(Message::ApplyValues))
                     .content("Apply values"),
             )),
@@ -133,14 +127,13 @@ impl Component for Probe {
             )),
             TextBlock::new().text(self.status.clone()).automation_id("status"),
             TextBlock::new().text(self.state_summary()).automation_id("probe-state"),
-            "Other settings controls: latitude, wake-time text, startup toggle, error message",
+            "Other settings controls: wake-time text, startup toggle, error message",
             StackPanel::new().orientation(Orientation::Horizontal).spacing(8.0).children((
-                NumberBox::new().minimum(-90.0).maximum(90.0).value(40.7128).width(180.0).automation_name("Latitude control sample"),
                 TextBox::new().text("07:00").width(100.0).automation_name("Wake time control sample"),
                 ToggleSwitch::new().automation_name("Startup control sample"),
             )),
-            InfoBar::new().is_open(true).title("Probe only").message("No configuration, location, startup registration, or Night Light changes."),
-        )))
+            InfoBar::new().is_open(true).title("Probe only").message("No configuration, startup registration, or Night Light changes."),
+        ))).into()
     }
 }
 
@@ -257,7 +250,7 @@ impl Probe {
             self.selected = id;
             self.sync_inputs();
         }
-        if !event.capture_succeeded {
+        if event.capture_succeeded != Some(true) {
             self.status = "Pointer capture failed; no point was moved or inserted.".into();
             return;
         }
@@ -435,7 +428,7 @@ impl Probe {
             .find(|point| point.id == self.selected)
     }
 
-    fn graph(&self, context: &ViewContext<Self>) -> View {
+    fn graph(&self, context: &ViewContext<'_, Self>) -> View {
         let points = self.projected_points();
         let hovered = self.pointer.and_then(|(x, y)| self.nearest(x, y));
         let mut shapes = Vec::<View>::new();
@@ -518,7 +511,8 @@ impl Probe {
             .on_pointer_released(context.callback(|_| Message::Release))
             .on_pointer_capture_lost(context.message(Message::Release))
             .on_pointer_canceled(context.message(Message::Release))
-            .content(Canvas::new().keyed_children(shapes.into_iter().enumerate()))
+            .content(Canvas::new().children(shapes))
+            .into()
     }
 }
 
@@ -543,7 +537,7 @@ mod tests {
         PointerEventInfo {
             x,
             y,
-            capture_succeeded: true,
+            capture_succeeded: Some(true),
             is_left_button_pressed: true,
             ..PointerEventInfo::default()
         }
@@ -747,11 +741,11 @@ mod tests {
         let mut probe = centered_probe();
         for event in [
             PointerEventInfo {
-                capture_succeeded: false,
+                capture_succeeded: Some(false),
                 ..pointer(100.0, 100.0)
             },
             PointerEventInfo {
-                capture_succeeded: false,
+                capture_succeeded: Some(false),
                 ..pointer(320.0, 110.0)
             },
             PointerEventInfo {

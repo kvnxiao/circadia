@@ -38,7 +38,7 @@ This supports a single-process design: the process continues to handle tray acti
 
 **Development revision `722f2021`:** `App::run_application` accepts an `Application` whose view declares windows and notification icons. A declared but closed window does not keep the application running; a live notification icon does. `show_window` opens, restores, or activates the named settings window. Closing it drops component state but preserves application state. `context.exit()` ends the application. The lower-level `App::run_with` selects explicit dispatcher shutdown, and `AppContext::open_component_window` disables automatic last-window exit for that path.
 
-These are different entry points with different lifetime rules. The [development probe](../../probes/windows-reactor/development/src/main.rs) uses the application declaration API and a tray icon. It keeps a counter in application state so closing and reopening settings can test ownership directly. See the [probe results and commands](../../probes/windows-reactor/README.md) for the exact validation level.
+These are different entry points with different lifetime rules. The [pinned probe](../../probes/windows-reactor/src/main.rs) uses the application declaration API and a tray icon. It keeps a counter in application state so closing and reopening settings can test ownership directly. See the [probe results and commands](../../probes/windows-reactor/README.md) for the exact validation level.
 
 **Measured on Windows build 26300.9711:** the development probe stayed in one process after settings closed, reopened with its application counter preserved, and exited through its explicit action. Activation used a synthetic notification callback addressed to that process. These results verify that lifetime path, not actual Shell input or a complete Circadia controller.
 
@@ -48,7 +48,7 @@ Neither initialization timing nor a small executable establishes low resident me
 
 The application owns accepted configuration, the controller, tray state, and the single-instance activation endpoint. Settings owns draft edits and temporary interactions. After validation and persistence succeed, settings publishes the accepted configuration to the application. Reopening settings reconstructs its draft from that configuration. This matches the spec and the development API's component destruction behavior.
 
-Component-scoped tasks can be cancelled when settings closes. Use them for operations whose results belong only to that window; controller work must have application lifetime. Request location permission on the foreground UI thread and deliver completion without blocking message dispatch. Native registry observation, focus notifications, startup registration, and file picker ownership remain integrations to verify; declaring a Reactor control does not implement them.
+Component-scoped tasks can be cancelled when settings closes. Use them for operations whose results belong only to that window; controller work must have application lifetime. Native registry observation, focus notifications, startup registration, and file picker ownership remain integrations to verify; declaring a Reactor control does not implement them.
 
 The development `show_window` method handles requests inside the current process. A second invocation still needs detection and signaling to that process. It must not initialize another controller or write Night Light. The lifecycle probe does not test cross-process activation.
 
@@ -69,7 +69,7 @@ A split design could use a background executable such as `circadia.exe` and a se
 
 Proceed with the selected single-process design. For the application declaration API, use a tested, recorded development revision or a later published release that includes it. Published 0.100.0 alone does not provide the researched tray lifetime path. An adapter or upstream change would need its own validation; keeping a hidden settings window is not evidence that closing settings works.
 
-Treat Reactor's preview API changes as a maintenance constraint. Keep the probes and lockfiles as upgrade checks. Resource measurements can identify actual problems before any proposal changes the process model.
+Treat Reactor's preview API changes as a maintenance constraint. Keep the pinned probe and its lockfile as upgrade checks; the [source archive](archives/README.md) preserves the published-release comparison. Resource measurements can identify actual problems before any proposal changes the process model.
 
 ## Resource measurement protocol
 
@@ -88,7 +88,7 @@ Test self-contained deployment from a clean output directory on a machine withou
 - Build the selected UI implementation and measure idle CPU and memory before opening settings and after closing it.
 - Record loaded modules before opening settings and after closing it in the selected single process.
 - Verify deployment on a system without a preinstalled compatible Windows App SDK runtime for a Reactor deployment.
-- Exercise the temperature graph and Windows location request without blocking the background controller. Address search is outside the MVP.
+- Exercise temperature graph editing and the executable file picker without blocking the background controller. Location acquisition and solar scheduling are post-MVP work.
 - Do not describe f.lux's executable imports, thread structure, UI toolkit, or memory use as verified without direct evidence.
 
 ## Sources

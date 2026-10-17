@@ -1,4 +1,4 @@
-param([string]$Executable = "$PSScriptRoot\target\debug\circadia-reactor-probe.exe")
+param([string]$Executable = "$PSScriptRoot\target\debug\circadia-reactor-lifecycle-probe.exe")
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
@@ -56,7 +56,9 @@ if (-not [CircadiaPointerInput]::GetCursorPos([ref]$cursor)) { throw 'Cannot rea
 $probe = $null
 $mouseDown = $false
 try {
-    $probe = Start-Process -FilePath (Resolve-Path -LiteralPath $Executable).Path -PassThru -WindowStyle Hidden
+    $launch = @{ FilePath = (Resolve-Path -LiteralPath $Executable).Path; PassThru = $true; WindowStyle = "Hidden" }
+    $launch.ArgumentList = "--graph"
+    $probe = Start-Process @launch
     $condition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $probe.Id)
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
@@ -202,8 +204,7 @@ try {
     Assert-State 4 4 Sunrise -360 1200 '4,1,2,3' $false -PointerTolerance
 
     $window.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
-    if (-not $probe.WaitForExit(5000)) { throw 'Probe did not exit after closing settings' }
-    if ($probe.ExitCode -ne 0) { throw "Probe exited with code $($probe.ExitCode)" }
+    if ($probe.WaitForExit(500)) { throw 'Tray process exited after closing the graph' }
     [ordered]@{
         result = 'passed'
         processId = $probe.Id
@@ -215,7 +216,7 @@ try {
         checks = @('numeric Apply uses integer temperature steps', 'reanchor preserves offset and temperature', 'chronological reconnection',
             'off-center grab', 'movement threshold', 'click insertion and immediate drag',
             'separate new-point anchor', 'diagonal radius miss inserts', 'captured movement outside plot',
-            'release outside plot stops drag', 'no movement after release', 'successful exit')
+            'release outside plot stops drag', 'no movement after release', 'tray process survives graph closure')
     } | ConvertTo-Json
 } finally {
     if ($mouseDown) { [CircadiaPointerInput]::Button($false) }

@@ -1,52 +1,39 @@
 set shell := ["bash", "-uc"]
+set windows-shell := ["bash", "-uc"]
 
 fmt:
     cargo +nightly fmt --all
-    cargo +nightly fmt --manifest-path development/Cargo.toml --all
 
 lint:
     cargo +nightly fmt --all --check
-    cargo +nightly fmt --manifest-path development/Cargo.toml --all --check
     cargo +stable clippy --all-targets --all-features --locked -- -D warnings
-    cargo +stable clippy --manifest-path development/Cargo.toml --all-targets --all-features --locked -- -D warnings
 
 fix:
     cargo +stable clippy --fix --all-targets --all-features --locked --allow-dirty --allow-no-vcs
-    cargo +stable clippy --manifest-path development/Cargo.toml --fix --all-targets --all-features --locked --allow-dirty --allow-no-vcs
     just fmt
     just lint
 
 test:
-    cargo +stable test --all-targets --locked
-    cargo +stable test --manifest-path development/Cargo.toml --all-targets --all-features --locked
+    cargo +stable test --all-targets --all-features --locked
 
 doc:
-    RUSTDOCFLAGS="-D warnings" cargo +stable doc --no-deps --locked
-    RUSTDOCFLAGS="-D warnings" cargo +stable doc --manifest-path development/Cargo.toml --all-features --no-deps --locked
+    RUSTDOCFLAGS="-D warnings" cargo +stable doc --all-features --no-deps --locked
 
 dependencies:
     cargo +stable audit
     cargo +stable machete
-    cd development && cargo +stable audit
-    cd development && cargo +stable machete
 
 build:
     cargo +stable build --locked
 
-build-development:
-    cargo +stable build --manifest-path development/Cargo.toml --locked
-
 build-self-contained:
-    cargo +stable build --manifest-path development/Cargo.toml --features self-contained --locked
+    cargo +stable build --features self-contained --locked
 
 run:
     cargo +stable run --locked
 
-run-development:
-    cargo +stable run --manifest-path development/Cargo.toml --locked
-
 run-self-contained:
-    cargo +stable run --manifest-path development/Cargo.toml --features self-contained --locked
+    cargo +stable run --features self-contained --locked
 
 check: lint test doc dependencies
 

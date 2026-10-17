@@ -4,6 +4,7 @@ questions:
   - What is documented about missing solar events, midnight, and daylight-saving changes?
   - Which Windows f.lux behaviors provide a documented reference for Circadia's schedule and tray controls?
   - Which requested schedule features extend beyond the documented f.lux interface?
+  - Does the nine-hour bedtime rule specify transition timing, and can Circadia express a similar schedule?
   - What evidence establishes foreground suppression, recent-app selection, fullscreen behavior, startup, and location entry?
 observed-in:
   - f.lux Windows documentation retrieved 2026-10-16, with release notes through 4.141
@@ -14,7 +15,7 @@ recheck-when: f.lux changes its Windows scheduling or app-selection behavior, or
 
 # Windows f.lux behavior relevant to Circadia
 
-f.lux provides a documented reference for solar and wake-time scheduling, three temperature controls, gradual transitions, and suppression for selected foreground apps. Its developers describe a menu of recently used apps that supports selection after Alt+Tab. Circadia's required arbitrary 1..N temperature points, offsets from sunrise, sunset, and wake time, and adjustable continuous gradients extend beyond the documented f.lux controls. Exact executable matching also differs from the title-based matching described in later f.lux developer statements. These findings establish documented behavior, not runtime verification of the current executable. [Windows welcome guide](https://justgetflux.com/news/pages/v4/welcome/), [Windows release notes](https://justgetflux.com/news/pages/v4/readme/), [recent-app selection](https://forum.justgetflux.com/topic/4060/please-add-disable-by-exe), [matching identities](https://forum.justgetflux.com/topic/8439/how-can-add-more-of-6-items-to-blacklist).
+f.lux provides a documented reference for solar and wake-time scheduling, three temperature controls, gradual transitions, and suppression for selected foreground apps. Its developers describe a menu of recently used apps that supports selection after Alt+Tab. Circadia's arbitrary 1..N temperature points use offsets from manual Wake and Bedtime clocks. That editing model extends beyond the documented f.lux controls. Exact executable matching also differs from the title-based matching described in later f.lux developer statements. These findings establish documented behavior, not runtime verification of the current executable. [Windows welcome guide](https://justgetflux.com/news/pages/v4/welcome/), [Windows release notes](https://justgetflux.com/news/pages/v4/readme/), [recent-app selection](https://forum.justgetflux.com/topic/4060/please-add-disable-by-exe), [matching identities](https://forum.justgetflux.com/topic/8439/how-can-add-more-of-6-items-to-blacklist).
 
 ## Decision context and evidence limits
 
@@ -32,9 +33,15 @@ Only official documentation and statements by f.lux developers are used to estab
 
 **Observed in the Windows v4 developer discussion retrieved 2026-10-16:** The Working Late preset removes the solar cycle and schedules its fade approximately nine hours before wake time. This is a documented example of wake-relative scheduling. It is not evidence that f.lux exposes an arbitrary wake offset or that every preset follows this precise timing. [Timings](https://forum.justgetflux.com/topic/8655/timings).
 
+That statement does not distinguish the start from the end of the transition. An ordinary participant in a macOS forum thread reports reaching the bedtime temperature nine hours before wake, with the gradual transition starting an hour earlier. The developer's reply confirms only approximate nine-hour timing. This thread does not establish the Windows transition boundaries. [Bedtime discussion](https://forum.justgetflux.com/topic/7894/how-do-i-adjust-my-bedtime).
+
+**Design inference for Circadia:** Wake at 07:00 and Bedtime at 22:00 can reproduce a nine-hour nighttime interval without deriving one clock from the other. Bedtime -60 at 3400 K and Bedtime +0 at 2200 K define a one-hour evening ramp. Wake -60 at 2200 K keeps that temperature until 06:00, and Wake +0 at 6500 K defines the morning ramp. These points use the selected four-hour offset bounds; the global fade for focus and configuration changes is separate.
+
+The user chooses both clocks and all point temperatures. f.lux's approximate nine-hour convention does not establish a required nighttime duration for Circadia. Preset creation remains deferred in the [draft specification](../specs/SPEC.md#future-work).
+
 **Observed in the official FAQ and developer discussion retrieved 2026-10-16:** f.lux offers a slow transition lasting one hour. The developer explains that its older graph illustrated the sun rather than the actual fade, and that version 4 changed the displayed curve and transition behavior. These sources do not specify an interpolation equation or an arbitrary editable curve. They therefore do not justify copying a screenshot as a mathematical schedule definition. [FAQ](https://justgetflux.com/faq.html), [Make it follow the curve](https://forum.justgetflux.com/topic/4169/make-it-follow-the-curve/12).
 
-The required Circadia extension needs its own contract: each point has a temperature and an event-relative time, and the schedule connects successive points continuously. Configuring one point naturally suggests a constant temperature; this is a design recommendation, not a f.lux finding. Those rules belong in an arbitrary-point specification; Circadia records its selected rules and remaining boundary questions in [the schedule area](../specs/schedule.md).
+Circadia defines its own point contract: each point has a temperature and a Wake/Bedtime offset. Consecutive points connect linearly, and a one-point curve is constant. These are selected Circadia behaviors, not f.lux findings; [the schedule area](../specs/schedule.md) defines their boundaries.
 
 ## Schedule boundaries, polar conditions, and clock changes
 
@@ -46,9 +53,7 @@ The required Circadia extension needs its own contract: each point has a tempera
 
 **Observed in Windows release notes and a developer explanation retrieved 2026-10-16:** Versions 4.118 and 4.119 document DST smoothing. Herf describes adjusting wake timing over approximately the week before a clock change. The reviewed sources do not define how an ambiguous or nonexistent local wake time resolves, or how the current release handles every time-zone change. [Windows release notes](https://justgetflux.com/news/pages/v4/readme/), [DST smoothing explanation](https://forum.justgetflux.com/topic/7566/what-is-dst-smoothing).
 
-**Design inference:** f.lux's documented three-period interface does not supply rules for Circadia's arbitrary points. A constant one-point curve, chronological connections across midnight, and rejection of conflicting temperatures at the same instant require explicit Circadia contracts. Retaining the last valid scheduled temperature when a required solar event is unavailable is also a Circadia choice, not verified f.lux behavior.
-
-A wake-relative curve offers a user-controlled alternative when solar events are unavailable. Substituting a latitude or an automatic synthetic schedule would change the meaning of saved solar anchors and requires a separate product decision. No runtime f.lux comparison was performed for these findings.
+**Design inference:** f.lux's documented three-period interface does not supply rules for Circadia's arbitrary points. Circadia defines distinct point minutes, chronological interpolation across midnight, and omission/first-occurrence handling for Windows clock changes. Its manual clocks remove solar-event availability and seasonal movement from MVP validation. These are Circadia contracts, not verified f.lux behavior.
 
 ## Foreground suppression and recent-app selection
 
@@ -60,11 +65,11 @@ A wake-relative curve offers a user-controlled alternative when solar events are
 
 **Observed in the Windows v4 developer discussion retrieved 2026-10-16:** The intended transition behavior removes the tint quickly and restores it more slowly when focus leaves a selected app. The developer describes recent-app selection in the same discussion. The reply does not establish a configurable debounce delay or exact current fade durations. [I want a configurable delay when switching](https://forum.justgetflux.com/topic/4145/i-want-a-configurable-delay-when-switching).
 
-A simple Circadia design can preserve recent eligible foreground apps in memory and offer them in the tray menu. The displayed action should name its actual candidate; silently treating the taskbar or settings window as the selected app would defeat this interaction. The exact candidate count, handling of closed apps, and exclusions for shell windows require Circadia decisions.
+A simple Circadia design can preserve recent eligible foreground apps in memory and offer them in the tray menu. The displayed action should name its actual candidate; silently treating the taskbar or settings window as the selected app would defeat this interaction. Circadia selects five distinct executable names in most-recent-first order, retains closed apps until displaced, and clears history on exit. Its own UI and desktop/taskbar interactions do not replace the user's application candidate.
 
 ## App identity and matching
 
-**Observed in developer statements retrieved 2026-10-16:** An early explanation describes executable or executable-resource names. Later Windows discussions explicitly describe using window titles because packaged apps can share a host executable. In another discussion, the developer confirms permissive matching to accommodate document names in titles. These statements establish that the documented f.lux approach is not equivalent to exact case-insensitive executable-basename matching. They do not expose the complete current matching algorithm. [Early identity explanation](https://forum.justgetflux.com/topic/4060/please-add-disable-by-exe), [Title-matching explanation](https://forum.justgetflux.com/topic/7836/bug-app-whitelist-matches-too-eagerly), [Later identity explanation](https://forum.justgetflux.com/topic/8439/how-can-add-more-of-6-items-to-blacklist).
+**Observed in developer statements retrieved 2026-10-16:** An early explanation describes executable names or names from executable resources. The exact resource metadata field is not established here. Later Windows discussions explicitly describe using window titles because packaged apps can share a host executable. In another discussion, the developer confirms permissive matching to accommodate document names in titles. These statements establish that the documented f.lux approach is not equivalent to exact case-insensitive executable-basename matching. They do not expose the complete current matching algorithm. [Early identity explanation](https://forum.justgetflux.com/topic/4060/please-add-disable-by-exe), [Title-matching explanation](https://forum.justgetflux.com/topic/7836/bug-app-whitelist-matches-too-eagerly), [Later identity explanation](https://forum.justgetflux.com/topic/8439/how-can-add-more-of-6-items-to-blacklist).
 
 For Circadia, readable display names and stable matching identifiers should be distinct. An executable rule can display a friendly app name while storing the explicit identifier selected by the user. Packaged apps and inaccessible process identities need specified behavior; adopting f.lux's menu interaction does not require copying its title matching.
 
@@ -74,7 +79,7 @@ For Circadia, readable display names and stable matching identifiers should be d
 
 **Observed in the Windows v4 developer discussion retrieved 2026-10-16:** A desktop window triggering fullscreen suppression is identified as a bug and fixed in version 4.43. Thus a rule that merely treats the desktop's monitor-sized rectangle as fullscreen would reproduce behavior the developer rejected. [Desktop suppression bug](https://forum.justgetflux.com/topic/3991/fixed-flux-applies-a-different-color-temp-when-on-desktop/7).
 
-The evidence supports a user-facing fullscreen feature, but cannot select Circadia's detection mechanism. Any future automatic detector needs explicit rules for borderless videos, games, and shell-window exclusions. That feature is outside the MVP under [SPEC.md](../specs/SPEC.md#future-work). Its existing whole-desktop Night Light scope differs from f.lux's documented per-monitor suppression.
+The evidence supports a user-facing fullscreen feature, but cannot select Circadia's detection mechanism. Any future automatic detector needs explicit rules for borderless videos, games, and shell-window exclusions. That feature is outside the MVP under [SPEC.md](../specs/SPEC.md#future-work). Circadia controls Night Light across the desktop, which differs from f.lux's documented per-monitor suppression.
 
 ## Startup and location entry
 
@@ -97,34 +102,13 @@ The page's working credentials do not establish credentials or permission for a 
 
 **Observed in Windows release notes retrieved 2026-10-16:** Version 4.130, dated September 2023, replaced the Google Maps location preview with NASA Black Marble imagery as the map background. A map preview and a geocoding service have different responsibilities; this release note does not establish a change to address resolution. [Windows release notes](https://justgetflux.com/news/pages/v4/readme/).
 
-**Observed in Google documentation retrieved 2026-10-16:** Google's Geocoding API requires an enabled billing account and an API key or OAuth token. Reproducing f.lux's submitted-search interaction does not require selecting the same provider. A future address-search integration requires separate decisions about provider selection, saved-result terms, offline fallback, and transmission of the entered query. [Google usage and billing](https://developers.google.com/maps/documentation/geocoding/usage-and-billing).
+**Observed in Google documentation retrieved 2026-10-16:** Google's Geocoding API requires an enabled billing account and an API key or OAuth token. Reproducing f.lux's submitted-search interaction does not require selecting the same provider. A future address-search integration requires separate decisions about provider selection, provider restrictions on storing returned coordinates, offline fallback, and transmission of the entered query. [Google usage and billing](https://developers.google.com/maps/documentation/geocoding/usage-and-billing).
 
-## Alternatives within Circadia's required schedule scope
+## Applicability and remaining evidence
 
-Every option below supports arbitrary 1..N temperature points and sunrise-, sunset-, or wake-relative offsets. Restricting the app to f.lux's three periods would not satisfy that scope.
+Use f.lux as an interaction reference for the graph, foreground suppression, recent-app candidates, and editable exclusion list. Circadia separately defines its two manual clocks, relative-only point editor, and exact executable matching. Solar and location findings apply to post-MVP work.
 
-| Option | Adjustable controls | Implementation and behavior consequences |
-| :-- | :-- | :-- |
-| Point editor with linear interpolation (Recommended) | Event, offset, and temperature for every point; moving points changes each segment's gradient. | Direct interpolation and a graph computed from the same schedule. Continuous temperature, with possible slope changes at points. |
-| Point editor with selectable easing | All point controls plus a defined curve choice between successive points. | More validation and graph behavior; can smooth slopes while preserving endpoints if the curve is constrained. |
-| Free curve editor | All point controls plus editable curve handles. | Most expressive, but requires rules for overshoot, invalid times, and how handles behave when solar times move. |
-
-The recommendation interprets adjustable gradients as adjustment through point temperatures and times. If users need independent curve-shape control between unchanged endpoints, the second option is the narrower extension that provides it.
-
-## Recommendation and remaining decisions
-
-Use f.lux as an interaction reference: expose a schedule graph, location and wake settings, foreground suppression, recently used app candidates, and a persistent editable exclusion list. Define Circadia's event-relative schedule and exact matching rules directly. Avoid making unverified claims that its curve, process matching, fullscreen detection, or startup controls reproduce f.lux internals.
-
-The comparison identifies these product choices. This is not a list of currently open MVP decisions; [SPEC.md](../specs/SPEC.md#open-questions) records those, and its Future work section separates deferred features:
-
-- Whether point timing and temperature provide enough gradient control, or each segment also needs an easing choice.
-- How event-relative points repeat across midnight and resolve collisions, reordered solar events, and polar days.
-- How many recent apps appear, which shell windows are ignored, and whether adding an exclusion immediately reevaluates focus.
-- Whether packaged apps use a separate identifier or have an explicit matching limitation.
-- Whether fullscreen includes borderless windows and videos.
-- How startup registration, location search, manual coordinates, and incomplete initial setup appear to the user.
-
-A runtime comparison against Windows f.lux 4.141 would settle current menu details and transition behavior. Exact f.lux internals are unnecessary if Circadia specifies and tests its own observable behavior.
+A runtime comparison against Windows f.lux 4.141 would establish current menu details and transition behavior. Exact f.lux internals are unnecessary for implementing Circadia's own [schedule contract](../specs/schedule.md).
 
 ## Sources
 
