@@ -59,6 +59,7 @@ The released APIs support Circadia's selected integration:
 - Before a repair or scheduled write, obtain fresh settings and state for that control attempt. A queued snapshot does not establish that both records are still readable or current.
 - While a read or write failure is pending, use `discard_pending()` to maintain observation without reading. Retry on focus changes, scheduled curve operations, accepted configuration changes, and [target recomputation events](../specs/schedule.md#req-target-recompute--recompute-from-current-inputs) such as resume. Read current data even without another notification.
 - Classify snapshot-read errors separately from lost observation. Retain a watcher after a read error; replace a failed registration on those same retry events.
+- Use the same rounded integer intended temperature for native writes and readback comparison under [REQ-temperature-refresh](../specs/SPEC.md#req-temperature-refresh--repeat-the-complete-temperature-refresh). A fractional curve value or fade step must not make its own rounded readback appear different.
 - Serialize writes and request `RefreshPolicy::Always` for each temperature operation. Matching values, duplicate snapshots, and preview-only changes do not independently request another refresh.
 
 The library does not select retry triggers or own Circadia's desired values. Repeating every temperature write after every notification would cause another refresh and potentially another notification; comparing schedule enablement, on/off state, and temperature prevents that feedback loop.
@@ -72,4 +73,6 @@ Publication and automated tests establish the public API and tested registry beh
 - Smooth interruption and native-slider behavior during rapid Circadia fades.
 - Circadia's message-loop responsiveness and recovery behavior once integrated with Windows Reactor, Circadia's Rust UI library for WinUI 3.
 
-Controlled display tests and application integration tests are still required. Registry timestamps and unchanged gamma-table reads cannot substitute for display measurements.
+The separate [runtime measurements](nightlight-runtime.md) verify unconditional operation latency, decoded readback, reversal of a timed sequence of temperature requests, native slider response, and restoration on the recorded host. Application integration tests are still required to verify controller behavior and message-loop responsiveness.
+
+Physical display response and calibrated output equivalence are accepted assumptions in the draft. Optical testing is not required for draft approval or the selected MVP acceptance criteria. Registry readback, timestamps, and unchanged gamma-table reads do not establish optical behavior; the display properties above remain unmeasured.

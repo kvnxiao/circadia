@@ -2,105 +2,131 @@
 spec: SPEC.md
 ---
 
-# Location and daily temperature curve
+# Wake, Bedtime, and the daily temperature curve
 
-Read the shared terms, invariants, and lifecycle requirements in [SPEC.md](SPEC.md) with this area.
+Read the shared terms and invariants in [SPEC.md](SPEC.md) before this area.
 
-## Location
+## Time anchors
 
-### REQ-location-input — Save independent coordinates
+### REQ-configure-time-anchors — Configure Wake and Bedtime clocks
 
-Settings accepts manual latitude and longitude and saves them in Circadia's configuration. Latitude is finite and within -90 through 90 degrees; longitude is finite and within -180 through 180 degrees. Saving coordinates does not copy them into Windows Night Light settings. Circadia does not read the native schedule's location as its configuration source.
+Settings defines exactly two daily time anchors, Wake and Bedtime. The user specifies both as local clock times in whole minutes from 00:00 through 23:59. They repeat every day in the computer's Windows time zone, without weekday-specific schedules. Circadia does not derive either clock from the other or from sunrise, sunset, or location.
 
-**Failure behavior:** Invalid coordinates are rejected with an explanation. They do not replace the last valid saved configuration.
-
-**Scenarios:**
-
-- The user saves latitude 40.7128 and longitude -74.0060, then restarts Circadia: the same coordinates remain configured.
-- The user enters latitude 95, nonnumeric text, or a non-finite value: Save identifies the invalid field and preserves the prior configuration.
-- The user changes Windows Night Light's location or schedule: Circadia's saved coordinates do not change.
-
-### REQ-current-location — Request the current location explicitly
-
-Settings offers a Use current location action. A user invocation requests Windows location access and retrieves one position. Successful coordinates populate the same editable fields as manual input and use the normal Save action. Circadia does not continuously track the device's location.
-
-**Failure behavior:** Denied permission, disabled location services, unavailable data, or cancellation preserves the previously saved coordinates. Settings explains the outcome and keeps manual coordinate entry available.
+Anchor clocks are exact. Changing one moves all points attached to it while preserving their offsets, temperatures, and identities. The complete candidate curve must pass REQ-edit-temperature-curve before it replaces the last valid graph or can be saved. A valid change reconnects points in circular chronological order. Circadia does not adjust either clock to avoid a collision.
 
 **Scenarios:**
 
-- Windows returns a position: the user can inspect or edit its coordinates before saving them.
-- The user denies access: the saved location remains available and manual entry still works.
-- The app remains running after one successful request: it does not issue periodic position requests.
+- Wake is 07:00 and Bedtime is 23:00: Wake -60 occurs at 06:00 and Bedtime -60 occurs at 22:00 each day, regardless of seasonal solar changes.
+- The user changes Bedtime from 23:00 to 22:30: all Bedtime-relative points move 30 clock minutes earlier, while Wake-relative points retain their clock times.
+- Changing an anchor would place two points at the same minute: the draft identifies the collision, preserves the last valid graph, and disables Save until corrected.
+- Both clocks and a valid nonempty curve are entered without location information: setup can finish.
 
 ## Temperature curve
 
 ### REQ-edit-temperature-curve — Edit arbitrary curve points
 
-Settings supports adding, editing, moving, and removing curve points, with at least one point in a saved curve. Each point specifies a temperature, an anchor, and a signed time offset. The anchors are sunrise, sunset, and wake time. Wake time is editable independently of the points that reference it. The graph displays the same curve that the controller evaluates.
+Settings supports adding, editing, moving, and removing curve points, with at least one point in a saved curve. Each point stores a stable identity, temperature, anchor choice of Wake or Bedtime, and signed whole-minute offset from -240 through +240 inclusive. Every point is relative to an anchor; fixed clock points are unsupported. Saved points are recurring daily definitions without an assigned calendar date or weekday.
 
-The graph stores each point's vertical coordinate as an integer from 0 through 530. Labels and control-point temperatures used outside the graph convert this coordinate to Kelvin with `1200 + coordinate × 10`, giving 1200 K at the bottom and 6500 K at the top. Dragging and accepted whole-number temperature edits round to the nearest coordinate; ties round toward the higher Kelvin value. Numeric temperature entry outside the supported range is rejected before rounding. Labels and previews show whole Kelvin values.
+A point's clock minute is its anchor clock plus its offset, wrapped modulo 24 hours. Offsets can cross midnight but cannot span multiple days. The configured clocks and offsets determine circular chronological order; order is not an independent constraint that moves anchors. Every accepted candidate has distinct point minutes with at least one minute between neighbors, including the last point and the next cycle's first point. Equal temperatures do not permit duplicate times. Validation covers the whole recurring curve, including occurrences outside the visible graph.
 
-Point offsets are signed whole minutes. Horizontal dragging snaps to the nearest minute on the displayed timeline; ties round toward the later minute. Numeric offset entry rejects fractional minutes. The editor preserves the user's offsets rather than replacing them with one day's resolved clock times. Saving invalid input does not replace the last valid configuration.
+The graph stores each point's vertical coordinate as an integer from 0 through 530. The numeric editing fields display point temperatures using `1200 + coordinate × 10` kelvin. Dragging and accepted whole-number temperature edits round to the nearest coordinate; ties round toward higher kelvin. Numeric temperature entry outside 1200 K through 6500 K is rejected before rounding. Fractional kelvin entry is rejected. Numeric editing fields show whole kelvin values.
 
-A selector above the graph chooses the anchor for new points. Changing this selector affects subsequent additions only. Pressing near an existing point selects it for dragging; pressing empty space inside the graph inserts a point at that time and temperature using the selected new-point anchor. The inserted point can be dragged in the same gesture. Its signed offset is the elapsed duration from that anchor to the chosen instant on the displayed date. Numeric fields provide precise editing independently of dragging.
+A selector above the graph chooses Wake or Bedtime for new points. Changing it affects subsequent additions only. Pressing near an existing point selects it for dragging; pressing empty space attempts insertion using the selected anchor. An accepted new point can be dragged in the same gesture. Numeric fields provide precise offset and temperature editing.
 
-The selected point has its own editable anchor. Reanchoring preserves its signed offset, temperature, identity, and selection. The editor resolves the point against the new anchor and reconnects the curve in chronological order under REQ-solar-schedule. It connects the old neighbors directly and inserts the point between the neighbors at its new time. It does not adjust other points or change the offset to preserve the old clock time. Reanchoring that creates a coincident time or requires an absent solar event follows the existing schedule failure rules.
+Horizontal dragging snaps to the nearest minute on the displayed timeline; ties round toward the later minute. Insertion and dragging derive the signed clock-minute offset from the selected anchor to the requested local minute. The candidate must place the selected occurrence at that requested minute and keep the offset within -240 through +240. Each candidate derives the anchor occurrence date that yields its valid offset, independently of the occurrence selected at gesture start. The anchor clock stays fixed. No valid placement exists outside that anchor's range; the editor rejects it without switching anchors or creating a fixed clock point.
 
-The graph has a muted illustrative temperature gradient behind its segments and points, from 6500 K at the top to 1200 K at the bottom. The gradient does not claim to reproduce Night Light output. Temperature values remain readable without interpreting the background colors.
+Editing one point preserves every other point's anchor, offset, temperature, and identity. Changing a point between Wake and Bedtime preserves its signed offset, temperature, identity, and selection. It uses the new anchor's clock on the current computer-local day, wraps the resulting clock minute, and validates the whole candidate. An occupied target minute rejects the anchor change and retains the previous point and graph. Wrapping does not change the signed offset.
 
-**Scenarios:**
+A drag or time edit can change chronological order. When a point crosses another point's time, the graph reconnects in the new order while preserving identities and temperatures. An invalid drag candidate is rejected without ending the gesture; releasing there retains the last accepted position. Invalid numeric drafts show the error, preserve the last valid graph, and disable Save until corrected. Removing the final point also produces an invalid draft.
 
-- The user adds four points with different temperatures and offsets: all four are saved and appear on the graph.
-- A point is anchored 30 minutes after sunset; sunset resolves to 18:41 on one date and 18:39 on the next: that point resolves to 19:11 and 19:09 respectively.
-- The user changes wake time: every wake-relative point moves by the corresponding change, while its saved offset and temperature remain unchanged.
-- The new-point selector is Sunset and sunset resolves to 18:40; the user inserts a point at 19:10 and 3200 K: the point uses Sunset +30 minutes at 3200 K. Changing the new-point selector to Sunrise does not change that point.
-- Sunrise resolves to 06:00 and sunset to 18:00; the user reanchors a selected Sunset +30-minute point at 3200 K to Sunrise: the same selected point moves from 18:30 to 06:30, retains +30 minutes and 3200 K, and connects between existing points at 06:00 and 07:00. Its former neighbors connect directly.
-- The user reanchors a Sunset -30-minute point to Sunrise: it remains 30 minutes before its new anchor. Offsets that cross midnight are preserved without reducing them modulo 24 hours.
-- The user presses near a point and drags across another point's time: the same point remains selected and the graph reconnects in chronological order.
-- The user enters 3855 K or drags to a position corresponding to 3855 K: the point becomes 3860 K and its label has no decimal places. Entering 6501 K is rejected rather than rounded into range.
-- A point's vertical coordinate is 265: its label and control-point temperature outside the graph are 3850 K. Coordinates 0 and 530 convert to 1200 K and 6500 K respectively.
-- The user enters a 30.5-minute offset or a fractional Kelvin value: the input is rejected. Dragging to a time halfway between two minutes selects the later minute.
-- The user removes every point or enters an out-of-range temperature: the invalid curve cannot be saved.
+The graph displays the actual schedule over a continuous interval. Each daily display boundary is four local clock hours before Wake. A nonexistent boundary time advances to the first valid local instant after the gap; a repeated boundary time uses its first occurrence. These display rules do not change point-occurrence conversion under REQ-evaluate-daily-curve. Outside an active drag, the view spans the most recent boundary through the next boundary and shows a dot at the current instant on the scheduled curve. On an ordinary day it spans 24 hours and places Wake one-sixth of the way across. Its elapsed duration can vary on clock-change days. During insertion or dragging, the display boundaries and anchor clock values stay fixed; boundary rollover waits until the gesture ends.
 
-### REQ-solar-schedule — Evaluate the daily temperature curve
-
-Circadia calculates sunrise and sunset locally from its saved coordinates for the dates needed to evaluate the curve. Each calculated solar event is rounded to the nearest minute before use as an anchor; an event exactly halfway between minutes rounds to the later minute. Resolving a point adds its signed whole-minute offset to that rounded anchor instant. Between two distinct, chronologically adjacent resolved points, the scheduled temperature follows the straight line between their temperatures.
-
-The curve has no easing, smoothing, temperature bands, or hysteresis. Interpolation between the stored points remains continuous and can produce fractional Kelvin values. Only the result issued in a temperature operation is rounded to integer Kelvin; it is not snapped to the editor's point increments. The mathematical curve and its graph remain linear.
-
-The schedule uses the computer's Windows time zone for calendar dates and wake times, even when saved coordinates are elsewhere. Solar events resolve to actual instants for those dates. Point offsets are elapsed durations added to the anchor instant.
-
-A one-point curve is constant and does not require its anchor to occur. With multiple points, Circadia resolves the dates needed to bracket the current instant, including adjacent dates and offsets that cross midnight, and connects points in chronological order. There is no daily temperature reset. Coincident points with equal temperatures act as one point; coincident points with different temperatures invalidate the date's schedule, including times before the collision. The date and recovery boundary for a collision involving offsets across midnight remain in [Open questions](SPEC.md#open-questions).
-
-When evaluation is invalid because a required solar event is absent or points conflict, the controller retains the last valid scheduled temperature evaluated in this run and shows the unresolved point and date. Suppression does not overwrite that scheduled value. With no prior valid scheduled value, REQ-initial-setup supplies the fallback. Evaluation resumes when the schedule becomes valid under these rules, including after a coordinate or curve edit. Missing-event dependency and date-boundary rules that still need a decision are listed in [Open questions](SPEC.md#open-questions). The app does not invent a sunrise or sunset.
-
-Wake time follows the Windows time-zone rules for each date. A nonexistent local time shifts forward by the clock gap; a repeated local time uses its first occurrence. Circadia does not gradually adjust wake time before daylight-saving changes.
-
-**Permitted choices:** The local calculation library and its internal caching. The implementation documents its sunrise/sunset definition and validates its results against independent reference values before adoption.
+Multiple visible occurrences of one recurring point share its identity. An occurrence outside the interval or omitted by clock conversion does not remove the saved point. The visual presentation emphasizes the curve and current-time dot. The graph does not show numeric axes, numeric point labels, or calendar-date selectors. Selected-point fields outside the graph provide precise anchor, offset, and temperature editing. A muted illustrative gradient runs from 6500 K at the top to 1200 K at the bottom. It does not claim to reproduce Night Light output; numeric fields provide temperatures without requiring interpretation of colors.
 
 **Scenarios:**
 
-- Consecutive points resolve to 20:00 at 4000 K and 22:00 at 3000 K: the scheduled temperature at 21:00 is 3500 K.
-- The network is unavailable but valid coordinates and a resolvable curve exist: solar calculation and scheduling continue locally.
-- The resolved sunset changes between dates: sunset-relative points change for that date without modifying the saved offsets.
-- Calculated sunrise is 06:12:29 and a point uses Sunrise +30 minutes: the rounded anchor is 06:12 and the point resolves to 06:42. A calculated sunrise of 06:12:30 rounds to 06:13 and resolves that point to 06:43.
-- The mathematical curve evaluates to a fractional kelvin: the issued integer temperature differs by at most one kelvin and does not introduce coarse temperature bands.
-- Points at 20:00 and 21:00 have temperatures 4000 K and 4010 K: evaluation at 20:15 gives 4002.5 K before integer output rounding, rather than snapping to 4000 K.
-- A one-point curve requests 3400 K at a location without sunset that day: the schedule remains 3400 K without requiring sunset.
-- On dates without a clock change, adjacent points resolve to 23:00 at 3000 K and the next day's 07:00 at 5000 K: the scheduled temperature at 03:00 is 4000 K, with no midnight reset.
-- A sunset point is offset by 30 hours; Monday's sunset is 17:00: that instance resolves to Tuesday at 23:00, without reducing its offset modulo 24 hours.
-- Two points resolve to the same instant at 3000 K: evaluation treats them as one point and reports no collision error.
-- Two same-day points conflict at 20:00, one at 3000 K and one at 4000 K: the date's schedule is invalid even at 10:00, and status identifies the conflicting points.
-- A multi-point curve requires sunset, but sunset is absent and the last valid scheduled value was 3200 K: it retains 3200 K and reports the missing event. Temporary suppression uses 6500 K; ending suppression returns to the retained 3200 K.
-- The invalid solar curve is replaced by a valid constant 3500 K curve: the schedule error clears and 3500 K becomes the scheduled value.
-- Windows advances the local clock from 02:00 to 03:00 and wake time is 02:30: that day's wake anchor is 03:30.
-- Windows repeats 01:00 through 01:59 and wake time is 01:30: the wake anchor uses the first 01:30 occurrence.
-- The computer uses New York time and saved coordinates are in London: a 07:00 wake anchor follows New York's date-specific time-zone rules. The solar events still use the saved London coordinates.
+- The user adds Wake -60, Wake +0, Bedtime -60, and Bedtime +0: all four retain their anchors and offsets after saving.
+- Bedtime is 23:00: Bedtime -60 at 3400 K and Bedtime +0 at 2200 K define a one-hour evening ramp. Wake -60 at 2200 K holds that temperature until the morning ramp begins.
+- Wake is 07:00 and Bedtime is 23:00: allowed point clocks cover 03:00 through 11:00 and 19:00 through 03:00. A point cannot be placed at 15:00; linear interpolation still defines the temperature there.
+- The new-point selector is Bedtime at 23:00; inserting at 22:30 uses Bedtime -30. Changing the selector afterward does not modify that point.
+- Bedtime is 23:00 and Wake is 07:00: changing Bedtime +60 to Wake produces Wake +60 at 08:00, preserving temperature and identity.
+- Wake is 08:00 and Bedtime is 16:00. Wake +240 occupies 12:00; changing Wake -240 to Bedtime would also place it there. The editor rejects the change and keeps the selected point at 04:00.
+- Reanchoring Bedtime -30 to Wake preserves the negative offset. Crossing midnight does not reduce offsets modulo 24 hours.
+- Points are ordered A, B, C; C is dragged between A and B: the graph becomes A, C, B regardless of temperatures. Landing exactly on B is rejected and dragging continues.
+- A point exists at Bedtime +0: placing another at the same clock minute is rejected even at the same temperature or with a different anchor. Entering the duplicate in a field disables Save until corrected.
+- An offset of -240 or +240 is accepted when the curve is valid; -241, +241, and 30.5 minutes are rejected. A drag halfway between two minutes snaps to the later minute.
+- The user enters 3855 K or drags to that value: it becomes 3860 K. Entering 6501 K or a fractional kelvin value is rejected. Coordinate 265 represents 3850 K; 0 and 530 represent 1200 K and 6500 K.
+- The user removes every point: the draft cannot be saved, and the prior active curve continues.
+- Wake is 06:00 without a clock change: the graph spans 02:00 through the next 02:00, with the current-time dot at 06:00 one-sixth of the way across.
+- Wake is 07:00 and Bedtime is 23:00: Bedtime +240 appears at the left 03:00 boundary. Dragging it to 22:00 changes it to Bedtime -60, preserving its identity while deriving the new occurrence date.
+- A drag spans a display boundary: the time under a stationary pointer does not change because of a viewport shift. The view reevaluates its boundaries after release.
+- The selected point is Bedtime -60 at 3000 K: its marker has no numeric label; editing fields show its anchor, offset, and temperature.
+- Wake is 06:00 when Windows skips 02:00 through 02:59: the display boundary uses 03:00. Consecutive views meet at that instant; nonexistent point occurrences are still omitted.
+- Wake is 05:30 when Windows repeats 01:00 through 01:59: the display boundary uses the first 01:30, shared by consecutive views.
 
+### REQ-preview-temperature-curve — Preview a complete daily cycle
+
+Settings provides a dedicated Preview button alongside the graph. Once usable configuration has been saved, Preview validates the current settings draft and temporarily applies its scheduled temperatures to Night Light through the controller. Invalid drafts cannot start playback. Starting Preview does not add or move points and does not save configuration. Graph clicks outside playback continue to select, insert, and drag points.
+
+Playback samples the actual current instant when it starts and evaluates the next 24 elapsed hours of the draft's schedule over a fixed 10 seconds. The graph's time indicator follows that accelerated schedule. During playback, the graph selects its displayed interval using the playback instant, advancing to the next interval when that instant crosses a display boundary. Playback uses a captured copy of the validated draft; it does not replace the accepted configuration. The MVP does not expose a playback-duration setting.
+
+Starting Preview cancels an active fade and immediately requests the captured draft's temperature for the current instant, subject to suppression. Neither entry nor exit uses the global fade. Playback provides a Stop action and ends when:
+
+- The user presses Stop, begins editing settings, or requests Save.
+- Settings loses foreground activation or begins closing.
+- Another action publishes a new accepted configuration.
+- Suppression activates.
+- The session locks, the system suspends, or the clock or time zone changes.
+- A Night Light read or write fails.
+
+Ordinary completion or cancellation cancels any active fade. It returns the graph to the actual current time and immediately requests the target from the accepted configuration and current suppression state. It does not restore a captured starting temperature or restart a canceled fade. Draft edits remain unsaved. An edit that stops playback proceeds against the normal editing view. Once stopped, playback does not resume automatically.
+
+Playback uses the controller's serialized Night Light operations and existing failure rules. A read or write failure ends playback without triggering a restoration write or an immediate retry. Resume and unlock recompute normal control under REQ-target-recompute. Quit and session end follow REQ-quit-preserve-state, leaving the last applied state.
+
+**Scenarios:**
+
+- Initial setup has not been saved: Preview is unavailable and does not write Night Light.
+- Usable configuration exists and the current draft is valid but unsaved: Preview animates and applies that draft's schedule without saving it.
+- A draft has an invalid offset or temperature: Preview is unavailable, the error is shown, and normal control continues from the accepted configuration.
+- Playback starts at instant T: five seconds into the cycle, its scheduled instant is T plus 12 elapsed hours. At ten seconds, it completes the 24-hour traversal and resumes the actual current time.
+- The real scheduled temperature changes while playback runs: completion uses the current accepted schedule and focus state, rather than a captured starting temperature.
+- Global fades are enabled with a 500 ms duration: entry and exit still request their targets immediately, and the cycle lasts 10 seconds without added fade time.
+- The user begins changing an offset during playback: playback stops, normal control resumes immediately, and the edit remains an unsaved draft.
+- The user switches to another application: playback stops on settings deactivation. Subsequent suppression changes use the ordinary focus-delay and fade rules.
+- The user requests Save during playback: playback stops before validation and persistence; a successful save then follows the ordinary configuration-change rules.
+- A Night Light read fails during playback: remaining playback steps are canceled, and no restoration write bypasses the read-failure rule.
+- The system resumes after suspending during playback: normal control recomputes the current target; playback does not resume.
+- The user quits during playback: remaining playback operations stop, and shutdown does not restore a temperature.
+- The user clicks empty graph space outside playback: the normal point-insertion behavior applies; the click does not start Preview.
+- Preview finishes: stored curve definitions and configuration remain unchanged.
+
+### REQ-evaluate-daily-curve — Evaluate the daily temperature curve
+
+The schedule uses the computer's Windows time zone. For each local calendar date, add each point's offset to its anchor clock in clock minutes, allowing the result to cross into an adjacent date. Then convert that resulting local date and minute to an actual instant. Calendar dates belong only to evaluated occurrences; saved points repeat daily and do not acquire the date of an edit or selection.
+
+Saving validates the recurring clock-minute positions and their circular spacing under REQ-edit-temperature-curve. Exact daily anchor clocks and fixed offsets do not vary with the season. A saved curve requires no annual validation horizon, automatic anchor adjustment, or location information.
+
+Between chronologically adjacent actual occurrences, the scheduled temperature follows the straight line between their temperatures using elapsed real time. There is no daily reset, easing, smoothing, temperature band, or hysteresis. Interpolation retains fractional kelvin. Native writes and readback comparison use the same integer intended temperature under [REQ-temperature-refresh](SPEC.md#req-temperature-refresh--repeat-the-complete-temperature-refresh). A one-point curve is constant and does not require its timed occurrence to exist.
+
+Clock conversion applies to each resulting point independently. On a forward clock change, a nonexistent local-time occurrence is omitted. On a backward change, a repeated time uses its first occurrence only. Remaining occurrences, including those on neighboring dates, still bracket evaluation. These clock changes do not invalidate saved configuration or alter its offsets. Circadia does not gradually shift configured times before a daylight-saving change.
+
+**Scenarios:**
+
+- Bedtime is 22:00, with Bedtime -120 at 4000 K and Bedtime +0 at 3000 K: at 21:00 the schedule is 3500 K on an ordinary day.
+- The network is unavailable and configuration is valid: scheduling continues locally.
+- The app restarts or evaluates the same dates in reverse order: it produces the same occurrences from unchanged configuration and Windows clock rules.
+- Points at 20:00 and 21:00 have temperatures 4000 K and 4010 K: evaluation at 20:15 gives 4002.5 K. The intended temperature is 4003 K for both the native operation and readback comparison.
+- A one-point curve requests 3400 K on a date without its local-time occurrence: the schedule remains 3400 K.
+- Bedtime is 23:00 at 3000 K and Wake is 07:00 at 5000 K, each with a +0 point: at 03:00 the schedule is 4000 K on an ordinary day, without a midnight reset.
+- Bedtime is 23:00 with a +180 point: it occurs at 02:00 following each Bedtime, and retains +180 as its offset.
+- The clock advances from 02:00 to 03:00: a point at 02:30 is omitted; a point at 03:30 still occurs, including when it is +60 clock minutes from a 02:30 anchor.
+- Every point's clock time falls within a forward gap: surrounding dates supply the bracketing occurrences and interpolation continues.
+- The clock repeats 01:00 through 01:59: a point at 01:30 occurs once, at the first 01:30. Interpolation through the repeated hour uses elapsed time.
+- The computer changes from New York time to London time: Wake at 07:00 and Bedtime at 23:00 follow the new local clock without changing the saved values.
 
 ### REQ-target-recompute — Recompute from current inputs
 
-The controller recomputes the scheduled temperature and foreground match after:
+The controller recomputes the scheduled temperature and whether the foreground application matches a configured suppression rule after:
 
 - The application starts with usable configuration.
 - The system resumes or the user session unlocks.
@@ -108,7 +134,7 @@ The controller recomputes the scheduled temperature and foreground match after:
 - A configuration change is accepted.
 - The dates needed by the current curve change.
 
-Suppression takes precedence over the recomputed scheduled temperature. Recomputing after sleep or a clock change evaluates the current instant rather than replaying missed steps. Startup reads Night Light's current state and stored temperature; a valid stored temperature is the fade origin when Night Light is active, and 6500 K is the origin when it is off. A missing or out-of-range stored temperature uses the fallback in REQ-initial-setup.
+While suppression for a matching foreground application is active, its 6500 K target takes precedence over the recomputed scheduled temperature. Recomputing after sleep or a clock change evaluates the current instant rather than replaying missed steps. Startup reads Night Light's current state and stored temperature; a valid stored temperature is the fade origin when Night Light is active, and 6500 K is the origin when it is off. A missing or out-of-range stored temperature uses 6500 K as the startup fade origin.
 
 **Scenarios:**
 

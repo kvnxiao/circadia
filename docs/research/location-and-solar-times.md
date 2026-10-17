@@ -23,7 +23,7 @@ Local solar calculation is a viable way to schedule a Windows Night Light utilit
 
 ## Decision context
 
-This document compares a broader address-search design and solar-service alternatives. The MVP in [SPEC.md](../specs/SPEC.md) selects manual coordinates, an explicit Windows location request, and local solar calculation. Provider recommendations below apply to a future search feature; the observations and comparisons remain evidence rather than additional requirements.
+Solar scheduling and location acquisition are post-MVP work under [SPEC.md](../specs/SPEC.md#future-work). This document compares location providers and solar-service alternatives for that work. The [local solar validation](solar-calculation.md) records measured library behavior, including polar and date-boundary cases. These findings do not add location inputs or solar dependencies to the Wake/Bedtime MVP.
 
 The utility turns off the Windows Night Light schedule and computes its own screen-temperature schedule. An address-search feature would need to convert an entered address or city into latitude and longitude. Scheduling needs to retain coordinates independently of Windows Night Light and determine solar events on future days. The choice is whether those events require an online service and, separately, which location-search service supports the intended settings experience.
 
@@ -43,7 +43,7 @@ This document records documentation and source inspection. It does not report li
 
 | Option | Cost and access | Date and event behavior | Operational tradeoff |
 | :-- | :-- | :-- | :-- |
-| Local Rust calculation | No solar service or API key; library license applies. | The `sunrise` 3.0.0 API accepts coordinates and a date, optionally elevation, and returns UTC event times or `None` for an absent event. | Scheduling can run without a network connection; accuracy and boundary handling need validation. |
+| Local Rust calculation | No solar service or API key; library license applies. | The `sunrise` 3.0.0 API accepts coordinates and a date, optionally elevation, and returns UTC event times or `None` for an absent event. | Scheduling can run without a network connection; the separate reference comparison rejects this candidate's polar behavior. |
 | Sunrise-Sunset.org v2 | Free, keyless; visible attribution required; reasonable-volume policy without a numerical quota. HTTP 429 includes `Retry-After`. | Up to 366 dates per request; ISO 8601 or Unix output; detected or explicit IANA time zone; independently nullable events and a solar-state field. | An online dependency with explicit cache support. [API documentation](https://sunrise-sunset.org/api). |
 | SunriseSunset.io | Free for personal and commercial use, keyless; backlink required; reasonable-use policy without a fixed enforced quota. | Up to 365 dates per request; ISO 8601 or Unix output; time-zone detection; explicit polar-state field and nullable events. | Terrain elevation is included by default and can be overridden or disabled. [API documentation](https://sunrisesunset.io/api/). |
 
@@ -53,11 +53,11 @@ This document records documentation and source inspection. It does not report li
 
 **Inference:** An API cache should distinguish coordinates, requested dates, time-zone interpretation, elevation policy, and calculation version. Several cached days are sufficient to reduce network calls; a larger range extends operation through an outage. An exhausted cache still needs a defined failure policy. Local calculation avoids this cache-coverage dependency. Comparisons between implementations must use the same elevation and event convention before interpreting differences as errors.
 
-## Local Rust calculation is feasible, but the crate remains unselected
+## Candidate API and separate validation
 
 **Observed in `sunrise` 3.0.0 documentation and repository material:** `SolarDay::event_time` returns `Option<DateTime<Utc>>`; the documented absent-event example is sunset during a polar day. `with_altitude` defaults to zero meters. The project is MIT licensed and supports calculation without the Rust standard library when configured with `libm`. These APIs demonstrate a local implementation path. [Versioned API documentation](https://docs.rs/sunrise/3.0.0/sunrise/struct.SolarDay.html), [project repository](https://github.com/nathan-osman/rust-sunrise).
 
-The crate's published documentation does not establish an error tolerance for this app. Its interpretation of the input date near the international date line and its behavior around polar transition days require source review and reference comparisons before selection. Validation should use independently produced expected values rather than values computed by the same function under test.
+The crate's published documentation does not establish an error tolerance for this app. The separate [reference comparison](solar-calculation.md) tests its date-line and polar behavior and rejects `sunrise` 3.0.0 because it misses polar events. That research selects `solar-positioning` 0.7.1; the API description above remains evidence about the evaluated alternative.
 
 ## Location-search alternatives
 
@@ -103,7 +103,7 @@ These estimates exclude taxes, hosting, map display, and autocomplete. They coun
 
 - The stored data is isolated to its associated user.
 - The data is not reused across users.
-- The cache does not replace an additional service call.
+- Google restricts using cached data to replace additional service calls; how this condition applies to Circadia's offline schedule remains unverified.
 
 Thus a blanket 30-day limit omits an explicit exception. The sources reviewed here do not resolve when an additional service call is required for Circadia's saved location and offline scheduling. That condition needs confirmation before selecting Google. These findings do not establish the conditions for an EEA billing account. [Service Specific Terms, section 6](https://cloud.google.com/maps-platform/terms/maps-service-terms).
 
@@ -115,7 +115,7 @@ Thus a blanket 30-day limit omits an explicit exception. The sources reviewed he
 
 **Observed in Microsoft's WinUI 3 location guide retrieved 2026-10-16:** `Geolocator.RequestAccessAsync` must run on the UI thread while the app is in the foreground. A one-time `GetGeopositionAsync` call can then obtain coordinates. Packaged apps declare the location capability; the current guide says unpackaged apps do not need that manifest declaration but still request access. Disabled services, denied access, and unavailable position data are normal outcomes. [Microsoft location guide](https://learn.microsoft.com/en-us/windows/apps/develop/maps-and-location/get-location).
 
-**Recommendation:** Offer Use current location in settings, show the resulting coordinates, and save them through the same configuration path as a search result. Retain the previous saved location if detection or search fails. Automatic travel tracking and reverse-geocoding a detected position are separate features; neither is necessary for this fixed desktop schedule.
+**Recommendation:** Offer Use current location in settings, show the resulting coordinates, and save them through the same configuration path as a search result. Retain the previous saved location if detection or search fails. Automatic travel tracking and reverse-geocoding a detected position are separate features; neither is necessary for a schedule based on a saved location.
 
 ## Calendar days, time zones, and polar conditions
 
@@ -129,7 +129,7 @@ An absent event does not select a product fallback by itself. Continuous dayligh
 
 Prefer local solar calculation after an explicitly selected location. Keep online access in the settings flow for address/city search and optional Windows location. If an online solar service is preferred, retrieve explicit future dates in a batch and retain their results; do not add near-event refreshes solely to improve accuracy.
 
-This comparison identifies the following design choices. They include alternatives and future-provider work; [SPEC.md](../specs/SPEC.md#open-questions) records the decisions still open for the selected MVP:
+A future solar/location feature would need these decisions:
 
 - Choose the geocoding provider and accept its attribution, query, and credential requirements.
 - Choose the calendar-day/time-zone rule and the behavior when the saved location differs from the computer's location.
@@ -137,7 +137,7 @@ This comparison identifies the following design choices. They include alternativ
 - Choose continuous-daylight, continuous-night, and single-event-day behavior.
 - If solar scheduling uses an API, choose cache coverage, retry timing, and behavior after cached dates are exhausted.
 
-Unobserved behavior includes the selected Rust calculation on Windows, international-date-line boundaries, daylight-saving changes, polar transition dates, provider search coverage for intended locations, and packaged versus unpackaged Windows permission handling. A bounded calculation comparison and a small test application for Windows location permissions would settle those gaps. No provider accuracy claim substitutes for that validation.
+The separate [solar comparison](solar-calculation.md) validates the tested Rust calculation, including date-line boundaries and polar transitions. The [combined probe](schedule-integration.md) verifies Windows date-boundary integration, and the [Reactor research](windows-reactor-ui.md) records a successful location request on that desktop. The location code is preserved in the [source archive](archives/README.md); the active Reactor probe does not request location. Provider search coverage and additional permission outcomes remain unverified future-feature work.
 
 ## Sources
 

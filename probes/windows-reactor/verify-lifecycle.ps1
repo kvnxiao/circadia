@@ -1,4 +1,4 @@
-param([string]$Executable = "$PSScriptRoot\development\target\debug\circadia-reactor-lifecycle-probe.exe")
+param([string]$Executable = "$PSScriptRoot\target\debug\circadia-reactor-lifecycle-probe.exe")
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
