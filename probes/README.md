@@ -6,13 +6,14 @@ Probes establish dependency capabilities and limitations before Circadia relies 
 
 | Probe | Research question | Validation scope |
 | :-- | :-- | :-- |
-| [Windows Reactor](windows-reactor/README.md) | Can the selected Reactor revision support graph editing, a tray process, an executable file picker owned by settings, and foreground lookup? | Graph/curve unit tests and all four consolidated desktop scripts pass; pointer checks ran at 100% scaling. The fixture is not the MVP Wake/Bedtime editor. |
+| [Windows Reactor](windows-reactor/README.md) | Can the selected Reactor revision support graph editing, a tray process, an executable file picker owned by settings, and foreground lookup? | Graph/curve unit tests and the UI, pointer, lifecycle, and native-integration scripts pass; pointer checks ran at 100% scaling. The fixture is not the MVP schedule editor. |
 | [Windows clock conversion](windows-clock/README.md) | Can Windows rules omit skipped times, select the first repeated instant, and support elapsed interpolation? | Eighteen read-only tests cover conversion, date boundaries, omitted points, and interpolation. A separate explicit command exercises host settings. |
+| [Local solar calculation timing](solar-timing/README.md) | Does per-date local calculation cost justify a persistent cache? | Four ordinary/polar cases, 1,000 timed calls each, independent event-count expectations, and separate process-overhead measurement. Uses the archived locked calculator in an extracted workspace. |
 | [Night Light runtime](nightlight-runtime/README.md) | Do public native operations and Windows controls store requested temperatures at a useful cadence? | Recorded direct operations, CLI readback, temperature steps that reverse direction, slider response, and restoration. Verified stored values are assumed to produce the intended display response; optical output was not measured. |
 
 Read each probe's README before inspecting source or running it. Probe checks are separate from application checks. GUI, pointer, host-setting, and Night Light exercises require an explicit invocation and an available desktop.
 
-The [source archive](../docs/research/archives/README.md) preserves the retired solar calculation and published Reactor comparison. It also preserves algorithms that adjust solar reference times and place edited points while preserving their order across dates. Those experiments do not implement the manual Wake/Bedtime MVP. The archive includes their source, fixtures, lockfiles, and matching research.
+The [source archive](../docs/research/archives/README.md) preserves the retired solar calculation and the comparison of Reactor's published 0.100.0 release with the pinned development revision. It also preserves algorithms that adjust solar reference times and place edited points while preserving their order across dates. Those experiments do not implement the generated three-temperature MVP. The archive includes their source, fixtures, lockfiles, and matching research.
 
 ## Python validation
 
@@ -25,7 +26,7 @@ just --justfile probes/justfile python-check
 just --justfile probes/justfile python-test
 ```
 
-`python-check` checks lint, formatting, and types, including the host-setting script without executing it. `python-test` runs only the read-only Windows clock suite. `python-format` applies Ruff formatting. The [host time-zone exercise](windows-clock/README.md#manual-host-settings-exercise) stays separate from these recipes.
+`python-check` checks lint, formatting, and types, including the host-setting script without executing it. `python-test` runs the read-only Windows clock suite and timing-output validation tests; it does not run benchmarks or host-setting exercises. `python-format` applies Ruff formatting. The [host time-zone exercise](windows-clock/README.md#manual-host-settings-exercise) stays separate from these recipes.
 
 Keep parameters and return values annotated. Use concrete types for callbacks, native fields, and external data. Limit type-check suppressions to intentional invalid-input fixtures and explain lint suppressions at their use. Run the shared checks and affected suites after changing Python probes.
 

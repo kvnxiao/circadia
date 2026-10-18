@@ -18,7 +18,7 @@ A second process could isolate UI dependencies and reclaim that process's resour
 
 ## Selected design and comparison scope
 
-Circadia needs an always-running Night Light controller and an occasionally open settings window with an editable temperature graph. [SPEC.md](../specs/SPEC.md) selects one Reactor process. The alternatives below explain the costs of separation without reopening that settled choice. The [Reactor UI research](windows-reactor-ui.md) maps the settings requirements to published and development APIs.
+Circadia needs an always-running Night Light controller and an occasionally open settings window with schedule controls and a generated temperature graph. [SPEC.md](../specs/SPEC.md) selects one Reactor process. The alternatives below explain the costs of separation without reopening that settled choice. The [Reactor UI research](windows-reactor-ui.md) maps the settings requirements to published and development APIs.
 
 An executable is a file on disk. A process is a running instance of a program. Two processes can execute the same file with different startup arguments, or execute separate files. A tray icon and a settings window do not each require their own process.
 
@@ -76,7 +76,7 @@ Treat Reactor's preview API changes as a maintenance constraint. Keep the pinned
 Use a release build and record its source revision, lockfile, Windows build, architecture, display scaling, and runtime deployment model. Measure the same PID in these states:
 
 1. Start with usable configuration and settings closed; allow initialization to finish.
-2. Open settings and edit temperature-curve points and the list of executable filenames whose foreground focus temporarily sets the target to 6500 K. Record the list sizes and edit sequence so another run can repeat the workload.
+2. Open settings and edit schedule settings and the list of executable filenames whose foreground focus temporarily sets the target to 6500 K. Record the list sizes and edit sequence so another run can repeat the workload.
 3. Close settings and confirm controller work continues.
 
 For each state, record observation duration, working set, private bytes, CPU-time delta, and context-switch counts. Record the active schedule, foreground changes, and fades. A constant curve with stable focus tests idle behavior; a sloping curve tests necessary timed work. Repeat after several open/close cycles to investigate growth. A one-time UI-only memory sample does not satisfy REQ-lean-background.
@@ -88,7 +88,7 @@ Test self-contained deployment from a clean output directory on a machine withou
 - Build the selected UI implementation and measure idle CPU and memory before opening settings and after closing it.
 - Record loaded modules before opening settings and after closing it in the selected single process.
 - Verify deployment on a system without a preinstalled compatible Windows App SDK runtime for a Reactor deployment.
-- Exercise temperature graph editing and the executable file picker without blocking the background controller. Location acquisition and solar scheduling are post-MVP work.
+- Exercise schedule controls, graph updates, explicit location acquisition, and the executable file picker without blocking the background controller.
 - Do not describe f.lux's executable imports, thread structure, UI toolkit, or memory use as verified without direct evidence.
 
 ## Sources

@@ -18,7 +18,7 @@ Eight integration tests pass with the real Rust solar calculator, installed Wind
 
 Morning prefers sunrise, and Evening prefers sunset. An anchor source date identifies the Morning or Evening occurrence used by a relative point. Its date can differ from the point's displayed date when the offset crosses midnight.
 
-Solar/resolver integration supports post-MVP research. Windows clock conversion and host-setting observations also apply to the manual Wake/Bedtime MVP. The results below retain the tested automatic/fixed-point fixtures; they do not verify the current native editor.
+Solar calculation, Windows clock conversion, and host-setting observations support the draft MVP. The results below retain the tested automatic/fixed-point fixtures; their backup selection and movable-anchor resolver do not define the generated schedule or verify its native integration.
 
 ## Calculation path
 
@@ -60,4 +60,4 @@ The retained [host-setting script](../../probes/windows-clock/host_settings.py) 
 
 ## Remaining integration work
 
-The MVP native editor must share validated Wake/Bedtime definitions and converted occurrences with the controller. Its graph begins four clock hours before Wake and displays the actual scheduled curve without numeric labels. Native rendering, Preview, and Save integration remain unverified. Preview animates and applies the draft's next 24 elapsed hours of temperatures over 10 seconds. The combined probe does not establish UI responsiveness, notification-driven rule refresh, or production controller behavior. The [solar comparison](solar-calculation.md) and [automatic editor investigation](schedule-editor-resolution.md) remain evidence for post-MVP work.
+The MVP native editor must share validated Wake/Bedtime definitions and converted occurrences with the controller. Its graph begins four clock hours before Wake and displays the actual scheduled curve without numeric labels. Native rendering, Preview, and Save integration remain unverified. Preview animates and applies the draft's next 24 elapsed hours of temperatures over 10 seconds. The combined probe does not establish UI responsiveness, notification-driven rule refresh, or production controller behavior. The [solar comparison](solar-calculation.md) supports local event calculation. The [automatic editor investigation](schedule-editor-resolution.md) records a separate point-editing model.

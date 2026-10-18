@@ -13,7 +13,7 @@ recheck-when: Anchor count, offset limits, ordering, date assignment, priority, 
 
 The source is archived under `probes/schedule-resolution/verify.py` in the [recoverable snapshot](archives/README.md). Its README records the original commands; run them from an extracted copy. Retained Windows conversion and interpolation checks are in the active [clock probe](../../probes/windows-clock/README.md).
 
-This investigation covers automatic Morning/Evening anchors and fixed clock points for possible post-MVP solar scheduling. The [MVP schedule](../specs/schedule.md) uses exact manual Wake/Bedtime clocks and relative-only points. It needs direct clock arithmetic, duplicate rejection, and chronological sorting; it does not require this automatic-anchor solver or placement search. The results below describe the tested probe model.
+This investigation covers automatic Morning/Evening anchors, fixed clock points, and arbitrary offsets. The [draft MVP schedule](../specs/schedule.md) instead generates transitions between three ordered temperatures using manual Wake/Bedtime clocks and optional solar targets. It does not use this automatic-anchor solver or point-placement search. The results below describe the tested probe model.
 
 A bounded resolver is feasible for the tested, normalized daily schedules. It preserves fixed and manual times, adjusts automatic anchors together with their relative points, and gives Morning priority. Its results depend on dated inputs rather than the current evaluation window or previously running application state. The proof and probe support the scheduling model; they do not verify graph editing, solar calculations, or Windows time-zone conversion.
 

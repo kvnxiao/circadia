@@ -23,7 +23,7 @@ Local solar calculation is a viable way to schedule a Windows Night Light utilit
 
 ## Decision context
 
-Solar scheduling and location acquisition are post-MVP work under [SPEC.md](../specs/SPEC.md#future-work). This document compares location providers and solar-service alternatives for that work. The [local solar validation](solar-calculation.md) records measured library behavior, including polar and date-boundary cases. These findings do not add location inputs or solar dependencies to the Wake/Bedtime MVP.
+The [draft schedule](../specs/schedule.md) uses local solar calculation with manual coordinates or an explicit Windows location request. This document preserves comparisons with address-search providers and online solar services. The [local solar validation](solar-calculation.md) records measured library behavior, including polar and date-boundary cases. City/address search remains deferred.
 
 The utility turns off the Windows Night Light schedule and computes its own screen-temperature schedule. An address-search feature would need to convert an entered address or city into latitude and longitude. Scheduling needs to retain coordinates independently of Windows Night Light and determine solar events on future days. The choice is whether those events require an online service and, separately, which location-search service supports the intended settings experience.
 
@@ -137,7 +137,7 @@ A future solar/location feature would need these decisions:
 - Choose continuous-daylight, continuous-night, and single-event-day behavior.
 - If solar scheduling uses an API, choose cache coverage, retry timing, and behavior after cached dates are exhausted.
 
-The separate [solar comparison](solar-calculation.md) validates the tested Rust calculation, including date-line boundaries and polar transitions. The [combined probe](schedule-integration.md) verifies Windows date-boundary integration, and the [Reactor research](windows-reactor-ui.md) records a successful location request on that desktop. The location code is preserved in the [source archive](archives/README.md); the active Reactor probe does not request location. Provider search coverage and additional permission outcomes remain unverified future-feature work.
+The separate [solar comparison](solar-calculation.md) validates the tested Rust calculation, including date-line boundaries and polar transitions. The [combined probe](schedule-integration.md) verifies Windows date-boundary integration, and the [Reactor research](windows-reactor-ui.md) records a successful location request on that desktop. The location code is preserved in the [source archive](archives/README.md); the active Reactor probe does not request location. Provider search coverage remains deferred. Additional Windows permission outcomes and request cancellation remain unverified application checks.
 
 ## Sources
 

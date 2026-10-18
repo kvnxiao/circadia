@@ -9,12 +9,12 @@ Validated on 2026-10-17 with CPython 3.15.0a2 on Windows 11 x64 build 26300. All
 Coverage includes:
 
 - Skipped and repeated minutes, four complete transition days, half-hour changes, and selected year boundaries.
-- Offsets applied before conversion, including offsets from a missing anchor time.
+- Offsets applied before conversion, including offsets from a missing anchor time; these fixtures cover schedules with user-defined points, outside the MVP controls.
 - Fractional kelvin and elapsed interpolation across midnight and a repeated hour.
 - Constant curves and neighboring-date interpolation when every occurrence on a date is omitted.
-- Date lengths, fixed-bias conversion, and graph boundaries that fall in skipped or repeated hours.
+- Date lengths, fixed-bias conversion, and graph start/end times that fall in skipped or repeated hours.
 
-Expected timestamps and temperatures are independent of the converter under test. These fixtures do not establish universal historical time-zone support, the Rust implementation, or native editor/controller integration. The [archived experiments](../../docs/research/archives/README.md) preserve the broader resolver and solar fixtures.
+Expected timestamps and temperatures are independent of the converter under test. These fixtures do not establish universal historical time-zone support, the Rust implementation, or native editor/controller integration. The [archived experiments](../../docs/research/archives/README.md) preserve fixtures for a separate scheduler that adjusts solar reference clocks to preserve point order.
 
 ## Read-only checks
 
