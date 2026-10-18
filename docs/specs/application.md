@@ -52,6 +52,29 @@ If Night Light is already active, startup uses its valid stored temperature as t
 
 The startup fade duration is defined in one code setting so it can be changed independently of ordinary fades and scheduled transitions. The MVP does not expose a startup-duration control. Its duration starts when control can begin; it does not impose a deadline on process launch or initialization.
 
+**Note:** This diagram summarizes startup's prerequisite and temperature branches. Watcher registration, native-schedule reconciliation, retry triggers, and interruptions follow their requirements and are omitted here. The Night Light access requirements govern every operation, including each fade step.
+
+```mermaid
+flowchart TD
+  C{"Usable configuration?"} -->|No| Setup["Offer setup; do not access Night Light"]
+  C -->|Yes| S{"Scheduling prerequisite passes?"}
+  S -->|No| Wait["Report scheduling error;<br/>wait for an independent recompute event"]
+  S -->|Yes| R["Begin Night Light access;<br/>read fresh settings and state"]
+  R -->|Read failure| Error["Report Night Light error;<br/>stop this attempt"]
+  R -->|Both reads succeed| A{"Night Light active?"}
+  A -->|No| P["Store target and complete refresh<br/>while Night Light is inactive"]
+  P -->|Failure| Error
+  P -->|Success| Enable["Enable Night Light without a startup fade"]
+  Enable -->|Failure| Error
+  Enable -->|Success| Control["Continue Night Light control"]
+  A -->|Yes| Origin["Use valid stored temperature as fade origin;<br/>otherwise use 6500 K"]
+  Origin --> Equal{"Origin equals current target?"}
+  Equal -->|Yes; no fade| Control
+  Equal -->|No| Fade["Fade over 1000 ms,<br/>converging on the target at completion"]
+  Fade -->|Read or write failure| Error
+  Fade -->|Completion| Control
+```
+
 **Scenarios:**
 
 - Night Light is off with a stored temperature of 2200 K, and the current target is 3400 K: startup prepares 3400 K while inactive, then enables Night Light without a fade or a 6500 K intermediate value.
