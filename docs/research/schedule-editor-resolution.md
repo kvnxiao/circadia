@@ -14,7 +14,7 @@ recheck-when: Anchor count, offset limits, date associations, ordering, drag sel
 
 The [source snapshot](archives/README.md) preserves `probes/schedule-resolution/editor.py`, `placement.py`, and their dependencies. Run their original commands from the extracted tree. Manual-clock, collision, and identity expectations remain reference fixtures; the automatic placement algorithms are retired from the active probes.
 
-This investigation covers automatic Morning/Evening anchors and fixed clock points for possible post-MVP solar scheduling. The [MVP schedule](../specs/schedule.md) uses exact manual Wake/Bedtime clocks and relative-only points. It needs direct clock arithmetic, duplicate rejection, and chronological sorting; it does not require this automatic-anchor solver or placement search. The results below describe the tested probe model.
+This investigation covers automatic Morning/Evening anchors, fixed clock points, and arbitrary offsets. The [draft MVP schedule](../specs/schedule.md) instead generates transitions between three ordered temperatures using manual Wake/Bedtime clocks and optional solar targets. It does not use this automatic-anchor solver or point-placement search. The results below describe the tested probe model.
 
 The mathematical probe converts dated point cycles into the resolver's representation and checks insertion, dragging, and current-day anchor changes against the resulting curve. All 36 editor tests pass. The model uses the effective anchor before insertion or at drag start as its fixed reference when several offsets reach the requested minute. It preserves the dated neighbor order of unedited points.
 
@@ -194,7 +194,7 @@ A concrete fixture has only a fixed noon point. Morning prefers 23:00 yesterday 
 | Yesterday | +180 minutes | Zero | Today 02:00, today 12:01, tomorrow 12:01 |
 | Today | +60 minutes | Zero | Yesterday 11:59, today 02:00, tomorrow 02:00 |
 
-Both results satisfy the probe's exact-hit and repeating-order constraints. The probe accepts a supplied source date and does not select among these alternatives. This ambiguity depends on moving automatic anchors. With exact daily Wake/Bedtime clocks and offsets bounded to four hours, at most one offset from the selected anchor reaches a requested clock minute. The MVP derives each edited occurrence from that candidate instead of retaining a source date from drag start.
+Both results satisfy the probe's exact-hit and repeating-order constraints. The probe accepts a supplied source date and does not select among these alternatives. This ambiguity depends on moving automatic anchors. With exact daily Wake/Bedtime clocks and offsets bounded to four hours, at most one offset from the selected anchor reaches a requested clock minute. That inference applies to a manual-offset editor. The draft MVP generates its curve without edited points or drag gestures.
 
 ## Reference search timing
 

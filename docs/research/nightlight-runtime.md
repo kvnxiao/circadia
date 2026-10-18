@@ -33,11 +33,11 @@ The native preview flag temporarily requests application of the stored temperatu
 
 The direct-operation range was 0.0759–0.2440 ms; operation plus snapshot range was 0.1075–0.2933 ms. These are one short debug-profile run, not percentile estimates or worst-case bounds. The installed CLI version was not captured during this run; the direct library version is locked to 0.4.0. The CLI's automatic refresh policy is separate from the direct calls' unconditional policy.
 
-The timed reversal changes the next requested step after a completed synchronous call. It does not cancel an in-flight registry operation or exercise Circadia's controller, which is not implemented. A synchronous public-library call has no cancellation deadline. The application contract stops new control work on Quit without restoring Night Light. This probe does not verify application exit while a library operation is already executing.
+The timed reversal changes the next requested step after a completed synchronous call. It does not cancel an in-flight registry operation or exercise Circadia's controller, which is not implemented. A synchronous public-library call has no cancellation deadline. The application contract stops new control work before its best-effort exit cleanup. This probe does not verify application exit while a library operation is already executing.
 
 ## Restoration and remaining checks
 
-Probe restoration is experimental cleanup, separate from the application's [exit behavior](../specs/application.md#req-quit-preserve-state--exit-without-changing-night-light). Circadia leaves Night Light at its last state on Quit; the probe restores the state it captured for its experiment.
+Probe restoration is experimental cleanup, separate from the application's [exit behavior](../specs/application.md#req-exit-night-light-off--turn-night-light-off-on-graceful-exit). Circadia requests Night Light off on graceful exit; the probe restores the state it captured for its experiment.
 
 The probe captures temperature, active state, and schedule before writes. It refuses a missing or unsupported baseline temperature and an active preview. On a returned error, it attempts temperature, active-state, and schedule restoration independently, using fresh public update operations. It does not write an old serialized settings snapshot: refresh operations advance modification metadata, and restoring an old snapshot could regress that metadata.
 

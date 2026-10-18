@@ -20,7 +20,7 @@ Keep Reactor for the MVP. Published Reactor 0.100.0 exposes enough native contro
 
 Reactor is a preview, not a generally available UI contract. Microsoft explicitly permits public API refinement during the preview. Accept that maintenance cost, record the exact dependency source, and rerun these probes before upgrading. The repository's draft [spec](../specs/SPEC.md) still governs behavior; this research does not approve it or remove requirements.
 
-Circadia's suppression list stores executable filenames chosen by the user. When a listed application has foreground focus, suppression temporarily changes the temperature target to 6500 K. The draft defines points relative to two manual clocks, Wake and Bedtime. Preview animates the draft's next 24 elapsed hours over 10 seconds while applying those temperatures to Night Light. The UI probes use three fixed fixture anchors; they verify controls and pointer behavior rather than the current schedule model.
+Circadia's suppression list stores executable filenames chosen by the user. When a listed application has foreground focus, suppression temporarily changes the temperature target to 6500 K. The draft generates a curve from three ordered temperatures, manual Wake/Bedtime clocks, and optional solar targets. Preview animates the draft's next 24 elapsed hours over 10 seconds while applying those temperatures to Night Light. The UI probes use three fixed fixture anchors; they verify controls and pointer behavior rather than the current schedule model.
 
 The [Windows compatibility assessment](windows-compatibility.md) records the selected runtime's declared minimum and supports a Windows 11 build 22000 baseline. The runtime checks here apply to build 26300.9711; minimum-build execution remains unverified.
 
@@ -44,7 +44,7 @@ Source inspection establishes API availability. Compilation establishes that the
 
 | Circadia requirement | Published 0.100.0 support | Development revision and remaining work |
 | :-- | :-- | :-- |
-| REQ-edit-temperature-curve: add, select, edit, move, remove 1..N points | `Button`, `ComboBox`, `NumberBox`, child controls with stable identifiers, `Canvas`, `Line`, `Ellipse`, and `Border` pointer events | Application code must implement hit testing, coordinate conversion, point identity, validation, and persistence. No dedicated chart editor was found in either control surface. |
+| Archived point-editing model: add, select, edit, move, remove 1..N points | `Button`, `ComboBox`, `NumberBox`, child controls with stable identifiers, `Canvas`, `Line`, `Ellipse`, and `Border` pointer events | Application code must implement hit testing, coordinate conversion, point identity, validation, and persistence. No dedicated chart editor was found in either control surface. |
 | REQ-evaluate-daily-curve: show the controller's linear curve | Native line segments can display evaluated points | Share validated Wake/Bedtime definitions and Windows-converted occurrences with the graph. The current fixture graph does not verify this integration. |
 | Wake and Bedtime clock editing | `TimePicker` emits selected-time changes but has no public selected-time setter | The inspected development schema also lacks that setter. A validated `HH:mm` text field can display and edit the two anchor clocks. A native TimePicker is a later improvement. |
 | REQ-edit-executable-list: manual executable selection | List controls exist; `windows` exposes legacy picker and Shell dialog types. Published `WindowRef` lacks a public native handle accessor. | Development `ComponentContext::run_window` supplies a scoped `WindowHandle::as_raw`; the probe verifies a non-null handle. Neither surface supplies a complete file-picker service. The pinned probe verifies an owned Shell dialog, selection, and cancellation through safe `winsafe` APIs. Pasting a filename does not satisfy the requirement. |
@@ -101,11 +101,11 @@ Release, capture loss, and pointer cancellation stop movement while retaining th
 
 This avoids a separate rendering engine for a small graph. `windows-canvas` is an alternative if measured point counts or drawing requirements make individual XAML shapes unsuitable. Its name refers to a separate Direct2D library; Reactor's `Canvas` is a native layout control. The two are not interchangeable.
 
-Application points need stable identity, temperature, a Wake/Bedtime anchor choice, and a bounded signed offset. Horizontal dragging derives an offset from the fixed anchor and validates the complete candidate for duplicate clock minutes. Vertical movement changes temperature within 1200-6500 K. The shared schedule validator must also cover anchor-clock edits, playback, and Save.
+The draft application uses a generated graph without point editing. Its shared validation covers temperature ordering, manual clocks, solar inputs, and transition duration for the graph, playback, and Save. The point-identity and drag behavior described here belongs to the probe fixture.
 
-The probe fixes sunrise at 06:00, sunset at 18:00, and wake at 07:00. Its plot displays 00:00-24:00 and omits points outside that interval while preserving their offsets in the editor. It does not verify the specified Wake-minus-four-hours viewport, adjacent-date interpolation, constant one-point evaluation, or Windows skipped/repeated-time conversion. Its numeric tests establish UI geometry and field validation, not the complete REQ-evaluate-daily-curve contract.
+The probe fixes sunrise at 06:00, sunset at 18:00, and wake at 07:00. Its plot displays 00:00-24:00 and omits points outside that interval while preserving their offsets in the editor. It does not verify the specified Wake-minus-four-hours viewport, adjacent-date generated transitions or Windows skipped/repeated-time conversion. Its numeric tests establish UI geometry and field validation, not the complete REQ-evaluate-daily-curve contract.
 
-Native mouse tests passed at 100% scaling for insertion, off-center dragging, reanchoring, snapped point temperatures, and release outside the plot. A separate background Border identifies the plot rectangle for automation: the outer graph's reported bounds also include markers extending past its edges. Pointer input uses Win32 `SendInput`; UI Automation selects anchors and reads the probe state. A finished interaction still requires tests for:
+Native mouse tests passed at 100% scaling for insertion, off-center dragging, reanchoring, snapped point temperatures, and release outside the plot. A separate background Border identifies the plot rectangle for automation: the outer graph's reported bounds also include markers extending past its edges. Pointer input uses Win32 `SendInput`; UI Automation selects anchors and reads the probe state. Reusing the draggable point-editor model would require tests for:
 
 - Unexpected capture loss and closing settings during a drag.
 - Selecting coincident or closely spaced markers and preserving selection when points reorder.
@@ -115,7 +115,7 @@ Native mouse tests passed at 100% scaling for insertion, off-center dragging, re
 
 ## Suggested MVP UI and follow-ups
 
-**Recommended MVP presentation:** a scrollable settings window with Wake and Bedtime clock fields, a point list, a linear graph, and a dedicated Preview/Stop control. Selecting a point exposes its anchor, offset, and temperature fields. The selected graph interaction supports insertion and dragging, while fields provide precise editing. The remaining native and accessibility checks apply before treating the graph as production-ready.
+**Draft MVP presentation:** a scrollable settings window with three temperature controls, Wake and Bedtime clocks, solar/location settings, a shared scheduled-transition duration, and a generated graph with Preview/Stop. The graph does not support insertion or dragging. Native validation, rendering, and accessibility remain application checks.
 
 Keep the suppression list, executable picker, startup switch, and control/error status in that window. Use one application-owned tray icon with Settings and Quit actions. Preserve the controller-only Night Light write rule and shared validation/persistence path.
 
@@ -127,7 +127,7 @@ Keep the suppression list, executable picker, startup switch, and control/error 
 | Rich tray menu icons and accelerators | Plain menu commands can provide the required actions | Verify the eventual release's menu API rather than relying on an issue's status |
 | Replace custom Windows integration with public helpers when available | Picker ownership, activation, and sign-in registration can be implemented separately | Verified public helpers or a tested Windows integration layer |
 
-File selection and tray lifetime are MVP requirements. The successful one-time location probe supplies evidence for post-MVP solar scheduling; location permission and acquisition are outside the current application scope.
+File selection, tray lifetime, and explicit location acquisition are draft MVP requirements. The successful one-time location probe supplies evidence for its tested host. Denied permission, disabled services, cancellation, and production integration remain application checks.
 
 ## Reproducible probes and outstanding evidence
 
@@ -163,7 +163,7 @@ The archived location action invokes `windows` 0.62.2 permission and position AP
 
 Foreground lookup resolves the probe executable with limited-query access. Opening protected PID 4 with that same access fails, establishing an actual denial path. This is not an elevated-foreground matrix or foreground-event-hook test. The wrapper's fixed path buffer can fail on long executable paths; failure to read an executable identity is treated as no match in the suppression list.
 
-The pinned graph uses the original fixed three-anchor fixtures. These results close the dependency-combination question, while the manual Wake/Bedtime editor, playback/Save consistency, and production responsiveness still require native integration. The [combined schedule probe](schedule-integration.md) separately supplies Windows clock evidence and post-MVP solar results.
+The pinned graph uses the original fixed three-anchor fixtures. These results close the dependency-combination question, while the generated schedule controls, playback/Save consistency, and production responsiveness still require native integration. The [combined schedule probe](schedule-integration.md) separately supplies Windows clock and local solar evidence; its automatic-anchor resolver is a different scheduling model.
 
 ## Active probe after consolidation
 

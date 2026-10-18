@@ -3,7 +3,7 @@
 ## Scope and decisions
 
 - Read [SPEC.md](docs/specs/SPEC.md) and the relevant [schedule requirements](docs/specs/schedule.md) before changing behavior. Treat their requirements as the product contract; use [research](docs/research/README.md) for evidence and limitations.
-- Preserve settled choices: one Rust process using the Windows Reactor UI library, native Night Light control, temperature points timed by offsets from user-entered Wake and Bedtime clocks, and foreground-only suppression (a temporary 6500 K override) for explicitly listed executables. For example, do not add a fullscreen detector to the MVP.
+- Preserve settled choices: one Rust process using the Windows Reactor UI library, native Night Light control, three ordered temperature levels with generated transitions around user-entered Wake/Bedtime clocks and optional solar targets, and foreground-only suppression (a temporary 6500 K override) for explicitly listed executables. For example, do not add a fullscreen detector to the MVP.
 - Use the available `brainstorm` skill for explicitly open product decisions before implementation. For example, settle a question under Open questions instead of selecting its answer in a plan.
 - Keep implementations simple and proportional to the requirement. Prefer direct code; do not add services, separate UI processes, recovery subsystems, or general abstractions without a demonstrated need.
 - Do not change the sibling `win-nightlight-cli` repository as an incidental part of a Circadia task. Treat a required public library extension as a dependency task with its own authorized scope.
@@ -26,6 +26,13 @@
 - Preserve research findings when product choices change. Explain current applicability in the index and spec instead of rewriting evidence to imply a different result.
 - Write direct prose that makes sense without the conversation. State concrete behavior, define project-specific terms, and keep emojis and kaomojis out of repository files.
 
+## Python probes and helpers
+
+- Apply the shared [Python configuration](probes/pyproject.toml) to every active Python probe, helper, and test. Keep new files covered by the shared checks; for example, a new probe directory must not bypass Ruff or ty through a local exclusion.
+- Annotate function parameters and return values, and use concrete types at native and external-data boundaries. For example, declare `ctypes` structure fields and validate decoded data before treating it as a typed result.
+- Run the pinned Ruff lint/format and ty checks through `uvx` with `just --justfile probes/justfile python-check`, then run affected Python 3.15 test recipes. Resolve diagnostics without weakening the shared rules or adding blanket suppressions; for example, limit a necessary suppression to an intentional invalid-input fixture and explain it at the use.
+- Keep host-setting exercises and performance measurements separate from routine checks. For example, `python-test` runs read-only clock tests, while the host time-zone exercise requires its explicit invocation.
+
 ## Research probes
 
 - Apply the same repository rules and language-specific skills to probes as to application code, because probe code may be reused in the application. For example, keep Rust validation, diagnostics, lint policy, and tests at the same standard.
@@ -44,7 +51,6 @@
 - Use `rg` for search, `gh` for GitHub, and `uv` for Python tools. If a `justfile` exists, run `just --list` and use the applicable recipe.
 - Inspect the actual repository tooling before selecting checks. Do not assume Cargo or `just` commands exist before their manifests are added.
 - Use Python 3.15 for `uv run` checks. Run the spec structural checker after spec changes: `uv run --python 3.15 "$HOME/.agents/skills/write-spec/scripts/check_spec.py" docs/specs/SPEC.md`. Check local Markdown links when moving or adding documents.
-- Annotate Python probe function parameters and return values. Run pinned Ruff lint/format and ty checks through `uvx` with `just --justfile probes/justfile python-check`, then run the affected Python 3.15 test recipes. Keep host-setting exercises separate from routine checks.
 - Test meaningful boundaries and failures with expectations independent of the implementation. For example, validate curve results against fixed reference cases rather than computing expected values with the function under test.
 - Keep tests that change live Night Light separate from default automated checks. Use controlled probes only within the authorized task and record their display and OS limitations.
 - Use the available `review-changes` skill with `mode=apply` on the accumulated changes before finishing implementation or preparing a commit or PR. Apply confirmed fixes, report remaining decisions, and preserve unrelated work.

@@ -15,7 +15,7 @@ recheck-when: f.lux changes its Windows scheduling or app-selection behavior, or
 
 # Windows f.lux behavior relevant to Circadia
 
-f.lux provides a documented reference for solar and wake-time scheduling, three temperature controls, gradual transitions, and suppression for selected foreground apps. Its developers describe a menu of recently used apps that supports selection after Alt+Tab. Circadia's arbitrary 1..N temperature points use offsets from manual Wake and Bedtime clocks. That editing model extends beyond the documented f.lux controls. Exact executable matching also differs from the title-based matching described in later f.lux developer statements. These findings establish documented behavior, not runtime verification of the current executable. [Windows welcome guide](https://justgetflux.com/news/pages/v4/welcome/), [Windows release notes](https://justgetflux.com/news/pages/v4/readme/), [recent-app selection](https://forum.justgetflux.com/topic/4060/please-add-disable-by-exe), [matching identities](https://forum.justgetflux.com/topic/8439/how-can-add-more-of-6-items-to-blacklist).
+f.lux provides a documented reference for solar and wake-time scheduling, three temperature controls, gradual transitions, and suppression for selected foreground apps. Its developers describe a menu of recently used apps that supports selection after Alt+Tab. Circadia also selects three temperature controls, but defines manual Wake and Bedtime clocks and its own target deadlines and solar omission rules. Exact executable matching also differs from the title-based matching described in later f.lux developer statements. These findings establish documented behavior, not runtime verification of the current executable. [Windows welcome guide](https://justgetflux.com/news/pages/v4/welcome/), [Windows release notes](https://justgetflux.com/news/pages/v4/readme/), [recent-app selection](https://forum.justgetflux.com/topic/4060/please-add-disable-by-exe), [matching identities](https://forum.justgetflux.com/topic/8439/how-can-add-more-of-6-items-to-blacklist).
 
 ## Decision context and evidence limits
 
@@ -35,13 +35,13 @@ Only official documentation and statements by f.lux developers are used to estab
 
 That statement does not distinguish the start from the end of the transition. An ordinary participant in a macOS forum thread reports reaching the bedtime temperature nine hours before wake, with the gradual transition starting an hour earlier. The developer's reply confirms only approximate nine-hour timing. This thread does not establish the Windows transition boundaries. [Bedtime discussion](https://forum.justgetflux.com/topic/7894/how-do-i-adjust-my-bedtime).
 
-**Design inference for Circadia:** Wake at 07:00 and Bedtime at 22:00 can reproduce a nine-hour nighttime interval without deriving one clock from the other. Bedtime -60 at 3400 K and Bedtime +0 at 2200 K define a one-hour evening ramp. Wake -60 at 2200 K keeps that temperature until 06:00, and Wake +0 at 6500 K defines the morning ramp. These points use the selected four-hour offset bounds; the global fade for focus and configuration changes is separate.
+**Design inference for Circadia:** Manual Wake at 07:00 and Bedtime at 22:00 express a nine-hour overnight interval without deriving either clock from the other. A shared 60-minute scheduled duration can reach Sleep by 22:00 and the appropriate morning temperature by 07:00. The middle temperature can be reached at Sunset several hours before Bedtime. These are Circadia design choices, not verified f.lux transition boundaries.
 
-The user chooses both clocks and all point temperatures. f.lux's approximate nine-hour convention does not establish a required nighttime duration for Circadia. Preset creation remains deferred in the [draft specification](../specs/SPEC.md#future-work).
+The user chooses both clocks and three ordered temperatures. f.lux's approximate nine-hour convention does not establish a required sleep duration for Circadia. The global fade for focus and configuration changes remains separate from scheduled transitions.
 
 **Observed in the official FAQ and developer discussion retrieved 2026-10-16:** f.lux offers a slow transition lasting one hour. The developer explains that its older graph illustrated the sun rather than the actual fade, and that version 4 changed the displayed curve and transition behavior. These sources do not specify an interpolation equation or an arbitrary editable curve. They therefore do not justify copying a screenshot as a mathematical schedule definition. [FAQ](https://justgetflux.com/faq.html), [Make it follow the curve](https://forum.justgetflux.com/topic/4169/make-it-follow-the-curve/12).
 
-Circadia defines its own point contract: each point has a temperature and a Wake/Bedtime offset. Consecutive points connect linearly, and a one-point curve is constant. These are selected Circadia behaviors, not f.lux findings; [the schedule area](../specs/schedule.md) defines their boundaries.
+Circadia generates constant intervals and linear transitions that finish at retained target times. Close targets shorten the transition; omitted solar targets do not retain separate offset points. These are selected Circadia behaviors, not f.lux findings; [the schedule area](../specs/schedule.md) defines their boundaries.
 
 ## Schedule boundaries, polar conditions, and clock changes
 
@@ -53,7 +53,7 @@ Circadia defines its own point contract: each point has a temperature and a Wake
 
 **Observed in Windows release notes and a developer explanation retrieved 2026-10-16:** Versions 4.118 and 4.119 document DST smoothing. Herf describes adjusting wake timing over approximately the week before a clock change. The reviewed sources do not define how an ambiguous or nonexistent local wake time resolves, or how the current release handles every time-zone change. [Windows release notes](https://justgetflux.com/news/pages/v4/readme/), [DST smoothing explanation](https://forum.justgetflux.com/topic/7566/what-is-dst-smoothing).
 
-**Design inference:** f.lux's documented three-period interface does not supply rules for Circadia's arbitrary points. Circadia defines distinct point minutes, chronological interpolation across midnight, and omission/first-occurrence handling for Windows clock changes. Its manual clocks remove solar-event availability and seasonal movement from MVP validation. These are Circadia contracts, not verified f.lux behavior.
+**Design inference:** The documented f.lux interface does not establish Circadia's collision rules. Circadia specifies chronological transitions across midnight, omission of conflicting or missing solar events, and omission/first-occurrence handling for manual clocks during Windows clock changes. These are Circadia contracts, not verified f.lux behavior.
 
 ## Foreground suppression and recent-app selection
 
@@ -106,7 +106,7 @@ The page's working credentials do not establish credentials or permission for a 
 
 ## Applicability and remaining evidence
 
-Use f.lux as an interaction reference for the graph, foreground suppression, recent-app candidates, and editable exclusion list. Circadia separately defines its two manual clocks, relative-only point editor, and exact executable matching. Solar and location findings apply to post-MVP work.
+Use f.lux as an interaction reference for the graph, foreground suppression, recent-app candidates, and editable exclusion list. Circadia separately defines its two manual clocks, generated three-temperature schedule, explicit coordinate acquisition, and exact executable matching. City/address search remains deferred; local solar timing is part of the draft MVP.
 
 A runtime comparison against Windows f.lux 4.141 would establish current menu details and transition behavior. Exact f.lux internals are unnecessary for implementing Circadia's own [schedule contract](../specs/schedule.md).
 
