@@ -230,6 +230,27 @@ Wake and Bedtime occurrences use Windows local-clock conversion. A nonexistent o
 
 Solar selection preserves each dated Wake and following Bedtime pair even when a manual target is omitted. A nonexistent boundary uses the first valid instant after the clock gap only to delimit solar selection. This boundary does not create a replacement manual temperature target. A repeated boundary uses its first occurrence.
 
+**Example:** This curve uses Daytime 6500 K, Morning/Evening 3400 K, Sleep 2200 K, and 60-minute transitions on a day without a clock change. The retained targets occur at Wake 05:00, Sunrise 07:00, Sunset 19:00, and Bedtime 01:00 the following date. The illustration shows the schedule from 04:00 through the following 03:00; its labels do not prescribe the settings graph's appearance.
+
+```mermaid
+---
+config:
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#3975b4"
+  xyChart:
+    width: 900
+    height: 350
+---
+xychart-beta
+  title "Scheduled temperatures across midnight"
+  x-axis "Local clock hour (00 begins the next date)" ["04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "00", "01", "02", "03"]
+  y-axis "Temperature (K)" 2200 --> 6500
+  line [2200, 3400, 3400, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 3400, 3400, 3400, 3400, 3400, 3400, 2200, 2200, 2200]
+```
+
+**Example:** The rising transitions run from 04:00 to Wake and from 06:00 to Sunrise. The falling transitions run from 18:00 to Sunset and from midnight to Bedtime. Each reaches its target at the anchor time; the curve continues through midnight without resetting.
+
 **Scenarios:**
 
 - Daytime is 6500 K, Morning/Evening is 3400 K, Sleep is 2200 K, Sunset is 18:13, and Bedtime is 01:00. With 60-minute transitions, 17:13–18:13 reaches 3400 K; 00:00–01:00 reaches 2200 K. Between those transitions the temperature remains 3400 K.
