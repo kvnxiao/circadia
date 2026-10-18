@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="560" viewBox="0 0 1120 560" role="img" aria-labelledby="curve-title curve-description">
+  <title id="curve-title">Scheduled color temperature across midnight</title>
+  <desc id="curve-description">Example of a display color temperature schedule on a day without a clock change. Sleep is 2200 K, Morning/Evening is 3400 K, and Daytime is 6500 K. One-hour transitions end at Wake 05:00, Sunrise 07:00, Sunset 19:00, and Bedtime 01:00 the next date. The curve continues through midnight without resetting.</desc>
+  <style>
+    text { font-family: "Segoe UI", Arial, sans-serif; fill: #1f2937; }
+    .heading { font-size: 26px; font-weight: 600; }
+    .label { font-size: 18px; font-weight: 600; }
+    .detail { font-size: 17px; fill: #526171; }
+    .axis { font-size: 16px; fill: #526171; font-variant-numeric: tabular-nums; }
+    .guide { stroke: #d7dfe8; stroke-width: 1; }
+    .bracket { fill: none; stroke: #526171; stroke-width: 1.5; }
+  </style>
+  <rect width="1120" height="560" fill="#ffffff"/>
+  <text x="28" y="36" class="heading">Scheduled color temperature</text>
+  <rect x="969.13" y="104" width="110.87" height="316" fill="#f2f6fb"/>
+  <text x="957.13" y="92" class="axis" text-anchor="end">Midnight</text>
+  <text x="981.13" y="92" class="axis">Next date</text>
+  <g>
+    <line x1="210" y1="120" x2="1080" y2="120" class="guide"/>
+    <text x="28" y="114" class="label">Daytime</text>
+    <text x="28" y="139" class="detail">6500 K</text>
+  </g>
+  <g>
+    <line x1="210" y1="307.44" x2="1080" y2="307.44" class="guide"/>
+    <text x="28" y="301.44" class="label">Morning/Evening</text>
+    <text x="28" y="326.44" class="detail">3400 K</text>
+  </g>
+  <g>
+    <line x1="210" y1="380" x2="1080" y2="380" class="guide"/>
+    <text x="28" y="374" class="label">Sleep</text>
+    <text x="28" y="399" class="detail">2200 K</text>
+  </g>
+  <line x1="969.13" y1="104" x2="969.13" y2="420" stroke="#8b9bad" stroke-width="1.5" stroke-dasharray="5 5"/>
+  <polyline points="230,380 266.96,307.44 303.91,307.44 340.87,120 747.39,120 784.35,307.44 969.13,307.44 1006.09,380 1080,380" fill="none" stroke="#3975b4" stroke-width="3" stroke-linejoin="round"/>
+  <g data-hour="5" data-kelvin="3400">
+    <circle cx="266.96" cy="307.44" r="5" fill="#3975b4" stroke="#ffffff" stroke-width="2"/>
+    <text x="266.96" y="250" class="label" text-anchor="middle">Wake</text>
+    <text x="266.96" y="273" class="detail" text-anchor="middle">05:00</text>
+  </g>
+  <g data-hour="7" data-kelvin="6500">
+    <circle cx="340.87" cy="120" r="5" fill="#3975b4" stroke="#ffffff" stroke-width="2"/>
+    <text x="340.87" y="78" class="label" text-anchor="middle">Sunrise</text>
+    <text x="340.87" y="101" class="detail" text-anchor="middle">07:00</text>
+  </g>
+  <g data-hour="19" data-kelvin="3400">
+    <circle cx="784.35" cy="307.44" r="5" fill="#3975b4" stroke="#ffffff" stroke-width="2"/>
+    <text x="784.35" y="343" class="label" text-anchor="middle">Sunset</text>
+    <text x="784.35" y="366" class="detail" text-anchor="middle">19:00</text>
+  </g>
+  <g data-hour="25" data-kelvin="2200">
+    <circle cx="1006.09" cy="380" r="5" fill="#3975b4" stroke="#ffffff" stroke-width="2"/>
+    <text x="1022.09" y="334" class="label" text-anchor="start">Bedtime</text>
+    <text x="1022.09" y="357" class="detail" text-anchor="start">01:00</text>
+  </g>
+  <line x1="230" y1="420" x2="1080" y2="420" class="guide"/>
+  <line x1="230" y1="420" x2="230" y2="426" stroke="#8b9bad"/>
+  <text x="230" y="446" class="axis" text-anchor="middle">04:00</text>
+  <line x1="303.91" y1="420" x2="303.91" y2="426" stroke="#8b9bad"/>
+  <text x="303.91" y="446" class="axis" text-anchor="middle">06:00</text>
+  <line x1="525.65" y1="420" x2="525.65" y2="426" stroke="#8b9bad"/>
+  <text x="525.65" y="446" class="axis" text-anchor="middle">12:00</text>
+  <line x1="747.39" y1="420" x2="747.39" y2="426" stroke="#8b9bad"/>
+  <text x="747.39" y="446" class="axis" text-anchor="middle">18:00</text>
+  <line x1="969.13" y1="420" x2="969.13" y2="426" stroke="#8b9bad"/>
+  <text x="969.13" y="446" class="axis" text-anchor="middle">00:00</text>
+  <line x1="1080" y1="420" x2="1080" y2="426" stroke="#8b9bad"/>
+  <text x="1080" y="446" class="axis" text-anchor="middle">03:00</text>
+  <path d="M 230 462 V 470 H 266.96 V 462" class="bracket"/>
+  <text x="248.48" y="496" class="axis" text-anchor="middle">60 min</text>
+  <path d="M 303.91 462 V 470 H 340.87 V 462" class="bracket"/>
+  <text x="322.39" y="496" class="axis" text-anchor="middle">60 min</text>
+  <path d="M 747.39 462 V 470 H 784.35 V 462" class="bracket"/>
+  <text x="765.87" y="496" class="axis" text-anchor="middle">60 min</text>
+  <path d="M 969.13 462 V 470 H 1006.09 V 462" class="bracket"/>
+  <text x="987.61" y="496" class="axis" text-anchor="middle">60 min</text>
+  <text x="655" y="536" class="detail" text-anchor="middle">Local time</text>
+</svg>
