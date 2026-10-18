@@ -28,7 +28,7 @@ The native-control script opens Windows Night Light settings, changes its streng
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File verify-native-controls.ps1
 ```
 
-Both native scripts close the Settings page they open, including after failures. The control script attempts window cleanup and temperature restoration independently. It changes the visible display temporarily. Neither probe requires a colorimeter; physical display response is an accepted assumption. See the [probe index](../README.md) for other verification work.
+Both native scripts close the Settings page they open, including after failures. The control script attempts window cleanup and temperature restoration independently. It changes Night Light temporarily. The probes verified registry data without measuring display output and do not require a colorimeter. Circadia's visible benchmark separately requires inspection of warming and cooling under the [spec](../../docs/specs/application.md#req-preview-benchmark--measure-and-visibly-exercise-temperature-updates). See the [probe index](../README.md) for other verification work.
 
 ## Check the Windows slider after an external write
 

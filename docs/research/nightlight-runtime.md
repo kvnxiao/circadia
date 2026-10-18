@@ -15,7 +15,7 @@ The [runtime probe](../../probes/nightlight-runtime/README.md) verifies decoded 
 
 ## Acceptance evidence
 
-The [draft specification](../specs/SPEC.md) accepts successful public-library operations and decoded registry values as temperature verification. Physical response, optical equivalence between 6500 K and Night Light off, and Windows' preservation of calibrated output are accepted assumptions. A colorimeter and separate SDR/HDR measurements are not approval gates. The prohibition on application gamma-ramp and calibration-profile writes still applies.
+The [draft specification](../specs/SPEC.md) accepts successful public-library operations and decoded registry values as temperature verification. The application additionally requires a visible warming/cooling benchmark; these recorded timings do not satisfy that check. Optical equivalence between 6500 K and Night Light off and Windows' preservation of calibrated output remain unverified and outside the acceptance criteria. A colorimeter and separate SDR/HDR measurements are not approval gates. The prohibition on application gamma-ramp and calibration-profile writes still applies.
 
 The native preview flag temporarily requests application of the stored temperature. The library clears it after refresh; an active preview means that flag is still enabled.
 
@@ -37,7 +37,7 @@ The timed reversal changes the next requested step after a completed synchronous
 
 ## Restoration and remaining checks
 
-Probe restoration is experimental cleanup, separate from the application's [exit behavior](../specs/application.md#req-exit-night-light-off--turn-night-light-off-on-graceful-exit). Circadia requests Night Light off on graceful exit; the probe restores the state it captured for its experiment.
+Probe restoration is experimental cleanup, separate from the application's [exit behavior](../specs/control.md#req-exit-night-light-off--turn-night-light-off-on-graceful-exit). Circadia requests Night Light off on graceful exit; the probe restores the state it captured for its experiment.
 
 The probe captures temperature, active state, and schedule before writes. It refuses a missing or unsupported baseline temperature and an active preview. On a returned error, it attempts temperature, active-state, and schedule restoration independently, using fresh public update operations. It does not write an old serialized settings snapshot: refresh operations advance modification metadata, and restoring an old snapshot could regress that metadata.
 
