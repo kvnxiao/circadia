@@ -13,7 +13,7 @@ The released libraries provide the complete temperature refresh and decoded chan
 
 ## Evidence and scope
 
-The dependency determines which public operations support Circadia's ownership and failure requirements. [SPEC.md](../specs/SPEC.md#night-light-access) defines the application policy.
+The dependency determines which public operations support Circadia's ownership and failure requirements. The [native-access specification](../specs/native-access.md) defines the application policy.
 
 **Observed in release metadata:** Tag `v0.4.0` identifies commit `96fdd61b06ca4fb74dbc2b8368ddc9bd4b77ab03`. The library, watcher, and CLI packages are published on crates.io at 0.4.0. [Release](https://github.com/kvnxiao/win-nightlight-cli/releases/tag/v0.4.0), [library](https://crates.io/crates/win-nightlight-lib/0.4.0), [watcher](https://crates.io/crates/win-nightlight-watch/0.4.0).
 
@@ -57,9 +57,9 @@ The released APIs support Circadia's selected integration:
 
 - Register both watchers before initial reads. Use notification snapshots to compare schedule enablement, on/off state, and temperature with Circadia's current intention.
 - Before a repair or scheduled write, obtain fresh settings and state for that control attempt. A queued snapshot does not establish that both records are still readable or current.
-- While a read or write failure is pending, use `discard_pending()` to maintain observation without reading. Retry on focus changes, scheduled curve operations, accepted configuration changes, and [target recomputation events](../specs/schedule.md#req-target-recompute--recompute-from-current-inputs) such as resume. Read current data even without another notification.
+- While a read or write failure is pending, use `discard_pending()` to maintain observation without reading. The application defines a [native recovery sequence](../specs/native-access.md#req-native-recovery--retry-native-access-without-blocking-settings) and explicit Retry actions. Read current data even without another notification.
 - Classify snapshot-read errors separately from lost observation. Retain a watcher after a read error; replace a failed registration on those same retry events.
-- Use the same rounded integer intended temperature for native writes and readback comparison under [REQ-temperature-refresh](../specs/SPEC.md#req-temperature-refresh--repeat-the-complete-temperature-refresh). A fractional curve value or fade step must not make its own rounded readback appear different.
+- Use the last issued rounded temperature for readback comparison until the next permitted output under [REQ-temperature-refresh](../specs/native-access.md#req-temperature-refresh--repeat-the-complete-temperature-refresh). Advancing the mathematical curve or fade between outputs must not make a matching snapshot appear different.
 - Serialize writes and request `RefreshPolicy::Always` for each temperature operation. Matching values, duplicate snapshots, and preview-only changes do not independently request another refresh.
 
 The library does not select retry triggers or own Circadia's desired values. Repeating every temperature write after every notification would cause another refresh and potentially another notification; comparing schedule enablement, on/off state, and temperature prevents that feedback loop.
@@ -75,4 +75,4 @@ Publication and automated tests establish the public API and tested registry beh
 
 The separate [runtime measurements](nightlight-runtime.md) verify unconditional operation latency, decoded readback, reversal of a timed sequence of temperature requests, native slider response, and restoration on the recorded host. Application integration tests are still required to verify controller behavior and message-loop responsiveness.
 
-Physical display response and calibrated output equivalence are accepted assumptions in the draft. Optical testing is not required for draft approval or the selected MVP acceptance criteria. Registry readback, timestamps, and unchanged gamma-table reads do not establish optical behavior; the display properties above remain unmeasured.
+The draft requires a visible warming/cooling benchmark during implementation and release validation. Instrumented optical testing and calibrated output equivalence remain outside those acceptance criteria. Registry readback, timestamps, and unchanged gamma-table reads do not establish optical behavior; the display properties above remain unmeasured.

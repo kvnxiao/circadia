@@ -1,30 +1,31 @@
 ---
-status: approved
-areas: [schedule.md, application.md]
+status: draft
+areas: [schedule.md, suppression.md, native-access.md, control.md, application.md]
 ---
 
 # Circadia
 
 ## Purpose and scope
 
-Circadia is a Windows 11 tray app that manages native Windows Night Light with a generated daily temperature curve. Users configure Daytime, Morning/Evening, and Sleep temperatures, required Wake and Bedtime clocks, and optional Sunrise and Sunset timing. Transitions finish by each retained target time, so evening warmth can begin hours before Bedtime. A user-selected application temporarily removes the tint while it has focus. The settings window and background controller run in one process using Windows Reactor, a Rust UI library for WinUI 3.
+Circadia is a Windows 11 tray app that manages native Windows Night Light with a generated daily temperature curve. Users configure Daytime, Morning/Evening, and Sleep temperatures, required Wake and Bedtime clocks, and optional Sunrise and Sunset timing. Transitions finish by each target time, so evening warmth can begin hours before Bedtime. Users can temporarily request 6500 K for a listed foreground application or for one hour through the tray menu. The settings window and background controller run in one process using Windows Reactor, a Rust UI library for WinUI 3.
 
-The target audience is active during the day and sleeps once overnight. A bedtime after midnight is supported. Night-shift schedules and multiple daily sleep periods are outside the MVP's intended use.
+The target audience is active during the day and sleeps once overnight. A bedtime after midnight is supported. Night-shift schedules and multiple daily sleep periods are outside the minimum viable product (MVP)'s intended use.
 
-Circadia does not write GPU gamma ramps or monitor calibration profiles. Successful library operations and decoded registry readback provide the acceptance evidence for temperature changes. Display response, calibration preservation by Windows, and optical equivalence between 6500 K and Night Light off are accepted assumptions; they do not require colorimeter, SDR, or HDR measurements before approval.
+Circadia does not write GPU gamma ramps or monitor calibration profiles. Successful library operations and decoded registry readback verify native requests. A visible temperature benchmark separately checks that Windows applies those requests to the display. Instrumented optical measurements, calibration preservation by Windows, and optical equivalence between 6500 K and Night Light off are outside the acceptance criteria.
 
 **Goals:**
 
 - Generate gradual transitions between three ordered temperature levels, with each target reached by its stated time.
 - Keep Wake and Bedtime under user control while optional solar timing follows the seasons.
 - Omit unavailable or conflicting solar targets and shorten transitions when targets are close together.
-- Suppress tint only for user-listed foreground applications, in any window mode.
+- Suppress tint for user-listed foreground applications in any window mode, or through a one-hour manual toggle.
 - Keep background work event-driven and settings responsive.
 - Favor straightforward implementations with few components and explicit state ownership.
 
 **Non-goals:**
 
-- Automatic fullscreen suppression in the minimum viable product (MVP); see Future work.
+- Automatic fullscreen suppression in the MVP; see Future work.
+- Pausing control by turning Night Light off while Circadia remains running. Manual suppression requests 6500 K with Night Light on.
 - Arbitrary curve-point editing, user-defined offsets, extra fixed-clock targets, or weekday-specific schedules.
 - Night-shift scheduling, multiple daily sleep periods, city/address search, or automatic location tracking.
 - Per-monitor temperature control, per-app suppression temperatures, or changes to calibration profiles.
@@ -35,7 +36,7 @@ Circadia does not write GPU gamma ramps or monitor calibration profiles. Success
 
 - Use Rust and one `windows-reactor` application process per user session. The MVP targets Windows 11 x64, build 22000 or later, and distributes the required native Windows App SDK runtime alongside the executable.
 - Read and write Night Light through `win-nightlight-lib`; observe decoded settings and state through `win-nightlight-watch`.
-- Keep the Windows Night Light schedule disabled while Circadia successfully controls Night Light.
+- Request the Windows Night Light schedule off during control. Errors and exit do not restore or enable that schedule.
 - Write temperatures only within the library's supported 1200 K to 6500 K range.
 - Prefer direct code and existing library capabilities. Introduce additional components or general abstractions only for a demonstrated requirement or measured limitation.
 
@@ -50,32 +51,58 @@ The suppression list stores executable file names explicitly added by the user. 
 | Term | Meaning |
 | :-- | :-- |
 | Temperature level | Daytime, Morning/Evening, or Sleep, ordered from highest to lowest kelvin. Morning and evening share one value. |
-| Time anchor | A required user-entered Wake or Bedtime clock, or an optional calculated Sunrise or Sunset event. |
-| Activity interval | Wake through the following Bedtime, which can cross midnight. |
-| Schedule target | A retained anchor's time and the temperature the generated curve reaches at that time. |
+| Schedule target | A Wake, Bedtime, Sunrise, or Sunset occurrence selected for the curve, with the temperature reached at that instant. |
 | Scheduled transition | The linear temperature change before a target, using the shared maximum duration or a shorter available interval. |
 | Scheduled temperature | The value obtained by evaluating the generated curve for the current instant. |
-| Frozen temperature | The last successfully written temperature captured when required schedule calculation fails, used until recovery. |
-| Matching app | The current foreground app whose executable file name is on the suppression list. |
+| Wake/Bedtime-only curve | The curve with both solar targets omitted; Wake reaches Daytime and Bedtime reaches Sleep. |
+| Solar timing enabled | Sunrise, Sunset, or both inputs are enabled. Each input has its own switch. |
+| Last scheduled temperature | The last successfully stored value from the accepted schedule or its temporary fallback. Suppression, Preview, benchmark, and intermediate fade writes do not replace it. The final fade step counts when it reaches the accepted schedule or fallback. Storage counts even if the following native-preview cleanup fails. |
+| Frozen temperature | The last scheduled temperature captured when Windows time-zone acquisition or conversion prevents schedule evaluation, preserved until recovery. |
+| Suspended control | Temperature control stopped because time-zone evaluation failed before a last scheduled temperature was established. Settings remains available and evaluation can be retried. |
+| Matching app | The current foreground app whose executable file name is included and not excluded from automatic suppression. |
+| Foreground change | A change of foreground window, including switches between two nonmatching apps. It is an event before the focus delay is applied. |
 | Focus delay | The global duration for which matching or nonmatching focus persists before suppression changes. |
-| Suppression | The temporary override that sets the target to 6500 K for matching focus. |
-| Target temperature | 6500 K during suppression; otherwise the playback or scheduled temperature. Calculation failures follow the schedule area's failure rules. |
+| Automatic suppression | The suppression source established by matching focus, subject to the focus delay after startup. |
+| Manual suppression | The independent, runtime-only one-hour suppression source controlled by the tray toggle. |
+| Suppression | The temporary 6500 K override, active when automatic suppression, manual suppression, or both are active. |
+| Target temperature | 6500 K during suppression; otherwise the benchmark, playback, or scheduled temperature. Calculation failures follow the control area's failure rules. |
 | Last written temperature | The last requested temperature known to have been stored successfully, including a write followed by a reported preview-cleanup failure. It is not a measurement of displayed color. |
-| Intended temperature | The current fade step, or the target when no fade is active, rounded to integer kelvin under REQ-temperature-refresh. |
-| Preview flag | A native Night Light setting that the library toggles to request application of a temperature. |
-| Schedule playback | The Preview button's accelerated traversal of the temperature curve, distinct from the native preview flag. |
+| Intended temperature | The quantized temperature of the last issued output step, used as the observation baseline until the next permitted output is issued. Each new step rounds the current fade step or target to the nearest 10 K under REQ-temperature-refresh. |
+| Native preview flag | A Night Light setting that the library toggles to request application of a temperature, distinct from Circadia's Preview playback. |
+| Schedule playback | The Preview button's ten-second traversal of the next 24 hours of the draft curve. |
+| Preview benchmark | A separate visible temperature sweep that measures complete native control attempts; it does not evaluate or save a draft schedule. |
 | Temperature operation | One call to the public library operation that requests a temperature and its complete refresh. |
-| Snapshot | A decoded settings or state record from a registry read. It is not an atomic capture of the write that signaled a watcher. |
-| Control attempt | Fresh settings and state reads followed by the required owned-state writes and, when due, one temperature operation. Each fade step is a separate attempt. |
-| Recompute event | An event requiring target reevaluation under [REQ-target-recompute](schedule.md#req-target-recompute--recompute-from-current-inputs), such as resume or a clock change. |
+| Owned values | Native schedule disabled, Night Light active, and the intended temperature. All other settings are unrelated to Circadia's ownership. |
+| Control attempt | Fresh settings and state reads followed by required owned-value writes and, when due, one temperature operation. Each emitted fade step is a separate attempt. Graceful exit has a state-only exception. |
+| Ordinary fade | A fade governed by the user's global enable switch and duration. Startup has a separate duration; scheduled interpolation is not an ordinary fade. |
+| Fade origin | The temperature from which a fade starts, normally the last written temperature. Startup can instead use the freshly read native temperature. |
+| Accepted configuration | The validated configuration currently used for scheduling and automatic suppression. Its accepted schedule is the curve generated from those inputs, including the permitted solar fallback. |
+| Saved configuration | The configuration on disk. A malformed external edit can differ from the accepted configuration. |
+| Draft | Unsaved settings edits, separate from the accepted configuration. |
+| Usable configuration | Configuration with valid clocks, ordered temperatures, durations, preferences, and coordinates when solar timing is enabled. Its runtime calculations can still fail. |
+| Startup prerequisites | Usable configuration plus successful Windows time-zone acquisition and conversion sufficient to evaluate its current curve. Solar failure permits a Wake/Bedtime-only fallback. |
+| Night Light access begun | The controller has passed startup prerequisites and entered native initialization, immediately before attempting watcher registration and initial reads. It remains true for that process run even if those operations fail or control is later suspended. |
+| Recompute event | An event requiring target reevaluation under [REQ-target-recompute](control.md#req-target-recompute--recompute-from-current-inputs), such as resume or a clock change. |
+| Explicit retry action | The settings Retry action, a request to start Preview or its benchmark, a successful Save, or a user toggle of manual suppression. It can retry native access immediately, subject to serialization and the existing control/access guards. |
+| Native recovery | Automatic retries after a native read, write, or observation failure, with delays of 100, 200, 400, then 800 ms under REQ-native-recovery. |
+| Clock gap / repeated interval | Local clock times skipped by a forward offset change / displayed twice by a backward offset change. |
+| Confirmed session end | Windows' notification that sign-out, shutdown, restart, or closure for servicing will proceed, distinct from its earlier query. |
 | Controller | The component that evaluates the curve and focus, serializes Night Light operations, and tracks errors. |
 | Settings window | The on-demand editor within the same process as the controller and tray icon. |
 
-Configuration persists across restarts. Focus history, pending delays, active fades, and the last written temperature are runtime state. Startup reconstructs control state from configuration, current focus, the clock, and fresh Night Light reads rather than resuming a persisted fade.
+Configuration persists across restarts. Focus history, pending delays, manual suppression and its deadline, active fades, and stored-temperature baselines are runtime state. Startup reconstructs control state from configuration, current focus, the clock, and fresh Night Light reads rather than resuming a persisted fade or timer.
 
 ## Architecture overview
 
-One process owns the configuration model, controller, tray icon, and settings window. The controller is the sole component that requests Night Light writes. Settings and tray actions update the shared model through the same validation and persistence path. Closing settings preserves the controller and tray icon.
+One process owns the configuration model, controller, tray icon, and settings window. The controller is the sole component that requests Night Light writes. Settings and tray configuration edits use the same validation and persistence path. Manual suppression changes runtime state without saving configuration. Closing settings preserves the controller and tray icon.
+
+The controller selects one temperature source in this order:
+
+1. Either suppression source requests 6500 K.
+2. Otherwise, a running Preview benchmark or schedule playback supplies its temperature.
+3. Otherwise, the accepted schedule or its frozen temperature applies.
+
+Benchmark and schedule playback cannot run together. Suspended control prevents temperature writes from every source until scheduling becomes evaluable. Settings, editing, and native recovery status remain available.
 
 ```mermaid
 flowchart LR
@@ -104,11 +131,25 @@ Circadia changes screen color only through the Night Light library. It does not 
 **Scenarios:**
 
 - An API trace covers scheduled changes, suppression, and fades: Circadia does not call gamma-ramp setters or calibration/profile mutation APIs.
-- Calibration curves are read before and after control operations: the recorded values are unchanged. This checks stored calibration data; physical display output remains an accepted assumption.
+- An API trace covers the visible benchmark and restoration: Circadia makes native Night Light requests without gamma-ramp setters or calibration/profile mutation calls. Changes that Windows itself makes to the live display transform do not violate this invariant.
+
+### REQ-event-driven-idle — Perform background work only when needed
+
+Circadia minimizes CPU use by scheduling work for input events, necessary output changes, or an explicitly active operation. Foreground identity uses focus events and Night Light observation uses change notifications. Stable focus does not cause recurring process or window inspection. Curve output waits for its next 10 K change or relevant schedule boundary instead of sampling at a fixed rate.
+
+Constant output does not cause repeated temperature operations. Resume requires its discrete complete refresh under REQ-suspend-resume, including at an unchanged temperature. Suppression stops underlying curve-output timers after reaching 6500 K. Schedule inputs are still recalculated on relevant configuration, date, clock, and resume events. Other timed work is limited to focus delays, manual suppression expiry, changing fades or playback, the user-started benchmark, and pending native recovery. Native recovery stops after success; unchanged errors do not produce repeated identical diagnostics. Hidden settings do not animate their graph or update a countdown.
+
+**Scenarios:**
+
+- A constant schedule and stable focus continue for ten minutes: tracing shows no periodic foreground queries, temperature writes, graph animation, or native retry work.
+- A one-hour 6500 K to 2400 K transition runs without interruptions: output follows its 410 distinct 10 K changes, without a recurring 50 ms sampler.
+- A listed game remains focused over a scheduled transition: underlying intermediate temperature writes and their timers stop. A date change still recomputes required schedule inputs once.
+- A native error persists: only the native recovery sequence and explicit user actions attempt recovery; curve ticks and self-generated notifications do not create additional attempts.
+- Settings closes during manual suppression: the hour still expires, but its hidden countdown does not generate recurring UI updates.
 
 ### REQ-app-owns-night-light — Maintain the desired Night Light state
 
-After startup prerequisites pass, with successful Night Light access, the controller requests Night Light on, the native schedule off, and the intended temperature. Suppression uses 6500 K while Night Light remains enabled. Circadia requests off only during graceful exit under [REQ-exit-night-light-off](application.md#req-exit-night-light-off--turn-night-light-off-on-graceful-exit). After observing a deviation, the controller restores the owned value from the current application state. It preserves unrelated settings through the library's update operations.
+After startup prerequisites pass, with successful Night Light access, the controller requests Night Light on, the native schedule off, and the intended temperature. Suppression uses 6500 K while Night Light remains enabled. Circadia requests off only during graceful exit under [REQ-exit-night-light-off](control.md#req-exit-night-light-off--turn-night-light-off-on-graceful-exit). After observing a deviation, the controller restores the owned value from the current application state. It preserves unrelated settings through the library's update operations.
 
 Startup prerequisites follow REQ-startup-temperature. Read, write, and observation failures follow the Night Light access requirements. External writers can cause transient deviations. Control ends when graceful exit begins.
 
@@ -117,6 +158,7 @@ Startup prerequisites follow REQ-startup-temperature. Read, write, and observati
 - Valid configuration is available and the native sunset schedule is enabled; control starts successfully: the native schedule is disabled and Circadia supplies the temperature.
 - While Circadia controls Night Light, the user changes the native schedule or on/off state: an observed difference causes Circadia to restore its desired state.
 - Windows changes temperature during a fade: reconciliation uses the current intended fade step, not the fade's final target.
+- Windows changes temperature while control has a constant intention: reconciliation restores that intention immediately, without starting an ordinary fade.
 - A required registry read fails: the read-failure rule takes precedence over normal ownership writes.
 
 ### REQ-single-instance — One application instance per session
@@ -125,7 +167,7 @@ Only one instance controls Night Light in a user session. Starting Circadia agai
 
 **Scenarios:**
 
-- Circadia is running in the tray; the user launches it from the Start menu: settings opens in the existing instance, and the target temperature does not change solely because of the launch.
+- Circadia is running in the tray; the user launches its executable or a shortcut again: settings opens in the existing instance, and the target temperature does not change solely because of the launch.
 - Settings is already open; the user launches Circadia again: the existing window is activated.
 
 ### REQ-game-process-isolation — Restrict access to other processes
@@ -150,164 +192,19 @@ Circadia runs with the user's standard rights and does not request elevation to 
 
 | Area | Scope |
 | :-- | :-- |
-| [Daily temperatures, Wake, Bedtime, and solar timing](schedule.md) | Temperature levels, clocks, location, solar targets, generated transitions, graph, playback, and recomputation. Read after the shared terms and invariants. |
-| [Configuration and application lifecycle](application.md) | Configuration persistence, setup, settings, shutdown, and resource behavior. Read with the shared Night Light access requirements. |
-
-## Application selection
-
-### REQ-executable-list-match — Match listed foreground executables
-
-A focused app matches only when its executable file name is on the user's suppression list. Matching is case-insensitive and uses the file name, not the full installation path or window title. Listed apps match in every window mode. An unlisted app does not match, even in fullscreen. A listed app running in the background does not trigger suppression.
-
-**Failure behavior:** The app attempts identity lookup within its permitted access rights. If it cannot identify the executable, it treats the foreground app as nonmatching. It does not infer a match from an unrelated window title or request elevation. Any alternative identity lookup preserves these access and matching rules.
-
-**Scenarios:**
-
-- `VLC.EXE` is listed and a foreground window belongs to `vlc.exe`: it matches.
-- A listed game gains focus in windowed, borderless fullscreen, or exclusive fullscreen mode: it matches in each mode.
-- An unlisted game gains focus in fullscreen: it does not match.
-- The list is empty: no application triggers suppression.
-- A listed game remains running on one monitor while an unlisted browser has focus on another: the browser does not match.
-- Two installations have the same listed executable file name: either matches when focused.
-
-### REQ-edit-executable-list — Edit the suppression list
-
-The suppression list starts empty. The user adds applications explicitly, either from recent foreground applications in the tray menu or by selecting an executable file in settings. The app saves the selected executable file name in its configuration and shows that matching name in the list. Settings lets the user remove entries. The MVP does not expose an automatic fullscreen suppression option or fullscreen-specific include and exclude lists.
-
-The tray menu stores the five most recent distinct executable file names in most-recent-first order so the user can add an app after switching away from it. Closed apps remain candidates; the history resets when Circadia exits. Each entry identifies the application being added. Merely detecting an app does not add it to the suppression list. Circadia's own UI and desktop/taskbar interactions do not replace the application candidate the user switched away from.
-
-**Failure behavior:** If the app cannot identify a recent application's executable, that candidate cannot be added through the menu. Manual executable selection remains available; runtime matching still requires successful identity lookup.
-
-**Scenarios:**
-
-- A game has focus; the user switches to another app and opens the tray menu: the menu lets the user select the game and add its executable.
-- A game appears in the menu; the user closes the menu without selecting it: the suppression list does not change.
-- Recent-app identification fails; the user selects the executable in settings and saves: the entry remains after restarting Circadia.
-- The user removes an entry and saves: current focus is reevaluated, and that executable no longer matches.
-- Six distinct apps receive focus: the history retains the latest five. Refocusing one moves it to the front without creating a duplicate; closing it keeps it available until displaced or Circadia exits.
-
-## Suppression and fades
-
-### REQ-suppress-on-focus — Suppress while focused
-
-During suppression, the target temperature is 6500 K. Matching focus starts suppression after the focus delay; nonmatching focus ends it after the focus delay. If focus returns to the matching or nonmatching state that established the current suppression state before the delay expires, the pending change is canceled. Moving directly between matching apps preserves suppression. When suppression ends, the target follows active schedule playback if present; otherwise it is the scheduled temperature for the actual current instant. The ordinary focus-transition fade applies. Activating suppression cancels schedule playback under REQ-preview-temperature-curve.
-
-Once suppression is active, the controller suspends ordinary scheduled-temperature updates. It does not evaluate the hidden temperature curve or calculate solar events on recurring schedule ticks. Input changes mark the schedule for recomputation when suppression ends. The focus delay, a fade toward 6500 K, and Night Light observation continue to serve their existing purposes.
-
-When suppression ends, the controller evaluates the schedule at that actual instant. It does not restore the temperature from before suppression or replay missed transitions. If a scheduled transition is in progress, control resumes at its interpolated temperature and continues the remaining transition. The ordinary focus fade converges on the schedule under REQ-transition-fade.
-
-The focus delay filters brief focus changes. It does not add hysteresis or temperature bands to the scheduled curve. The user configures one global focus delay, initially 250 ms, within the inclusive range 0–5000 ms. A zero delay changes suppression immediately.
-
-**Scenarios:**
-
-- Fades are enabled and a listed game remains focused beyond the focus delay: the temperature fades toward 6500 K.
-- The game keeps running while an unlisted browser on another monitor remains focused beyond the delay: the temperature fades toward the current scheduled value.
-- During suppression, focus leaves the game and returns within the delay: suppression continues without a temperature change caused by that interruption.
-- Focus moves directly between two listed apps: suppression continues, without a redundant temperature operation caused solely by that focus change.
-- A listed game changes window mode without losing focus: suppression continues.
-- With the default 250 ms delay, focus leaves a listed app for 200 ms and returns: suppression continues without a new fade.
-- A game remains focused from evening into the hour before Bedtime: after reaching 6500 K, the controller does not run hidden temperature updates at each scheduled step.
-- Evening is 3400 K and occurs at least 60 minutes before Bedtime; Sleep is 2200 K and the scheduled duration is 60 minutes. Suppression ends 30 minutes before Bedtime: the schedule evaluates to 2800 K at that instant and continues toward 2200 K. Night Light remains enabled throughout.
-- A game closes or focus moves to an unlisted application after several scheduled transitions have passed: once the focus delay expires, the controller evaluates the current instant without replaying those transitions.
-- A 5000 ms focus delay is ending suppression after switching to settings, and Preview starts before it expires: suppression retains its 6500 K target until the delay ends. The target then follows the active playback with the ordinary focus fade. Preview still ends at its ten-second deadline and immediately returns to the accepted schedule.
-- A delay of 0 or 5000 ms is accepted; a negative value or a value above 5000 ms blocks Save and preserves the active configuration.
-
-### REQ-transition-fade — Fade between temperatures
-
-With fades enabled, a target change caused by focus, configuration, or recomputation after an interruption such as resume or a clock change starts a gradual fade from the last written temperature toward the new target. A new fade replaces an active fade and starts from its last written step. Normal progression along the scheduled linear curve, including accelerated schedule playback, does not start a separate fade at every update.
-
-A fade returning to normal scheduling or active playback converges on that curve's temperature at the fade's completion time, then continues along it. If playback ends first, its immediate exit rule cancels the unfinished fade. Suppression remains the overriding target during a fade. Startup follows [REQ-startup-temperature](application.md#req-startup-temperature--apply-the-current-temperature-at-startup).
-
-Settings provides a global fade enable/disable switch and one global fade duration. Fades are initially enabled with a duration of 500 ms; the inclusive duration range is 100–10,000 ms. These controls apply to focus changes, accepted configuration changes, and recomputation after interruptions such as resume or clock changes. They do not add per-point transitions or replace scheduled interpolation. Schedule playback starts and stops without these fades under REQ-preview-temperature-curve. With ordinary fades disabled, these target changes issue one temperature operation, which can perform multiple registry writes internally.
-
-**Permitted choices:** Fade step count and cadence, within the configured duration and serialized Night Light access rules.
-
-**Scenarios:**
-
-- Suppression starts at night with fades enabled: recorded requested temperatures progress from the origin to 6500 K over the configured duration.
-- Suppression ends halfway through a fade: the replacement fade starts from the last successfully written step rather than jumping to an earlier endpoint.
-- The schedule rises during a fade back from suppression: the fade joins the curve at its completion time without a jump to an outdated target.
-- Fades are disabled: a changed override or configuration target issues one temperature operation. Ordinary progression along a sloped curve still interpolates continuously.
-- The scheduled transition duration is 60 minutes: evening and bedtime transitions use that maximum independently of the global fade duration.
-- A new configuration uses enabled 500 ms fades. A stable focus change starts its fade after the default 250 ms focus delay.
-- A duration of 100 or 10,000 ms is accepted; 99 or 10,001 ms blocks Save and preserves the active configuration.
-
-## Night Light access
-
-### REQ-temperature-refresh — Repeat the complete temperature refresh
-
-The controller rounds the current fade step, or the target when no fade is active, to the nearest integer kelvin; exact half-kelvin ties round toward the higher temperature. Native writes and readback comparison use this integer intended temperature. Curve and fade calculations retain fractional precision; output rounding does not snap to the editor's 10 K increments or change those calculations.
-
-Every explicit temperature operation requests the intended temperature and the library's unconditional, complete preview-on/preview-off refresh. This applies even when the stored value already equals the request or preview was already active. Successful completion leaves preview off. Circadia serializes these operations with its other Night Light writes.
-
-Success means the library reports completion of its writes; Circadia does not require optical verification or readback proof after each temperature operation. The app does not implement the undocumented registry format or access the library's private setters.
-
-**Failure behavior:** Library errors follow REQ-night-light-write-failure. A later explicit operation requests the complete sequence again, without a separate preview-recovery subsystem.
-
-**Scenarios:**
-
-- A curve value or fade step of 4002.49 K has an intended temperature of 4002 K; 4002.5 K has an intended temperature of 4003 K. Writes and readback comparison use the same integer.
-- The stored temperature equals the requested value and preview is already active: a successful operation still performs the refresh and finishes with preview off.
-- The stored temperature differs: a successful operation stores the requested value and finishes the refresh.
-- Night Light is inactive and the requested temperature is unchanged: the temperature operation still requests the complete refresh. Active-state control remains a separate operation.
-- The library reports successful temperature storage followed by failed preview cleanup: the app records the partial success and displays the failure; its next explicit temperature operation requests the complete sequence again.
-
-### REQ-night-light-observation — Reconcile observed owned values
-
-Circadia creates separate settings and state watchers through `win-nightlight-watch`, registering both before the initial reads. When no read or write failure is pending, it consumes a notification through the library and compares the returned decoded snapshot's owned fields with the controller's current intention. An observed difference in native schedule mode, active state, or intended temperature starts a control attempt that rereads both records and reevaluates the required repair. A notification alone does not request another temperature refresh.
-
-Snapshots describe the later read, not the triggering write. Settings and state are independent observations, not an atomic pair. Notifications can combine writes, omit intermediate values, or produce repeated snapshots. Circadia reconciles observed values with its current intention; it does not count notifications, infer the writer, or replay intermediate values. Timestamp-only or preview-only differences do not trigger a refresh. Temperature comparison uses the integer intended temperature defined by REQ-temperature-refresh, including during a fade. An independently due temperature operation still follows REQ-temperature-refresh even when the stored kelvin value matches.
-
-While a read or write failure is pending, Circadia consumes notifications without reading snapshots and rearms observation through the library. This includes notifications caused by partial writes or restoration of a missing value. Read/write reconciliation resumes only on an independent retry trigger listed in the failure requirements. That trigger reads current data even when no notification remains pending; discarded changes are not replayed.
-
-**Failure behavior:** A watcher snapshot-read error follows REQ-night-light-read-failure and does not by itself mean notification registration was lost. If observation stops or cannot be armed, the app drops the failed watcher and displays the loss of observation. At the next focus change, scheduled temperature operation, configuration change, or recompute event, it attempts to restore observation and reads current state. It does not run an independent polling or recovery service. Successful registration for both values and fresh reads clear the observation error without clearing an unrelated write error.
-
-**Scenarios:**
-
-- A successful refresh causes notifications with matching owned values, including duplicate snapshots: no additional refresh is requested.
-- The curve evaluates to 4002.5 K and a successful operation stores 4003 K. While that intended temperature remains unchanged, matching owned values in subsequent snapshots do not request a repair, including duplicate notifications.
-- The current fade step is 3350.5 K and the stored temperature is 3351 K. Matching owned values do not request an extra operation before the next independently due fade step. That next step still requests the complete refresh, even if it rounds to 3351 K again.
-- An external writer enables the native schedule: the snapshot detects the difference; a control attempt rereads both records and disables the schedule if it is still enabled.
-- Several temperature writes occur before one notification is consumed: reconciliation compares the returned value with the current integer intended temperature, without replaying omitted temperatures.
-- A queued snapshot differs from the current intention, but fresh control-attempt reads already match it: no repair write is issued solely because of the stale snapshot.
-- A read or write failure is pending when a notification arrives: consuming it does not read a snapshot or start writes; the next independent retry trigger reads both records even without another notification.
-- A watcher key becomes unavailable: status reports the problem; the next resume event attempts to reopen observation and reconcile current values.
-- Observation is restored but a temperature write still fails: the observation error clears and the write error remains visible.
-
-### REQ-night-light-read-failure — Stop writes when reads fail
-
-Every control attempt, including each fade step, begins by reading and decoding both Night Light settings and state. A queued snapshot or a cached record does not satisfy these reads. The decoded state's library usability diagnostic (`State::is_usable()`) does not independently block writes; library read and write errors govern failure handling. If either read fails, it does not begin Night Light writes, cancels the active fade and schedule playback, and shows the error in the tray status and settings. A library operation that fails a later internal read follows the write-failure rule because earlier operations can already have succeeded.
-
-The app retries reads at the next focus change, scheduled curve operation, accepted configuration change, or recompute event. Canceled fade or playback steps and failure-triggered playback cancellation are not retry triggers. If no such event occurs, the error remains visible without a dedicated retry timer. Successful reads of both values clear the read error; a subsequent write failure is reported separately.
-
-Graceful exit uses its single cleanup attempt under REQ-exit-night-light-off, including the same fresh-read guard.
-
-**Scenarios:**
-
-- The settings format cannot be decoded at startup: the app reports the read failure and does not request writes.
-- A read fails during a fade: remaining fade steps are cancelled; a later focus change reads again before attempting control.
-- A watcher returns a snapshot-read error after rearming: the app reports a read failure, retains that watcher, and discards notifications without reads until an independent retry trigger.
-- A missing value is restored during an unchanged, constant schedule: its notification does not bypass the pending failure; the next independent trigger retries reads.
-
-### REQ-night-light-write-failure — Retry the required control operations
-
-When an owned-state write or temperature operation fails, Circadia reports the failed operation and cancels the remaining fade and playback steps. It preserves knowledge of any earlier successful writes, including a stored temperature followed by a preview-cleanup error. It does not report the entire control attempt as successful.
-
-At the next focus change, scheduled curve operation, accepted configuration change, or recompute event, the controller reads current state and recomputes the current target. It retries the required schedule-off, state-on, and temperature operations, rather than retrying temperature alone. A successful full control attempt clears the corresponding write error.
-
-Graceful exit follows REQ-exit-night-light-off instead of retrying normal control operations.
-
-**Scenarios:**
-
-- Disabling the native schedule fails: status reports the failure; the next control attempt retries that operation before reporting successful ownership.
-- Turning Night Light on fails but the temperature is stored: the next attempt still requests the required active state.
-- A fade step fails: its remaining steps stop; the next independent trigger attempts the current target rather than an obsolete queued step.
-- A partial temperature write generates a notification after preview cleanup fails: consuming that notification does not start another write attempt.
-- A retry reads both values successfully but fails to activate Night Light: the read error clears and the write error remains visible.
+| [Daily temperatures, Wake, Bedtime, and solar timing](schedule.md) | Pure schedule inputs, clock conversion, solar selection, and generated transitions. Read after the shared terms and invariants. |
+| [Automatic and manual suppression](suppression.md) | Executable identity, inclusion and exclusion lists, focus delay, and the one-hour toggle. Read after the root. |
+| [Native Night Light access](native-access.md) | Serialized refresh, observation, inactive preparation, and read/write failures. Read after the root. |
+| [Temperature control and lifecycle](control.md) | Startup, fades, schedule failures, recomputation, suspend/resume, and exit. Read after schedule, suppression, and native access. |
+| [Configuration and application interface](application.md) | Persistence, setup, settings, graph, Preview and its benchmark, launch preferences, and resource use. Read after control and its dependencies. |
 
 ## Security
 
-Wake and Bedtime clocks, temperature levels, coordinates, executable names, and preferences are stored per user. Circadia does not upload them or call a daily solar service. Use current location explicitly requests Windows location access; that operating-system service can use network-backed positioning. Manual coordinates and disabled solar timing require no location permission.
+Wake and Bedtime clocks, temperature levels, coordinates, executable names, and preferences are stored per user. Circadia does not upload them or call a daily solar service. **Use current location** explicitly requests Windows location access; that operating-system service can use network-backed positioning. Manual coordinates and disabled solar timing do not require location permission.
+
+Diagnostics are local per-user records of operation type, timestamp, and technical error code or sanitized error category. They exclude coordinates, executable identities, window titles, and personal file paths, including those embedded in library error messages. Record the first failure of an operation/category, a change of category, and its recovery. Identical consecutive failures do not append records. A diagnostics-write failure does not recursively log itself or prevent control, editing, or exit. Settings provides a way to open the diagnostics location. The exact local format and location are permitted implementation choices; diagnostics are not uploaded automatically.
+
+All error and degraded-operation messages appear inside settings. The tray icon remains static and the tray menu reports ordinary control and suppression status without errors. Circadia does not show error popups or error notifications, or open settings in response to a background failure. An explicit launch without usable configuration still opens setup under REQ-initial-setup.
 
 Circadia writes its configuration, diagnostics, current-user Night Light values, and its optional sign-in registration. The controller alone requests Night Light writes. It does not execute a selected suppression-list file merely because the user adds it. Process inspection is restricted by REQ-game-process-isolation and REQ-unelevated-operation. Compatibility with every anti-cheat product is outside the guarantee; representative elevated-game tests remain necessary.
 
@@ -323,7 +220,7 @@ That follow-up needs mixed-DPI and multi-monitor testing, same-window mode trans
 
 **Additional schedule controls:** Separate morning/evening temperatures, per-transition durations, and arbitrary user points are outside the MVP. The schedule uses one middle temperature and one shared scheduled-transition duration.
 
-**Configurable preview duration:** The MVP uses a fixed 10-second schedule playback. A later version can expose its duration if use demonstrates a need.
+**Configurable Preview duration:** The MVP uses a fixed 10-second schedule playback. A later version can expose its duration if use demonstrates a need.
 
 ## Explored alternatives
 
@@ -332,9 +229,15 @@ That follow-up needs mixed-DPI and multi-monitor testing, same-window mode trans
 - **Moving Sunset to an earlier Bedtime:** This preserves an unnecessary middle target. Omitting Sunset lets the app generate the complete transition to Sleep before Bedtime.
 - **Repeated solar-driven cycles:** Following every crossing can add another warming/cooling cycle within one waking day. Solar targets are limited to one morning and one evening between Wake and the following Bedtime.
 - **Synthetic solar times during polar conditions:** Backup clocks or reused events would imply a solar event that does not occur. Missing events are omitted while Wake and Bedtime remain user-controlled.
-- **Waiting for solar recovery before startup control:** Waiting can preserve a stale bedtime tint and prevent app suppression. A temporary Wake/Bedtime-only schedule keeps control available while the solar error remains visible.
+- **Freezing or blocking on solar calculation failure:** A Wake/Bedtime-only fallback keeps scheduling, editing, and Preview available while settings reports the solar error. Losing a solar target can change the current temperature; ordinary recomputation fades apply during control.
+- **Fixed-rate sampling throughout long transitions:** Scheduling the next 10 K output change avoids repeated calculation and duplicate refreshes between steps.
+- **Using the slowest display as the fade ceiling:** The fastest active display defines the ceiling so slower side displays do not limit transitions on the main display. Serialized calls still limit actual throughput.
 - **Preserving tint on ordinary Quit:** Keeping the last active temperature permits warmth after automation stops, but can leave bedtime tint active after exit. Explicit Quit uses the same off request as confirmed Windows session end.
+- **Resuming queued temperature steps:** Relative waits can exclude suspended time. Resume evaluates the current curve and discards obsolete steps instead of prolonging a transition by the suspended interval.
+- **Skipping resume refresh when records match:** Stored values do not verify displayed color after resume. A discrete complete refresh explicitly reapplies the current intended output.
 - **Persistent solar caches:** Multi-location caches introduce retention, location matching, invalidation, and persistence behavior. The selected design calculates required dates locally from the current saved coordinates.
+- **Omitting manual targets in a clock gap:** Omitting Wake or Bedtime can prolong the preceding temperature through an entire day. Elapsed-interval adjustment preserves the target and its ordinary separation from the preceding manual target.
+- **Shifting every remaining target on a clock-change day:** This unnecessarily shifts the evening routine after an overnight change. The next target returns to its configured clock unless doing so would collapse or reverse the manual target order.
 
 ## Implementation and release validation
 
@@ -346,14 +249,20 @@ These checks establish implementation conformance and release readiness. Spec ap
 - Explicit location permission, manual coordinates, failed location requests, and local solar calculation across ordinary and polar dates.
 - Validation of unsaved settings for the generated graph, Preview, and Save; Preview entry/exit and cancellation.
 - Actual Shell interaction, second-launch activation, Explorer restart, settings closure, and shutdown.
+- Suspend/resume across partial transitions, multiple dates, and clock changes; suppression expiry, interrupted playback, native failures, missing advance suspend notice, and repeated resume notifications under REQ-suspend-resume.
 
-Measure the time from schedule-setting input to the updated graph.
+Verify graph latency, due output deadlines, rate ceilings, serialized writes, retry delays, and the visible benchmark against their requirements. Resource measurements have no numerical pass threshold; REQ-event-driven-idle is an invariant. The release maintainer declares and records each reference machine's hardware, Windows build, display modes, and build profile before collecting acceptance results.
 
 **Note:** The Windows Reactor UI probe uses predefined anchor times; it does not verify the complete application.
 
 **Before release:** Verify clean-machine deployment on the minimum and a current serviced Windows 11 build, resource use, display scaling, accessibility, and foreground matching across representative applications, window modes, and elevation levels.
 
-These acceptance checks remain required. Implementation plans assign their tasks and concrete verification steps.
+Include these Windows checks:
+
+- Exercise sleep, hibernation, hybrid sleep, and Modern Standby on hardware that supports each state, recording unavailable states. Verify resume delivery with settings closed and without relying on unlock, fresh native reads, unchanged-temperature refresh, and visible output after resuming. Record notification, native-operation, and display-response timing separately; do not infer visible restoration from registry equality. Distinguish restoration of an existing process from startup after Fast Startup.
+- On fresh profiles on build 22000 and a current supported build, test Night Light access before opening its native settings. Distinguish missing keys, missing values, and decode errors. Record any verified native initialization action and recovery through automatic or explicit retry. Do not prescribe opening Windows settings as a remedy without verifying that it initializes the missing data. Missing data follows the same settings-only error and retry behavior.
+- Exercise Quit after a temperature operation reports failed native-preview cleanup. Verify the serialized exit attempt and decoded state, including whether the native preview flag remains set. An off state does not prove untinted display output; the exit contract accepts that limitation.
+- Run the visible benchmark with a single display and mixed-refresh displays. Record visible changes in both directions, operation timings, the ceiling, and any missing or erratic response. Successful registry operations with an ineffective visible sweep fail this check and require an implementation or rate adjustment before release.
 
 ## Supporting evidence
 
@@ -363,14 +272,18 @@ The [research index](../research/README.md) records feasibility findings, versio
 | :-- | :-- |
 | Windows Reactor for the generated graph, settings, and tray | [UI capabilities and native integration](../research/windows-reactor-ui.md) |
 | Native Night Light ownership, refresh, and failures | [Library and watcher contracts](../research/nightlight-contracts.md), [runtime timing and readback](../research/nightlight-runtime.md) |
+| Output precision, rate ceiling, benchmark, and retry timing | [Temperature update cadence](../research/temperature-update-cadence.md) |
+| Suspend/resume timing and native refresh | [Windows suspend and resume](../research/suspend-resume.md); notification ordering and visible restoration remain implementation and release checks. |
 | Startup fade and Windows exit notifications | [Session shutdown and startup restoration](../research/session-shutdown.md); source inspection does not establish cleanup success during shutdown or the next sign-in's display state. |
-| Local dates and clock times mapped to actual instants | [Clock conversion fixtures and host-setting checks](../research/windows-clock-conversion.md) |
+| Local dates and clock times mapped to actual instants | [Clock conversion fixtures](../research/windows-clock-conversion.md), [host-setting checks](../research/schedule-integration.md#host-setting-exercise), and [elapsed-interval reasoning](../research/clock-change-intervals.md); the target-adjustment policy is not exercised by the existing probe. |
 | Optional solar timing and explicit coordinate acquisition | [Local solar calculation](../research/solar-calculation.md), [location APIs](../research/location-and-solar-times.md); the probes do not verify the generated schedule's event-selection rules. |
 | Local calculation without persistent solar caches | [Measured per-date calculation cost](../research/solar-performance.md); four dates on one desktop do not establish a universal latency bound. |
 | Windows 11 build 22000 minimum | [Dependency and runtime compatibility](../research/windows-compatibility.md) |
 | One process for settings and background control | [Desktop process architecture](../research/desktop-process-architecture.md) |
 | Scheduling and application-selection interactions | [f.lux comparison](../research/flux-behavior.md) |
+| One-hour manual suppression | [Elapsed-time source and resume limits](../research/timed-suppression.md) |
+| Hosted executable identity | [Window ownership and limited-query resolution](../research/hosted-application-identity.md); representative application coverage remains unverified. |
 
 ## Conformance
 
-A conforming implementation satisfies every requirement and invariant in this spec and its area files, the constraints and non-goals in Purpose and scope, the component responsibilities in Architecture overview, and the access limits in Security. Implementation and release validation obligations bind at their stated stages. Present-tense statements in these parts are mandatory. Uppercase SHOULD marks a recommendation an implementation may decline with a documented reason; uppercase MAY marks an allowed option. Text and diagrams labeled Example or Note, Background and terms, Explored alternatives, Future work, Supporting evidence, the architecture diagram, and linked research are informative. Terms bind through the requirements that use them.
+A conforming implementation satisfies every requirement and invariant in this spec and its area files, the constraints and non-goals in Purpose and scope, the component responsibilities in Architecture overview, the requirements in Security, and the transitions in each diagram that lists every transition. Implementation and release validation obligations bind at their stated stages. Present-tense statements in these parts are mandatory. Uppercase SHOULD marks a recommendation an implementation may decline with a documented reason; uppercase MAY marks an allowed option. Text and diagrams labeled Example or Note, Background and terms, Explored alternatives, Future work, Supporting evidence, the architecture diagram, and linked research are informative. Terms bind through the requirements that use them.

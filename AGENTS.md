@@ -2,8 +2,8 @@
 
 ## Scope and decisions
 
-- Read [SPEC.md](docs/specs/SPEC.md) and the relevant [schedule requirements](docs/specs/schedule.md) before changing behavior. Treat their requirements as the product contract; use [research](docs/research/README.md) for evidence and limitations.
-- Preserve settled choices: one Rust process using the Windows Reactor UI library, native Night Light control, three ordered temperature levels with generated transitions around user-entered Wake/Bedtime clocks and optional solar targets, and foreground-only suppression (a temporary 6500 K override) for explicitly listed executables. For example, do not add a fullscreen detector to the MVP.
+- Read [SPEC.md](docs/specs/SPEC.md) and the relevant areas in its [area index](docs/specs/SPEC.md#area-specifications) before changing behavior. Treat their requirements as the product contract; use [research](docs/research/README.md) for evidence and limitations.
+- Preserve settled choices: one Rust process using the Windows Reactor UI library, native Night Light control, three ordered temperature levels with generated transitions around user-entered Wake/Bedtime clocks and optional solar targets, automatic suppression for explicitly listed foreground executables, and a one-hour manual suppression toggle. Both suppression sources request a temporary 6500 K override. For example, do not add a fullscreen detector to the MVP.
 - Use the available `brainstorm` skill for explicitly open product decisions before implementation. For example, settle a question under Open questions instead of selecting its answer in a plan.
 - Keep implementations simple and proportional to the requirement. Prefer direct code; do not add services, separate UI processes, recovery subsystems, or general abstractions without a demonstrated need.
 - Do not change the sibling `win-nightlight-cli` repository as an incidental part of a Circadia task. Treat a required public library extension as a dependency task with its own authorized scope.
@@ -11,7 +11,7 @@
 ## Implementation
 
 - Follow [rust-rules](.agents/skills/rust-rules/SKILL.md) for Rust work and [github-actions-rules](.agents/skills/github-actions-rules/SKILL.md) for workflow changes.
-- Keep the controller as the only component requesting Night Light writes. Route settings and tray edits through the shared configuration validation and persistence path.
+- Keep the controller as the only component requesting Night Light writes. Route settings and tray configuration edits through the shared configuration validation and persistence path.
 - Use public Night Light library operations. Do not duplicate the undocumented registry codec or assume a proposed API exists in the pinned dependency.
 - Keep foreground inspection limited to window metadata and process identity. Do not request elevation, inject code, or read another application's memory to improve matching.
 - Default to no comments or private docstrings. Explain only constraints the code cannot express, such as an OS race or an ABI requirement; keep public documentation to the linter's required contract.

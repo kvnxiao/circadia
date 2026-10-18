@@ -13,9 +13,9 @@ recheck-when: Windows time-zone data or clock policy changes; the Rust converter
 
 # Windows clock conversion
 
-A read-only Windows API probe implements the selected skipped/repeated-time policy for the tested dates and zones. All 18 retained tests pass on 2026-10-17, including four complete transition days, half-hour changes, year crossings, date boundaries, and elapsed-time interpolation. This establishes a conversion reference; the Rust implementation remains unverified. The [combined investigation](schedule-integration.md) records snapshots after actual host setting changes on 2026-10-16. The relocated host-setting exercise passed again on 2026-10-17 and verified restoration of Eastern Standard Time with daylight adjustment enabled.
+A read-only Windows API probe tests omission of skipped local clocks and selection of the first repeated instant for the recorded dates and zones. All 18 retained tests pass on 2026-10-17, including four complete transition days, half-hour changes, year crossings, date boundaries, and elapsed-time interpolation. This establishes a conversion reference; the Rust implementation remains unverified. The [combined investigation](schedule-integration.md) records snapshots after actual host setting changes on 2026-10-16. The relocated host-setting exercise passed again on 2026-10-17 and verified restoration of Eastern Standard Time with daylight adjustment enabled.
 
-The [schedule requirements](../specs/schedule.md) define the policy. Current applicability covers dated Wake and Bedtime targets, skipped/repeated-time conversion, the graph's start and end times, and elapsed-time interpolation. Relative offsets remain probe fixtures for schedules with user-defined points; the MVP does not expose them. Run instructions and side effects are in the [probe README](../../probes/windows-clock/README.md). The [source archive](archives/README.md) preserves fixtures for a separate scheduler that adjusts solar reference clocks to preserve point order.
+The [schedule requirements](../specs/schedule.md) define the policy. The conversion evidence identifies missing and repeated local times and supports elapsed-time interpolation. The probe's omission policy does not implement the spec's dated Wake/Bedtime adjustment or its graph-boundary clamping. [Clock-change intervals](clock-change-intervals.md) explains the selected elapsed-interval policy separately. Relative offsets remain probe fixtures for schedules with user-defined points; the MVP does not expose them. Run instructions and side effects are in the [probe README](../../probes/windows-clock/README.md). The [source archive](archives/README.md) preserves fixtures for a separate scheduler that adjusts solar reference clocks to preserve point order.
 
 ## Conversion procedure
 
@@ -91,9 +91,9 @@ For example, a synthetic fixture can disable solar timing and set Wake to 07:00,
 
 ## Remaining integration checks
 
-- Implement the Rust conversion and compare it with the applicable fixed fixtures, including omission before interpolation and conversion of the graph's start and end times. Offset fixtures do not require product support for user-defined offsets.
+- Implement the Rust conversion and compare it with the applicable fixed fixtures. Separately verify elapsed-interval adjustment of Wake/Bedtime occurrences and conversion of the graph's start and end times under the specification. Offset fixtures do not require product support for user-defined offsets.
 - Integrate notification-driven rule refresh in the application. The [combined probe](schedule-integration.md) verifies fresh snapshots after actual host time-zone and daylight-adjustment changes; it does not verify application notification delivery.
-- Connect the graph and controller to the same converted occurrences, including days when all configured points are omitted.
+- Connect the graph and controller to the same resolved manual occurrences and selected solar events, including activity intervals without usable solar events.
 - Evaluate relevant year-boundary offset changes without treating a successful finite sample as universal historical support.
 
 The probe does not change the clock, time zone, registry, display, location settings, or Night Light. It does not verify solar calculations, native UI integration, or supported Windows build limits.
