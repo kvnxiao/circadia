@@ -11,11 +11,11 @@ recheck-when: The Night Light library, refresh policy, Windows build, or chosen 
 
 # Native temperature operation timing
 
-The [runtime probe](../../probes/nightlight-runtime/README.md) verifies decoded temperature readback for 15 direct native operations, a subsequent `wnl temp 3100` command, and restoration. Direct operations took 0.076–0.244 ms in this run. A sequence with steps scheduled 100 ms apart reversed direction and reached every requested value. These measurements support testing short interruption fades; they do not select a user-facing fade duration or prove visual smoothness.
+The [runtime probe](../../probes/nightlight-runtime/README.md) verifies decoded temperature readback for 15 direct native operations, a subsequent `wnl temp 3100` command, and restoration. Direct operations took 0.076–0.244 ms in this run. A sequence with steps scheduled 100 ms apart reversed direction and reached every requested value. These measurements support testing short fades after changes to the requested temperature; they do not select a user-facing fade duration or prove visual smoothness.
 
 ## Acceptance evidence
 
-The [draft specification](../specs/SPEC.md) accepts successful public-library operations and decoded registry values as temperature verification. The application additionally requires a visible warming/cooling benchmark; these recorded timings do not satisfy that check. Optical equivalence between 6500 K and Night Light off and Windows' preservation of calibrated output remain unverified and outside the acceptance criteria. A colorimeter and separate SDR/HDR measurements are not approval gates. The prohibition on application gamma-ramp and calibration-profile writes still applies.
+The [draft specification](../specs/SPEC.md) accepts successful public-library operations and decoded registry values as temperature verification. Release validation additionally requires visible inspection of schedule Preview and ordinary fades; these recorded timings do not satisfy that check. Optical equivalence between 6500 K and Night Light off and Windows' preservation of calibrated output remain unverified and outside the acceptance criteria. A colorimeter and separate SDR/HDR measurements are not approval gates. The prohibition on application gamma-ramp and calibration-profile writes still applies.
 
 The native preview flag temporarily requests application of the stored temperature. The library clears it after refresh; an active preview means that flag is still enabled.
 
@@ -31,13 +31,13 @@ The native preview flag temporarily requests application of the stored temperatu
 | External `wnl temp 3100` | Exit success and 3100 K readback after the repeated refreshes. |
 | Restore captured state | 2700 K, active, preview false, schedule off; operation and readback completed in 0.182 ms. |
 
-The direct-operation range was 0.0759–0.2440 ms; operation plus snapshot range was 0.1075–0.2933 ms. These are one short debug-profile run, not percentile estimates or worst-case bounds. The installed CLI version was not captured during this run; the direct library version is locked to 0.4.0. The CLI's automatic refresh policy is separate from the direct calls' unconditional policy.
+The direct-operation range was 0.0759–0.2440 ms; operation plus snapshot range was 0.1075–0.2933 ms. These measurements came from the maintainer's own machine in one short debug-profile run, not percentile estimates or worst-case bounds. Results vary with hardware, display configuration, Windows build, and load. The installed CLI version was not captured during this run; the direct library version is locked to 0.4.0. The CLI's automatic refresh policy is separate from the direct calls' unconditional policy.
 
 The timed reversal changes the next requested step after a completed synchronous call. It does not cancel an in-flight registry operation or exercise Circadia's controller, which is not implemented. A synchronous public-library call has no cancellation deadline. The application contract stops new control work before its best-effort exit cleanup. This probe does not verify application exit while a library operation is already executing.
 
 ## Restoration and remaining checks
 
-Probe restoration is experimental cleanup, separate from the application's [exit behavior](../specs/control.md#req-exit-night-light-off--turn-night-light-off-on-graceful-exit). Circadia requests Night Light off on graceful exit; the probe restores the state it captured for its experiment.
+Probe restoration is experimental cleanup, separate from the application's [exit behavior](../specs/control.md#req-exit-night-light-off--clear-native-preview-and-turn-night-light-off-on-graceful-exit). Circadia requests Night Light off on graceful exit; the probe restores the state it captured for its experiment.
 
 The probe captures temperature, active state, and schedule before writes. It refuses a missing or unsupported baseline temperature and an active preview. On a returned error, it attempts temperature, active-state, and schedule restoration independently, using fresh public update operations. It does not write an old serialized settings snapshot: refresh operations advance modification metadata, and restoring an old snapshot could regress that metadata.
 

@@ -4,110 +4,116 @@ spec: SPEC.md
 
 # Native Night Light access
 
-Read the shared terms and invariants in [SPEC.md](SPEC.md) before this area. A snapshot is a decoded settings or state record from a registry read, not an atomic capture of the write that signaled a watcher.
+Read the shared terms and invariants in [SPEC.md](SPEC.md) before this area. A snapshot is a decoded settings or state record from a registry read, not an atomic capture of the write that signaled a watcher. The [0.5.0 transition research](../research/nightlight-transition-control.md) records the public operations and their limits.
 
 ## Temperature operations
 
-### REQ-temperature-refresh — Repeat the complete temperature refresh
+### REQ-temperature-refresh — Apply temperatures according to transition duration
 
-When issuing a due output step, the controller rounds the current fade step, or the target when no fade is active, to the nearest 10 K. Exact 5 K ties round toward higher kelvin. This issued value becomes the intended temperature for native writes and observation. It remains the observation baseline until the next permitted output is issued, even while the mathematical curve or fade advances. Curve and fade calculations retain fractional precision; rounding changes output, not their time progression.
+The controller rounds each due output to the nearest 10 K, with exact 5 K ties toward higher kelvin. That issued value becomes the intended temperature until the next permitted output. Calculations retain fractional precision; rounding changes output, not time progression.
 
-Every due temperature operation requests the intended temperature and the library's unconditional, complete native-preview-on/native-preview-off refresh. Successful completion leaves the native preview flag off. The controller serializes all Night Light operations. Deduplication determines whether an operation is due; once requested, a complete refresh is required even if the stored value matches. Initialization, explicit recovery, resume under REQ-suspend-resume, inactive preparation, and benchmark samples can require a refresh at an unchanged temperature.
+Startup fades, ordinary fades, and the changing segments of Preview's compressed curve are short transitions. Each holds the native preview flag on while its changing temperatures are issued. The first request writes a valid temperature together with the flag, so an unrelated stored temperature does not appear first. Adjacent changing Preview segments without a constant segment between them continue the same held preview. Finishing changing output clears the flag, including when the final rounded temperature already matches. Constant segments do not keep the flag on solely because Preview is still running. A fade that converges on a running scheduled transition clears the flag at its completion, and the scheduled transition continues with ordinary sets.
 
-After fresh reads succeed, an attempt that finds Night Light off cancels any unfinished startup or ordinary fade and follows this order:
+Scheduled transitions are gradual. The first changed output of a gradual transition is an application refresh; later outputs use ordinary temperature sets. When another output change is due at least 60 seconds after the preceding application refresh or completed held preview, that change includes a refresh instead of a plain set. It does not add an unchanged-temperature timer. A transition ending before another refresh is due does not require an extra final refresh. Preview compression does not change the real-time schedule's minimum spacing.
 
-1. Request the native schedule off if needed.
-2. Store and completely refresh the current resolved target while Night Light is inactive.
-3. Request Night Light on.
+An application refresh requests native application even when stored temperature matches. Startup, native write-error recovery, resume, taskbar recreation, Discard, Preview entry, and the immediate restoration after Preview ends require application rather than relying on a same-value set. Live draft edits use ordinary sets. A short transition that holds the flag satisfies that obligation. Successful completion of an application refresh outside a short transition leaves the flag off. Ordinary sets preserve the expected off flag during gradual transitions.
 
-A failed step ends the attempt before the next step. Preparation applies the current resolved target directly; canceled fade steps do not resume after activation. Schedule or playback progression continues from its current instant. A later attempt repeats preparation with its then-current target even if an earlier preparation succeeded.
+The controller is the only caller requesting writes and serializes whole public library calls. It uses one library handle for the process lifetime and enables the library's startup timestamp margin before any settings-record write. The margin stamps the handle's first successful settings-record write at least 699 s after the stored timestamp, above timestamps that Windows may have applied for an earlier process. The controller does not reconstruct the handle for each transition, move timestamps backward, or interpret timestamp changes as temperature interference. The margin reduces the chance that Windows ignores a new process's first writes; it does not guarantee that Windows applies every request.
 
-Successful temperature storage updates the last written temperature even when the following native-preview cleanup fails. It updates the last scheduled temperature only when the source qualifies under its shared definition. A failed refresh remains a native write error despite partial storage.
+Before normal control writes, fresh settings-record and state-record reads satisfy REQ-night-light-read-failure. Native schedule disablement precedes activation. If Night Light is off, inactive preparation writes a temperature with the flag off before requesting on: 6500 K during startup and the current intended temperature otherwise. Startup chooses its origin from fresh reads; an ongoing transition retains its current intended step and deadline. A failed preparation prevents activation. A later attempt uses current inputs instead of replaying the failed step.
+
+Successful temperature storage updates the last written temperature even if later preview cleanup fails. Stored output is not an optical measurement.
 
 **Scenarios:**
 
-- A curve evaluates to 4004.9 K: output and readback comparison use 4000 K. At 4005 K they use 4010 K.
-- An initialization or recovery operation requests the stored temperature while native preview is already on: the complete refresh still runs and successful completion leaves preview off.
-- Night Light is off with 2200 K stored at noon. Preparation of 6500 K fails: that attempt does not turn Night Light on.
-- Preparation succeeds but activation fails. Before retry the target changes: the next attempt prepares the current target before requesting on.
-- A later external off request is observed: reconciliation uses the same preparation order.
-- A suppression fade has stored 4000 K when an external writer turns Night Light off: the fade is canceled, 6500 K is prepared while inactive, and activation does not resume an old step near 4100 K.
-- Temperature storage succeeds but native-preview cleanup fails: the last written temperature records the stored value, and the write error remains pending.
+- A curve evaluates to 4004.9 K: output and comparison use 4000 K. At 4005 K they use 4010 K.
+- A 500 ms fade runs at 60 Hz: the native preview flag stays on between due changing outputs, and cleanup clears it afterward. Steps do not each perform a separate brief preview.
+- Suppression ends 30 minutes into a 60-minute scheduled transition: the ordinary fade holds the flag while it converges on the curve, clears it at completion, and the transition continues with ordinary sets.
+- A one-hour transition runs: ordinary sets issue its changing values, with application refreshes substituted at due steps at least 60 seconds after the previous refresh.
+- Constant 3400 K output lasts ten minutes: the controller does not issue minute-based refreshes. A taskbar recreation event during that time requests one discrete refresh.
+- A short transition reaches its last rounded value before its deadline: completing the transition still clears native preview without repeating that temperature solely to mark completion.
+- An executing call outlasts cancellation: it finishes before cleanup or replacement, and canceled future steps do not run.
+- Inactive preparation fails: the attempt does not request Night Light on.
+- Temperature storage succeeds but cleanup fails: the stored value remains known and the operation remains failed until recovery.
 
 ## Observation
 
 ### REQ-night-light-observation — Reconcile observed Night Light changes
 
-Circadia creates separate settings and state watchers through the public watcher library, registering both before initial reads. While native access is healthy, it consumes notifications and compares decoded owned values with the current intention. Temperature comparison uses the last issued output step, not a later point on the mathematical curve. Before the first output step is issued, startup selects the initial temperature; notifications do not independently select one. A difference starts a control attempt with fresh reads to determine the required repair. Matching values and timestamp-only or native-preview-only differences do not request another refresh.
+Circadia registers separate settings and state watchers before initial reads. While native access has no pending failure, it compares decoded owned values with the current intention. Temperature comparison uses the intended temperature, not the curve's later calculated value. The native preview flag is expected on only during a short transition and off otherwise. Timestamp-only changes and matching values do not request writes.
 
-Snapshots describe their later read. Settings and state are independent observations. Notifications can combine writes, omit intermediate values, or repeat snapshots. Circadia does not count notifications, infer their writer, or replay intermediate temperatures.
+Notifications report registry changes, not their author or a reliable sequence of intermediate states. Their decoded snapshots come from subsequent independent reads. Several writes can produce one notification; several notifications can produce the same snapshot. A queued mismatch requests fresh confirmation before repair. Notifications generated during a synchronous library operation are reconciled after that complete operation returns, so its temporary preview flag does not trigger a competing repair.
 
-While a native failure is pending, Circadia consumes and rearms surviving notifications without reading snapshots. These notifications do not bypass the recovery delay, including notifications caused by partial writes or restoration of missing data. A recovery attempt reads current records even when no notification remains pending.
+A confirmed preview-only mismatch repairs the flag while preserving the current intended temperature and transition deadline. A simultaneous temperature mismatch follows the temperature-correction rule and establishes the required preview state as part of that correction. Circadia does not infer that a person moved the Windows Strength slider from the previous flag value that a library call returns.
 
-A watcher snapshot-read error retains registration and follows the read-failure rule. Lost registration drops that watcher and schedules restoration through REQ-native-recovery. Healthy temperature control can continue without observation, with its error shown inside settings. Restoring both watchers and reading current records clears the observation error; it does not clear an unrelated write error.
+While a native read or write failure is pending, available watchers continue registering notifications without reading snapshots or bypassing the recovery delay. Recovery reads current records even if notifications were coalesced. A watcher snapshot-read error retains registration and follows read failure. Lost registration schedules restoration; it does not stop otherwise successful native output. Restoring observation alone does not restart an existing fade or clear a separate write error.
 
 **Scenarios:**
 
-- A successful refresh generates duplicate snapshots with matching owned values: neither causes another refresh.
-- The last emitted temperature is 3350 K and another sample would also round to 3350 K: matching readback and the unchanged output do not request another operation.
-- A fast fade issued 3350 K and its mathematical value reaches 3370 K before the next display-paced operation is eligible: a notification containing 3350 K matches the observation baseline and does not issue an early repair or bypass the rate ceiling.
-- A queued snapshot differs, but fresh reads already match the intention: the stale snapshot does not cause a repair.
-- An external writer enables the native schedule or changes the intended temperature: fresh-read reconciliation repairs the owned value. Temperature repair does not start an ordinary fade.
-- Partial storage generates a notification after a failure: consuming it does not create an immediate retry loop.
-- A watcher becomes unavailable: settings reports observation loss, and the native recovery sequence attempts registration again.
-- Observation is restored while writes still fail: only the observation error clears.
+- The issued temperature is 3350 K and the curve has advanced to 3370 K before the next eligible output: matching 3350 K readback does not issue an early correction.
+- A queued snapshot differs but fresh records match: the controller does not write.
+- Another writer clears native preview during an ordinary fade: Circadia restores the flag at its current issued temperature without restarting the fade.
+- Another writer enables native preview during constant output: Circadia clears it without changing the temperature or inventing a fade.
+- A timestamp changes without a change to owned values: the controller does not write.
+- An application refresh generates preview-on and preview-off notifications: fresh matching records after the call do not cause another refresh.
 
 ## Failures and recovery
 
+### REQ-repeated-native-changes — Coalesce corrections of native settings
+
+A deviation is confirmed when fresh reads still differ from the owned values. Confirmed deviations request restoration of the current owned values. While native access has no pending failure, automatic corrections share the configured output-rate ceiling with changing temperature output. Several notifications before the next eligible attempt coalesce into one current-state reevaluation. Repeated interference does not introduce increasing delays or suspend ordinary scheduling. Required flag, schedule, and activation writes within one serialized attempt count as one output attempt against the ceiling.
+
+If a temperature deviation occurs without an active startup fade, ordinary fade, or Preview, an ordinary fade starts from the freshly observed valid temperature toward the current target. An absent or unsupported temperature uses 6500 K as the origin. Further interference during that fade does not restart its deadline. During an existing startup fade, ordinary fade, or Preview, correction follows its current progress and original deadline. A gradual scheduled transition continues advancing while an ordinary correction converges on its current curve.
+
+Native schedule, activation, and preview-only corrections do not themselves restart temperature fades. Actual read or write failures use REQ-native-recovery. An output rate of 1 Hz visibly delays corrections; external writers can cause transient deviations at every rate.
+
+**Scenarios:**
+
+- During constant 3400 K output, the stored Night Light temperature changes to 5000 K: a fresh confirmation starts a smooth return from 5000 K.
+- Another writer changes temperature repeatedly during that return: correction preserves its completion deadline instead of starting another full fade after each notification.
+- Ten notifications arrive before a 60 Hz correction opportunity: one attempt uses fresh records and current inputs.
+- A successful repair is followed by another deviation: the next correction uses the next opportunity that the configured rate allows.
+- A correction read fails: native recovery replaces normal output deadlines until access recovers.
+
 ### REQ-native-recovery — Retry native access without blocking settings
 
-A native read, write, or observation failure starts one shared recovery sequence. After the failed attempt returns, automatic retries wait 100, 200, 400, then 800 ms; subsequent failures retain the 800 ms delay. Each delay starts after the preceding attempt returns. It is not a timeout on a synchronous library call. At most one native operation executes at a time, and repeated requests during an executing attempt coalesce into one current-state reevaluation.
+A native read, write, or observation failure starts one shared recovery sequence. After the failed attempt returns, retries wait 100, 200, 400, then 800 ms; later failures retain 800 ms. These delays are not timeouts on synchronous calls. At most one native operation executes, and requests during it coalesce into one current-state reevaluation.
 
-Settings provides **Retry** beside native error status. An explicit retry action attempts recovery without waiting for the pending delay and cancels that pending deadline. If the explicit attempt fails, the shared sequence advances and starts its next delay after that attempt returns. Explicit actions do not create additional timers or retain an earlier deadline. A successful recovery cancels the timer and resets the next failure's initial delay to 100 ms. Foreground events, schedule ticks, manual expiry, and registry notifications update the desired state but do not bypass a pending recovery delay.
+Settings provides Retry. Explicit retry actions replace the pending deadline with one immediate attempt; repeated actions during a call coalesce. Failure advances the sequence, and successful recovery cancels the timer and resets it. Foreground events, curve ticks, manual expiry, and registry notifications update desired state without bypassing a read/write recovery delay. Observation-only failure does not delay otherwise successful output.
 
-Every recovery attempt uses current scheduling, suppression, and playback state. It retries fresh reads, lost watcher registration, and the owned-value operations still needed. A read or write error is cleared only after the corresponding operation succeeds; successful reads alone do not clear a write error. A write-error recovery includes a complete temperature refresh even if stored kelvin already matches. Failed watcher registration does not prevent otherwise successful reads and writes. When observation is the only failure, normally due output continues without attempting watcher registration between recovery deadlines.
+Recovery uses current scheduling, suppression, and playback. It retries fresh reads, lost watcher registration, pending preview cleanup, and required owned-value operations. A write-error recovery includes application of the current temperature even if storage already matches. Successful reads alone do not clear a write error. Recovery does not authorize normal writes prohibited by scheduling failure; preview cleanup remains permitted.
 
-Settings remains usable throughout recovery. The user can edit, save valid configuration, inspect the graph, start Preview, or request its benchmark. A native error does not require a confirmation dialog. Preview's time indicator continues if screen updates fail. The benchmark ends on its first native failure with partial results and can be started again immediately. Neither operation claims that a failed screen update succeeded.
-
-A failed normal fade stops issuing its remaining steps. Recovery selects the current target instead of replaying missed steps. Before startup control has completed successfully, recovery uses the startup preparation/fade rules; afterward, recovery from a read/write failure uses an ordinary fade from the last written temperature when available. This fade is distinct from restoring observation alone, which does not restart a healthy fade. Preview recovery applies its current playback target without an ordinary fade.
-
-Time-zone suspension pauses temperature retries until evaluation succeeds. **Retry** also retries that evaluation immediately. An existing native error resumes recovery when control becomes evaluable. System suspension pauses execution; resume uses the single current-state attempt and duplicate-notification rules in REQ-suspend-resume. Quit cancels normal recovery and performs only exit cleanup.
+Settings and graph animation remain responsive. Native output failures do not change Preview's logical deadline. Recovery during playback requests its current position; recovery after Stop selects the current live schedule. Identical consecutive errors do not repeatedly append diagnostics.
 
 **Scenarios:**
 
-- Attempts keep failing: automatic attempt starts follow completion plus 100, 200, 400, 800, and 800 ms, rather than a recurring curve cadence.
-- A call remains executing after 100 ms: another call does not start. UI input remains responsive.
-- A user selects Retry during the 800 ms wait: a current-state attempt starts without confirmation. Several clicks during that attempt do not queue several writes.
-- An initial failure schedules a retry after 100 ms, but the user selects Retry after 50 ms. That attempt fails: the old deadline is canceled and the next automatic attempt waits 200 ms after the explicit attempt returns.
-- Preview is five seconds into playback when access recovers: output applies its current playback instant, not the temperature of the failed step.
-- A constant nighttime schedule encounters a read failure: automatic retries continue without requiring focus changes. Success cancels retry work.
-- Repeated writes fail with the same category: settings retains the error, and diagnostics records the failure once until its category changes or recovery succeeds.
-- A pending retry overlaps manual expiry: its eventual attempt uses the expired state and does not extend suppression.
+- Calls keep failing: attempt starts follow completion plus 100, 200, 400, 800, and 800 ms.
+- A call remains executing after 100 ms: a second call does not begin, and UI input remains responsive.
+- Retry replaces a pending 800 ms delay and fails: the next delay starts after that call returns, without leaving the previous timer active.
+- Preview is five seconds into playback when access recovers: output applies that current position, not the failed earlier step.
+- A constant schedule encounters an error: retries continue without requiring a focus change and stop after recovery.
 
-### REQ-night-light-read-failure — Stop the failed attempt when reads fail
+### REQ-night-light-read-failure — Stop normal writes when reads fail
 
-Each normal control attempt reads and decodes fresh Night Light settings and state before requesting writes. Cached records and queued snapshots do not satisfy this guard. A library usability diagnostic does not independently prohibit control; actual read and write failures govern it.
+Each normal control attempt reads and decodes fresh settings and state records before writing temperature, schedule, or activation. Cached records and queued watcher snapshots do not satisfy this requirement. The state record's flag reporting whether Windows considers Night Light usable on this device does not independently prohibit control. Actual access failures govern it. A failed required read stops the attempt and starts recovery. Editing and graph calculation continue.
 
-If either read fails, that attempt does not begin writes. Settings reports the failure and REQ-native-recovery applies. Draft editing and graph calculation continue. A later internal read failure inside a writing library operation follows the write-failure rule because earlier storage can already have succeeded.
-
-Graceful exit is an exception: its public off operation reads only fresh state under REQ-exit-night-light-off.
+Cleanup has narrower read requirements. Ending native preview uses its own fresh settings-record read and does not require a readable state record. Turning Night Light off on exit uses its own fresh state-record read and does not require a readable settings record. These exceptions do not authorize a replacement temperature or native schedule write.
 
 **Scenarios:**
 
-- Settings cannot be decoded at startup: that attempt does not write, and automatic or explicit retry can try again.
-- A read fails during a fade: remaining steps stop, and recovery resolves the current target.
-- A watcher snapshot read fails after rearming: the watcher remains registered and the shared recovery sequence handles the error.
-- A missing value is restored during a constant schedule: the next recovery attempt reads it even if its notification was discarded.
+- The settings record cannot be decoded: the normal attempt does not write, and recovery retries later.
+- The state record becomes unreadable during a short transition but the settings record remains readable: normal control stops, and preview cleanup still runs.
+- The settings record is unreadable at exit but the state record is readable: preview cleanup fails independently, and the off attempt still runs.
 
 ### REQ-night-light-write-failure — Recover required control operations
 
-When an owned-value write or temperature operation fails, the attempt stops and settings identifies the failed operation. Circadia preserves knowledge of earlier successful storage, including temperature storage followed by failed native-preview cleanup. It does not report the whole attempt as successful.
+When an owned-value write or temperature operation fails, remaining steps stop. The controller records known successful storage and reports the failed operation. If the native preview flag could remain on, preview cleanup is pending: the controller makes one attempt to end the preview, reading only the settings record, after the failing call returns. It does not repeat cleanup that the failed library call already completed. Failed cleanup remains pending in the shared recovery sequence and does not erase the original error.
 
-Recovery follows REQ-native-recovery and retries the required operations from fresh data. If Night Light is off, target preparation precedes activation. Exit uses its single off attempt instead of retrying normal control.
+During failure, Circadia retains the latest stored temperature and normal on/off state; it does not roll back to an earlier schedule temperature or request off as a recovery shortcut. Recovery selects current inputs and performs only still-required operations. Exit instead uses its independent best-effort cleanup and off attempts without retries.
 
 **Scenarios:**
 
-- Disabling the native schedule fails: the attempt stops before temperature preparation or activation, and later recovery retries the necessary work.
-- Preparation succeeds but activation fails: later recovery still requires activation and repeats current-target preparation.
-- A temperature operation stores its value but cleanup fails: the next recovery performs a complete refresh even if the desired temperature is unchanged.
-- Fresh reads succeed but activation fails: the read error clears while the write error remains.
+- Native schedule disablement fails: the attempt does not continue to activation; any pending preview cleanup remains independently eligible.
+- A transition step fails after earlier successful storage: future steps stop, cleanup is attempted, and the last successfully stored value remains known.
+- Cleanup also fails: both failures remain visible, and automatic recovery uses the shared delay instead of an immediate retry loop.
+- A write reports successful temperature storage followed by failed cleanup: recovery applies the current target rather than treating matching stored kelvin as proof of complete success.
