@@ -1,12 +1,12 @@
 ---
-date: 2026-10-17
+date: 2026-10-19
 questions:
   - Can Circadia turn Night Light off during graceful Windows shutdown without a service?
   - Can the pinned Reactor and Night Light APIs support exit cleanup and a short startup fade?
 observed-in:
   - Microsoft Win32 session-ending and Windows App SDK lifecycle documentation accessed 2026-10-17
   - windows-rs revision 722f202100c3bd428627941d3834d87ad6679d1c, Reactor and window library source
-  - win-nightlight-lib 0.4.0 source and existing inactive-temperature probe
+  - win-nightlight-lib 0.5.0 source and transition guide, commit 0461529455f3594b9b9d6cc3d6c2e7a9736de9b5
 recheck-when: Windows session-ending behavior, the Reactor revision, or the Night Light library changes.
 ---
 
@@ -38,13 +38,13 @@ Source inspection establishes API availability, not successful session-ending de
 
 ## Night Light operations and ordering
 
-**Observed in win-nightlight-lib 0.4.0 source:** `Nightlight::set_active(false)` is a public synchronous operation. It reads current state and writes only when the active state changes; an unchanged result is not an error. It does not reset the stored temperature, restore the native schedule, or clear a preview flag. It has no caller-supplied timeout or cancellation parameter. The [library contracts](nightlight-contracts.md) describe the decoded records and failure rules.
+**Observed in win-nightlight-lib 0.5.0 source:** `Nightlight::set_active(false)` is a public synchronous operation. It reads current state and writes only when the active state changes; an unchanged result is not an error. It does not reset the stored temperature, restore the native schedule, or clear a preview flag. It has no caller-supplied timeout or cancellation parameter. The [0.5.0 transition research](nightlight-transition-control.md) records the other operation and failure contracts.
 
 An exit request must stop new scheduling, fade, playback, and reconciliation work before requesting off. It must serialize the off operation after any already executing library operation. Otherwise, queued control or observation handling could enable Night Light again. Requiring both settings and state to decode is a possible application guard, but it can prevent off cleanup when only settings is unreadable. The specification selects the public off operation's fresh state read; the operation does not need a settings read.
 
-For startup while inactive, `set_color_temperature` with `RefreshPolicy::Always` can prepare the computed current target before `set_active(true)`. The [runtime probe](nightlight-runtime.md) verified an inactive temperature write and completed preview cleanup while the active state stayed false. This supports enabling the computed temperature directly without a startup fade or a fixed intermediate value. Preparation failure cannot be treated as successful preparation. External writers can still race this sequence; the operations are not atomic.
+For startup while inactive, calling `apply_color_temperature` while Night Light is off stores the computed current target with preview off without waiting; the application can then call `set_active(true)`. The [0.5.0 transition research](nightlight-transition-control.md) records that contract and the upstream report that temperatures written while Night Light was off appeared when it was switched on. This supports enabling the computed temperature directly without a startup fade or a fixed intermediate value. Preparation failure cannot be treated as successful preparation. External writers can still race this sequence; the operations are not atomic.
 
-The existing timing measurements cover selected temperature operations, not the off request during Windows teardown. They do not establish an exit deadline. An off request also does not repair a preview flag left active by a failed refresh; decoded active state alone does not establish the physical display result in that failure case.
+The recorded evidence does not measure the off request during Windows teardown or establish an exit deadline. An off request also does not repair a preview flag left active by a failed refresh; decoded active state alone does not establish the physical display result in that failure case.
 
 ## Alternatives and recommendation
 
