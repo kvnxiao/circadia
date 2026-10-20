@@ -1,11 +1,11 @@
 ---
-date: 2026-10-18
+date: 2026-10-19
 questions:
   - Which Windows power and clock contracts affect temperature interpolation after sleep, hibernation, and Modern Standby?
   - What evidence supports current-state reconciliation and a complete native refresh on resume?
 observed-in:
   - Microsoft Learn Windows power, timer, and Modern Standby documentation retrieved 2026-10-18
-  - Existing win-nightlight-lib and win-nightlight-watch 0.4.0 contract and runtime research
+  - win-nightlight-lib and win-nightlight-watch 0.5.0, commit 0461529455f3594b9b9d6cc3d6c2e7a9736de9b5
 recheck-when: Supported Windows power states, notification integration, timer mechanisms, or the Night Light dependencies change.
 ---
 
@@ -39,9 +39,9 @@ The existing [session lifecycle research](session-shutdown.md#pinned-framework-i
 
 The [manual suppression research](timed-suppression.md) records a sleep-inclusive elapsed counter that is independent of wall-clock adjustments. Daily scheduling instead needs the actual current instant and Windows time-zone rules. The two calculations can share a resume trigger without sharing their time source. A resumed process also needs current required dates for solar calculation and the existing elapsed-interval policy if a seasonal clock change occurred.
 
-**Observed in the existing 0.4.0 library research:** A complete public temperature operation stores the requested temperature and toggles native preview on and off to request application. Fresh decoded reads support reconciliation; an inactive temperature can be prepared before activation. [Library contracts](nightlight-contracts.md), [runtime evidence](nightlight-runtime.md).
+**Observed in win-nightlight-lib 0.5.0 source:** While Night Light is on, `apply_color_temperature` writes the requested temperature with native preview on, waits 50 ms, then clears preview, even when the stored temperature already matches. This complete refresh requests application. Fresh decoded reads support reconciliation, and an inactive temperature can be prepared before activation. The [0.5.0 transition and watcher contracts](nightlight-transition-control.md) record cleanup retries and failure cases.
 
-The runtime evidence does not exercise sleep, hibernation, or Modern Standby. Stored temperature equality does not measure the display transform. Requiring a complete refresh after resume explicitly requests application, but does not establish that every resume loses native output or that refresh guarantees an immediately correct physical display.
+The library evidence does not exercise sleep, hibernation, or Modern Standby. Stored temperature equality does not measure the display transform. Requiring a complete refresh after resume explicitly requests application, but does not establish that every resume loses native output or that refresh guarantees an immediately correct physical display.
 
 ## Alternatives and recommendation
 
