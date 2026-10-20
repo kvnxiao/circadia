@@ -11,7 +11,7 @@ recheck-when: The Night Light library, refresh policy, Windows build, or chosen 
 
 # Native temperature operation timing
 
-The [runtime probe](../../probes/nightlight-runtime/README.md) verifies decoded temperature readback for 15 direct native operations, a subsequent `wnl temp 3100` command, and restoration. Direct operations took 0.076–0.244 ms in this run. A sequence with steps scheduled 100 ms apart reversed direction and reached every requested value. These measurements support testing short fades after changes to the requested temperature; they do not select a user-facing fade duration or prove visual smoothness.
+The runtime probe (`probes/nightlight-runtime/` at commit `fb483b4`) verifies decoded temperature readback for 15 direct native operations, a subsequent `wnl temp 3100` command, and restoration. Direct operations took 0.076–0.244 ms in this run. A sequence with steps scheduled 100 ms apart reversed direction and reached every requested value. These measurements support testing short fades after changes to the requested temperature; they do not select a user-facing fade duration or prove visual smoothness.
 
 ## Acceptance evidence
 
@@ -49,6 +49,6 @@ Restoration preserves user-visible fields rather than registry bytes or timestam
 
 **Observed on the recorded Windows build:** With the Strength slider at 0, restoring 4910 K through `RefreshPolicy::Always` left the open page displaying 0. Closing and reopening Night Light settings changed the displayed strength to 30 while decoded temperature remained 4910 K, active, preview false, schedule off. The open slider therefore does not reliably reflect external temperature writes. The observation does not identify Windows' internal UI mechanism.
 
-The [settings-refresh script](../../probes/nightlight-runtime/verify-settings-refresh.ps1) reproduces the comparison for an explicitly requested restoration temperature. It closes the page in `finally`, including after failures. It leaves the explicitly requested temperature in place. Circadia's own status should use the controller's intended state and decoded observations; an already open Windows slider is not acceptance evidence for a later library write. Circadia does not need to control or reopen Windows Settings to apply a temperature.
+The settings-refresh script (`probes/nightlight-runtime/verify-settings-refresh.ps1` at commit `fb483b4`) reproduces the comparison for an explicitly requested restoration temperature. It closes the page in `finally`, including after failures. It leaves the explicitly requested temperature in place. Circadia's own status should use the controller's intended state and decoded observations; an already open Windows slider is not acceptance evidence for a later library write. Circadia does not need to control or reopen Windows Settings to apply a temperature.
 
 After review, the native-control script validates the captured temperature, closes its Settings page, and restores through the public unconditional operation even if the native slider leaves preview enabled. Window cleanup and temperature restoration are attempted independently. A subsequent run changed Strength 30 to 0, read 6500 K, restored its captured 4910 K, and verified that the page was closed. The original direct-operation timing results above remain a separate run with a 2700 K baseline.
