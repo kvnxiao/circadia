@@ -10,7 +10,8 @@
 
 ## Implementation
 
-- Follow [rust-rules](.agents/skills/rust-rules/SKILL.md) for Rust work and [github-actions-rules](.agents/skills/github-actions-rules/SKILL.md) for workflow changes.
+- Follow [rust-rules](.agents/skills/rust-rules/SKILL.md) for Rust work, [python-rules](.agents/skills/python-rules/SKILL.md) for Python work, and [github-actions-rules](.agents/skills/github-actions-rules/SKILL.md) for workflow changes.
+- Write Python only for research probes under `probes/`. Do not add Python code anywhere else in the repository; for example, write application code and its tooling in Rust.
 - Keep the controller as the only component requesting Night Light writes. Route settings and tray configuration edits through the shared configuration validation and persistence path.
 - Use public Night Light library operations. Do not duplicate the undocumented registry codec or assume a proposed API exists in the pinned dependency.
 - Keep foreground inspection limited to window metadata and process identity. Do not request elevation, inject code, or read another application's memory to improve matching.
@@ -25,13 +26,6 @@
 - Distinguish documented behavior, source inspection, measured results, and inference. For example, an unchanged gamma-table read does not prove unchanged calibrated display output.
 - Preserve research findings when product choices change. Explain current applicability in the index and spec instead of rewriting evidence to imply a different result.
 - Write direct prose that makes sense without the conversation. State concrete behavior, define project-specific terms, and keep emojis and kaomojis out of repository files.
-
-## Python probes and helpers
-
-- Apply the shared [Python configuration](probes/pyproject.toml) to every active Python probe, helper, and test. Keep new files covered by the shared checks; for example, a new probe directory must not bypass Ruff or ty through a local exclusion.
-- Annotate function parameters and return values, and use concrete types at native and external-data boundaries. For example, declare `ctypes` structure fields and validate decoded data before treating it as a typed result.
-- Run the pinned Ruff lint/format and ty checks through `uvx` with `just --justfile probes/justfile python-check`, then run affected Python 3.15 test recipes. Resolve diagnostics without weakening the shared rules or adding blanket suppressions; for example, limit a necessary suppression to an intentional invalid-input fixture and explain it at the use.
-- Keep host-setting exercises and performance measurements separate from routine checks. For example, `python-test` runs read-only clock tests, while the host time-zone exercise requires its explicit invocation.
 
 ## Research probes
 
@@ -50,6 +44,8 @@
 - Use the harness's Bash tool with MSYS2 syntax on Windows when available. Otherwise run commands through MSYS2 Bash; use PowerShell only when a Windows-only API requires it.
 - Use `rg` for search, `gh` for GitHub, and `uv` for Python tools. If a `justfile` exists, run `just --list` and use the applicable recipe.
 - Inspect the actual repository tooling before selecting checks. Do not assume Cargo or `just` commands exist before their manifests are added.
+- Keep Python files covered by the shared [Python configuration](probes/pyproject.toml) and check them with `just --justfile probes/justfile python-check`, then run affected test recipes. For example, a new probe directory must not bypass Ruff or ty through a local exclusion.
+- Keep host-setting exercises and performance measurements separate from routine checks. For example, `python-test` runs read-only clock tests, while the host time-zone exercise requires its explicit invocation.
 - Use Python 3.15 for `uv run` checks. Run the spec structural checker after spec changes: `uv run --python 3.15 "$HOME/.agents/skills/write-spec/scripts/check_spec.py" docs/specs/SPEC.md`. Check local Markdown links when moving or adding documents.
 - Test meaningful boundaries and failures with expectations independent of the implementation. For example, validate curve results against fixed reference cases rather than computing expected values with the function under test.
 - Keep tests that change live Night Light separate from default automated checks. Use controlled probes only within the authorized task and record their display and OS limitations.
