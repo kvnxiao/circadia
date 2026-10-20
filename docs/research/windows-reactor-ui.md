@@ -1,5 +1,5 @@
 ---
-date: 2026-10-17
+date: 2026-10-18
 questions:
   - Which published windows-rs and Reactor versions support Circadia's settings and tray requirements?
   - Can Rust code draw and edit a temperature curve with native WinUI 3 controls?
@@ -20,7 +20,7 @@ Keep Reactor for the MVP. Published Reactor 0.100.0 exposes enough native contro
 
 Reactor is a preview, not a generally available UI contract. Microsoft explicitly permits public API refinement during the preview. Accept that maintenance cost, record the exact dependency source, and rerun these probes before upgrading. The repository's draft [spec](../specs/SPEC.md) still governs behavior; this research does not approve it or remove requirements.
 
-Circadia's suppression list stores executable filenames chosen by the user. When a listed application has foreground focus, suppression temporarily changes the temperature target to 6500 K. The draft generates a curve from three ordered temperatures, manual Wake/Bedtime clocks, and optional solar targets. Preview animates the draft's next 24 elapsed hours over 10 seconds while applying those temperatures to Night Light. The UI probes use three fixed fixture anchors; they verify controls and pointer behavior rather than the current schedule model.
+Circadia's suppression list stores executable filenames chosen by the user. When a listed application has foreground focus, suppression temporarily changes the temperature target to 6500 K. The draft generates a curve from three ordered temperatures, manual Wake/Bedtime clocks, and optional solar targets. The current spec defines a live draft and configurable Preview from the current instant through tomorrow's matching local clock. These lifecycle requirements are not verified by the UI probe. The UI probes use three fixed fixture anchors; they verify controls and pointer behavior rather than the current schedule model.
 
 The [Windows compatibility assessment](windows-compatibility.md) records the selected runtime's declared minimum and supports a Windows 11 build 22000 baseline. The runtime checks here apply to build 26300.9711; minimum-build execution remains unverified.
 
@@ -48,14 +48,22 @@ Source inspection establishes API availability. Compilation establishes that the
 | REQ-evaluate-daily-curve: show the controller's linear curve | Native line segments can display evaluated points | Share validated Wake/Bedtime definitions and Windows-converted occurrences with the graph. The current fixture graph does not verify this integration. |
 | Wake and Bedtime clock editing | `TimePicker` emits selected-time changes but has no public selected-time setter | The inspected development schema also lacks that setter. A validated `HH:mm` text field can display and edit the two anchor clocks. A native TimePicker is a later improvement. |
 | REQ-edit-executable-list: manual executable selection | List controls exist; `windows` exposes legacy picker and Shell dialog types. Published `WindowRef` lacks a public native handle accessor. | Development `ComponentContext::run_window` supplies a scoped `WindowHandle::as_raw`; the probe verifies a non-null handle. Neither surface supplies a complete file-picker service. The pinned probe verifies an owned Shell dialog, selection, and cancellation through safe `winsafe` APIs. Pasting a filename does not satisfy the requirement. |
-| Recent-app tray menu | No published first-class notification-icon application API found | Development `ApplicationView`, `NotifyIcon`, and `MenuItem` declarations with stable identifiers support a dynamic menu. Application code implements the selected five-entry distinct-executable history in most-recent-first order, retaining closed apps until displaced or exit. |
+| Recent-app tray menu | No published first-class notification-icon application API found | Development `ApplicationView`, `NotifyIcon`, and `MenuItem` declarations with stable identifiers support replacing menu content; replacement closes an open menu. Application code implements the selected five-entry distinct-executable history in most-recent-first order, retaining closed apps until displaced or exit. |
 | REQ-on-demand-settings: controller survives settings closure | Published `App::run_component` ends with the last window | Development `Application` state and notification icons have independent window lifetimes. Closing settings drops its component; saved configuration and controller state must belong to the application. |
 | REQ-single-instance: activate an existing process | No single-instance coordinator found | Development `show_window` opens or activates a window within one process. It does not provide the second-process detection or signaling required by the spec. |
 | REQ-sign-in-start | Toggle control exists | Current-user startup registration and failure reporting need Windows integration. The probe toggle does not register startup. |
-| Night Light and configuration failures | Text, buttons, and `InfoBar` support status and errors | The MVP uses a static icon. Menu and settings status report suppression and simultaneous errors together. |
+| Night Light and configuration failures | Text, buttons, and `InfoBar` support status and errors | Text menu entries support concise control and suppression status. Settings can show detailed errors. A static icon does not itself communicate an error. |
 | Keyboard and assistive technology | Native form controls, automation names and IDs, programmatic focus | Native controls do not make a custom plot accessible automatically. Retain a complete field-based editor; test Narrator, tab order, focus after insertion/removal, contrast, and scaling. |
 | Temperature background and 10 K editing | Published `Brush` exposes theme and solid colors, but no gradient variant. `NumberBox` lacks a public step-size setter. | The probe draws a sampled gradient with translucent rectangles. Temperature text entry has an explicit Apply action that rounds to 10 K; native NumberBox arrow increments cannot be configured to that step through this API. |
 | REQ-event-driven-idle and REQ-lean-background | UI updates follow messages; background jobs are available | Do not use an animated drawing loop for a static graph. Measure before settings first opens, while it is open, and after it closes. A probe's memory snapshot is not conformance evidence. |
+
+## Tray command and countdown limits
+
+**Observed by source inspection on 2026-10-18 at revision `722f202100c3bd428627941d3834d87ad6679d1c`:** The public `MenuItem` declaration supports plain commands with labels and enabled state, separators, and submenus. It has no checked-item property. The native builder creates `MenuFlyoutItem` for plain commands. Replacing menu content dismisses the open menu; changing only callbacks preserves it. The inspected application interface has no menu-opening or menu-closing callback for refreshing a countdown just when the menu opens.
+
+Stable start/stop labels therefore fit the verified API. A live countdown in visible settings avoids periodically replacing and dismissing the tray menu. Native command activation, accessibility, and Explorer restart recovery still need application checks; source inspection does not establish them.
+
+Sources: [public menu declarations](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/declaration.rs#L754), [native menu items](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/native/transient_menu.rs#L334), and [application menu replacement](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/native/app/application.rs#L190).
 
 ## Native Windows Settings appearance
 
@@ -163,7 +171,7 @@ The archived location action invokes `windows` 0.62.2 permission and position AP
 
 Foreground lookup resolves the probe executable with limited-query access. Opening protected PID 4 with that same access fails, establishing an actual denial path. This is not an elevated-foreground matrix or foreground-event-hook test. The wrapper's fixed path buffer can fail on long executable paths; failure to read an executable identity is treated as no match in the suppression list.
 
-The pinned graph uses the original fixed three-anchor fixtures. These results close the dependency-combination question, while the generated schedule controls, playback/Save consistency, and production responsiveness still require native integration. The [combined schedule probe](schedule-integration.md) separately supplies Windows clock and local solar evidence; its automatic-anchor resolver is a different scheduling model.
+The pinned graph uses the original fixed three-anchor fixtures. These results verify that the tested dependencies work together, while the generated schedule controls, playback/Save consistency, and production responsiveness still require native integration. The [combined schedule probe](schedule-integration.md) separately supplies Windows clock and local solar evidence. Its scheduling model adjusts Morning and Evening reference times and the points placed at offsets from them to preserve their order; the MVP instead uses fixed Wake/Bedtime clocks and optional solar targets.
 
 ## Active probe after consolidation
 

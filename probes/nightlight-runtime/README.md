@@ -6,6 +6,8 @@ Verified on 2026-10-16 with Rust 1.99.0, `win-nightlight-lib` 0.4.0, and Windows
 
 The native preview flag temporarily requests application of the stored temperature. A completed refresh clears it; the baseline guard rejects an active preview.
 
+The recorded tests ran on the maintainer's own machine. Operation latency and visible results can differ on another user's hardware, display configuration, Windows build, or system load; these measurements are not a universal update-rate guarantee.
+
 ## Commands and side effects
 
 From this directory in MSYS2 Bash:
@@ -28,7 +30,7 @@ The native-control script opens Windows Night Light settings, changes its streng
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File verify-native-controls.ps1
 ```
 
-Both native scripts close the Settings page they open, including after failures. The control script attempts window cleanup and temperature restoration independently. It changes Night Light temporarily. The probes verified registry data without measuring display output and do not require a colorimeter. Circadia's visible benchmark separately requires inspection of warming and cooling under the [spec](../../docs/specs/application.md#req-preview-benchmark--measure-and-visibly-exercise-temperature-updates). See the [probe index](../README.md) for other verification work.
+Both native scripts close the Settings page they open, including after failures. The control script attempts window cleanup and temperature restoration independently. It changes Night Light temporarily. The probes verified registry data without measuring display output and do not require a colorimeter. Circadia's release validation separately requires visible inspection of schedule Preview and ordinary fades under the [spec](../../docs/specs/SPEC.md#implementation-and-release-validation). See the [probe index](../README.md) for other verification work.
 
 ## Check the Windows slider after an external write
 
