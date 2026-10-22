@@ -2,6 +2,10 @@
 
 mod config;
 mod diagnostics;
+#[cfg(windows)]
+mod platform;
+#[cfg(windows)]
+mod schedule;
 mod session;
 mod storage;
 
@@ -16,6 +20,42 @@ pub use diagnostics::DiagnosticFailure;
 pub use diagnostics::DiagnosticLog;
 pub use diagnostics::DiagnosticOperation;
 pub use diagnostics::DiagnosticWrite;
+#[cfg(windows)]
+pub use platform::clock::WindowsZone;
+#[cfg(windows)]
+pub use schedule::ActivityInterval;
+#[cfg(windows)]
+pub use schedule::Anchor;
+#[cfg(windows)]
+pub use schedule::AnchorKind;
+#[cfg(windows)]
+pub use schedule::Curve;
+#[cfg(windows)]
+pub use schedule::GraphSegment;
+#[cfg(windows)]
+pub use schedule::Playback;
+#[cfg(windows)]
+pub use schedule::Schedule;
+#[cfg(windows)]
+pub use schedule::ScheduleError;
+#[cfg(windows)]
+pub use schedule::Segment;
+#[cfg(windows)]
+pub use schedule::SolarCrossings;
+#[cfg(windows)]
+pub use schedule::SolarSelection;
+#[cfg(windows)]
+pub use schedule::Target;
+#[cfg(windows)]
+pub use schedule::TimeInterval;
+#[cfg(windows)]
+pub use schedule::calculate_solar;
+#[cfg(windows)]
+pub use schedule::graph_interval;
+#[cfg(windows)]
+pub use schedule::resolve_anchors;
+#[cfg(windows)]
+pub use schedule::select_solar;
 pub use session::ConfigLayer;
 pub use session::ConfigSession;
 pub use session::Draft;
