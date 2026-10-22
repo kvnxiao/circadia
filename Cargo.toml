@@ -18,7 +18,8 @@ thiserror = "2.0"
 toml = "1.1"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Time"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Time", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
+winsafe = { version = "0.0.29", features = ["user"] }
 
 [dev-dependencies]
 test-case = "3"

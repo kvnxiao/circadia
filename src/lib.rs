@@ -8,6 +8,7 @@ mod platform;
 mod schedule;
 mod session;
 mod storage;
+mod suppression;
 
 pub use config::Config;
 pub use config::ConfigInput;
@@ -22,6 +23,12 @@ pub use diagnostics::DiagnosticOperation;
 pub use diagnostics::DiagnosticWrite;
 #[cfg(windows)]
 pub use platform::clock::WindowsZone;
+#[cfg(windows)]
+pub use platform::clock::elapsed_since_boot;
+#[cfg(windows)]
+pub use platform::foreground::ForegroundEvents;
+#[cfg(windows)]
+pub use platform::foreground::read_foreground;
 #[cfg(windows)]
 pub use schedule::ActivityInterval;
 #[cfg(windows)]
@@ -69,3 +76,12 @@ pub use storage::RestoreCause;
 pub use storage::RestoreNotice;
 pub use storage::StartupConfig;
 pub use storage::StorageError;
+pub use suppression::Focus;
+pub use suppression::Foreground;
+pub use suppression::ForegroundApps;
+pub use suppression::ManualCommand;
+pub use suppression::ManualOutcome;
+pub use suppression::RecentApp;
+pub use suppression::Suppression;
+pub use suppression::SuppressionError;
+pub use suppression::SuppressionState;

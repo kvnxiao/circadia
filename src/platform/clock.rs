@@ -8,6 +8,7 @@ use jiff::civil::Weekday;
 use jiff::tz::Offset;
 use std::collections::BTreeMap;
 use std::io;
+use std::time::Duration;
 use windows_sys::Win32::Foundation::SYSTEMTIME;
 use windows_sys::Win32::System::Time::DYNAMIC_TIME_ZONE_INFORMATION;
 use windows_sys::Win32::System::Time::GetDynamicTimeZoneInformation;
@@ -15,6 +16,11 @@ use windows_sys::Win32::System::Time::GetTimeZoneInformationForYear;
 use windows_sys::Win32::System::Time::SystemTimeToTzSpecificLocalTime;
 use windows_sys::Win32::System::Time::TIME_ZONE_ID_INVALID;
 use windows_sys::Win32::System::Time::TIME_ZONE_INFORMATION;
+
+/// Read boot-relative elapsed time, including sleep and hibernation.
+pub fn elapsed_since_boot() -> Duration {
+    Duration::from_millis(winsafe::GetTickCount64())
+}
 
 /// Resolve clocks using one snapshot of the Windows zone and adjustment
 /// setting.

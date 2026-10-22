@@ -1,0 +1,724 @@
+use crate::Config;
+use crate::ValidationError;
+use crate::normalize_executable;
+use std::time::Duration;
+use thiserror::Error;
+
+/// Classify one foreground observation without using window geometry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Foreground {
+    /// Treat missing, inaccessible, or ambiguous identity as nonmatching.
+    Unknown,
+    /// Ignore desktop and taskbar interactions when retaining recent apps.
+    Shell,
+    /// Use the resolved application's executable filename.
+    Application(String),
+}
+
+/// Present the current inclusion and exclusion of one recent executable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecentApp {
+    /// Normalized executable filename used for matching.
+    pub executable: String,
+    /// Membership in the active suppression list.
+    pub included: bool,
+    /// Exclusion that disables the tray toggle and automatic suppression.
+    pub excluded: bool,
+}
+
+/// Track current identity and the five most recent distinct applications.
+#[derive(Clone, Debug)]
+pub struct ForegroundApps {
+    own_executable: String,
+    current: Option<String>,
+    recent: Vec<String>,
+}
+
+impl ForegroundApps {
+    /// Initialize empty history using the actual running executable filename.
+    ///
+    /// # Errors
+    ///
+    /// Reject an invalid executable filename.
+    pub fn new(own_executable: &str) -> Result<Self, ValidationError> {
+        Ok(Self {
+            own_executable: normalize_executable(own_executable)?,
+            current: None,
+            recent: Vec::new(),
+        })
+    }
+
+    /// Replace current identity and retain eligible recent applications.
+    pub fn observe(&mut self, foreground: &Foreground) {
+        self.current = match foreground {
+            Foreground::Application(name) => normalize_executable(name).ok(),
+            Foreground::Unknown | Foreground::Shell => None,
+        };
+        if let Some(name) = &self.current
+            && name != &self.own_executable
+            && name != "applicationframehost.exe"
+        {
+            self.recent.retain(|previous| previous != name);
+            self.recent.insert(0, name.clone());
+            self.recent.truncate(5);
+        }
+    }
+
+    /// Return the latest resolved filename, including nonmatching apps.
+    pub fn current(&self) -> Option<&str> {
+        self.current.as_deref()
+    }
+
+    /// Apply active inclusion and exclusion rules to current focus.
+    pub fn matches(&self, config: &Config) -> bool {
+        self.current.as_deref().is_some_and(|name| {
+            config.includes(name) && !config.is_excluded(name, &self.own_executable)
+        })
+    }
+
+    /// Build most-recent-first tray entries from the active configuration.
+    pub fn recent(&self, config: &Config) -> Vec<RecentApp> {
+        self.recent
+            .iter()
+            .map(|name| RecentApp {
+                executable: name.clone(),
+                included: config.includes(name),
+                excluded: config.is_excluded(name, &self.own_executable),
+            })
+            .collect()
+    }
+}
+
+/// Classify resolved focus under the active configuration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Focus {
+    /// Request automatic suppression after the configured delay.
+    Matching,
+    /// End automatic suppression after the configured delay.
+    Nonmatching,
+}
+
+/// Execute the action offered by the manual suppression control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManualCommand {
+    /// Start a fresh hour only if no interval is active.
+    Start,
+    /// Cancel an active interval.
+    Stop,
+}
+
+/// Identify the effect of a manual command independently of native output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManualOutcome {
+    /// Start a new interval and stop Preview.
+    Started,
+    /// Cancel the existing interval.
+    Stopped,
+    /// Preserve state for a duplicate command.
+    Unchanged,
+    /// Reject a new interval while control is unavailable.
+    Unavailable,
+}
+
+/// Report a deadline beyond the elapsed counter's representation.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+#[error("suppression deadline cannot be represented")]
+pub struct SuppressionError;
+
+/// Report runtime suppression requests independently of output availability.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SuppressionState {
+    /// Automatic source after focus delay and Preview deferral.
+    pub automatic: bool,
+    /// Active manual interval after logical expiry is processed.
+    pub manual: bool,
+    /// Playback currently defers automatic activation.
+    pub preview: bool,
+}
+
+impl SuppressionState {
+    /// Combine both suppression sources.
+    pub fn active(self) -> bool {
+        self.automatic || self.manual
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Automatic {
+    #[default]
+    Uninitialized,
+    Inactive,
+    Active,
+}
+
+impl From<Focus> for Automatic {
+    fn from(focus: Focus) -> Self {
+        match focus {
+            Focus::Matching => Self::Active,
+            Focus::Nonmatching => Self::Inactive,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PendingFocus {
+    #[default]
+    None,
+    Waiting(Duration),
+    Deferred,
+}
+
+/// Apply focus delays and manual expiry using sleep-inclusive elapsed time.
+#[derive(Clone, Debug)]
+pub struct Suppression {
+    automatic: Automatic,
+    focus: Focus,
+    focus_since: Duration,
+    pending: PendingFocus,
+    manual_deadline: Option<Duration>,
+    preview: bool,
+}
+
+impl Default for Suppression {
+    fn default() -> Self {
+        Self {
+            automatic: Automatic::Uninitialized,
+            focus: Focus::Nonmatching,
+            focus_since: Duration::ZERO,
+            pending: PendingFocus::None,
+            manual_deadline: None,
+            preview: false,
+        }
+    }
+}
+
+impl Suppression {
+    /// Initialize current focus immediately after startup prerequisites pass.
+    pub fn initialize_focus(&mut self, focus: Focus, now: Duration) {
+        self.preview = false;
+        self.advance(now);
+        self.focus = focus;
+        self.focus_since = now;
+        self.pending = PendingFocus::None;
+        self.automatic = focus.into();
+    }
+
+    /// Reevaluate focus without restarting an unchanged matching state.
+    ///
+    /// # Errors
+    ///
+    /// Report an unrepresentable deadline.
+    pub fn observe_focus(
+        &mut self,
+        focus: Focus,
+        now: Duration,
+        config: &Config,
+    ) -> Result<(), SuppressionError> {
+        self.advance(now);
+        if focus != self.focus {
+            self.focus = focus;
+            self.focus_since = now;
+        }
+        if self.automatic == Automatic::Uninitialized {
+            return Ok(());
+        }
+        if (self.automatic == Automatic::Active) == (focus == Focus::Matching) {
+            self.pending = PendingFocus::None;
+            return Ok(());
+        }
+        let delay = Duration::from_millis(config.input().focus_delay_ms.unsigned_abs());
+        self.pending = PendingFocus::Waiting(
+            self.focus_since
+                .checked_add(delay)
+                .ok_or(SuppressionError)?,
+        );
+        self.advance(now);
+        Ok(())
+    }
+
+    /// Discard pre-suspend focus timing and expire manual suppression before
+    /// output.
+    ///
+    /// # Errors
+    ///
+    /// Report an unrepresentable new focus deadline.
+    pub fn resume_focus(
+        &mut self,
+        focus: Focus,
+        now: Duration,
+        config: &Config,
+    ) -> Result<(), SuppressionError> {
+        self.preview = false;
+        self.pending = PendingFocus::None;
+        self.focus = focus;
+        self.focus_since = now;
+        self.observe_focus(focus, now, config)
+    }
+
+    /// Process logical deadlines without issuing native operations.
+    pub fn advance(&mut self, now: Duration) {
+        if self.manual_deadline.is_some_and(|deadline| deadline <= now) {
+            self.manual_deadline = None;
+        }
+        if let PendingFocus::Waiting(deadline) = self.pending
+            && deadline <= now
+        {
+            if self.preview && self.focus == Focus::Matching {
+                self.pending = PendingFocus::Deferred;
+            } else {
+                self.automatic = self.focus.into();
+                self.pending = PendingFocus::None;
+            }
+        }
+    }
+
+    /// Start Preview only after initialization and while both sources are
+    /// inactive.
+    pub fn begin_preview(&mut self, now: Duration) -> bool {
+        self.advance(now);
+        if self.automatic == Automatic::Uninitialized || self.state().active() {
+            return false;
+        }
+        self.preview = true;
+        true
+    }
+
+    /// Release Preview deferral while preserving an unexpired focus delay.
+    pub fn end_preview(&mut self, now: Duration) {
+        self.advance(now);
+        self.preview = false;
+        if self.pending == PendingFocus::Deferred {
+            self.automatic = Automatic::Active;
+            self.pending = PendingFocus::None;
+        }
+    }
+
+    /// Apply an explicit Start or Stop without extending duplicate starts.
+    ///
+    /// Availability requires scheduling prerequisites, not successful native
+    /// output.
+    ///
+    /// # Errors
+    ///
+    /// Report an unrepresentable one-hour deadline.
+    pub fn manual(
+        &mut self,
+        command: ManualCommand,
+        now: Duration,
+        control_available: bool,
+    ) -> Result<ManualOutcome, SuppressionError> {
+        self.advance(now);
+        match command {
+            ManualCommand::Stop => Ok(if self.manual_deadline.take().is_some() {
+                ManualOutcome::Stopped
+            } else {
+                ManualOutcome::Unchanged
+            }),
+            ManualCommand::Start if self.manual_deadline.is_some() => Ok(ManualOutcome::Unchanged),
+            ManualCommand::Start
+                if !control_available || self.automatic == Automatic::Uninitialized =>
+            {
+                Ok(ManualOutcome::Unavailable)
+            }
+            ManualCommand::Start => {
+                let deadline = now
+                    .checked_add(Duration::from_hours(1))
+                    .ok_or(SuppressionError)?;
+                self.end_preview(now);
+                self.manual_deadline = Some(deadline);
+                Ok(ManualOutcome::Started)
+            }
+        }
+    }
+
+    /// Return state after the caller processes elapsed deadlines.
+    pub fn state(&self) -> SuppressionState {
+        SuppressionState {
+            automatic: self.automatic == Automatic::Active,
+            manual: self.manual_deadline.is_some(),
+            preview: self.preview,
+        }
+    }
+
+    /// Return the next necessary wake-up, excluding deferred automatic
+    /// activation.
+    pub fn next_deadline(&self) -> Option<Duration> {
+        let focus = match self.pending {
+            PendingFocus::Waiting(deadline) => Some(deadline),
+            PendingFocus::None | PendingFocus::Deferred => None,
+        };
+        focus.into_iter().chain(self.manual_deadline).min()
+    }
+
+    /// Return remaining manual time for a visible countdown.
+    pub fn manual_remaining(&self, now: Duration) -> Option<Duration> {
+        self.manual_deadline
+            .map(|deadline| deadline.saturating_sub(now))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ConfigInput;
+    use test_case::test_case;
+
+    fn milliseconds(value: u64) -> Duration {
+        Duration::from_millis(value)
+    }
+
+    fn focus_config(delay: i64) -> Config {
+        ConfigInput {
+            focus_delay_ms: delay,
+            ..ConfigInput::default()
+        }
+        .validate()
+        .expect("focus delay")
+    }
+
+    #[test]
+    fn matching_uses_normalized_names_and_exclusion_precedence() {
+        let config = ConfigInput {
+            suppression: vec![
+                "VLC.EXE".into(),
+                "browser.exe".into(),
+                "night-colors.exe".into(),
+            ],
+            exclusions: vec!["BROWSER.EXE".into()],
+            ..ConfigInput::default()
+        }
+        .validate()
+        .expect("config");
+        let mut apps = ForegroundApps::new("NIGHT-COLORS.EXE").expect("own name");
+        for (name, expected) in [
+            ("vlc.exe", true),
+            ("BROWSER.exe", false),
+            ("night-colors.exe", false),
+            ("unlisted.exe", false),
+            ("ApplicationFrameHost.exe", false),
+        ] {
+            apps.observe(&Foreground::Application(name.into()));
+            assert_eq!(apps.matches(&config), expected);
+        }
+        let browser = apps
+            .recent(&config)
+            .into_iter()
+            .find(|app| app.executable == "browser.exe")
+            .expect("browser entry");
+        assert!(browser.included);
+        assert!(browser.excluded);
+    }
+
+    #[test]
+    fn recent_history_retains_five_distinct_names_and_refocusing_moves_to_front() {
+        let mut apps = ForegroundApps::new("circadia.exe").expect("own name");
+        for name in [
+            "a.exe", "b.exe", "c.exe", "d.exe", "e.exe", "f.exe", "C.EXE",
+        ] {
+            apps.observe(&Foreground::Application(name.into()));
+        }
+        assert_eq!(apps.recent, ["c.exe", "f.exe", "e.exe", "d.exe", "b.exe"]);
+        assert_eq!(apps.current(), Some("c.exe"));
+        apps.observe(&Foreground::Unknown);
+        assert_eq!(apps.current(), None);
+        assert_eq!(apps.recent, ["c.exe", "f.exe", "e.exe", "d.exe", "b.exe"]);
+    }
+
+    #[test]
+    fn shell_own_host_and_failed_identity_do_not_replace_recent_candidates() {
+        let mut apps = ForegroundApps::new("renamed.exe").expect("own name");
+        apps.observe(&Foreground::Application("game.exe".into()));
+        for foreground in [
+            Foreground::Shell,
+            Foreground::Application("RENAMED.EXE".into()),
+            Foreground::Application("ApplicationFrameHost.exe".into()),
+            Foreground::Application("C:\\bad.exe".into()),
+            Foreground::Unknown,
+        ] {
+            apps.observe(&foreground);
+            assert_eq!(apps.recent, ["game.exe"]);
+        }
+    }
+
+    #[test]
+    fn nonmatching_focus_changes_still_replace_current_identity() {
+        let mut apps = ForegroundApps::new("circadia.exe").expect("own name");
+        for name in ["first.exe", "second.exe"] {
+            apps.observe(&Foreground::Application(name.into()));
+            assert_eq!(apps.current(), Some(name));
+            assert!(!apps.matches(&Config::default()));
+        }
+    }
+
+    #[test]
+    fn startup_initializes_immediately_and_later_focus_uses_the_delay() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Matching, milliseconds(0));
+        assert!(state.state().automatic);
+        assert_eq!(state.next_deadline(), None);
+        state
+            .observe_focus(Focus::Nonmatching, milliseconds(100), &focus_config(5000))
+            .expect("focus");
+        state.advance(milliseconds(5099));
+        assert!(state.state().automatic);
+        state.advance(milliseconds(5100));
+        assert!(!state.state().active());
+        assert_eq!(state.next_deadline(), None);
+    }
+
+    #[test]
+    fn a_brief_focus_reversal_cancels_the_pending_change() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Matching, milliseconds(0));
+        state
+            .observe_focus(Focus::Nonmatching, milliseconds(100), &Config::default())
+            .expect("leave");
+        state
+            .observe_focus(Focus::Matching, milliseconds(300), &Config::default())
+            .expect("return");
+        state.advance(milliseconds(500));
+        assert!(state.state().automatic);
+        assert_eq!(state.next_deadline(), None);
+    }
+
+    #[test]
+    fn changes_between_matching_apps_preserve_elapsed_focus() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
+        state
+            .observe_focus(Focus::Matching, milliseconds(100), &Config::default())
+            .expect("first app");
+        state
+            .observe_focus(Focus::Matching, milliseconds(200), &Config::default())
+            .expect("second app");
+        assert_eq!(state.next_deadline(), Some(milliseconds(350)));
+        state.advance(milliseconds(350));
+        assert!(state.state().automatic);
+        state
+            .observe_focus(Focus::Matching, milliseconds(400), &Config::default())
+            .expect("third app");
+        assert_eq!(state.next_deadline(), None);
+    }
+
+    #[test_case(0, 10; "zero delay")]
+    #[test_case(5000, 5010; "maximum delay")]
+    fn focus_delay_boundaries(delay: i64, deadline: u64) {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
+        state
+            .observe_focus(Focus::Matching, milliseconds(10), &focus_config(delay))
+            .expect("focus");
+        state.advance(milliseconds(deadline));
+        assert!(state.state().automatic);
+        assert_eq!(state.next_deadline(), None);
+    }
+
+    #[test]
+    fn preview_defers_elapsed_automatic_activation_without_a_repeating_timer() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
+        assert!(state.begin_preview(milliseconds(0)));
+        state
+            .observe_focus(Focus::Matching, milliseconds(100), &Config::default())
+            .expect("focus");
+        state.advance(milliseconds(350));
+        assert!(!state.state().active());
+        assert!(state.state().preview);
+        assert_eq!(state.next_deadline(), None);
+        state.end_preview(milliseconds(400));
+        assert!(state.state().automatic);
+        assert!(!state.state().preview);
+    }
+
+    #[test]
+    fn preview_end_preserves_a_pending_delay_and_nonmatching_focus_cancels_deferral() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
+        assert!(state.begin_preview(milliseconds(0)));
+        state
+            .observe_focus(Focus::Matching, milliseconds(100), &Config::default())
+            .expect("focus");
+        state.end_preview(milliseconds(200));
+        assert_eq!(state.next_deadline(), Some(milliseconds(350)));
+        assert!(!state.state().active());
+        assert!(state.begin_preview(milliseconds(250)));
+        state.advance(milliseconds(350));
+        state
+            .observe_focus(Focus::Nonmatching, milliseconds(400), &Config::default())
+            .expect("leave");
+        state.end_preview(milliseconds(500));
+        assert!(!state.state().active());
+        assert_eq!(state.next_deadline(), None);
+    }
+
+    #[test]
+    fn manual_commands_are_idempotent_and_stop_then_start_grants_a_fresh_hour() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
+        assert_eq!(
+            state
+                .manual(ManualCommand::Start, milliseconds(100), true)
+                .expect("start"),
+            ManualOutcome::Started
+        );
+        assert_eq!(state.next_deadline(), Some(milliseconds(3_600_100)));
+        assert_eq!(
+            state
+                .manual(ManualCommand::Start, milliseconds(1000), true)
+                .expect("duplicate"),
+            ManualOutcome::Unchanged
+        );
+        assert_eq!(state.next_deadline(), Some(milliseconds(3_600_100)));
+        assert_eq!(
+            state
+                .manual(ManualCommand::Stop, milliseconds(2000), false)
+                .expect("stop while unavailable"),
+            ManualOutcome::Stopped
+        );
+        assert_eq!(
+            state
+                .manual(ManualCommand::Stop, milliseconds(2000), false)
+                .expect("duplicate stop"),
+            ManualOutcome::Unchanged
+        );
+        assert_eq!(
+            state
+                .manual(ManualCommand::Start, milliseconds(2000), true)
+                .expect("new start"),
+            ManualOutcome::Started
+        );
+        assert_eq!(state.next_deadline(), Some(milliseconds(3_602_000)));
+    }
+
+    #[test]
+    fn manual_and_automatic_sources_end_independently() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Matching, milliseconds(0));
+        state
+            .manual(ManualCommand::Start, milliseconds(0), true)
+            .expect("start");
+        state.advance(milliseconds(3_600_000));
+        assert!(state.state().automatic);
+        assert!(!state.state().manual);
+        state
+            .manual(ManualCommand::Start, milliseconds(3_600_000), true)
+            .expect("new start");
+        state
+            .observe_focus(
+                Focus::Nonmatching,
+                milliseconds(3_600_000),
+                &Config::default(),
+            )
+            .expect("leave");
+        state.advance(milliseconds(3_600_250));
+        assert!(!state.state().automatic);
+        assert!(state.state().manual);
+        assert!(state.state().active());
+        state.advance(milliseconds(7_200_000));
+        assert!(!state.state().active());
+    }
+
+    #[test]
+    fn unavailable_control_blocks_new_manual_intervals_without_extending_existing_ones() {
+        let mut state = Suppression::default();
+        assert_eq!(
+            state
+                .manual(ManualCommand::Start, milliseconds(0), true)
+                .expect("before startup"),
+            ManualOutcome::Unavailable
+        );
+        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
+        assert_eq!(
+            state
+                .manual(ManualCommand::Start, milliseconds(0), false)
+                .expect("unavailable"),
+            ManualOutcome::Unavailable
+        );
+        state
+            .manual(ManualCommand::Start, milliseconds(100), true)
+            .expect("start");
+        assert_eq!(
+            state
+                .manual(ManualCommand::Start, milliseconds(1000), false)
+                .expect("duplicate during error"),
+            ManualOutcome::Unchanged
+        );
+        assert_eq!(
+            state.manual_remaining(milliseconds(1000)),
+            Some(milliseconds(3_599_100))
+        );
+        state.advance(milliseconds(4_200_100));
+        assert!(!state.state().manual);
+        assert_eq!(state.next_deadline(), None);
+    }
+
+    #[test]
+    fn manual_start_cancels_preview_and_blocks_new_playback() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
+        assert!(state.begin_preview(milliseconds(0)));
+        state
+            .manual(ManualCommand::Start, milliseconds(100), true)
+            .expect("start");
+        assert!(!state.state().preview);
+        assert!(state.state().manual);
+        assert!(!state.begin_preview(milliseconds(100)));
+        state
+            .manual(ManualCommand::Stop, milliseconds(200), true)
+            .expect("stop");
+        assert!(!state.state().preview);
+    }
+
+    #[test]
+    fn resume_restarts_pending_focus_delay_and_expires_sleep_inclusive_manual_time() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
+        state
+            .manual(ManualCommand::Start, milliseconds(0), true)
+            .expect("start");
+        state
+            .observe_focus(Focus::Matching, milliseconds(1_200_000), &Config::default())
+            .expect("focus before sleep");
+        state
+            .resume_focus(Focus::Matching, milliseconds(4_200_000), &Config::default())
+            .expect("resume");
+        assert!(!state.state().active());
+        assert_eq!(state.next_deadline(), Some(milliseconds(4_200_250)));
+        state.advance(milliseconds(4_200_250));
+        assert!(state.state().automatic);
+        state
+            .resume_focus(Focus::Matching, milliseconds(5_000_000), &Config::default())
+            .expect("resume while active");
+        assert!(state.state().automatic);
+        assert_eq!(state.next_deadline(), None);
+    }
+
+    #[test]
+    fn changed_delay_uses_the_time_that_matching_focus_began() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
+        state
+            .observe_focus(Focus::Matching, milliseconds(100), &focus_config(5000))
+            .expect("focus");
+        state
+            .observe_focus(Focus::Matching, milliseconds(500), &focus_config(250))
+            .expect("shorter delay");
+        assert!(state.state().automatic);
+        assert_eq!(state.next_deadline(), None);
+    }
+
+    #[test]
+    fn deadline_overflow_is_recoverable() {
+        let mut state = Suppression::default();
+        state.initialize_focus(Focus::Nonmatching, Duration::ZERO);
+        assert_eq!(
+            state.manual(ManualCommand::Start, Duration::MAX, true),
+            Err(SuppressionError)
+        );
+        assert!(!state.state().active());
+        assert_eq!(
+            state.observe_focus(Focus::Matching, Duration::MAX, &Config::default()),
+            Err(SuppressionError)
+        );
+    }
+}
