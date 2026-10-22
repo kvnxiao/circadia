@@ -1,7 +1,11 @@
 //! Validate Circadia settings and provide application domain logic.
 
 mod config;
+#[cfg(windows)]
+mod controller;
 mod diagnostics;
+#[cfg(windows)]
+mod native;
 #[cfg(windows)]
 mod platform;
 #[cfg(windows)]
@@ -16,11 +20,92 @@ pub use config::Coordinates;
 pub use config::FieldError;
 pub use config::ValidationError;
 pub use config::normalize_executable;
+#[cfg(windows)]
+pub use controller::AttemptStatus;
+#[cfg(windows)]
+pub use controller::CalculatedSchedule;
+#[cfg(windows)]
+pub use controller::CalculationClient;
+#[cfg(windows)]
+pub use controller::CalculationPurpose;
+#[cfg(windows)]
+pub use controller::CalculationRequest;
+#[cfg(windows)]
+pub use controller::CalculationResult;
+#[cfg(windows)]
+pub use controller::CalculationWorker;
+#[cfg(windows)]
+pub use controller::CommandOutcome;
+pub use controller::CommandReceipt;
+#[cfg(windows)]
+pub use controller::ControlError;
+#[cfg(windows)]
+pub use controller::ControlRuntime;
+#[cfg(windows)]
+pub use controller::ControlTime;
+#[cfg(windows)]
+pub use controller::ControllerClient;
+#[cfg(windows)]
+pub use controller::ControllerCommand;
+#[cfg(windows)]
+pub use controller::ControllerExit;
+#[cfg(windows)]
+pub use controller::ControllerSnapshot;
+#[cfg(windows)]
+pub use controller::ControllerWorker;
+#[cfg(windows)]
+pub use controller::NativeCycle;
+#[cfg(windows)]
+pub use controller::NativeDriver;
+#[cfg(windows)]
+pub use controller::NativeRecovery;
+#[cfg(windows)]
+pub use controller::OutputDeadlines;
+#[cfg(windows)]
+pub use controller::OutputRate;
+#[cfg(windows)]
+pub use controller::OutputTarget;
+#[cfg(windows)]
+pub use controller::OutputUpdate;
+#[cfg(windows)]
+pub use controller::Recompute;
+#[cfg(windows)]
+pub use controller::RunningPreview;
+#[cfg(windows)]
+pub use controller::RuntimeTime;
+#[cfg(windows)]
+pub use controller::SchedulingState;
+#[cfg(windows)]
+pub use controller::TemperatureFade;
+#[cfg(windows)]
+pub use controller::TemperatureOutput;
 pub use diagnostics::DiagnosticCategory;
 pub use diagnostics::DiagnosticFailure;
 pub use diagnostics::DiagnosticLog;
 pub use diagnostics::DiagnosticOperation;
 pub use diagnostics::DiagnosticWrite;
+#[cfg(windows)]
+pub use native::ActivationPreparation;
+#[cfg(windows)]
+pub use native::Native;
+#[cfg(windows)]
+pub use native::NativeAttempt;
+#[cfg(windows)]
+pub use native::NativeExit;
+#[cfg(windows)]
+pub use native::NativeFailure;
+#[cfg(windows)]
+pub use native::NativeNotifications;
+#[cfg(windows)]
+pub use native::NativeRequest;
+#[cfg(windows)]
+pub use native::NativeSettings;
+#[cfg(windows)]
+pub use native::NativeSnapshot;
+#[cfg(windows)]
+pub use native::ObservationMode;
+#[cfg(windows)]
+pub use native::TemperatureMode;
 #[cfg(windows)]
 pub use platform::clock::WindowsZone;
 #[cfg(windows)]
@@ -29,6 +114,10 @@ pub use platform::clock::elapsed_since_boot;
 pub use platform::foreground::ForegroundEvents;
 #[cfg(windows)]
 pub use platform::foreground::read_foreground;
+#[cfg(windows)]
+pub use platform::wake::NativeWake;
+#[cfg(windows)]
+pub use platform::wake::WakeReason;
 #[cfg(windows)]
 pub use schedule::ActivityInterval;
 #[cfg(windows)]

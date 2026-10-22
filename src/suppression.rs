@@ -236,6 +236,13 @@ impl Suppression {
         Ok(())
     }
 
+    /// Cancel pending focus changes and Preview while retaining active sources.
+    pub fn suspend(&mut self, now: Duration) {
+        self.preview = false;
+        self.pending = PendingFocus::None;
+        self.advance(now);
+    }
+
     /// Discard pre-suspend focus timing and expire manual suppression before
     /// output.
     ///
