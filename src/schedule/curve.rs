@@ -126,6 +126,17 @@ impl Curve {
         self.segment(instant)?.rounded(instant)
     }
 
+    pub(crate) fn ratio(&self, instant: Timestamp) -> Result<(i128, i128), ScheduleError> {
+        let segment = self.segment(instant)?;
+        let span = segment.end.as_nanosecond() - segment.start.as_nanosecond();
+        let elapsed = instant.as_nanosecond() - segment.start.as_nanosecond();
+        Ok((
+            i128::from(segment.from) * span
+                + (i128::from(segment.to) - i128::from(segment.from)) * elapsed,
+            span,
+        ))
+    }
+
     /// Find the next nanosecond at which rounded output changes.
     ///
     /// # Errors
