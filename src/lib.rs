@@ -13,6 +13,8 @@ mod schedule;
 mod session;
 mod storage;
 mod suppression;
+#[cfg(windows)]
+mod ui;
 
 pub use config::Config;
 pub use config::ConfigInput;
@@ -36,6 +38,7 @@ pub use controller::CalculationResult;
 pub use controller::CalculationWorker;
 #[cfg(windows)]
 pub use controller::CommandOutcome;
+#[cfg(windows)]
 pub use controller::CommandReceipt;
 #[cfg(windows)]
 pub use controller::ControlError;
@@ -76,6 +79,8 @@ pub use controller::RuntimeTime;
 #[cfg(windows)]
 pub use controller::SchedulingState;
 #[cfg(windows)]
+pub use controller::SolarConflict;
+#[cfg(windows)]
 pub use controller::TemperatureFade;
 #[cfg(windows)]
 pub use controller::TemperatureOutput;
@@ -111,9 +116,23 @@ pub use platform::clock::WindowsZone;
 #[cfg(windows)]
 pub use platform::clock::elapsed_since_boot;
 #[cfg(windows)]
+pub use platform::config_notifications::ConfigurationNotifications;
+#[cfg(windows)]
+pub use platform::events::DesktopEvent;
+#[cfg(windows)]
+pub use platform::events::LifecycleWindow;
+#[cfg(windows)]
+pub use platform::events::UiWake;
+#[cfg(windows)]
 pub use platform::foreground::ForegroundEvents;
 #[cfg(windows)]
 pub use platform::foreground::read_foreground;
+#[cfg(windows)]
+pub use platform::instance::ExistingInstance;
+#[cfg(windows)]
+pub use platform::instance::InstanceClaim;
+#[cfg(windows)]
+pub use platform::instance::PrimaryInstance;
 #[cfg(windows)]
 pub use platform::wake::NativeWake;
 #[cfg(windows)]
@@ -155,6 +174,7 @@ pub use schedule::select_solar;
 pub use session::ConfigLayer;
 pub use session::ConfigSession;
 pub use session::Draft;
+pub use session::ExecutableList;
 pub use session::ReloadChange;
 pub use session::ReloadResult;
 pub use session::SessionError;
@@ -174,3 +194,7 @@ pub use suppression::RecentApp;
 pub use suppression::Suppression;
 pub use suppression::SuppressionError;
 pub use suppression::SuppressionState;
+#[cfg(all(windows, feature = "graph-measurement"))]
+pub use ui::measurement::GraphMeasurement;
+#[cfg(windows)]
+pub use ui::run_desktop;

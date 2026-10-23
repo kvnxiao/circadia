@@ -8,6 +8,15 @@ use crate::ValidationError;
 use crate::normalize_executable;
 use thiserror::Error;
 
+/// Select the editable executable filename list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecutableList {
+    /// Include a foreground application in automatic suppression.
+    Suppression,
+    /// Override automatic suppression for a foreground application.
+    Exclusions,
+}
+
 /// Keep a configuration layer's last successfully stored scheduled temperature.
 #[derive(Clone, Debug)]
 pub struct ConfigLayer {
@@ -38,6 +47,11 @@ pub struct Draft {
 }
 
 impl Draft {
+    /// Return the Discard baseline, including persisted tray changes.
+    pub fn baseline(&self) -> &Config {
+        &self.baseline
+    }
+
     /// Return the editable fields, including invalid whole-number and clock
     /// input.
     pub fn input(&self) -> &ConfigInput {
@@ -188,6 +202,39 @@ impl ConfigSession {
         }
     }
 
+    /// Change one draft membership without persisting it.
+    ///
+    /// # Errors
+    /// Reject missing drafts, invalid filenames, or fixed exclusions.
+    pub fn edit_executable(
+        &mut self,
+        list: ExecutableList,
+        executable: &str,
+        present: bool,
+        running_executable: &str,
+    ) -> Result<(), SessionError> {
+        let executable = normalize_executable(executable)?;
+        if present && Config::default().is_excluded(&executable, running_executable) {
+            return Err(SessionError::ExcludedExecutable);
+        }
+        let draft = self.draft.as_mut().ok_or(SessionError::NoDraft)?;
+        let mut input = draft.input.clone();
+        let names = match list {
+            ExecutableList::Suppression => &mut input.suppression,
+            ExecutableList::Exclusions => &mut input.exclusions,
+        };
+        names.retain(|name| name != &executable);
+        if present {
+            names.push(executable);
+            names.sort_unstable();
+        }
+        if draft.error.is_some() {
+            draft.input = input;
+            return Ok(());
+        }
+        self.edit(input)
+    }
+
     /// Preserve an unparsed UI field without changing valid runtime settings.
     ///
     /// # Errors
@@ -248,7 +295,9 @@ impl ConfigSession {
     /// Preserve accepted and draft state when reading or validating the file
     /// fails.
     pub fn reload(&mut self, store: &ConfigStore) -> Result<ReloadResult, StorageError> {
-        let Some(external) = store.read_external()? else {
+        let Some(external) =
+            store.read_external(self.accepted.as_ref().map(ConfigLayer::config))?
+        else {
             return Ok(ReloadResult {
                 change: ReloadChange::Missing,
                 persistence: PersistResult::default(),
@@ -373,6 +422,91 @@ mod tests {
     use super::*;
 
     #[test]
+    fn draft_exclusions_preserve_inclusions_and_the_discard_baseline() {
+        let initial = ConfigInput {
+            suppression: vec!["game.exe".into()],
+            ..ConfigInput::default()
+        }
+        .validate()
+        .expect("initial settings");
+        let mut session = ConfigSession::new(Some(initial));
+        session.begin_edit();
+        session
+            .edit_executable(ExecutableList::Exclusions, "GAME.EXE", true, "circadia.exe")
+            .expect("exclude a listed app");
+        let draft = session.draft().expect("draft");
+        assert!(draft.is_dirty());
+        assert!(
+            draft
+                .live()
+                .config()
+                .is_excluded("game.exe", "circadia.exe")
+        );
+        assert_eq!(draft.input().suppression, ["game.exe"]);
+        assert_eq!(draft.baseline().input().exclusions, Vec::<String>::new());
+        session.load_latest();
+        assert_eq!(
+            session.draft().expect("restored draft").input().exclusions,
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            session.draft().expect("restored draft").input().suppression,
+            ["game.exe"]
+        );
+    }
+
+    #[test]
+    fn list_edits_during_invalid_text_remain_unsaved_without_replacing_live_values() {
+        let mut session = ConfigSession::new(Some(Config::default()));
+        session.begin_edit();
+        session
+            .invalid_edit(FieldError {
+                field: "wake",
+                message: "Enter a clock.",
+            })
+            .expect("invalid UI text");
+        session
+            .edit_executable(
+                ExecutableList::Suppression,
+                "game.exe",
+                true,
+                "circadia.exe",
+            )
+            .expect("editable list");
+        let draft = session.draft().expect("draft");
+        assert_eq!(draft.input().suppression, ["game.exe"]);
+        assert!(draft.error().is_some());
+        assert_eq!(
+            draft.live().config().input().suppression,
+            Vec::<String>::new()
+        );
+        let corrected = draft.input().clone();
+        session.edit(corrected).expect("corrected text");
+        assert_eq!(
+            session
+                .draft()
+                .expect("draft")
+                .live()
+                .config()
+                .input()
+                .suppression,
+            ["game.exe"]
+        );
+    }
+
+    #[test_case::test_case(ExecutableList::Suppression, "ApplicationFrameHost.exe")]
+    #[test_case::test_case(ExecutableList::Exclusions, "NIGHT-COLORS.EXE")]
+    fn selection_rejects_fixed_exclusions(list: ExecutableList, executable: &str) {
+        let mut session = ConfigSession::new(Some(Config::default()));
+        session.begin_edit();
+        assert!(matches!(
+            session.edit_executable(list, executable, true, "night-colors.exe"),
+            Err(SessionError::ExcludedExecutable)
+        ));
+        assert!(!session.draft().expect("draft").is_dirty());
+    }
+
+    #[test]
     fn save_detects_an_external_edit_before_its_notification() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let store = ConfigStore::new(directory.path());
@@ -394,7 +528,7 @@ mod tests {
         assert!(matches!(session.save(&store), Err(SessionError::Stale)));
         assert_eq!(
             store
-                .read_external()
+                .read_external(None)
                 .expect("read file")
                 .expect("file")
                 .config
@@ -434,7 +568,7 @@ mod tests {
             .set_inclusion(&store, "game.exe", true, "circadia.exe")
             .expect("tray addition");
         let saved = store
-            .read_external()
+            .read_external(None)
             .expect("read file")
             .expect("file")
             .config;
@@ -618,7 +752,7 @@ mod tests {
         assert_eq!(draft.input().suppression, ["game.exe"]);
         assert!(draft.error().is_some());
         let saved = store
-            .read_external()
+            .read_external(None)
             .expect("read saved")
             .expect("saved file")
             .config;
@@ -800,6 +934,35 @@ mod tests {
         session.begin_edit();
         session.save(&store).expect("recreate file");
         assert!(store.primary_path().is_file());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unchanged_reload_does_not_generate_another_file_notification() {
+        use crate::ConfigurationNotifications;
+        use crate::NativeWake;
+        use crate::WakeReason;
+        use std::time::Duration;
+
+        let directory = tempfile::tempdir().expect("configuration directory");
+        let store = ConfigStore::new(directory.path());
+        store
+            .save(&Config::default())
+            .expect("initial configuration");
+        let mut session = ConfigSession::new(Some(Config::default()));
+        let mut changes =
+            ConfigurationNotifications::open(directory.path()).expect("watch directory");
+        let wake = NativeWake::new().expect("worker wake");
+        assert_eq!(
+            session.reload(&store).expect("reload").change,
+            ReloadChange::Unchanged
+        );
+        assert_eq!(
+            changes
+                .wait(&wake, Some(Duration::from_millis(25)))
+                .expect("observe reload effects"),
+            WakeReason::Deadline
+        );
     }
 
     #[test]

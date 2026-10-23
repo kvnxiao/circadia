@@ -376,7 +376,9 @@ impl ControlRuntime {
         now: RuntimeTime,
     ) -> Result<ManualOutcome, ControlError> {
         let before = self.suppression.state().active();
-        let available = self.available() || (self.preview_active() && self.focus_initialized);
+        let available = self.available()
+            || (self.focus_initialized
+                && (self.preview_active() || self.state == SchedulingState::Evaluating));
         let outcome = self.suppression.manual(command, now.uptime, available)?;
         if outcome == ManualOutcome::Started {
             self.preview = None;

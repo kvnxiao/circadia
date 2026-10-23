@@ -87,6 +87,14 @@ enum StorageErrorKind {
 }
 
 impl StorageError {
+    pub(crate) fn missing_configuration() -> Self {
+        StorageErrorKind::Io {
+            operation: "reading configuration file",
+            source: io::Error::from(io::ErrorKind::NotFound),
+        }
+        .into()
+    }
+
     pub(crate) fn is_invalid_input(&self) -> bool {
         matches!(
             &self.0,
@@ -163,21 +171,29 @@ impl ConfigStore {
         })
     }
 
-    /// Read an externally changed file and back up its validated bytes.
+    /// Read the primary file and back up validated values that differ from
+    /// `accepted`.
     ///
     /// # Errors
     ///
     /// Return read, decoding, or validation errors; preserve the existing
     /// backup on failure.
-    pub fn read_external(&self) -> Result<Option<ExternalConfig>, StorageError> {
+    pub fn read_external(
+        &self,
+        accepted: Option<&Config>,
+    ) -> Result<Option<ExternalConfig>, StorageError> {
         let Some((config, contents)) = read_config(&self.primary_path())? else {
             return Ok(None);
         };
         Ok(Some(ExternalConfig {
-            config,
             persistence: PersistResult {
-                backup_error: atomic_write(&self.backup_path(), contents.as_bytes()).err(),
+                backup_error: if accepted == Some(&config) {
+                    None
+                } else {
+                    atomic_write(&self.backup_path(), contents.as_bytes()).err()
+                },
             },
+            config,
         }))
     }
 
@@ -430,7 +446,7 @@ mod tests {
         store.save(&Config::default()).expect("initial save");
         let before = fs_err::read(store.backup_path()).expect("backup bytes");
         fs_err::write(store.primary_path(), "invalid").expect("external invalid edit");
-        assert!(store.read_external().is_err());
+        assert!(store.read_external(None).is_err());
         assert_eq!(
             fs_err::read(store.backup_path()).expect("backup bytes"),
             before

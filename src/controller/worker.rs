@@ -74,12 +74,22 @@ pub enum Recompute {
 }
 
 /// Send one ordered state-changing intent to the sole controller worker.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ControllerCommand {
     /// Open a draft without changing output.
     BeginEdit,
-    /// Validate and apply editable fields; calculate the graph independently.
+    /// Validate scalar fields while preserving ordered executable-list edits.
+    /// Calculate the graph independently of native output.
     Edit(Box<ConfigInput>),
+    /// Change one executable-list membership in the live draft.
+    EditExecutable {
+        /// List receiving the change.
+        list: crate::ExecutableList,
+        /// Executable filename only.
+        executable: String,
+        /// Requested membership.
+        present: bool,
+    },
     /// Preserve an unparsed field error without changing live values.
     InvalidEdit(FieldError),
     /// Persist and adopt the live draft without restarting its transition.
@@ -108,6 +118,13 @@ pub enum ControllerCommand {
     Preview(Box<Config>),
     /// Stop playback and restore current live control.
     StopPreview,
+    /// Record a UI operation outcome using only sanitized diagnostic data.
+    Diagnostic {
+        /// Operation whose failure or recovery changed.
+        operation: DiagnosticOperation,
+        /// Failure category and technical code, or successful recovery.
+        result: Result<(), DiagnosticFailure>,
+    },
     /// Process an already resolved foreground observation.
     Foreground(Foreground),
     /// Recompute after a Windows notification or explicit Retry.
@@ -142,7 +159,7 @@ impl ControllerCommand {
         }
     }
 
-    fn bytes(&self) -> usize {
+    pub(crate) fn bytes(&self) -> usize {
         let input = match self {
             Self::Edit(input) => Some(input.as_ref()),
             Self::Preview(config) => Some(config.input()),
@@ -164,6 +181,7 @@ impl ControllerCommand {
         } else {
             match self {
                 Self::Inclusion { executable, .. }
+                | Self::EditExecutable { executable, .. }
                 | Self::Foreground(Foreground::Application(executable))
                 | Self::Resume {
                     foreground: Foreground::Application(executable),
@@ -261,6 +279,7 @@ struct Shared {
     latest: Mutex<Option<Arc<ControllerSnapshot>>>,
     generation: AtomicU64,
     stopping: AtomicBool,
+    finished: AtomicBool,
     wake: Arc<NativeWake>,
     calculation: CalculationClient,
     notify: Arc<dyn Fn() -> io::Result<()> + Send + Sync>,
@@ -278,6 +297,9 @@ impl Drop for StopAdmission {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         queue.commands.clear();
         queue.bytes = 0;
+        drop(queue);
+        self.0.finished.store(true, Ordering::Release);
+        drop((self.0.notify)());
     }
 }
 
@@ -292,6 +314,10 @@ impl fmt::Debug for ControllerClient {
 }
 
 impl ControllerClient {
+    pub(crate) fn is_finished(&self) -> bool {
+        self.0.finished.load(Ordering::Acquire)
+    }
+
     /// Enqueue a command without waiting for a native call or disk operation.
     ///
     /// - Success acknowledges admission, not command completion.
@@ -316,19 +342,23 @@ impl ControllerClient {
         if matches!(
             command,
             ControllerCommand::Edit(_)
+                | ControllerCommand::EditExecutable { .. }
                 | ControllerCommand::InvalidEdit(_)
                 | ControllerCommand::Save
-        ) && self
-            .snapshot()?
-            .is_some_and(|snapshot| snapshot.preview_active)
-        {
+        ) && queued_preview_active(
+            self.snapshot()?
+                .is_some_and(|snapshot| snapshot.preview_active),
+            &queue.commands,
+        ) {
             return Err(io::Error::new(
                 io::ErrorKind::WouldBlock,
                 "Preview disables settings edits and Save",
             ));
         }
         let bytes = queue.bytes.saturating_add(command.bytes());
-        if queue.commands.len() >= 128 || bytes > 8 * 1024 * 1024 {
+        if queue.commands.len() >= super::COMMAND_QUEUE_CAPACITY
+            || bytes > super::COMMAND_QUEUE_BYTES
+        {
             return Err(io::Error::new(
                 io::ErrorKind::WouldBlock,
                 "controller command queue is full",
@@ -424,6 +454,22 @@ impl ControllerClient {
     }
 }
 
+fn queued_preview_active(active: bool, commands: &VecDeque<Envelope>) -> bool {
+    commands
+        .iter()
+        .fold(active, |active, envelope| match &envelope.command {
+            ControllerCommand::Preview(_) => true,
+            ControllerCommand::StopPreview
+            | ControllerCommand::Discard
+            | ControllerCommand::LoadLatest
+            | ControllerCommand::Lock
+            | ControllerCommand::Suspend
+            | ControllerCommand::Manual(ManualCommand::Start)
+            | ControllerCommand::Recompute(Recompute::Clock) => false,
+            _ => active,
+        })
+}
+
 /// Preserve independent exit and worker outcomes for the application boundary.
 #[derive(Debug)]
 pub struct ControllerExit {
@@ -474,7 +520,7 @@ impl ControllerWorker {
         )
     }
 
-    fn with_native(
+    pub(crate) fn with_native(
         directory: PathBuf,
         running_executable: String,
         notify: impl Fn() -> io::Result<()> + Send + Sync + 'static,
@@ -496,6 +542,7 @@ impl ControllerWorker {
             latest: Mutex::new(None),
             generation: AtomicU64::new(0),
             stopping: AtomicBool::new(false),
+            finished: AtomicBool::new(false),
             wake,
             calculation: calculation.client(),
             notify,
@@ -614,7 +661,7 @@ struct Worker<F> {
     store: ConfigStore,
     own_executable: String,
     startup: Option<Arc<StartupConfig>>,
-    storage_error: Option<Arc<StorageError>>,
+    storage_error: Option<(DiagnosticOperation, Arc<StorageError>)>,
     command: Option<(u64, CommandOutcome)>,
     native_errors: BTreeMap<DiagnosticOperation, Arc<NativeFailure>>,
     control_error: Option<Arc<ControlError>>,
@@ -903,7 +950,10 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             uptime: now.uptime,
             recent: runtime.recent(),
             startup: self.startup.clone(),
-            storage_error: self.storage_error.clone(),
+            storage_error: self
+                .storage_error
+                .as_ref()
+                .map(|(_, error)| Arc::clone(error)),
             command: self.command.clone(),
             native_errors: self.native_errors.clone(),
             control_error: self.control_error.clone(),
@@ -923,6 +973,12 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         let mut outcome = CommandOutcome::Applied;
         let mut expedite = false;
         match envelope.command {
+            ControllerCommand::Diagnostic { operation, result } => {
+                match result {
+                    Ok(()) => self.log.recovered(operation, SystemTime::now()),
+                    Err(failure) => self.log.failure(operation, failure, SystemTime::now()),
+                };
+            }
             ControllerCommand::Manual(command) => {
                 let result = self
                     .driver
@@ -1007,6 +1063,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             && matches!(
                 command,
                 ControllerCommand::Edit(_)
+                    | ControllerCommand::EditExecutable { .. }
                     | ControllerCommand::InvalidEdit(_)
                     | ControllerCommand::Save
             )
@@ -1021,10 +1078,29 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         let mut expedite = false;
         match command {
             ControllerCommand::BeginEdit => self.session.begin_edit(),
-            ControllerCommand::Edit(input) => match self.session.edit(*input) {
-                Ok(()) => update = Some(OutputUpdate::LiveEdit),
-                Err(error) => outcome = CommandOutcome::Failed(Arc::new(error)),
-            },
+            ControllerCommand::Edit(mut input) => {
+                if let Some(draft) = self.session.draft() {
+                    input.suppression.clone_from(&draft.input().suppression);
+                    input.exclusions.clone_from(&draft.input().exclusions);
+                }
+                match self.session.edit(*input) {
+                    Ok(()) => update = Some(OutputUpdate::LiveEdit),
+                    Err(error) => outcome = CommandOutcome::Failed(Arc::new(error)),
+                }
+            }
+            ControllerCommand::EditExecutable {
+                list,
+                executable,
+                present,
+            } => {
+                match self
+                    .session
+                    .edit_executable(list, &executable, present, &self.own_executable)
+                {
+                    Ok(()) => update = Some(OutputUpdate::LiveEdit),
+                    Err(error) => outcome = CommandOutcome::Failed(Arc::new(error)),
+                }
+            }
             ControllerCommand::InvalidEdit(error) => {
                 if let Err(error) = self.session.invalid_edit(error) {
                     outcome = CommandOutcome::Failed(Arc::new(error));
@@ -1056,23 +1132,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 self.session.load_latest();
                 update = Some(OutputUpdate::Apply);
             }
-            ControllerCommand::Reload => match self.session.reload(&self.store) {
-                Ok(result) => {
-                    self.persisted(result.persistence);
-                    self.recovered(DiagnosticOperation::ConfigurationRead);
-                    if result.change == crate::ReloadChange::Changed {
-                        update = Some(OutputUpdate::Fade);
-                    }
-                }
-                Err(error) => {
-                    self.log.failure(
-                        DiagnosticOperation::ConfigurationRead,
-                        error.diagnostic(),
-                        SystemTime::now(),
-                    );
-                    self.storage_error = Some(Arc::new(error));
-                }
-            },
+            ControllerCommand::Reload => update = self.reload_configuration(),
             ControllerCommand::Inclusion {
                 executable,
                 included,
@@ -1124,11 +1184,39 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 error.diagnostic(),
                 SystemTime::now(),
             );
-            self.storage_error = Some(Arc::new(error));
+            self.storage_error = Some((DiagnosticOperation::BackupWrite, Arc::new(error)));
         } else {
             self.recovered(DiagnosticOperation::BackupWrite);
             self.storage_error = None;
         }
+    }
+
+    fn reload_configuration(&mut self) -> Option<OutputUpdate> {
+        let error = match self.session.reload(&self.store) {
+            Ok(result) if result.change != crate::ReloadChange::Missing => {
+                self.recovered(DiagnosticOperation::ConfigurationRead);
+                if result.change == crate::ReloadChange::Changed {
+                    self.persisted(result.persistence);
+                    return Some(OutputUpdate::Fade);
+                }
+                if matches!(
+                    self.storage_error,
+                    Some((DiagnosticOperation::ConfigurationRead, _))
+                ) {
+                    self.storage_error = None;
+                }
+                return None;
+            }
+            Ok(_) => StorageError::missing_configuration(),
+            Err(error) => error,
+        };
+        self.log.failure(
+            DiagnosticOperation::ConfigurationRead,
+            error.diagnostic(),
+            SystemTime::now(),
+        );
+        self.storage_error = Some((DiagnosticOperation::ConfigurationRead, Arc::new(error)));
+        None
     }
 
     fn calculation_failed(&mut self, operation: DiagnosticOperation) {

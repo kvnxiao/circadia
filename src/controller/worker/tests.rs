@@ -187,6 +187,63 @@ fn acknowledged(snapshot: &ControllerSnapshot, receipt: &CommandReceipt) -> bool
 }
 
 #[test]
+fn shutdown_notifies_after_disconnecting_queued_actions() {
+    let directory = tempfile::tempdir().expect("directory");
+    ConfigStore::new(directory.path())
+        .save(&input(3400).validate().expect("config"))
+        .expect("saved config");
+    let (entered, started) = mpsc::sync_channel(1);
+    let (release, finish) = mpsc::sync_channel(1);
+    let records = Arc::new(Mutex::new(Records {
+        blocked: Some((entered, finish)),
+        ..Records::default()
+    }));
+    let observer = Arc::new(Mutex::new(std::sync::Weak::<Shared>::new()));
+    let completion_state = Arc::clone(&observer);
+    let (notify, notified) = mpsc::sync_channel(1);
+    let worker = ControllerWorker::with_native(
+        directory.path().to_owned(),
+        "circadia.exe".into(),
+        move || {
+            if completion_state
+                .lock()
+                .expect("client observer")
+                .upgrade()
+                .is_some_and(|shared| shared.finished.load(Ordering::Acquire))
+            {
+                notify.try_send(()).expect("one final notification");
+            }
+            Ok(())
+        },
+        Native::with_backend(Backend(records)),
+        || Foreground::Unknown,
+    )
+    .expect("worker");
+    let client = worker.client();
+    *observer.lock().expect("client observer") = Arc::downgrade(&client.0);
+    started
+        .recv_timeout(Duration::from_secs(10))
+        .expect("native operation blocked");
+    let receipt = client
+        .submit(ControllerCommand::BeginEdit)
+        .expect("queued action");
+    client.request_exit().expect("exit requested");
+    assert!(!client.is_finished());
+    release.send(()).expect("finish native operation");
+    notified
+        .recv_timeout(Duration::from_secs(10))
+        .expect("notification after final disconnect");
+    assert!(client.is_finished());
+    assert!(matches!(
+        receipt.completion.try_recv(),
+        Err(mpsc::TryRecvError::Disconnected)
+    ));
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+}
+
+#[test]
 fn failed_save_outcome_survives_later_commands() {
     let directory = tempfile::tempdir().expect("directory");
     ConfigStore::new(directory.path())
@@ -305,6 +362,150 @@ fn startup_diagnostics_record_failure_and_save_recovery_without_private_input() 
     );
     assert!(!log.contains("private-clock-input"));
     assert!(!log.contains(directory.path().to_str().expect("fixture path")));
+}
+
+#[test]
+fn ui_diagnostics_record_failure_once_and_recovery_without_changing_configuration() {
+    let directory = tempfile::tempdir().expect("directory");
+    let store = ConfigStore::new(directory.path());
+    let initial = input(3400).validate().expect("valid configuration");
+    store.save(&initial).expect("save fixture");
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    let failure = DiagnosticFailure {
+        category: DiagnosticCategory::AccessDenied,
+        code: Some(5),
+    };
+    for result in [Err(failure), Err(failure), Ok(())] {
+        let receipt = client
+            .submit(ControllerCommand::Diagnostic {
+                operation: DiagnosticOperation::Location,
+                result,
+            })
+            .expect("report UI result");
+        wait_for(&client, &notified, |snapshot| {
+            acknowledged(snapshot, &receipt)
+        });
+    }
+    assert!(worker.shutdown().worker.is_ok());
+    let log =
+        fs_err::read_to_string(directory.path().join("diagnostics.log")).expect("diagnostic log");
+    let entries: Vec<_> = log
+        .lines()
+        .map(|line| line.split_once('\t').expect("timestamp field").1)
+        .collect();
+    assert_eq!(
+        entries,
+        [
+            "location\tfailure\taccess_denied\t5",
+            "location\trecovered\t-\t-"
+        ]
+    );
+    assert_eq!(
+        store
+            .load()
+            .accepted
+            .expect("configuration remains readable"),
+        initial
+    );
+}
+
+#[test]
+fn unchanged_reload_preserves_backup_warning_until_a_successful_write() {
+    let directory = tempfile::tempdir().expect("directory");
+    let store = ConfigStore::new(directory.path());
+    store
+        .save(&input(3400).validate().expect("config"))
+        .expect("saved config");
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    wait_for(&client, &notified, |snapshot| {
+        snapshot.scheduling == SchedulingState::Available
+    });
+    fs_err::remove_file(store.backup_path()).expect("remove backup fixture");
+    fs_err::create_dir(store.backup_path()).expect("prevent backup replacement");
+    client
+        .submit(ControllerCommand::BeginEdit)
+        .expect("begin edit");
+    let saved = client
+        .submit(ControllerCommand::Save)
+        .expect("save with backup failure");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &saved)
+    });
+    assert!(snapshot.storage_error.is_some());
+    let reloaded = client
+        .submit(ControllerCommand::Reload)
+        .expect("own file notification");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &reloaded)
+    });
+    assert!(
+        snapshot.storage_error.is_some(),
+        "an unchanged reload did not repair the backup"
+    );
+    fs_err::remove_dir(store.backup_path()).expect("remove empty backup directory");
+    let saved = client
+        .submit(ControllerCommand::Save)
+        .expect("repair backup");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &saved)
+    });
+    assert!(snapshot.storage_error.is_none());
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+}
+
+#[test]
+fn missing_primary_is_reported_and_recreating_identical_values_clears_the_error() {
+    let directory = tempfile::tempdir().expect("directory");
+    let store = ConfigStore::new(directory.path());
+    let config = input(3400).validate().expect("config");
+    store.save(&config).expect("saved config");
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    wait_for(&client, &notified, |snapshot| {
+        snapshot.scheduling == SchedulingState::Available
+    });
+    fs_err::remove_file(store.primary_path()).expect("delete primary");
+    let reloaded = client
+        .submit(ControllerCommand::Reload)
+        .expect("deletion notification");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &reloaded)
+    });
+    assert_eq!(
+        snapshot
+            .storage_error
+            .as_ref()
+            .expect("missing file error")
+            .diagnostic()
+            .category,
+        DiagnosticCategory::Missing
+    );
+    assert_eq!(
+        snapshot
+            .accepted
+            .as_ref()
+            .expect("retained config")
+            .config(),
+        &config
+    );
+    store.save(&config).expect("recreate identical values");
+    let reloaded = client
+        .submit(ControllerCommand::Reload)
+        .expect("replacement notification");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &reloaded)
+    });
+    assert!(snapshot.storage_error.is_none());
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
 }
 
 #[test]
@@ -586,6 +787,128 @@ fn preview_calculation_starts_before_a_blocked_native_call_returns() {
             .daytime_kelvin,
         3000
     );
+}
+
+#[test]
+fn queued_preview_blocks_edits_until_an_ordered_stop_without_waiting_for_native_output() {
+    let directory = tempfile::tempdir().expect("directory");
+    ConfigStore::new(directory.path())
+        .save(&input(3400).validate().expect("config"))
+        .expect("saved config");
+    let (entered, started) = mpsc::sync_channel(1);
+    let (release, finish) = mpsc::sync_channel(1);
+    let records = Arc::new(Mutex::new(Records {
+        blocked: Some((entered, finish)),
+        ..Records::default()
+    }));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    started
+        .recv_timeout(Duration::from_secs(10))
+        .expect("blocked native call");
+    client.submit(ControllerCommand::BeginEdit).expect("draft");
+    client
+        .submit(ControllerCommand::Preview(Box::new(
+            input(3400).validate().expect("config"),
+        )))
+        .expect("queued Preview");
+    let rejected = client.submit(ControllerCommand::Edit(Box::new(input(3000))));
+    client
+        .submit(ControllerCommand::StopPreview)
+        .expect("ordered Stop");
+    let changed = client
+        .submit(ControllerCommand::Edit(Box::new(input(3000))))
+        .expect("edit admitted after Stop");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let calculated = loop {
+        if let Some(result) = client.calculations().latest().expect("calculation")
+            && Some(result.revision) == changed.calculation
+        {
+            break Some(result);
+        }
+        if notified
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .is_err()
+        {
+            break None;
+        }
+    };
+    release.send(()).expect("release native call");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &changed)
+    });
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+    assert_eq!(
+        rejected
+            .expect_err("queued Preview must disable edits")
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    assert!(
+        calculated.is_some(),
+        "edits after Stop must calculate while native output is still blocked"
+    );
+    assert!(!snapshot.preview_active);
+    assert_eq!(
+        snapshot
+            .draft
+            .as_ref()
+            .expect("draft")
+            .live()
+            .config()
+            .input()
+            .daytime_kelvin,
+        3000
+    );
+}
+
+#[test]
+fn a_queued_field_edit_preserves_a_newer_tray_membership() {
+    let directory = tempfile::tempdir().expect("directory");
+    ConfigStore::new(directory.path())
+        .save(&input(3400).validate().expect("config"))
+        .expect("saved config");
+    let (entered, started) = mpsc::sync_channel(1);
+    let (release, finish) = mpsc::sync_channel(1);
+    let records = Arc::new(Mutex::new(Records {
+        blocked: Some((entered, finish)),
+        ..Records::default()
+    }));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    started
+        .recv_timeout(Duration::from_secs(10))
+        .expect("blocked output");
+    client.submit(ControllerCommand::BeginEdit).expect("draft");
+    client
+        .submit(ControllerCommand::Inclusion {
+            executable: "game.exe".into(),
+            included: true,
+        })
+        .expect("tray addition");
+    let changed = client
+        .submit(ControllerCommand::Edit(Box::new(input(3000))))
+        .expect("field edit from the preceding UI snapshot");
+    release.send(()).expect("release output");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &changed)
+    });
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+    let draft = snapshot.draft.as_ref().expect("draft");
+    assert_eq!(draft.live().config().input().suppression, ["game.exe"]);
+    assert_eq!(draft.live().config().input().sleep_kelvin, 3000);
+    let accepted = snapshot
+        .accepted
+        .as_ref()
+        .expect("accepted")
+        .config()
+        .input();
+    assert_eq!(accepted.suppression, ["game.exe"]);
+    assert_eq!(accepted.sleep_kelvin, 3400);
 }
 
 #[test]

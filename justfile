@@ -5,6 +5,24 @@ clippy_scope := "--workspace --all-targets --all-features --locked"
 fmt:
     cargo +nightly fmt --all
 
+build:
+    cargo +stable build --bin circadia --locked
+
+build-self-contained:
+    cargo +stable build --bin circadia --features self-contained --locked
+
+native-lifecycle: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- target/debug/circadia.exe
+
+native-explorer: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --restart-explorer target/debug/circadia.exe
+
+native-settings: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --settings target/debug/circadia.exe
+
+measure-graph:
+    cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-graph
+
 lint:
     cargo +nightly fmt --all --check
     cargo +stable clippy {{clippy_scope}} -- -D warnings

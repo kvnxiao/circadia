@@ -111,6 +111,39 @@ fn initialize(session: &ConfigSession, foreground: &Foreground, kelvin: u16) -> 
 }
 
 #[test]
+fn manual_start_survives_a_valid_edit_waiting_for_calculation() {
+    let mut session = ConfigSession::new(Some(Config::default()));
+    let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
+    session.begin_edit();
+    session
+        .edit(ConfigInput {
+            sleep_kelvin: 2200,
+            ..ConfigInput::default()
+        })
+        .expect("valid edit");
+    let request = runtime
+        .configure(session.active(), OutputUpdate::LiveEdit, time(100))
+        .expect("configure")
+        .expect("request");
+    runtime.expect_calculation(2);
+    assert_eq!(
+        runtime
+            .manual(ManualCommand::Start, time(101))
+            .expect("manual request"),
+        ManualOutcome::Started
+    );
+    assert!(runtime.suppression().manual);
+    runtime
+        .calculated(result(2, request, 3000), time(102))
+        .expect("calculated");
+    assert!(runtime.suppression().manual);
+    assert_eq!(
+        runtime.manual_remaining(time(102).uptime),
+        Some(Duration::from_millis(3_599_999))
+    );
+}
+
+#[test]
 fn preview_entry_defers_automatic_suppression_while_calculation_is_pending() {
     let config = ConfigInput {
         suppression: vec!["game.exe".into()],

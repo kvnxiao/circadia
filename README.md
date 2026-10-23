@@ -1,6 +1,6 @@
 # Circadia
 
-Circadia is being implemented as a Windows 11 x64 tray application that schedules native Windows Night Light. The [specification](docs/specs/SPEC.md) defines the application contract. The current library provides configuration persistence, local diagnostics, temperature schedules for specific calendar dates, graph and Preview timing, foreground/manual suppression, and a native-control worker. There is no application binary or tray/settings interface yet.
+Circadia is a Windows 11 x64 tray application under development that schedules native Windows Night Light. The [specification](docs/specs/SPEC.md) defines the application contract. The executable has a tray menu and native settings for schedule edits, a generated graph, Preview playback, and manual suppression. Retry requests another attempt at schedule calculation and native access. Settings supports Save, Discard, external-file conflicts, and adding or removing executable filenames. Adding an application opens a native file picker; the selected executable is not run. Closing with unsaved changes offers Save, Discard, or Keep Editing. Sign-in registration and complete application conformance checks are still being implemented.
 
 ## Development
 
@@ -13,11 +13,22 @@ just check
 just check-msrv
 ```
 
-The lockfile fixes dependency resolution. Builds, tests, and Clippy use stable Rust; formatting uses nightly. Windows clock tests read installed zone rules without changing the host setting. Application checks do not run the separate [research probes](probes/README.md) or change live Night Light.
+The lockfile fixes dependency resolution. Builds, tests, and Clippy use stable Rust; formatting uses nightly. Windows clock tests read installed zone rules without changing the host setting. `just check` does not run the separate [research probes](probes/README.md) or change live Night Light. The explicit [native lifecycle harness](tools/README.md) changes live Night Light and sends mouse and keyboard input. Its separate Explorer recovery recipe also restarts the Windows Shell.
+
+Build and launch the current application with its bundled runtime:
+
+```bash
+just build-self-contained
+./target/debug/circadia.exe
+```
+
+Launching Circadia starts management of live Night Light. Start minimized defaults on; open settings from the tray or launch the executable again. Closing settings keeps control running. Quit clears native preview and requests Night Light off.
 
 ## Configuration
 
 The configuration format is TOML with `schema_version = 1`. All fields except coordinates are required. Coordinates can be omitted when Sunrise and Sunset are disabled. Unknown fields and schema versions are rejected.
+
+Solar coordinates can be entered manually or acquired with **Use current location**. That action requests Windows location permission and one position while settings is in the foreground. Valid coordinates enter the live draft; Save persists them. A denied or failed request preserves the existing fields. Closing settings or cancelling the request discards its eventual result. Windows location services can use network-backed positioning; Circadia does not request location at startup or track travel.
 
 The fields configure the specified application behavior:
 
@@ -43,13 +54,15 @@ The fields configure the specified application behavior:
 
 Temperature input rounds to the nearest 10 K, with ties toward higher kelvin. Validation checks the range before rounding and the temperature order afterward. It preserves entries present in both `suppression` and `exclusions`. `ApplicationFrameHost.exe` and the running Circadia executable are always excluded from automatic suppression.
 
+Settings displays both executable lists, labels included but excluded entries as inactive, and allows removal from either user list. List edits remain unsaved until Save; Discard restores the accepted lists. Tray changes persist immediately and survive subsequent field edits and Discard. Fixed exclusions cannot be removed.
+
 The library accepts editable `ConfigInput` values and produces a `Config` only after validation. Disk loading, live editing, and persistence use that same validation path. Valid unsaved edits supply the active configuration during an editing session. Invalid edits preserve the last valid draft. Save adopts the draft only after writing the primary file; Discard returns to the accepted configuration.
 
 A valid external change updates the accepted configuration and marks an open draft stale, blocking Save until the draft is discarded or reloaded. Save and tray mutations also check the current file before writing, so an external edit does not depend on its notification being processed first. Tray mutations preserve unrelated externally changed fields.
 
 ## Local data
 
-The application will use `%LOCALAPPDATA%/Circadia/`. The library accepts an explicit directory so tests use isolated temporary files.
+The application uses `%LOCALAPPDATA%/Circadia/`. The `--data-dir DIRECTORY` argument selects another directory for configuration and diagnostics. It does not isolate Windows Night Light settings; the native lifecycle harness changes those settings even with temporary configuration.
 
 | File | Purpose |
 | :-- | :-- |
@@ -62,9 +75,11 @@ Startup accepts defaults only when both configuration files are missing. A valid
 
 Diagnostics use tab-separated Unix milliseconds, operation, status, error category, and an optional technical error code. Categories are fixed names such as `access_denied` and `invalid_data`. Repeated identical failures are recorded once per operation until its error changes or it recovers. Records exclude coordinates, executable names, window titles, personal paths, and raw dependency error text. Logging failure does not prevent editing, control, or exit.
 
+Choose **Open diagnostics folder** in settings to open the data directory in Windows Explorer.
+
 ## Schedule calculation
 
-`Schedule` combines Wake/Bedtime occurrences on specific dates with optional solar events, then generates constant and linear intervals. Targets less than 60 elapsed seconds apart merge before transitions are generated. Each merge keeps the last retained target's time and adopts the later target's temperature. Fractional temperatures remain available for graph rendering; native output rounds to 10 K. The curve calculates the next instant when rounded output changes directly.
+`Schedule` combines Wake/Bedtime occurrences on specific dates with optional solar events, then generates constant and linear intervals. Targets are processed chronologically before transitions are generated. A target less than 60 elapsed seconds after the preceding retained target merges into it, replacing its temperature but keeping its time. The next target is compared against that unchanged time. Fractional temperatures remain available for graph rendering; native output rounds to 10 K. The curve calculates the next instant when rounded output changes directly.
 
 `WindowsZone` reads a snapshot of the current Windows zone and its automatic daylight-saving adjustment setting. Explicit yearly rules identify repeated and nonexistent local clocks. The first Wake or Bedtime after a seasonal change preserves the clock-face interval from its predecessor as elapsed time: 23:00 to 07:00 remains eight hours. Later occurrences return to their configured clocks unless a gap, another seasonal change, or reversed or equal occurrence order requires further adjustment.
 
@@ -74,7 +89,9 @@ Solar calculation uses the locked `solar-positioning` 0.7.1 Solar Position Algor
 
 Sunrise candidates include Wake and exclude Bedtime; Sunset candidates lie strictly between them. If both enabled inputs have candidates, selection retains the earliest Sunrise and the earliest Sunset after it. If no Sunset follows that Sunrise, both solar targets are omitted and the interval is reported as a timing conflict. If only one enabled input has candidates, its earliest event is retained. A missing crossing is a successful empty result. A required calculation failure returns the Wake/Bedtime-only curve with the error. Dependency upgrades require rerunning the [solar reference checks](docs/research/solar-calculation.md).
 
-The graph spans the most recent daily boundary through the next boundary, each at the configured Wake clock minus four local hours. Preview captures the configuration and uniformly compresses the actual interval through tomorrow's matching local clock into its configured duration. Both use the first occurrence of repeated boundaries and the first valid instant after a gap. Clipping the graph preserves fractional endpoints and does not merge targets again. Rendering latency, live Night Light output, and complete application behavior remain integration checks.
+The graph spans the most recent daily boundary through the next boundary, each at the configured Wake clock minus four local hours. Preview captures the configuration and uniformly compresses the actual interval through tomorrow's matching local clock into its configured duration. Both use the first occurrence of repeated boundaries and the first valid instant after a gap. Clipping the graph preserves fractional endpoints and does not merge targets again.
+
+The native settings harness checks graph availability, changing Preview temperatures, and restoration after Stop and Discard. It also checks Preview cancellation through synthetic lock, suspend/resume, clock-change, and session-end messages, plus Quit. These checks read Windows Night Light records; they do not verify displayed color or actual OS power transitions. `just measure-graph` measures native input-to-render timing, including solar fallback, and verifies Preview animation while a simulated output call is blocked. See the [measurement method and limits](tools/README.md#graph-rendering).
 
 ## Foreground and manual suppression
 
@@ -90,12 +107,20 @@ Manual Start and Stop commands are idempotent. Start creates one hour of suppres
 
 `ControllerWorker` owns configuration state and serializes Night Light operations on a dedicated thread. A separate calculation worker generates schedule and graph results while native calls are blocked. The client submits bounded, ordered commands and reads immutable status snapshots. A successful submission acknowledges queue admission and returns a receipt that preserves that command's outcome independently of later snapshots. Superseded calculations are rejected, and output waits for fresh calculation after relevant input changes.
 
-The controller selects suppression, Preview, or the active schedule in that order. The accepted configuration and draft each have a record of their last scheduled temperature successfully stored in Windows. A valid draft is active while editing; otherwise the accepted configuration is active. A time-zone failure ends Preview and retains the active configuration's recorded temperature. Without one, scheduled output, suppression output, and ownership repairs stop until calculation succeeds; pending native preview cleanup remains eligible. Solar failure uses the Wake/Bedtime-only curve.
+The controller selects suppression, Preview, or the active schedule in that order. The accepted configuration and draft each have a record of their last scheduled temperature successfully stored in Windows. A valid draft is active while editing; otherwise the accepted configuration is active. A time-zone failure ends Preview and retains the active configuration's recorded temperature. Without one, scheduled output, suppression output, and corrections to native Night Light settings stop until calculation succeeds; pending native preview cleanup remains eligible. Solar failure uses the Wake/Bedtime-only curve.
 
-Preview admission captures its start instant and the UI's validated draft, then starts graph calculation independently of native dispatch. The returned receipt identifies the calculation and its original animation start. The worker rechecks the draft and availability before native playback. Neither calculation nor native-call latency extends playback. Edits and Save are unavailable during Preview.
+Preview admission captures its start instant and the UI's validated draft, then starts graph calculation independently of native dispatch. The returned receipt identifies the calculation and its original animation start. Before native playback, the worker checks:
+
+- The draft is current and valid.
+- Scheduling is available.
+- Neither suppression source is active.
+
+Neither calculation nor native-call latency extends playback. Edits and Save are unavailable during Preview.
 
 Native access uses public `win-nightlight-lib` and `win-nightlight-watch` 0.5.0 operations, with one Night Light handle for the worker's lifetime. Each control attempt reads current settings and state before selecting writes. It disables the native schedule before enabling Night Light and preserves unrelated values. Cleanup clears Windows' native preview flag. Temperature writes and application through that flag are tracked separately, including successful storage followed by a cleanup failure.
 
 The worker waits for commands, native notifications, or the next required deadline. It calculates the next 10 K change directly and skips obsolete steps after slow calls. Constant output does not cause repeated temperature operations. Startup uses a one-second fade; ordinary transitions use the configured duration. Native failures share completion-relative retry delays of 100, 200, 400, and then 800 ms. Restoring a lost change-notification registration schedules confirmation of current Night Light values without restarting an active fade.
 
-Suspend cancels Preview and pending output while preserving manual suppression's deadline. Resume recomputes current inputs and requests application of the current temperature even when its stored value matches. The caller assigns the same identifier to notifications for one wake; duplicates do not authorize additional attempts. After native access has begun, shutdown finishes the current public call and independently attempts native preview cleanup and Night Light off. Shutdown joins both workers. Deterministic tests use an injected native backend. Windows desktop notifications, live display behavior, and complete application performance still require integration validation.
+Suspend cancels Preview and pending output while preserving manual suppression's deadline. Resume recomputes current inputs and requests application of the current temperature even when its stored value matches. Windows resume timestamps, explicit suspend notifications, and sleep-inclusive versus awake-only counters identify notifications for one wake from sleep; duplicates do not authorize additional attempts. Taskbar recreation compares the Shell window and process identity before requesting another application of the current Night Light temperature.
+
+After native access has begun, shutdown finishes the current public call and independently attempts native preview cleanup and Night Light off. Shutdown joins both workers. Deterministic tests use an injected native backend. The native lifecycle harness exercises actual Shell activation, Explorer recreation, and configuration notifications; power and session messages are synthetic. Hardware power-transition delivery, visible display behavior, and complete application performance still require validation.

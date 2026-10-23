@@ -8,6 +8,16 @@ license = "MIT"
 description = "Schedule native Windows Night Light temperatures"
 repository = "https://github.com/kvnxiao/circadia"
 
+[features]
+self-contained = ["dep:windows-reactor-setup"]
+native-tests = ["windows/Win32_Foundation", "windows/Win32_System_Com", "windows/Win32_UI_Accessibility", "winsafe/ole"]
+graph-measurement = ["native-tests", "windows-reactor/test"]
+
+[[bin]]
+name = "native-lifecycle"
+path = "tools/native_lifecycle.rs"
+required-features = ["native-tests"]
+
 [dependencies]
 fs-err = "3.3"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
@@ -21,11 +31,24 @@ toml = "1.1"
 win-nightlight-lib = "0.5.0"
 win-nightlight-watch = "0.5.0"
 windows-result = "0.100.0"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
-winsafe = { version = "0.0.29", features = ["user"] }
+windows = { version = "0.62", features = ["Devices_Geolocation", "Foundation"] }
+windows-future = "0.3"
+windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "722f202100c3bd428627941d3834d87ad6679d1c" }
+windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "722f202100c3bd428627941d3834d87ad6679d1c" }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_Threading", "Win32_System_Time", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+winsafe = { version = "0.0.29", features = ["user", "shell"] }
+
+[build-dependencies]
+fs-err = "3.3"
+
+[target.'cfg(windows)'.build-dependencies]
+windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "722f202100c3bd428627941d3834d87ad6679d1c", optional = true }
 
 [dev-dependencies]
 test-case = "3"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-core = "0.62"
 
 [lints.rust]
 unsafe_code = "deny"
