@@ -374,6 +374,8 @@ impl ControllerClient {
             wall: Timestamp::now(),
             elapsed: submitted_at.duration_since(self.0.origin),
         };
+        #[cfg(feature = "graph-measurement")]
+        let entered = crate::activity::clock().map_or(entered, |time| time.output);
         let calculation = match &command {
             ControllerCommand::Edit(input) => input
                 .as_ref()
@@ -438,6 +440,11 @@ impl ControllerClient {
             .lock()
             .map(|latest| latest.clone())
             .map_err(|_error| io::Error::other("controller snapshot lock failed"))
+    }
+
+    #[cfg(feature = "graph-measurement")]
+    pub(crate) fn measurement_wake(&self) -> io::Result<()> {
+        self.0.wake.signal()
     }
 
     /// Read independently calculated graph results while native output blocks.
@@ -780,6 +787,8 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 .next_date
                 .is_some_and(|date| date <= self.now().output.wall)
             {
+                #[cfg(feature = "graph-measurement")]
+                crate::activity::record(crate::ActivityEvent::DateRecompute);
                 self.next_date = None;
                 self.recalculate(OutputUpdate::Fade, None)?;
             }
@@ -822,7 +831,19 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 .into_iter()
                 .chain(date)
                 .min();
-            self.shared.wake.wait(&self.driver.handles(), timeout)?;
+            #[cfg(feature = "graph-measurement")]
+            crate::activity::record(crate::ActivityEvent::DateDeadline(self.next_date));
+            #[cfg(feature = "graph-measurement")]
+            let timeout = if crate::activity::clock().is_some() {
+                None
+            } else {
+                timeout
+            };
+            let reason = self.shared.wake.wait(&self.driver.handles(), timeout)?;
+            #[cfg(feature = "graph-measurement")]
+            crate::activity::record(crate::ActivityEvent::WorkerWake(reason));
+            #[cfg(not(feature = "graph-measurement"))]
+            let _ = reason;
         }
         Ok(())
     }
@@ -1264,6 +1285,10 @@ impl<F: FnMut() -> Foreground> Worker<F> {
 }
 
 fn time(origin: Instant) -> RuntimeTime {
+    #[cfg(feature = "graph-measurement")]
+    if let Some(time) = crate::activity::clock() {
+        return time;
+    }
     RuntimeTime {
         output: ControlTime {
             wall: Timestamp::now(),

@@ -150,12 +150,17 @@ impl NativeDriver {
     /// # Errors
     /// Report invalid schedule bounds or unrepresentable deadlines.
     pub fn next_deadline(&mut self, now: RuntimeTime) -> Result<Option<Duration>, ControlError> {
-        Ok(self
-            .deadlines(now)?
-            .earliest()
-            .into_iter()
-            .chain(self.runtime.logical_deadline(now)?)
-            .min())
+        let deadlines = self.deadlines(now)?;
+        let logical = self.runtime.logical_deadline(now)?;
+        #[cfg(feature = "graph-measurement")]
+        crate::activity::record(crate::ActivityEvent::Wait(crate::ActivityWait {
+            now,
+            output: deadlines.output,
+            cleanup: deadlines.cleanup,
+            recovery: deadlines.recovery,
+            logical,
+        }));
+        Ok(deadlines.earliest().into_iter().chain(logical).min())
     }
 
     /// Consume notifications only between complete synchronous operations.
@@ -241,6 +246,12 @@ impl NativeDriver {
         if !current() || (!retry && !output && !cleanup) {
             return Ok(report);
         }
+        #[cfg(feature = "graph-measurement")]
+        crate::activity::record(crate::ActivityEvent::NativeDue {
+            retry,
+            output,
+            cleanup,
+        });
         if retry && self.recovery.observation_failed() {
             let errors = self.native.restore_observation();
             self.correction |= errors.is_empty();

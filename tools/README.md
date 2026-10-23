@@ -1,6 +1,6 @@
 # Native application checks
 
-Run these tools from the repository root on an interactive Windows 11 x64 desktop with an English Windows Shell. Install the development tools listed in the [project README](../README.md). Live native checks are separate from `just check`. The lifecycle, settings, and Explorer checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, shutdown, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
+Run these tools from the repository root on an interactive Windows 11 x64 desktop with an English Windows Shell. Install the development tools listed in the [project README](../README.md). Live native checks are separate from `just check`. The lifecycle, settings, and Explorer checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, shutdown, deployment, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
 
 ## Application lifecycle
 
@@ -45,7 +45,7 @@ just native-settings
 
 Preview plays the schedule from the current time through the same local time on the next date, compressed into a configured duration. It animates the graph and requests the corresponding Night Light temperatures.
 
-A schedule target specifies a temperature to reach by a clock or solar-event time. Sleep is the temperature reached at Bedtime; optional Sunrise and Sunset targets anchor temperature changes to those solar events.
+A schedule target specifies a temperature to reach by a clock or solar-event time. Sleep is the temperature reached at Bedtime. Daytime is the highest configured temperature; Morning/Evening is the shared middle temperature used with solar timing. Optional Sunrise and Sunset targets anchor temperature changes to those solar events. Accepted values satisfy Daytime >= Morning/Evening >= Sleep.
 
 Automatic suppression requests 6500 K while a listed, non-excluded application has foreground focus. The focus delay is the configured wait before a changed foreground match starts or ends automatic suppression.
 
@@ -148,7 +148,7 @@ Each sample starts when Reactor delivers the matching native text-change event. 
 
 The tool records 21 graph-latency samples. Eighteen change the Sleep temperature, Wake clock, or Bedtime clock, split evenly between disabled solar timing and enabled Sunrise/Sunset targets. Two more Sleep-temperature edits test solar calculation failure and recovery. The last edit follows the resume check below. The tool fails if any sample exceeds 100 ms. A simulated temperature operation remains blocked during those edits.
 
-Separate form checks verify the unused Morning/Evening label, accepted temperature rounding, rejection of invalid input, and correction of invalid temperature order.
+Separate form checks verify that Morning/Evening is labeled unused when both solar inputs are off. They also check rounding to the nearest 10 K, with ties toward higher kelvin, rejection of invalid input, and correction of edits that violate Daytime >= Morning/Evening >= Sleep.
 
 A separate two-second Preview must advance through rendered graph positions and return to editable settings while another output operation remains blocked. The resume check starts a 60-second Preview and sends a synthetic resume notification without a preceding suspend notification. Editing must become available within the harness's 20-second timeout, and a Sleep-temperature edit must update the graph while output remains blocked. This checks cancellation before playback could finish naturally; it does not put Windows to sleep or verify hardware resume delivery.
 
@@ -166,7 +166,7 @@ just native-recovery
 
 The recipe runs the complete release application with its bundled runtime, isolated configuration, and a simulated Night Light backend. UI Automation operates the real settings controls without moving the cursor, sending keys, or requiring foreground focus. Settings can take focus when it opens. The recipe does not change Windows Night Light.
 
-The checks verify:
+Observation registration subscribes to changes in Windows Night Light settings and state. The checks verify:
 
 - Failed observation registration still permits live edits and output. Retry restores observation, and repeated failures produce one diagnostic entry before recovery.
 - Failed settings reads prevent temperature, schedule, and on/off writes while Preview advances on the graph. Recovery applies the current 6500 K position instead of earlier playback steps.
@@ -177,7 +177,7 @@ The checks verify:
 
 Wake and Bedtime are configured relative to the current local clock so Preview moves from a 2200 K Sleep period to 6500 K Daytime. A separate live edit to 2300 K exercises partial storage. The tool prints each completed operation's start, duration, request, failure, and resulting simulated state. Capture is bounded; overflow fails the check. On failure, the tool retains and prints the temporary configuration directory.
 
-These checks establish application behavior after controlled failures at the native adapter boundary. They do not establish Windows access permissions, actual watcher failure delivery, or displayed color. The existing live native recipes exercise successful Windows operations separately.
+These checks establish application behavior after controlled failures at the native adapter boundary. They do not establish Windows access permissions, delivery of actual Night Light subscription failures, or displayed color. The existing live native recipes exercise successful Windows operations separately.
 
 ## Native output timing
 
@@ -201,6 +201,29 @@ Each temperature-call record includes the attempt start, public-call start, and 
 The tool requires at least 95% of temperature calls in each scenario to start within 20 ms of eligibility. It also checks final temperatures and Preview restoration, rejects native errors or incomplete traces, and verifies cleanup through native readback. The raw trace and scenario summaries print after the application exits. Ordinary builds exclude the instrumentation; measured call timings include its overhead and do not establish displayed color or smoothness.
 
 This recipe changes live Night Light without moving the cursor or sending keyboard input. Settings can take focus. Graceful exit clears native preview and requests Night Light off without restoring the previous native schedule or temperature. Failure retains the temporary configuration directory. The tool prints the source revision, executable, build profile, hardware, Windows build, display modes, and Settings dimensions; preserve those details with the raw results.
+
+## Worker activity and idle behavior
+
+Close any running Circadia instance, then run:
+
+```bash
+just measure-activity
+```
+
+The recipe runs the complete release application with a simulated Night Light backend and isolated configuration. It records worker wakeups, foreground events and queries, temperature-curve evaluations, schedule calculation requests, native work, selected deadlines, and updates to the settings window. It does not change Windows Night Light or the Windows clock. Ordinary application builds exclude the instrumentation.
+
+The first phase observes constant 3400 K output for ten minutes with settings closed, using real clocks and Windows waits. Any native call or update to the settings window fails the check. Foreground queries and deadline wakeups must correspond to foreground or date events. A strict stable-focus result additionally requires no foreground changes or date boundary during the observation. Desktop activity can prevent that result; the tool prints the event counts and reports the limitation.
+
+Later phases use controlled application clocks and explicit worker wakeups. They check:
+
+- A one-hour 6500 K to 2400 K transition emits exactly 410 distinct 10 K steps at independently calculated deadlines.
+- Automatic suppression removes underlying temperature deadlines while preserving one date-boundary recalculation.
+- Closing settings stops its countdown updates while manual suppression still expires after exactly one hour.
+- Persistent native read failures use 100, 200, 400, and then 800 ms retry delays. Successful recovery stops retries.
+
+These phases verify controller deadline selection and handling, not Windows timeout delivery or foreground events from actual games. The manual-suppression phase opens and closes settings through UI Automation without mouse or keyboard input; the window can take focus. The tool prints the raw activity and simulated-operation traces after exit. Capture overflow fails the check.
+
+Use `just measure-activity --quick` to shorten the real idle observation to two seconds. It runs the same controlled phases but cannot establish ten-minute idleness. This instrumentation run does not replace the ordinary-build resource measurements below.
 
 ## CPU and memory
 
@@ -231,6 +254,20 @@ Context-switch deltas come from thread snapshots matched by thread ID and creati
 Use `just measure-resources --quick` for a harness check with two-second observations and no settling periods. Those short results are not release baselines. The tool prints the executable, source revision, build profile, processor, logical processor count, physical memory, Windows build, connected display modes, and settings DPI and dimensions. Keep the raw output alongside any published results; measurements are specific to that machine and workload.
 
 This recipe changes live Night Light and uses UI Automation without moving the cursor or sending keyboard input. Settings can take focus. Each application run ends through graceful cleanup, which clears native preview and requests Night Light off without restoring the prior schedule or temperature. Failure retains the temporary configuration directory. It does not invoke actual sleep, sign-out, or shutdown.
+
+## Copied runtime deployment
+
+Build the bundled runtime with `just build-self-contained`. From `target/debug`, copy `circadia.exe`, `circadia.ico`, `Microsoft.Web.WebView2.Core.dll`, and the files listed in the [pinned runtime manifest](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor-setup/assets/runtime.txt) to a separate directory. Preserve their relative paths, including resource subdirectories. Close any running Circadia instance and pass the copied executable to:
+
+```bash
+just native-deployment "path/to/copied/Circadia/circadia.exe"
+```
+
+The recipe uses isolated configuration at constant 3400 K with Start minimized enabled. It checks direct launch, shortcut activation of settings in the existing process, and a fresh primary launch through a shortcut. The shortcut's working directory differs from the runtime directory. The tool verifies the launched executable, editable settings, native temperature, successful process exit, preview cleanup, and Night Light off.
+
+This recipe uses UI Automation without mouse or keyboard input. Settings can take focus. It changes live Night Light and uses the lifecycle harness's cleanup behavior, including forced termination if graceful exit fails. It does not restore the prior native schedule or temperature. Failures during the direct or shortcut application checks retain the temporary configuration directory.
+
+A successful run establishes launch behavior for the supplied layout on the tested machine. Verify deployment separately on clean machines without an installed compatible runtime, including Windows 11 build 22000, the minimum supported build.
 
 ## Explorer recovery
 

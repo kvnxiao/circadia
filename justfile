@@ -29,8 +29,14 @@ native-shutdown: build-self-contained
 native-picker: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- --picker target/debug/circadia.exe
 
+native-deployment executable:
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --deployment "{{executable}}"
+
 measure-graph:
     cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-graph
+
+measure-activity args="":
+    cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-activity {{args}}
 
 native-recovery:
     cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --native-recovery

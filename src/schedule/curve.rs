@@ -169,6 +169,8 @@ impl Curve {
     }
 
     fn segment(&self, instant: Timestamp) -> Result<&Segment, ScheduleError> {
+        #[cfg(feature = "graph-measurement")]
+        crate::activity::record(crate::ActivityEvent::CurveEvaluation);
         self.segments
             .iter()
             .find(|segment| segment.start <= instant && instant <= segment.end)

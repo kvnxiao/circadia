@@ -413,6 +413,8 @@ impl Component for Settings {
     }
 
     fn view(&self, input: &Input, context: &mut ViewContext<'_, Self>) -> View {
+        #[cfg(feature = "graph-measurement")]
+        crate::activity::record(crate::ActivityEvent::SettingsView);
         context.on_window_placement(context.callback(|_| Message::PlacementChanged));
         context.window_visuals(
             WindowVisuals::new()
@@ -1203,7 +1205,11 @@ impl Settings {
             } else {
                 Duration::from_secs(30)
             };
-            self.timer = Some(context.set_local_timeout(delay, || Message::Tick));
+            self.timer = Some(context.set_local_timeout(delay, || {
+                #[cfg(feature = "graph-measurement")]
+                crate::activity::record(crate::ActivityEvent::SettingsTick);
+                Message::Tick
+            }));
         }
     }
 
