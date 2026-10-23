@@ -1,4 +1,5 @@
 use std::io;
+use std::time::Instant;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::CLSCTX_INPROC_SERVER;
 use windows::Win32::System::Com::CoCreateInstance;
@@ -396,9 +397,21 @@ impl Automation {
 
 pub(super) fn wait<T>(
     description: &str,
+    check: impl FnMut() -> io::Result<Option<T>>,
+) -> io::Result<T> {
+    wait_until(
+        description,
+        Instant::now() + crate::lifecycle::WAIT_TIMEOUT,
+        check,
+    )
+}
+
+pub(super) fn wait_until<T>(
+    description: &str,
+    deadline: Instant,
     mut check: impl FnMut() -> io::Result<Option<T>>,
 ) -> io::Result<T> {
-    crate::lifecycle::wait(description, || match check() {
+    crate::lifecycle::wait_until(description, deadline, || match check() {
         Err(error)
             if error
                 .get_ref()

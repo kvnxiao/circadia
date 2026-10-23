@@ -37,18 +37,9 @@ pub(super) fn exercise(
         Ok((pending || error.is_some() || changed).then_some(()))
     })
     .and_then(|()| {
-        loop {
-            if automation.enabled(settings, process, "current-location")? == Some(true) {
-                break Ok(());
-            }
-            if started.elapsed() >= Duration::from_secs(75) {
-                break Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "Windows location did not finish within 75 seconds",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        wait_for_completion(started, || {
+            automation.enabled(settings, process, "current-location")
+        })
     });
     if result.is_err() {
         drop(automation.invoke(settings, process, "cancel-location"));
@@ -109,4 +100,61 @@ pub(super) fn exercise(
         "PASS: location stays unsaved, manual entry remains available, and Discard restores the saved fields",
     );
     Ok(())
+}
+
+fn wait_for_completion(
+    started: Instant,
+    mut enabled: impl FnMut() -> io::Result<Option<bool>>,
+) -> io::Result<()> {
+    crate::automation::wait_until(
+        "Windows location completion within 75 seconds",
+        started + Duration::from_secs(75),
+        || Ok(enabled()?.filter(|enabled| *enabled).map(|_| ())),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_case::test_case;
+    use windows::Win32::UI::Accessibility::UIA_E_ELEMENTNOTAVAILABLE;
+    use windows::Win32::UI::Accessibility::UIA_E_TIMEOUT;
+
+    #[test_case(UIA_E_ELEMENTNOTAVAILABLE)]
+    #[test_case(UIA_E_TIMEOUT)]
+    fn transient_completion_observation_does_not_cancel_location(code: u32) {
+        let mut attempts = 0;
+        let result = wait_for_completion(Instant::now(), || {
+            attempts += 1;
+            match attempts {
+                1 => Err(io::Error::other(windows::core::Error::from_hresult(
+                    windows::core::HRESULT(code.cast_signed()),
+                ))),
+                2 => Ok(Some(false)),
+                _ => Ok(Some(true)),
+            }
+        });
+        result.expect("transient observation must retry without cancelling location");
+        assert_eq!(attempts, 3);
+    }
+
+    #[test_case(UIA_E_ELEMENTNOTAVAILABLE)]
+    #[test_case(UIA_E_TIMEOUT)]
+    fn observation_retry_keeps_the_original_location_deadline(code: u32) {
+        let started = Instant::now()
+            .checked_sub(Duration::from_secs(75))
+            .expect("elapsed request start");
+        let mut attempts = 0;
+        let result = wait_for_completion(started, || {
+            attempts += 1;
+            Err(io::Error::other(windows::core::Error::from_hresult(
+                windows::core::HRESULT(code.cast_signed()),
+            )))
+        });
+        assert_eq!(
+            result.expect_err("original deadline expired").kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert_eq!(attempts, 1);
+    }
 }
