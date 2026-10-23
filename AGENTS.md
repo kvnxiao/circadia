@@ -41,6 +41,7 @@
 
 ## Tools and validation
 
+- Update Git ignore rules only in repository `.gitignore` files. Do not edit files under `.git/` or global Git ignore settings; for example, add `/.plans/` to the root `.gitignore`, not `.git/info/exclude`. Use Git commands for normal repository operations.
 - Use the harness's Bash tool with MSYS2 syntax on Windows when available. Otherwise run commands through MSYS2 Bash; use PowerShell only when a Windows-only API requires it.
 - Use `rg` for search, `gh` for GitHub, and `uv` for Python tools. If a `justfile` exists, run `just --list` and use the applicable recipe.
 - Inspect the actual repository tooling before selecting checks. Do not assume Cargo or `just` commands exist before their manifests are added.
