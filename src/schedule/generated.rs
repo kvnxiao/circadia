@@ -266,6 +266,244 @@ mod tests {
         assert!(schedule.solar_error.is_none());
     }
 
+    #[test_case("2026-06-21"; "polar day")]
+    #[test_case("2026-12-21"; "polar night")]
+    fn polar_solar_calculation_generates_only_manual_targets(date: &str) {
+        let date: jiff::civil::Date = date.parse().expect("polar date");
+        let next = date.tomorrow().expect("next date");
+        let config = ConfigInput {
+            bedtime: "01:00".into(),
+            coordinates: Some(Coordinates {
+                latitude: 69.6492,
+                longitude: 18.9553,
+            }),
+            ..config().input().clone()
+        }
+        .validate()
+        .expect("polar configuration");
+        let mut zone = WindowsZone::named("UTC", false).expect("UTC zone");
+        let start = Offset::UTC
+            .to_timestamp(date.at(0, 0, 0, 0))
+            .expect("start");
+        let end = Offset::UTC.to_timestamp(next.at(8, 0, 0, 0)).expect("end");
+        let schedule = Schedule::calculate(&config, &mut zone, start, end).expect("polar schedule");
+        assert!(schedule.solar_error.is_none());
+        assert_eq!(schedule.conflicts, []);
+        assert_eq!(
+            schedule
+                .curve
+                .targets()
+                .iter()
+                .filter(|target| start <= target.instant && target.instant < end)
+                .map(|target| (Offset::UTC.to_datetime(target.instant), target.kelvin))
+                .collect::<Vec<_>>(),
+            [
+                (date.at(1, 0, 0, 0), 2400),
+                (date.at(7, 0, 0, 0), 6500),
+                (next.at(1, 0, 0, 0), 2400),
+                (next.at(7, 0, 0, 0), 6500),
+            ]
+        );
+        for (hour, minute, expected) in [(0, 30, 4450), (2, 0, 2400), (6, 30, 4450), (7, 0, 6500)] {
+            let instant = Offset::UTC
+                .to_timestamp(date.at(hour, minute, 0, 0))
+                .expect("sample");
+            assert_eq!(
+                schedule.curve.rounded(instant).expect("temperature"),
+                expected
+            );
+        }
+    }
+
+    #[test_case(&["2026-10-22T06:59:00Z"], &["2026-10-22T23:00:00Z"], None; "sunrise before wake")]
+    #[test_case(&["2026-10-22T07:00:00Z", "2026-10-22T09:00:00Z"],
+        &["2026-10-22T23:00:00Z", "2026-10-22T23:30:00Z"], None; "coincident boundaries")]
+    #[test_case(&["2026-10-22T23:00:00Z"], &["2026-10-22T07:00:00Z", "2026-10-22T18:00:00Z"],
+        Some("2026-10-22T18:00:00Z"); "exclude boundary candidates before selecting sunset")]
+    fn boundary_solar_events_select_only_eligible_targets(
+        rises: &[&str],
+        sets: &[&str],
+        sunset: Option<&str>,
+    ) {
+        let schedule = from_anchors(&config(), &anchors(), requested(), |_, _, _| {
+            Ok(SolarCrossings {
+                rises: rises
+                    .iter()
+                    .map(|rise| rise.parse().expect("sunrise"))
+                    .collect(),
+                sets: sets
+                    .iter()
+                    .map(|set| set.parse().expect("sunset"))
+                    .collect(),
+            })
+        })
+        .expect("schedule");
+        assert!(schedule.solar_error.is_none());
+        assert_eq!(schedule.conflicts, []);
+        let mut expected = vec![
+            Target {
+                instant: "2026-10-21T23:00:00Z".parse().expect("previous bedtime"),
+                kelvin: 2400,
+            },
+            Target {
+                instant: "2026-10-22T07:00:00Z".parse().expect("wake"),
+                kelvin: 6500,
+            },
+        ];
+        if let Some(sunset) = sunset {
+            expected.push(Target {
+                instant: sunset.parse().expect("selected sunset"),
+                kelvin: 3400,
+            });
+        }
+        expected.extend([
+            Target {
+                instant: "2026-10-22T23:00:00Z".parse().expect("bedtime"),
+                kelvin: 2400,
+            },
+            Target {
+                instant: "2026-10-23T07:00:00Z".parse().expect("next wake"),
+                kelvin: 6500,
+            },
+        ]);
+        assert_eq!(schedule.curve.targets(), expected);
+    }
+
+    #[test]
+    fn selected_solar_targets_merge_with_manual_boundaries_before_interpolation() {
+        let config = config();
+        let schedule = from_anchors(&config, &anchors(), requested(), |_, _, _| {
+            Ok(SolarCrossings {
+                rises: vec!["2026-10-22T07:00:30Z".parse().expect("sunrise")],
+                sets: vec!["2026-10-22T22:59:30Z".parse().expect("sunset")],
+            })
+        })
+        .expect("merged schedule");
+        assert_eq!(
+            schedule.curve.targets(),
+            [
+                Target {
+                    instant: "2026-10-21T23:00:00Z".parse().expect("previous bedtime"),
+                    kelvin: 2400
+                },
+                Target {
+                    instant: "2026-10-22T07:00:00Z".parse().expect("merged wake"),
+                    kelvin: 6500
+                },
+                Target {
+                    instant: "2026-10-22T22:59:30Z".parse().expect("merged bedtime"),
+                    kelvin: 2400
+                },
+                Target {
+                    instant: "2026-10-23T07:00:00Z".parse().expect("next wake"),
+                    kelvin: 6500
+                },
+            ]
+        );
+        for instant in ["2026-10-22T06:30:00Z", "2026-10-22T22:29:30Z"] {
+            assert_eq!(
+                schedule
+                    .curve
+                    .rounded(instant.parse().expect("midpoint"))
+                    .expect("temperature"),
+                4450
+            );
+        }
+        assert_eq!(
+            (&*config.input().wake, &*config.input().bedtime),
+            ("07:00", "23:00")
+        );
+    }
+
+    #[test_case("2026-03-08", "23:00", "2026-03-08T07:30:00Z", "2026-03-09T03:00:00Z",
+        "2026-03-08T07:10:00Z", "2026-03-08T07:40:00Z"; "spring gap")]
+    #[test_case("2026-11-01", "00:30", "2026-11-01T06:30:00Z", "2026-11-02T05:30:00Z",
+        "2026-11-01T05:40:00Z", "2026-11-01T06:40:00Z"; "repeated autumn clock")]
+    fn solar_selection_uses_adjusted_windows_activity_boundaries(
+        date: &str,
+        bedtime: &str,
+        wake: &str,
+        bed: &str,
+        excluded_rise: &str,
+        selected_rise: &str,
+    ) {
+        let date: jiff::civil::Date = date.parse().expect("transition date");
+        let config = ConfigInput {
+            wake: "02:30".into(),
+            bedtime: bedtime.into(),
+            sunset: false,
+            ..config().input().clone()
+        }
+        .validate()
+        .expect("clock-change configuration");
+        let mut zone = WindowsZone::named("Eastern Standard Time", false).expect("Eastern zone");
+        let anchors = resolve_anchors(
+            &config,
+            &mut zone,
+            date.yesterday().expect("previous date"),
+            date.tomorrow().expect("following date"),
+        )
+        .expect("adjusted anchors");
+        let wake = wake.parse().expect("adjusted wake");
+        let bed = bed.parse().expect("following bedtime");
+        let selected_rise = selected_rise.parse().expect("eligible sunrise");
+        let schedule = from_anchors(
+            &config,
+            &anchors,
+            TimeInterval {
+                start: wake,
+                end: bed,
+            },
+            |_, start, end| {
+                assert_eq!((start, end), (wake, bed));
+                Ok(SolarCrossings {
+                    rises: vec![
+                        excluded_rise.parse().expect("ineligible sunrise"),
+                        selected_rise,
+                    ],
+                    sets: Vec::new(),
+                })
+            },
+        )
+        .expect("adjusted solar schedule");
+        assert!(schedule.solar_error.is_none());
+        assert_eq!(schedule.conflicts, []);
+        assert_eq!(
+            schedule
+                .curve
+                .targets()
+                .iter()
+                .copied()
+                .filter(|target| wake <= target.instant && target.instant <= bed)
+                .collect::<Vec<_>>(),
+            [
+                Target {
+                    instant: wake,
+                    kelvin: 3400
+                },
+                Target {
+                    instant: selected_rise,
+                    kelvin: 6500
+                },
+                Target {
+                    instant: bed,
+                    kelvin: 2400
+                }
+            ]
+        );
+        let midpoint = wake
+            .checked_add(SignedDuration::from_secs(5 * 60))
+            .expect("sunrise midpoint");
+        assert_eq!(
+            schedule.curve.rounded(midpoint).expect("rising output"),
+            4950
+        );
+        assert_eq!(
+            (&*config.input().wake, &*config.input().bedtime),
+            ("02:30", bedtime)
+        );
+    }
+
     #[test]
     fn timing_conflict_omits_both_solar_targets_without_error() {
         let schedule = from_anchors(&config(), &anchors(), requested(), |_, _, _| {
