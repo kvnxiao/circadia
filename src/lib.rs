@@ -1,5 +1,7 @@
 //! Validate Circadia settings and provide application domain logic.
 
+#[cfg(all(windows, feature = "graph-measurement"))]
+mod activity;
 mod config;
 #[cfg(windows)]
 mod controller;
@@ -18,6 +20,14 @@ mod suppression;
 #[cfg(windows)]
 mod ui;
 
+#[cfg(all(windows, feature = "graph-measurement"))]
+pub use activity::ActivityEvent;
+#[cfg(all(windows, feature = "graph-measurement"))]
+pub use activity::ActivityMeasurement;
+#[cfg(all(windows, feature = "graph-measurement"))]
+pub use activity::ActivityRecord;
+#[cfg(all(windows, feature = "graph-measurement"))]
+pub use activity::ActivityWait;
 pub use config::Config;
 pub use config::ConfigInput;
 pub use config::Coordinates;

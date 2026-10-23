@@ -74,6 +74,12 @@ fn process_executable(process: u32) -> io::Result<String> {
 
 /// Read current foreground identity using window metadata and limited queries.
 pub fn read_foreground() -> Foreground {
+    #[cfg(feature = "graph-measurement")]
+    crate::activity::record(crate::ActivityEvent::ForegroundQuery);
+    #[cfg(feature = "graph-measurement")]
+    if let Some(foreground) = crate::activity::foreground() {
+        return foreground;
+    }
     resolve_window(&Windows, HWND::GetForegroundWindow())
 }
 
@@ -225,6 +231,8 @@ unsafe extern "system" fn foreground_event(
             .map(|value| Rc::clone(&value.notify))
     });
     if let Some(callback) = callback {
+        #[cfg(feature = "graph-measurement")]
+        crate::activity::record(crate::ActivityEvent::ForegroundEvent);
         callback();
     }
 }

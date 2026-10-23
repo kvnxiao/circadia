@@ -187,6 +187,8 @@ impl Session {
             read_foreground,
         )?;
         let client = controller.client();
+        #[cfg(feature = "graph-measurement")]
+        crate::activity::bind(&client);
         *runtime.borrow_mut() = Some(Runtime {
             controller,
             files: watched.ok(),

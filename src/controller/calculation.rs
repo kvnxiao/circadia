@@ -308,6 +308,8 @@ fn run_calculations(
 }
 
 fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, ScheduleError> {
+    #[cfg(feature = "graph-measurement")]
+    crate::activity::record(crate::ActivityEvent::Calculation);
     let mut zone = WindowsZone::current()?;
     let graph = graph_interval(&request.config, &mut zone, request.at)?;
     let next_local = zone

@@ -1,9 +1,15 @@
 //! Exercise the complete application with live Night Light and isolated
 //! settings.
 
+#[cfg(all(windows, feature = "graph-measurement"))]
+#[path = "native/activity.rs"]
+mod activity;
 #[cfg(windows)]
 #[path = "native/automation.rs"]
 mod automation;
+#[cfg(windows)]
+#[path = "native/deployment.rs"]
+mod deployment;
 #[cfg(windows)]
 #[path = "native/environment.rs"]
 mod environment;
@@ -46,6 +52,19 @@ mod tray;
 
 #[cfg(windows)]
 fn main() -> std::io::Result<()> {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|value| value == "--deployment")
+    {
+        return deployment::run();
+    }
+    #[cfg(feature = "graph-measurement")]
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|value| value == "--measure-activity")
+    {
+        return activity::run();
+    }
     #[cfg(feature = "output-measurement")]
     if std::env::args_os()
         .nth(1)
