@@ -23,6 +23,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::WM_POWERBROADCAST;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_QUERYENDSESSION;
 use winsafe::HWND;
 
+pub(super) const WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+
 #[derive(Clone, Copy)]
 enum ExplorerTest {
     Preserve,
@@ -482,9 +484,16 @@ pub(super) fn window(process: u32, title: &str, visible: bool) -> io::Result<Opt
 
 pub(super) fn wait<T>(
     description: &str,
+    check: impl FnMut() -> io::Result<Option<T>>,
+) -> io::Result<T> {
+    wait_until(description, Instant::now() + WAIT_TIMEOUT, check)
+}
+
+pub(super) fn wait_until<T>(
+    description: &str,
+    deadline: Instant,
     mut check: impl FnMut() -> io::Result<Option<T>>,
 ) -> io::Result<T> {
-    let started = Instant::now();
     loop {
         if let Some(value) = check().map_err(|source| {
             io::Error::other(CheckFailure {
@@ -494,13 +503,17 @@ pub(super) fn wait<T>(
         })? {
             return Ok(value);
         }
-        if started.elapsed() >= Duration::from_secs(20) {
+        if Instant::now() >= deadline {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 format!("timed out waiting for {description}"),
             ));
         }
-        std::thread::sleep(Duration::from_millis(25));
+        std::thread::sleep(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(25)),
+        );
     }
 }
 
