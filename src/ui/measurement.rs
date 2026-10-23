@@ -51,6 +51,7 @@ struct Shared {
     lifecycle: Mutex<Lifecycle>,
     ready: Condvar,
     native: Mutex<native::Simulation>,
+    settings: Mutex<Option<SettingsMeasurement>>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -66,7 +67,32 @@ enum Lifecycle {
 #[derive(Clone, Default)]
 pub struct GraphMeasurement(Arc<Shared>);
 
+/// Observe focus and middle-temperature values during native form checks.
+#[derive(Clone, Debug)]
+pub struct SettingsMeasurement {
+    /// Field retaining logical editing focus, including in an inactive window.
+    pub focused_field: Option<&'static str>,
+    /// Middle-temperature text supplied to the native control.
+    pub middle_text: String,
+    /// Rounded middle temperature when the complete form is valid.
+    pub validated_middle_kelvin: Option<i64>,
+    /// Middle temperature in the controller's last valid live draft.
+    pub live_middle_kelvin: Option<i64>,
+}
+
 impl GraphMeasurement {
+    /// Read the latest settings focus and temperature diagnostics.
+    ///
+    /// # Errors
+    /// Report poisoned measurement synchronization.
+    pub fn settings_state(&self) -> io::Result<Option<SettingsMeasurement>> {
+        self.0
+            .settings
+            .lock()
+            .map(|state| state.clone())
+            .map_err(|_error| io::Error::other("settings measurement lock failed"))
+    }
+
     /// Inject or clear a solar calculation failure in this measurement run.
     pub fn fail_solar(&self, failed: bool) {
         self.0.solar_failure.store(failed, Ordering::Relaxed);
@@ -274,6 +300,14 @@ pub(super) fn input(field: &str, value: &str) {
         && sample.value == value
     {
         sample.entered = Some(Instant::now());
+    }
+}
+
+pub(super) fn settings(state: SettingsMeasurement) {
+    if let Some(active) = ACTIVE.get()
+        && let Ok(mut settings) = active.0.settings.lock()
+    {
+        *settings = Some(state);
     }
 }
 
