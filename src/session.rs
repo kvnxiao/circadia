@@ -85,6 +85,7 @@ impl Draft {
 pub struct ConfigSession {
     accepted: Option<ConfigLayer>,
     draft: Option<Draft>,
+    configuration_file_expected: bool,
 }
 
 /// Describe the primary file observed after a filesystem notification.
@@ -94,7 +95,7 @@ pub enum ReloadChange {
     Unchanged,
     /// Valid external settings became the accepted configuration.
     Changed,
-    /// The primary file disappeared; accepted configuration remains active.
+    /// The primary file is absent; accepted configuration remains active.
     Missing,
 }
 
@@ -137,12 +138,23 @@ impl ConfigSession {
     /// Start with loaded settings or a configuration error.
     pub fn new(accepted: Option<Config>) -> Self {
         Self {
+            configuration_file_expected: accepted.is_some(),
             accepted: accepted.map(|config| ConfigLayer {
                 config,
                 last_scheduled: None,
             }),
             draft: None,
         }
+    }
+
+    pub(crate) fn from_startup(startup: &crate::StartupConfig) -> Self {
+        let mut session = Self::new(startup.accepted.clone());
+        session.configuration_file_expected = !startup.unsaved_defaults;
+        session
+    }
+
+    pub(crate) fn configuration_file_expected(&self) -> bool {
+        self.configuration_file_expected
     }
 
     /// Return accepted settings, independent of a live draft.
@@ -269,6 +281,7 @@ impl ConfigSession {
             return Err(SessionError::Stale);
         }
         let result = store.save(&config)?;
+        self.configuration_file_expected = true;
         draft.live.config = config.clone();
         draft.input = config.input().clone();
         draft.baseline = config;
@@ -295,9 +308,11 @@ impl ConfigSession {
     /// Preserve accepted and draft state when reading or validating the file
     /// fails.
     pub fn reload(&mut self, store: &ConfigStore) -> Result<ReloadResult, StorageError> {
-        let Some(external) =
-            store.read_external(self.accepted.as_ref().map(ConfigLayer::config))?
-        else {
+        let external = store.read_external(self.accepted.as_ref().map(ConfigLayer::config));
+        if !matches!(&external, Ok(None)) {
+            self.configuration_file_expected = true;
+        }
+        let Some(external) = external? else {
             return Ok(ReloadResult {
                 change: ReloadChange::Missing,
                 persistence: PersistResult::default(),
@@ -364,6 +379,7 @@ impl ConfigSession {
             draft.baseline = baseline.validate()?;
         }
         let result = store.save(&accepted.config)?;
+        self.configuration_file_expected = true;
         self.accepted = Some(accepted);
         self.draft = updated_draft;
         Ok(result)

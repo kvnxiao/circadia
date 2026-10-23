@@ -53,6 +53,16 @@ struct Shared {
     rendered: Condvar,
     gate: Mutex<Gate>,
     released: Condvar,
+    lifecycle: Mutex<Lifecycle>,
+    ready: Condvar,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Lifecycle {
+    #[default]
+    Starting,
+    Ready,
+    Stopped,
 }
 
 /// Measure native graph rendering with an isolated, controllably blocked
@@ -70,9 +80,6 @@ impl GraphMeasurement {
     /// # Errors
     /// Report duplicate measurement initialization or desktop failures.
     pub fn run(&self, directory: PathBuf) -> io::Result<()> {
-        ACTIVE
-            .set(self.clone())
-            .map_err(|_error| io::Error::other("measurement already started"))?;
         let native = Native::with_backend(Backend {
             shared: Arc::clone(&self.0),
             settings: NativeSettings {
@@ -82,7 +89,41 @@ impl GraphMeasurement {
             },
             active: true,
         });
-        super::run_with_native(Some(directory), native)
+        let result = ACTIVE
+            .set(self.clone())
+            .map_err(|_error| io::Error::other("measurement already started"))
+            .and_then(|()| super::run_with_native(Some(directory), native));
+        self.0
+            .lifecycle
+            .lock()
+            .map(|mut state| *state = Lifecycle::Stopped)
+            .map_err(|_error| io::Error::other("graph lifecycle lock failed"))?;
+        self.0.ready.notify_all();
+        result
+    }
+
+    /// Wait until the application can receive a graceful exit request.
+    ///
+    /// # Errors
+    /// Report startup failure or unavailable synchronization.
+    pub fn wait_ready(&self) -> io::Result<()> {
+        let state = self
+            .0
+            .lifecycle
+            .lock()
+            .map_err(|_error| io::Error::other("graph lifecycle lock failed"))?;
+        let state = self
+            .0
+            .ready
+            .wait_while(state, |state| *state == Lifecycle::Starting)
+            .map_err(|_error| io::Error::other("graph lifecycle lock failed"))?;
+        if *state == Lifecycle::Ready {
+            Ok(())
+        } else {
+            Err(io::Error::other(
+                "application stopped before graph input started",
+            ))
+        }
     }
 
     /// Arm one input-to-render sample before editing the named text control.
@@ -185,6 +226,15 @@ impl GraphMeasurement {
             .lock()
             .map_err(|_error| io::Error::other("measurement lock failed"))?;
         Ok(gate.held && gate.entered)
+    }
+}
+
+pub(super) fn desktop_ready() {
+    if let Some(active) = ACTIVE.get() {
+        if let Ok(mut state) = active.0.lifecycle.lock() {
+            *state = Lifecycle::Ready;
+        }
+        active.0.ready.notify_all();
     }
 }
 
@@ -316,5 +366,27 @@ impl NativeBackend for Backend {
         self.settings.previewing =
             matches!(mode, TemperatureMode::Hold | TemperatureMode::ApplyHeld);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_case::test_case;
+
+    #[test_case(Lifecycle::Ready, true; "receiver ready")]
+    #[test_case(Lifecycle::Stopped, false; "application startup failed")]
+    fn input_waits_for_startup_outcome(outcome: Lifecycle, ready: bool) {
+        let measurement = GraphMeasurement::default();
+        let input = measurement.clone();
+        let (started, beginning) = std::sync::mpsc::sync_channel(1);
+        let thread = std::thread::spawn(move || {
+            started.send(()).expect("test receives startup");
+            input.wait_ready()
+        });
+        beginning.recv().expect("input thread starts");
+        *measurement.0.lifecycle.lock().expect("lifecycle lock") = outcome;
+        measurement.0.ready.notify_all();
+        assert_eq!(thread.join().expect("input thread returns").is_ok(), ready);
     }
 }

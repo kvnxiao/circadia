@@ -192,6 +192,8 @@ impl Session {
             files: watched.ok(),
         });
         input.primary.publish_ready()?;
+        #[cfg(feature = "graph-measurement")]
+        measurement::desktop_ready();
         #[cfg(feature = "output-measurement")]
         crate::measurement::desktop_ready();
         Ok((
@@ -215,6 +217,9 @@ impl Drop for Session {
 }
 
 fn finish_runtime(runtime: &RefCell<Option<Runtime>>, result: &RefCell<Option<io::Error>>) {
+    if let Err(error) = crate::platform::picker::cancel() {
+        result.borrow_mut().get_or_insert(error);
+    }
     let ending = runtime.borrow_mut().take();
     if let Some(ending) = ending
         && let Err(error) = ending.shutdown()
@@ -687,6 +692,11 @@ impl Desktop {
     }
 
     fn quit(&mut self, context: &ApplicationContext<Self>) {
+        if let Err(error) = crate::platform::picker::cancel()
+            && let Some(session) = &self.session
+        {
+            session.result.borrow_mut().get_or_insert(error);
+        }
         self.exiting = true;
         self.pending.clear();
         if let Some(session) = &self.session

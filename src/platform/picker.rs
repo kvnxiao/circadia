@@ -1,8 +1,34 @@
+use std::cell::RefCell;
 use std::io;
 use std::path::Path;
 use windows_reactor::WindowHandle;
 use winsafe::co;
 use winsafe::prelude::*;
+
+thread_local! {
+    static ACTIVE: RefCell<Option<winsafe::IFileOpenDialog>> = const { RefCell::new(None) };
+}
+
+struct ActivePicker;
+
+impl Drop for ActivePicker {
+    fn drop(&mut self) {
+        ACTIVE.with_borrow_mut(Option::take);
+    }
+}
+
+#[expect(
+    unsafe_code,
+    reason = "IFileDialog::Close requires an HRESULT cancellation value"
+)]
+pub(crate) fn cancel() -> io::Result<()> {
+    let Some(dialog) = ACTIVE.with_borrow_mut(Option::take) else {
+        return Ok(());
+    };
+    // SAFETY: Close forwards the raw value as HRESULT despite accepting ERROR.
+    let cancelled = unsafe { co::ERROR::from_raw(co::ERROR::CANCELLED.to_hresult().raw()) };
+    dialog.Close(cancelled).map_err(io::Error::other)
+}
 
 pub(crate) fn executable(window: &WindowHandle<'_>) -> io::Result<Option<String>> {
     let mut parent = None;
@@ -35,6 +61,14 @@ pub(crate) fn executable(window: &WindowHandle<'_>) -> io::Result<Option<String>
     dialog
         .SetFileTypes(&[("Applications (*.exe)", "*.exe")])
         .map_err(io::Error::other)?;
+    ACTIVE.with_borrow_mut(|active| {
+        if active.is_some() {
+            return Err(io::Error::other("an executable picker is already open"));
+        }
+        *active = Some(dialog.clone());
+        Ok(())
+    })?;
+    let _active = ActivePicker;
     if !dialog.Show(&parent).map_err(io::Error::other)? {
         return Ok(None);
     }

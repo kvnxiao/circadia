@@ -460,6 +460,144 @@ fn unchanged_reload_preserves_backup_warning_until_a_successful_write() {
 }
 
 #[test]
+fn first_launch_reloads_keep_unsaved_defaults_without_a_storage_error() {
+    let directory = tempfile::tempdir().expect("directory");
+    let store = ConfigStore::new(directory.path());
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    for _ in 0..2 {
+        let reloaded = client
+            .submit(ControllerCommand::Reload)
+            .expect("initial or unrelated directory notification");
+        let snapshot = wait_for(&client, &notified, |snapshot| {
+            acknowledged(snapshot, &reloaded)
+        });
+        assert!(snapshot.storage_error.is_none());
+        assert_eq!(
+            snapshot
+                .accepted
+                .as_ref()
+                .expect("accepted defaults")
+                .config(),
+            &Config::default()
+        );
+    }
+    assert!(!store.primary_path().exists());
+    assert!(!store.backup_path().exists());
+    assert!(!directory.path().join("diagnostics.log").exists());
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConfigurationCreation {
+    Save,
+    Tray,
+    External,
+    InvalidExternal,
+    StaleSave,
+    FailedTray,
+}
+
+#[test_case(ConfigurationCreation::Save; "save")]
+#[test_case(ConfigurationCreation::Tray; "tray")]
+#[test_case(ConfigurationCreation::External; "external")]
+#[test_case(ConfigurationCreation::InvalidExternal; "invalid external")]
+#[test_case(ConfigurationCreation::StaleSave; "stale save")]
+#[test_case(ConfigurationCreation::FailedTray; "failed tray")]
+fn first_launch_reports_deletion_after_a_configuration_file_exists(source: ConfigurationCreation) {
+    let directory = tempfile::tempdir().expect("directory");
+    let store = ConfigStore::new(directory.path());
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    let command = match source {
+        ConfigurationCreation::Save => {
+            client
+                .submit(ControllerCommand::BeginEdit)
+                .expect("begin edit");
+            ControllerCommand::Save
+        }
+        ConfigurationCreation::Tray => ControllerCommand::Inclusion {
+            executable: "fixture.exe".into(),
+            included: true,
+        },
+        ConfigurationCreation::External => {
+            store
+                .save(&Config::default())
+                .expect("identical external defaults");
+            ControllerCommand::Reload
+        }
+        ConfigurationCreation::InvalidExternal => {
+            fs_err::write(store.primary_path(), "invalid").expect("invalid external file");
+            ControllerCommand::Reload
+        }
+        ConfigurationCreation::StaleSave | ConfigurationCreation::FailedTray => {
+            client
+                .submit(ControllerCommand::BeginEdit)
+                .expect("begin edit");
+            let edited = client
+                .submit(ControllerCommand::Edit(Box::new(input(3000))))
+                .expect("edit defaults");
+            wait_for(&client, &notified, |snapshot| {
+                acknowledged(snapshot, &edited)
+            });
+            store
+                .save(&input(3200).validate().expect("external config"))
+                .expect("create different external config");
+            if source == ConfigurationCreation::StaleSave {
+                ControllerCommand::Save
+            } else {
+                ControllerCommand::Inclusion {
+                    executable: "circadia.exe".into(),
+                    included: true,
+                }
+            }
+        }
+    };
+    let observed = client.submit(command).expect("observe configuration file");
+    let observed_snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &observed)
+    });
+    if matches!(
+        source,
+        ConfigurationCreation::StaleSave | ConfigurationCreation::FailedTray
+    ) {
+        assert_eq!(
+            observed_snapshot
+                .accepted
+                .as_ref()
+                .expect("external accepted")
+                .config(),
+            &input(3200).validate().expect("expected external config")
+        );
+        let outcome = observed.completion.try_recv().expect("command completed");
+        assert!(matches!(outcome, CommandOutcome::Failed(_)), "{outcome:?}");
+    }
+    fs_err::remove_file(store.primary_path()).expect("delete primary");
+    let reloaded = client
+        .submit(ControllerCommand::Reload)
+        .expect("deletion notification");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &reloaded)
+    });
+    assert_eq!(
+        snapshot
+            .storage_error
+            .as_ref()
+            .expect("missing file error")
+            .diagnostic()
+            .category,
+        DiagnosticCategory::Missing
+    );
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+}
+
+#[test]
 fn missing_primary_is_reported_and_recreating_identical_values_clears_the_error() {
     let directory = tempfile::tempdir().expect("directory");
     let store = ConfigStore::new(directory.path());

@@ -16,9 +16,76 @@ use windows::Win32::UI::Accessibility::UIA_ListItemControlTypeId;
 use windows::Win32::UI::Accessibility::UIA_SelectionItemPatternId;
 use windows::Win32::UI::Accessibility::UIA_ValuePatternId;
 use winsafe::HWND;
-use winsafe::HwKbMouse;
-use winsafe::KEYBDINPUT;
-use winsafe::co;
+
+pub(super) fn run() -> io::Result<()> {
+    require(
+        std::env::args_os().count() == 3,
+        "expected one executable path",
+    )?;
+    let executable = std::env::args_os().nth(2).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "expected Circadia executable")
+    })?;
+    match circadia::InstanceClaim::acquire()? {
+        circadia::InstanceClaim::Primary(_) => {}
+        circadia::InstanceClaim::Existing(_) => {
+            return Err(io::Error::other("close Circadia before picker checks"));
+        }
+    }
+    let executable = fs_err::canonicalize(executable)?;
+    let directory = tempfile::Builder::new()
+        .prefix("circadia-picker-")
+        .tempdir()?;
+    let result = (|| {
+        let config = circadia::ConfigInput {
+            daytime_kelvin: 3400,
+            middle_kelvin: 3400,
+            sleep_kelvin: 3400,
+            start_minimized: false,
+            ..circadia::ConfigInput::default()
+        }
+        .validate()
+        .map_err(io::Error::other)?;
+        let saved = circadia::ConfigStore::new(directory.path())
+            .save(&config)
+            .map_err(io::Error::other)?;
+        if let Some(error) = saved.backup_error {
+            return Err(io::Error::other(error));
+        }
+        let automation = Automation::new()?;
+        let native = win_nightlight_lib::Nightlight::new();
+        let mut application = crate::lifecycle::Process::start(&executable, directory.path())?;
+        let process = application.id();
+        let settings = wait("picker settings window", || {
+            window(process, "Circadia", true)
+        })?;
+        wait("editable picker settings", || {
+            Ok(automation
+                .enabled(&settings, process, "add-suppression")?
+                .filter(|enabled| *enabled))
+        })?;
+        crate::lifecycle::wait_temperature(&native, 3400)?;
+        exercise(&automation, &settings, process, directory.path())?;
+        automation.invoke(&settings, process, "quit")?;
+        application.wait_exit()?;
+        require(
+            !native
+                .read_settings()
+                .map_err(io::Error::other)?
+                .is_previewing()
+                && !native.read_state().map_err(io::Error::other)?.is_active(),
+            "picker test exit did not clear native preview and turn Night Light off",
+        )?;
+        report("PASS: picker checks and cleanup completed without mouse or keyboard input");
+        Ok(())
+    })();
+    if result.is_err() {
+        report(&format!(
+            "Retained picker fixture: {}",
+            directory.keep().display()
+        ));
+    }
+    result
+}
 
 #[derive(Clone, Copy)]
 enum Selection<'a> {
@@ -187,31 +254,27 @@ fn select(
 
 #[expect(
     unsafe_code,
-    reason = "navigate the owned picker through its focused address editor"
+    reason = "navigate the owned picker through its filename value and Open action"
 )]
 fn navigate(automation: &Automation, dialog: &HWND, process: u32, folder: &Path) -> io::Result<()> {
     let folder = folder
         .to_str()
         .ok_or_else(|| io::Error::other("picker fixture directory is not Unicode"))?;
-    automation.focus(dialog, process)?;
-    wait("picker receives foreground focus", || {
-        Ok((HWND::GetForegroundWindow().as_ref() == Some(dialog)).then_some(()))
+    let value = wait("picker filename editor", || {
+        filename_value(automation, dialog, process)
     })?;
-    keys(dialog, &[co::VK::MENU, co::VK::CHAR_D], "focus address bar")?;
-    let value = wait("picker address editor receives focus", || {
-        address_value(automation, dialog, process)
-    })?;
+    let destination = format!("{}\\", folder.trim_end_matches(['\\', '/']));
     // SAFETY: The owned BSTR remains live for this synchronous call.
-    unsafe { value.SetValue(&folder.into()) }.map_err(io::Error::other)?;
-    wait("picker address matches the fixture directory", || {
-        let Some(value) = address_value(automation, dialog, process)? else {
+    unsafe { value.SetValue(&destination.clone().into()) }.map_err(io::Error::other)?;
+    wait("picker filename contains the fixture directory", || {
+        let Some(value) = filename_value(automation, dialog, process)? else {
             return Ok(None);
         };
         // SAFETY: The live pattern returns an owned value.
         let actual = unsafe { value.CurrentValue() }.map_err(io::Error::other)?;
-        Ok((actual == folder).then_some(()))
+        Ok((actual == destination).then_some(()))
     })?;
-    keys(dialog, &[co::VK::RETURN], "navigate to fixture directory")?;
+    confirm(automation, dialog, process)?;
     let expected = format!("Address: {folder}");
     wait("picker navigated to the fixture directory", || {
         for element in automation.elements(dialog, process)? {
@@ -226,9 +289,9 @@ fn navigate(automation: &Automation, dialog: &HWND, process: u32, folder: &Path)
 
 #[expect(
     unsafe_code,
-    reason = "reacquire the focused address editor in the process-checked picker"
+    reason = "reacquire the filename editor in the process-checked picker"
 )]
-fn address_value(
+fn filename_value(
     automation: &Automation,
     dialog: &HWND,
     process: u32,
@@ -241,9 +304,7 @@ fn address_value(
         }
         // SAFETY: The live interface returns an owned accessible name.
         let name = unsafe { element.CurrentName() }.map_err(io::Error::other)?;
-        // SAFETY: The live interface returns a scalar focus state.
-        let focused = unsafe { element.CurrentHasKeyboardFocus() }.map_err(io::Error::other)?;
-        if name != "Address" || !focused.as_bool() {
+        if name != "File name:" && name != "File name" {
             continue;
         }
         // SAFETY: The requested interface matches the value pattern ID.
@@ -252,33 +313,6 @@ fn address_value(
             .map_err(io::Error::other);
     }
     Ok(None)
-}
-
-fn keys(dialog: &HWND, keys: &[co::VK], action: &str) -> io::Result<()> {
-    let mut foreground = None;
-    wait(&format!("picker foreground before {action}"), || {
-        foreground = HWND::GetForegroundWindow();
-        Ok((foreground.as_ref() == Some(dialog)).then_some(()))
-    }).inspect_err(|_| {
-        report(&format!("Picker keyboard target: {dialog:?}; foreground: {foreground:?}; foreground process: {:?}", foreground.as_ref().map(|window| window.GetWindowThreadProcessId().1)));
-    })?;
-    let inputs: Vec<_> = keys
-        .iter()
-        .map(|key| (*key, co::KEYEVENTF::NoValue))
-        .chain(keys.iter().rev().map(|key| (*key, co::KEYEVENTF::KEYUP)))
-        .map(|(key, flags)| {
-            HwKbMouse::Kb(KEYBDINPUT {
-                wVk: key,
-                dwFlags: flags,
-                ..KEYBDINPUT::default()
-            })
-        })
-        .collect();
-    let sent = winsafe::SendInput(&inputs).map_err(io::Error::other)?;
-    require(
-        usize::try_from(sent).ok() == Some(inputs.len()),
-        "picker keyboard input was incomplete",
-    )
 }
 
 #[expect(
