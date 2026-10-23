@@ -88,6 +88,7 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
             .enabled(&settings, process, "preview")?
             .filter(|enabled| *enabled))
     })?;
+    check_temperature_fields(&automation, &settings)?;
     wait("graph inside the visible viewport", || {
         Ok(automation.show_graph(&settings, process)?.then_some(()))
     })?;
@@ -113,6 +114,7 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
     automation.toggle(&settings, process, "sunset")?;
     input.sunrise = true;
     input.sunset = true;
+    wait_middle_usage(&automation, &settings, false)?;
     measure_edits(
         measurement,
         &automation,
@@ -169,6 +171,85 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
     let resumed = resume_preview(measurement, &automation, &settings, &mut input)?;
     samples.push(resumed);
     summarize(&samples)
+}
+
+fn wait_middle_usage(automation: &Automation, settings: &HWND, unused: bool) -> io::Result<()> {
+    wait("middle temperature usage label", || {
+        Ok(automation
+            .text(settings, std::process::id(), "middle_kelvin")?
+            .filter(|label| label.contains("unused") == unused))
+    })
+    .map(|_| ())
+}
+
+fn check_temperature_fields(automation: &Automation, settings: &HWND) -> io::Result<()> {
+    let process = std::process::id();
+    wait_middle_usage(automation, settings, true)?;
+    require(
+        automation.enabled(settings, process, "middle_kelvin")? == Some(true),
+        "unused middle temperature must remain editable",
+    )?;
+    automation.set_value(settings, process, "middle_kelvin", "3855")?;
+    wait_temperature_text(automation, settings, "middle_kelvin", "3860")?;
+    for invalid in ["6501", "3855.5"] {
+        automation.set_value(settings, process, "middle_kelvin", invalid)?;
+        wait("invalid temperature disables Save and Preview", || {
+            Ok(
+                (automation.enabled(settings, process, "save")? == Some(false)
+                    && automation.enabled(settings, process, "preview")? == Some(false))
+                .then_some(()),
+            )
+        })?;
+        wait_temperature_text(automation, settings, "middle_kelvin", invalid)?;
+    }
+    automation.set_value(settings, process, "wake", "unfinished")?;
+    automation.set_value(settings, process, "middle_kelvin", "3855")?;
+    wait_temperature_text(automation, settings, "middle_kelvin", "3855")?;
+    automation.set_value(settings, process, "wake", "07:00")?;
+    wait_temperature_text(automation, settings, "middle_kelvin", "3860")?;
+    automation.set_value(settings, process, "sleep_kelvin", "4000")?;
+    wait("temperature order disables Save", || {
+        Ok(automation
+            .enabled(settings, process, "save")?
+            .filter(|enabled| !enabled))
+    })?;
+    wait_temperature_text(automation, settings, "middle_kelvin", "3860")?;
+    automation.set_value(settings, process, "middle_kelvin", "4055")?;
+    wait_temperature_text(automation, settings, "middle_kelvin", "4060")?;
+    wait("corrected temperature order enables Save", || {
+        Ok(automation
+            .enabled(settings, process, "save")?
+            .filter(|enabled| *enabled))
+    })?;
+    automation.set_value(settings, process, "sleep_kelvin", "2400")?;
+    automation.set_value(settings, process, "middle_kelvin", "3400")?;
+    wait_temperature_text(automation, settings, "middle_kelvin", "3400")?;
+    report(
+        "PASS: temperature labels, rounded values, invalid input, and repaired ordering through native controls without changing focus",
+    );
+    Ok(())
+}
+
+fn wait_temperature_text(
+    automation: &Automation,
+    settings: &HWND,
+    id: &str,
+    expected: &str,
+) -> io::Result<()> {
+    let description = format!("{id} text to equal {expected:?}");
+    let mut observed = None;
+    wait(&description, || {
+        observed = automation.value(settings, std::process::id(), id)?;
+        Ok((observed.as_deref() == Some(expected)).then_some(()))
+    })
+    .map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("{error}; last observed text: {observed:?}"),
+        )
+    })?;
+    report(&format!("PASS: {id} text equals {expected:?}"));
+    Ok(())
 }
 
 fn summarize(samples: &[Duration]) -> io::Result<()> {

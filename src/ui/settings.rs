@@ -153,6 +153,7 @@ pub(super) struct Settings {
     calculation: Option<Arc<CalculationResult>>,
     form: Option<Form>,
     baseline: Option<Form>,
+    focused_field: Option<Field>,
     close_request: Option<CloseRequest>,
     error: Option<String>,
     pending: bool,
@@ -180,6 +181,8 @@ pub(super) enum Message {
     CloseInstalled(std::io::Result<CloseRequest>),
     CloseRequested,
     Field(Field, Rc<str>),
+    FocusField(Field),
+    LeaveField(Field),
     Preference(Preference, bool),
     RemoveExecutable(ExecutableList, String),
     PickExecutable(ExecutableList),
@@ -210,6 +213,7 @@ impl Component for Settings {
             calculation: input.calculation.clone(),
             form: None,
             baseline: None,
+            focused_field: None,
             close_request: None,
             error: None,
             pending: false,
@@ -341,6 +345,13 @@ impl Component for Settings {
             }
             Message::Field(field, value) if self.editable() => {
                 self.edit_field(field, &value, context);
+            }
+            Message::FocusField(field) => self.focused_field = Some(field),
+            Message::LeaveField(field) => {
+                self.focused_field = self.focused_field.filter(|focused| *focused != field);
+                if let Some(form) = &mut self.form {
+                    form.normalize_temperatures(self.focused_field);
+                }
             }
             Message::Preference(preference, value) if self.editable() => {
                 self.edit_preference(preference, value, context);
@@ -1232,9 +1243,10 @@ impl Settings {
 
     fn edit(&mut self, context: &ComponentContext<Self>) {
         self.error = None;
-        let Some(form) = &self.form else {
+        let Some(form) = &mut self.form else {
             return;
         };
+        form.normalize_temperatures(self.focused_field);
         let command = match form.input() {
             Ok(input) => {
                 if let Ok(config) = input.clone().validate() {
@@ -1387,10 +1399,19 @@ impl Settings {
     }
 
     fn field(&self, field: Field, form: &Form, context: &ViewContext<'_, Self>) -> View {
-        TextBox::new()
+        let input = TextBox::new()
             .header(
                 TextBlock::new()
-                    .text(field.label())
+                    .text(
+                        if field == Field::Middle
+                            && !form.preferences.sunrise
+                            && !form.preferences.sunset
+                        {
+                            "Morning / Evening temperature (K; unused without solar timing)"
+                        } else {
+                            field.label()
+                        },
+                    )
                     .text_wrapping(TextWrapping::Wrap),
             )
             .text(form.text(field))
@@ -1401,7 +1422,17 @@ impl Settings {
                 #[cfg(feature = "graph-measurement")]
                 super::measurement::input(field.id(), &value);
                 Message::Field(field, value)
-            }))
+            }));
+        Border::new()
+            .on_got_focus(
+                context
+                    .callback(move |_: windows_reactor::FocusEventInfo| Message::FocusField(field)),
+            )
+            .on_lost_focus(
+                context
+                    .callback(move |_: windows_reactor::FocusEventInfo| Message::LeaveField(field)),
+            )
+            .content(input)
             .into()
     }
 }

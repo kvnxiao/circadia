@@ -7,6 +7,7 @@ use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Read and atomically persist configuration in one per-user directory.
@@ -16,7 +17,7 @@ pub struct ConfigStore {
 }
 
 /// Select the configuration available at process startup.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct StartupConfig {
     pub(crate) unsaved_defaults: bool,
     /// Accepted inputs, or none while configuration requires correction.
@@ -24,7 +25,7 @@ pub struct StartupConfig {
     /// Backup restoration notice, retained until the next successful Save.
     pub restore: Option<RestoreNotice>,
     /// Load or backup errors available to the settings view.
-    pub problems: Vec<StorageError>,
+    pub problems: Vec<Arc<StorageError>>,
 }
 
 /// Explain why startup selected the backup.
@@ -39,7 +40,7 @@ pub enum RestoreCause {
 }
 
 /// Report startup restoration independently of accepted in-memory settings.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RestoreNotice {
     /// Reason the primary configuration was not used.
     pub cause: RestoreCause,
@@ -47,7 +48,7 @@ pub struct RestoreNotice {
     pub preserved_path: Option<PathBuf>,
     /// Failure to preserve or restore the file; the backup is still active in
     /// memory.
-    pub write_error: Option<StorageError>,
+    pub write_error: Option<Arc<StorageError>>,
 }
 
 /// Report backup failure after a successful primary configuration write.
@@ -151,6 +152,7 @@ impl ConfigStore {
                 restore: None,
                 problems: atomic_write(&self.backup_path(), contents.as_bytes())
                     .err()
+                    .map(Arc::new)
                     .into_iter()
                     .collect(),
             },
@@ -200,7 +202,7 @@ impl ConfigStore {
     }
 
     fn load_backup(&self, primary_error: Option<StorageError>) -> StartupConfig {
-        let mut problems: Vec<_> = primary_error.into_iter().collect();
+        let mut problems: Vec<_> = primary_error.into_iter().map(Arc::new).collect();
         let backup = match read_config(&self.backup_path()) {
             Ok(Some(backup)) => backup,
             Ok(None) => {
@@ -212,7 +214,7 @@ impl ConfigStore {
                 };
             }
             Err(error) => {
-                problems.push(error);
+                problems.push(Arc::new(error));
                 return StartupConfig {
                     unsaved_defaults: false,
                     accepted: None,
@@ -241,9 +243,11 @@ impl ConfigStore {
         match preserve {
             Ok(path) => {
                 notice.preserved_path = path;
-                notice.write_error = atomic_write(&self.primary_path(), backup.1.as_bytes()).err();
+                notice.write_error = atomic_write(&self.primary_path(), backup.1.as_bytes())
+                    .err()
+                    .map(Arc::new);
             }
-            Err(error) => notice.write_error = Some(error),
+            Err(error) => notice.write_error = Some(Arc::new(error)),
         }
         StartupConfig {
             unsaved_defaults: false,

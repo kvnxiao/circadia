@@ -491,6 +491,101 @@ fn first_launch_reloads_keep_unsaved_defaults_without_a_storage_error() {
     assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
 }
 
+#[test_case(false; "backup succeeds")]
+#[test_case(true; "backup fails")]
+fn tray_save_clears_only_the_resolved_restoration_write_error(backup_fails: bool) {
+    let directory = tempfile::tempdir().expect("directory");
+    let store = ConfigStore::new(directory.path());
+    fs_err::create_dir(store.primary_path()).expect("unreadable primary");
+    fs_err::write(
+        store.backup_path(),
+        toml::to_string(Config::default().input()).expect("serialize backup"),
+    )
+    .expect("valid backup");
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    let initial = wait_for(&client, &notified, |snapshot| snapshot.startup.is_some());
+    let notice = initial
+        .startup
+        .as_ref()
+        .expect("startup")
+        .restore
+        .as_ref()
+        .expect("restore notice");
+    assert_eq!(notice.cause, crate::RestoreCause::Unreadable);
+    assert!(notice.write_error.is_some());
+    let include = || ControllerCommand::Inclusion {
+        executable: "fixture.exe".into(),
+        included: true,
+    };
+    let failed = client.submit(include()).expect("blocked tray save");
+    let failed_snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &failed)
+    });
+    assert!(matches!(
+        failed.completion.try_recv().expect("failed save result"),
+        CommandOutcome::Failed(_)
+    ));
+    assert!(
+        failed_snapshot
+            .startup
+            .as_ref()
+            .expect("startup")
+            .restore
+            .as_ref()
+            .expect("restore notice")
+            .write_error
+            .is_some()
+    );
+    fs_err::remove_dir(store.primary_path()).expect("remove primary obstruction");
+    if backup_fails {
+        fs_err::remove_file(store.backup_path()).expect("remove backup fixture");
+        fs_err::create_dir(store.backup_path()).expect("block backup replacement");
+    }
+    let saved = client.submit(include()).expect("successful tray save");
+    let saved_snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &saved)
+    });
+    assert!(matches!(
+        saved.completion.try_recv().expect("tray save result"),
+        CommandOutcome::Applied
+    ));
+    let restored = saved_snapshot
+        .startup
+        .as_ref()
+        .expect("retained startup notice");
+    let restored = restored.restore.as_ref().expect("retained restore notice");
+    assert_eq!(restored.cause, crate::RestoreCause::Unreadable);
+    assert!(
+        restored.write_error.is_none(),
+        "successful primary save must clear its restore-write error"
+    );
+    assert!(
+        notice.write_error.is_some(),
+        "published snapshots remain immutable"
+    );
+    assert_eq!(saved_snapshot.storage_error.is_some(), backup_fails);
+    let persisted: ConfigInput =
+        toml::from_str(&fs_err::read_to_string(store.primary_path()).expect("written primary"))
+            .expect("valid primary");
+    assert_eq!(persisted.suppression, ["fixture.exe"]);
+    client
+        .submit(ControllerCommand::BeginEdit)
+        .expect("begin edit");
+    let saved = client.submit(ControllerCommand::Save).expect("full save");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &saved)
+    });
+    assert!(
+        snapshot.startup.is_none(),
+        "Save clears the complete restore notice"
+    );
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ConfigurationCreation {
     Save,

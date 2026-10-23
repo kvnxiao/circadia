@@ -57,7 +57,7 @@ The fields configure the specified application behavior:
 - Wake reaches Daytime and Bedtime reaches Sleep. When a selected Sunrise follows Wake, Wake reaches the middle temperature and Sunrise reaches Daytime. A selected Sunset reaches the same middle temperature. The solar selection rules are described below.
 - Scheduled transitions finish at their target times and use at most `scheduled_transition_minutes`. Suppression changes, schedule recomputation, and native-error recovery use `ordinary_fade_ms`.
 - A listed foreground executable requests a temporary 6500 K override called automatic suppression. Matching or nonmatching focus must persist for `focus_delay_ms` before automatic suppression changes; exclusions override the `suppression` inclusion list.
-- `output_rate_hz` limits attempts per second to change temperature or correct Night Light's enabled state, native schedule, or native preview flag. The native preview flag makes Windows apply changing temperatures immediately. Circadia's Preview plays the compressed schedule on the graph and requests its temperatures through Night Light. It compresses the interval from the current instant through the next day's matching local clock into `preview_seconds`.
+- `output_rate_hz` limits attempts per second to change temperature or correct Night Light's enabled state, native schedule, or native preview flag. Circadia uses the native preview flag to request immediate application of changing temperatures. Circadia's Preview plays the compressed schedule on the graph and requests its temperatures through Night Light. It compresses the interval from the current instant through the next day's matching local clock into `preview_seconds`.
 - `start_at_sign_in` requests current-user sign-in startup. `start_minimized` starts with only a tray icon and no settings window.
 
 | Setting | Default | Accepted values |
@@ -74,7 +74,9 @@ The fields configure the specified application behavior:
 | `suppression`, `exclusions` | Empty lists | Executable filenames, matched case-insensitively |
 | `start_at_sign_in`, `start_minimized` | false, true | Boolean preferences |
 
-Temperature input rounds to the nearest 10 K, with ties toward higher kelvin. Validation checks the range before rounding and the temperature order afterward. It preserves entries present in both `suppression` and `exclusions`. `ApplicationFrameHost.exe` and the running Circadia executable are always excluded from automatic suppression.
+Temperature input rounds to the nearest 10 K, with ties toward higher kelvin. Validation checks the range before rounding and the temperature order afterward. When the draft is valid, temperature fields show rounded values except for the field being edited. The Morning/Evening field (`middle_kelvin`) remains editable and is labeled unused when both solar switches are off.
+
+Validation preserves entries present in both `suppression` and `exclusions`. `ApplicationFrameHost.exe` and the running Circadia executable are always excluded from automatic suppression.
 
 Settings displays both executable lists, labels included but excluded entries as inactive, and allows removal from either user list. List edits remain unsaved until Save; Discard restores the accepted lists. Tray changes persist immediately and survive subsequent field edits and Discard. Fixed exclusions cannot be removed.
 
@@ -104,6 +106,8 @@ The application uses `%LOCALAPPDATA%/Circadia/`. The `--data-dir DIRECTORY` argu
 | `diagnostics.log` | Operation failures, changed errors, and recovery |
 
 Startup accepts defaults only when both configuration files are missing. A valid primary file takes precedence over the backup. If the primary file is missing, invalid, or unreadable, a valid backup becomes the accepted configuration even if restoring it to disk fails. If either file exists but neither is valid, the library reports a configuration error and does not supply an active configuration. A backup write failure does not undo a successful primary write.
+
+After restoring a backup, settings reports the cause until a successful Save. A successful tray configuration change clears a resolved write error from restoring the backup while retaining that notice.
 
 Diagnostics use tab-separated Unix milliseconds, operation, status, error category, and an optional technical error code. Categories are fixed names such as `access_denied` and `invalid_data`. Repeated identical failures are recorded once per operation until its error changes or it recovers. Records exclude coordinates, executable names, window titles, personal paths, and raw dependency error text. Logging failure does not prevent editing, control, or exit.
 
@@ -148,7 +152,7 @@ Manual Start and Stop commands are idempotent. Start creates one hour of suppres
 
 `ControllerWorker` owns configuration state and serializes Night Light operations on a dedicated thread. A separate calculation worker generates schedule and graph results while native calls are blocked. The client submits bounded, ordered commands and reads immutable status snapshots. A successful submission acknowledges queue admission and returns a receipt that preserves that command's outcome independently of later snapshots. Superseded calculations are rejected, and output waits for fresh calculation after relevant input changes.
 
-The controller selects suppression, Preview, or the active schedule in that order. The accepted configuration and draft each have a record of their last scheduled temperature successfully stored in Windows. A valid draft is active while editing; otherwise the accepted configuration is active. A time-zone failure ends Preview and retains the active configuration's recorded temperature. Without one, scheduled output, suppression output, and corrections to native Night Light settings stop until calculation succeeds; pending native preview cleanup remains eligible. Solar failure uses the Wake/Bedtime-only curve.
+The controller selects suppression, Preview, or the active schedule in that order. The accepted configuration and draft each have a record of their last scheduled temperature successfully stored in Windows. An open draft supplies its last valid schedule inputs; when settings is closed, the accepted configuration supplies them. A time-zone failure ends Preview and retains the active configuration's recorded temperature. Without one, scheduled output, suppression output, and corrections to native Night Light settings stop until calculation succeeds; pending native preview cleanup remains eligible. Solar failure uses the Wake/Bedtime-only curve.
 
 Preview admission captures its start instant and the UI's validated draft, then starts graph calculation independently of native dispatch. The returned receipt identifies the calculation and its original animation start. Before native playback, the worker checks:
 
