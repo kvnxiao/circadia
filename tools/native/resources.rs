@@ -16,7 +16,6 @@ use circadia::WindowsZone;
 use jiff::Timestamp;
 use std::io;
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 use std::time::Instant;
 use win_nightlight_lib::Nightlight;
@@ -54,7 +53,9 @@ pub(super) fn run() -> io::Result<()> {
             ));
         }
     }
-    environment(&executable, quick)?;
+    crate::environment::report(&executable, "Resource measurement")?;
+    report(&format!("Resource quick mode: {quick}"));
+    method();
     let directory = tempfile::Builder::new()
         .prefix("circadia-resources-")
         .tempdir()?;
@@ -450,83 +451,7 @@ fn median(mut values: Vec<usize>) -> io::Result<usize> {
     Ok(lower + (upper - lower) / 2)
 }
 
-fn environment(executable: &Path, quick: bool) -> io::Result<()> {
-    let mut displays = 0;
-    for device in winsafe::EnumDisplayDevices(None, None) {
-        // EnumDisplayDevices ends with false; its GetLastError value is
-        // unspecified.
-        let Ok(device) = device else { break };
-        if !device
-            .StateFlags
-            .has(winsafe::co::DISPLAY_DEVICE::ATTACHED_TO_DESKTOP)
-        {
-            continue;
-        }
-        let mut display = winsafe::DEVMODE::default();
-        require(
-            winsafe::EnumDisplaySettings(
-                Some(&device.DeviceName()),
-                winsafe::GmidxEnum::Enum(winsafe::co::ENUM_SETTINGS::CURRENT),
-                &mut display,
-            )
-            .map_err(io::Error::other)?,
-            "current display mode is unavailable",
-        )?;
-        report(&format!(
-            "Display {} ({}): {} x {} at {} Hz",
-            device.DeviceName(),
-            device.DeviceString(),
-            display.dmPelsWidth,
-            display.dmPelsHeight,
-            display.dmDisplayFrequency
-        ));
-        displays += 1;
-    }
-    require(displays > 0, "no attached display mode is available")?;
-    report(&format!(
-        "Physical memory bytes: {}",
-        winsafe::GlobalMemoryStatusEx()
-            .map_err(io::Error::other)?
-            .ullTotalPhys
-    ));
-    report(&format!(
-        "Resource measurement: release; {}; logical processors {}; executable {}; quick={quick}",
-        std::env::consts::ARCH,
-        std::thread::available_parallelism()?,
-        executable.display()
-    ));
-    for (key, value) in [
-        (
-            "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-            "CurrentBuildNumber",
-        ),
-        (
-            "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-            "UBR",
-        ),
-        (
-            "HKLM\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
-            "ProcessorNameString",
-        ),
-    ] {
-        let output = Command::new("reg.exe")
-            .args(["query", key, "/v", value])
-            .output()?;
-        require(
-            output.status.success(),
-            "reading resource machine metadata failed",
-        )?;
-        report(String::from_utf8_lossy(&output.stdout).trim());
-    }
-    let revision = Command::new("git").args(["rev-parse", "HEAD"]).output()?;
-    require(
-        revision.status.success(),
-        "reading resource source revision failed",
-    )?;
-    report(&format!(
-        "Base source revision: {}; working-tree changes are included",
-        String::from_utf8_lossy(&revision.stdout).trim()
-    ));
+fn method() {
     report(
         "CPU percent = process user+kernel CPU seconds / observed wall seconds / logical processors * 100. Memory values are bytes. Context switches sum observed thread deltas; activity after a thread's last observation is omitted if it exits before the next sample.",
     );
@@ -536,7 +461,6 @@ fn environment(executable: &Path, quick: bool) -> io::Result<()> {
     report(
         "RESULT columns: scenario,elapsed_seconds,cpu_seconds,cpu_percent_machine,median_working_set_bytes,peak_working_set_bytes,median_private_bytes,peak_private_bytes,sampled_context_switches,sampled_temperature_changes",
     );
-    Ok(())
 }
 
 #[cfg(test)]

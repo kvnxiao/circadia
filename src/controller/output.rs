@@ -267,6 +267,10 @@ pub struct TemperatureOutput {
     last_application: Option<Duration>,
     gradual: Option<(Timestamp, Timestamp)>,
     issued: Option<Issued>,
+    #[cfg(feature = "output-measurement")]
+    measured_deadlines: OutputDeadlines,
+    #[cfg(feature = "output-measurement")]
+    prepared_at: Option<ControlTime>,
 }
 
 impl Default for TemperatureOutput {
@@ -283,6 +287,10 @@ impl Default for TemperatureOutput {
             last_application: None,
             gradual: None,
             issued: None,
+            #[cfg(feature = "output-measurement")]
+            measured_deadlines: OutputDeadlines::default(),
+            #[cfg(feature = "output-measurement")]
+            prepared_at: None,
         }
     }
 }
@@ -304,6 +312,15 @@ impl TemperatureOutput {
         let source_changed = self.target.as_ref().is_some_and(|old| {
             old.is_preview() != target.is_preview() || old.is_scheduled() != target.is_scheduled()
         });
+        #[cfg(feature = "output-measurement")]
+        let ended_preview = match &self.target {
+            Some(OutputTarget::Preview {
+                playback, start, ..
+            }) => start
+                .checked_add(playback.duration())
+                .filter(|end| *end <= now.elapsed),
+            _ => None,
+        };
         self.target = Some(target);
         match change {
             OutputUpdate::Fade if changed || source_changed => {
@@ -321,12 +338,36 @@ impl TemperatureOutput {
             }
             OutputUpdate::Fade | OutputUpdate::Adopt => {}
         }
+        #[cfg(feature = "output-measurement")]
+        {
+            if change != OutputUpdate::Adopt
+                && (change != OutputUpdate::Fade
+                    || changed
+                    || source_changed
+                    || self.fade.is_none())
+            {
+                self.remember_deadlines(now);
+            }
+            if let Some(end) = ended_preview {
+                self.measured_deadlines.change = Some(end);
+                crate::measurement::endpoint(
+                    "preview-restoration",
+                    end,
+                    point.temperature.kelvin(),
+                );
+            }
+        }
         Ok(())
     }
 
     /// Require one application without restarting an existing transition.
     pub fn request_refresh(&mut self) {
         self.refresh = true;
+        #[cfg(feature = "output-measurement")]
+        {
+            self.measured_deadlines.change = Some(crate::measurement::elapsed());
+            self.measured_deadlines.discrete = true;
+        }
     }
 
     /// Restart initial application after recovery without a scheduled fallback.
@@ -335,6 +376,11 @@ impl TemperatureOutput {
         self.fade = None;
         self.pending = Pending::Fade;
         self.refresh = true;
+        #[cfg(feature = "output-measurement")]
+        {
+            self.measured_deadlines.change = Some(crate::measurement::elapsed());
+            self.measured_deadlines.discrete = true;
+        }
     }
 
     /// Cancel obsolete output while retaining successfully stored values.
@@ -343,6 +389,11 @@ impl TemperatureOutput {
         self.fade = None;
         self.pending = Pending::None;
         self.issued = None;
+        #[cfg(feature = "output-measurement")]
+        {
+            self.measured_deadlines = OutputDeadlines::default();
+            self.prepared_at = None;
+        }
     }
 
     /// Report whether a target remains selected during pending recalculation.
@@ -464,6 +515,10 @@ impl TemperatureOutput {
         now: ControlTime,
         ordinary_duration: Duration,
     ) -> Result<Option<NativeRequest>, ControlError> {
+        #[cfg(feature = "output-measurement")]
+        {
+            self.prepared_at = Some(now);
+        }
         self.issued = None;
         let Some(target) = &self.target else {
             return Ok(None);
@@ -493,6 +548,8 @@ impl TemperatureOutput {
             let fade = target.fade(now, duration, origin)?;
             if fade.changes() && !(startup && origin == point.temperature) {
                 self.fade = Some(fade);
+                #[cfg(feature = "output-measurement")]
+                crate::measurement::fade(fade);
             } else {
                 self.fade = None;
                 self.refresh = true;
@@ -504,7 +561,6 @@ impl TemperatureOutput {
         let live_edit = self.pending == Pending::Set;
         self.pending = Pending::None;
         let changing_fade = self.fade.is_some_and(|fade| now.elapsed < fade.end());
-        let final_step = !changing_fade;
         let temperature = if let Some(fade) = self.fade.filter(|_fade| changing_fade) {
             fade.rounded(now.elapsed)?
         } else {
@@ -553,14 +609,10 @@ impl TemperatureOutput {
         self.intended = Some(temperature);
         self.issued = Some(Issued {
             request,
-            scheduled: target.is_scheduled() && final_step,
-            final_step,
+            scheduled: target.is_scheduled() && !changing_fade,
+            final_step: !changing_fade,
             completing_fade: self.fade.is_some_and(|fade| now.elapsed >= fade.end()),
-            gradual: if target.is_preview() {
-                None
-            } else {
-                point.segment
-            },
+            gradual: point.segment.filter(|_| !target.is_preview()),
         });
         Ok(Some(request))
     }
@@ -608,6 +660,10 @@ impl TemperatureOutput {
                 self.gradual = step.gradual;
             }
         }
+        #[cfg(feature = "output-measurement")]
+        if let Some(prepared) = self.prepared_at.take() {
+            self.remember_deadlines(prepared);
+        }
         scheduled
     }
 
@@ -638,6 +694,19 @@ impl TemperatureOutput {
         }
         self.startup = Startup::Complete;
         Ok(target.is_scheduled().then_some(point.temperature))
+    }
+
+    #[cfg(feature = "output-measurement")]
+    pub(crate) fn measured_deadlines(&self) -> OutputDeadlines {
+        self.measured_deadlines
+    }
+
+    #[cfg(feature = "output-measurement")]
+    fn remember_deadlines(&mut self, at: ControlTime) {
+        match self.deadlines(at) {
+            Ok(deadlines) => self.measured_deadlines = deadlines,
+            Err(error) => crate::measurement::fail(&format!("capturing output deadline: {error}")),
+        }
     }
 }
 

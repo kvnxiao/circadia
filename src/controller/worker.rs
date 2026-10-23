@@ -551,6 +551,8 @@ impl ControllerWorker {
             notify,
         });
         let client = ControllerClient(Arc::clone(&shared));
+        #[cfg(feature = "output-measurement")]
+        crate::measurement::bind_origin(shared.origin);
         let thread = std::thread::Builder::new()
             .name("circadia-controller".into())
             .spawn(move || {

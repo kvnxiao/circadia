@@ -4,6 +4,9 @@
 #[cfg(windows)]
 #[path = "native/automation.rs"]
 mod automation;
+#[cfg(windows)]
+#[path = "native/environment.rs"]
+mod environment;
 #[cfg(all(windows, feature = "graph-measurement"))]
 #[path = "native/graph.rs"]
 mod graph;
@@ -13,6 +16,9 @@ mod lifecycle;
 #[cfg(windows)]
 #[path = "native/location.rs"]
 mod location;
+#[cfg(all(windows, feature = "output-measurement"))]
+#[path = "native/output.rs"]
+mod output;
 #[cfg(windows)]
 #[path = "native/picker.rs"]
 mod picker;
@@ -37,6 +43,13 @@ mod tray;
 
 #[cfg(windows)]
 fn main() -> std::io::Result<()> {
+    #[cfg(feature = "output-measurement")]
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|value| value == "--measure-output")
+    {
+        return output::run();
+    }
     if std::env::args_os()
         .nth(1)
         .is_some_and(|value| value == "--measure-resources")

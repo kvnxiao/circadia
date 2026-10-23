@@ -192,6 +192,8 @@ impl Session {
             files: watched.ok(),
         });
         input.primary.publish_ready()?;
+        #[cfg(feature = "output-measurement")]
+        crate::measurement::desktop_ready();
         Ok((
             Self {
                 runtime,

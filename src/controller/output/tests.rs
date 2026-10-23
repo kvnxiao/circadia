@@ -123,6 +123,36 @@ fn equal_startup_applies_without_an_artificial_delay() {
     );
 }
 
+#[cfg(feature = "output-measurement")]
+#[test_case::test_case(OutputUpdate::Adopt)]
+#[test_case::test_case(OutputUpdate::Fade)]
+fn measurement_preserves_the_due_threshold_across_a_slow_call_and_adoption(change: OutputUpdate) {
+    let mut output = initialized(2400);
+    output
+        .update(OutputTarget::Suppression, OutputUpdate::Fade, moment(100))
+        .expect("suppression");
+    let request = output
+        .prepare(fresh(2400, false), moment(100), Duration::from_millis(500))
+        .expect("selection")
+        .expect("fade start");
+    apply(&mut output, request, Duration::from_millis(220));
+    assert_eq!(
+        output.measured_deadlines().change,
+        Some(Duration::from_nanos(100_609_757))
+    );
+    assert_eq!(
+        output.deadlines(moment(250)).expect("due now").change,
+        Some(Duration::from_millis(250))
+    );
+    output
+        .update(OutputTarget::Suppression, change, moment(250))
+        .expect("adoption");
+    assert_eq!(
+        output.measured_deadlines().change,
+        Some(Duration::from_nanos(100_609_757))
+    );
+}
+
 #[test]
 fn suppression_replacement_starts_at_the_last_stored_step() {
     let mut output = initialized(2400);
