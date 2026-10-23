@@ -25,6 +25,9 @@ mod picker;
 #[cfg(windows)]
 #[path = "native/preview.rs"]
 mod preview;
+#[cfg(all(windows, feature = "graph-measurement"))]
+#[path = "native/recovery.rs"]
+mod recovery;
 #[cfg(windows)]
 #[path = "native/resources.rs"]
 mod resources;
@@ -73,6 +76,13 @@ fn main() -> std::io::Result<()> {
         windows_window::run();
         drop(fixture);
         return Ok(());
+    }
+    #[cfg(feature = "graph-measurement")]
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|value| value == "--native-recovery")
+    {
+        return recovery::run();
     }
     #[cfg(feature = "graph-measurement")]
     if std::env::args_os()

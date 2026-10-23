@@ -200,5 +200,9 @@ pub use suppression::SuppressionError;
 pub use suppression::SuppressionState;
 #[cfg(all(windows, feature = "graph-measurement"))]
 pub use ui::measurement::GraphMeasurement;
+#[cfg(all(windows, feature = "graph-measurement"))]
+pub use ui::measurement::SimulatedNativeCall;
+#[cfg(all(windows, feature = "graph-measurement"))]
+pub use ui::measurement::SimulatedNativeFault;
 #[cfg(windows)]
 pub use ui::run_desktop;

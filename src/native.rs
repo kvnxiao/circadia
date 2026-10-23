@@ -117,6 +117,13 @@ impl NativeFailure {
             source: Box::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
         }
     }
+    #[cfg(feature = "graph-measurement")]
+    pub(crate) fn injected_after_storage() -> Self {
+        Self {
+            temperature_stored: true,
+            ..Self::injected(DiagnosticOperation::TemperatureWrite)
+        }
+    }
     /// Identify the failed operation without exposing dependency text.
     pub fn operation(&self) -> DiagnosticOperation {
         self.operation

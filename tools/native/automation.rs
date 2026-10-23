@@ -24,6 +24,27 @@ pub(super) struct Automation {
 }
 
 impl Automation {
+    #[cfg(feature = "graph-measurement")]
+    #[expect(
+        unsafe_code,
+        reason = "read keyboard focus from an owned UI Automation control"
+    )]
+    pub(super) fn focused(
+        &self,
+        window: &winsafe::HWND,
+        process: u32,
+        id: &str,
+    ) -> io::Result<Option<bool>> {
+        self.find(window, process, id)?
+            .map(|element| {
+                // SAFETY: The element belongs to the process-checked window.
+                unsafe { element.CurrentHasKeyboardFocus() }
+                    .map(windows::core::BOOL::as_bool)
+                    .map_err(io::Error::other)
+            })
+            .transpose()
+    }
+
     #[expect(
         unsafe_code,
         reason = "toggle an identified control in the owned settings window"

@@ -8,7 +8,9 @@ use circadia::ConfigInput;
 use circadia::ConfigStore;
 use circadia::Coordinates;
 use circadia::GraphMeasurement;
+use circadia::SimulatedNativeFault;
 use std::io;
+use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 use std::time::Instant;
@@ -22,19 +24,7 @@ pub(super) fn run() -> io::Result<()> {
         std::env::args_os().len() == 2,
         "usage: native-lifecycle --measure-graph",
     )?;
-    match circadia::InstanceClaim::acquire()? {
-        circadia::InstanceClaim::Primary(_) => {}
-        circadia::InstanceClaim::Existing(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "close Circadia before graph measurement",
-            ));
-        }
-    }
     environment()?;
-    let directory = tempfile::Builder::new()
-        .prefix("circadia-graph-")
-        .tempdir()?;
     let input = ConfigInput {
         start_minimized: false,
         preview_seconds: 2,
@@ -44,16 +34,41 @@ pub(super) fn run() -> io::Result<()> {
         }),
         ..ConfigInput::default()
     };
+    desktop_check(input.clone(), &[], move |measurement, _| {
+        exercise(measurement, input)
+    })
+}
+
+pub(super) fn desktop_check(
+    input: ConfigInput,
+    faults: &[SimulatedNativeFault],
+    exercise: impl FnOnce(&GraphMeasurement, &Path) -> io::Result<()> + Send + 'static,
+) -> io::Result<()> {
+    match circadia::InstanceClaim::acquire()? {
+        circadia::InstanceClaim::Primary(_) => {}
+        circadia::InstanceClaim::Existing(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "close Circadia before the desktop check",
+            ));
+        }
+    }
+    let directory = tempfile::Builder::new()
+        .prefix("circadia-desktop-check-")
+        .tempdir()?;
     ConfigStore::new(directory.path())
-        .save(&input.clone().validate().map_err(io::Error::other)?)
+        .save(&input.validate().map_err(io::Error::other)?)
         .map_err(io::Error::other)?;
     let measurement = GraphMeasurement::default();
+    measurement.fail_native(faults)?;
     let driver = measurement.clone();
+    let data = directory.path().to_owned();
     let thread = std::thread::Builder::new()
-        .name("circadia-graph-input".into())
+        .name("circadia-desktop-check".into())
         .spawn(move || {
             driver.wait_ready()?;
-            let result = exercise(&driver, input);
+            let result = exercise(&driver, &data);
+            let cleared = driver.fail_native(&[]);
             let released = driver.hold_output(false);
             let closed =
                 window(std::process::id(), "Circadia event receiver", false).and_then(|receiver| {
@@ -61,13 +76,20 @@ pub(super) fn run() -> io::Result<()> {
                         native_message(&receiver, WM_ENDSESSION, 1).map(|_| ())
                     })
                 });
-            result.and(released).and(closed)
+            result.and(cleared).and(released).and(closed)
         })?;
     let application = measurement.run(directory.path().to_owned());
     let checks = thread
         .join()
-        .map_err(|_error| io::Error::other("graph input thread panicked"))?;
-    application.and(checks)
+        .map_err(|_error| io::Error::other("desktop check thread panicked"))?;
+    let result = application.and(checks);
+    if result.is_err() {
+        report(&format!(
+            "Failed desktop fixture retained: {}",
+            directory.keep().display()
+        ));
+    }
+    result
 }
 
 fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Result<()> {
@@ -245,7 +267,11 @@ fn wait_temperature_text(
     .map_err(|error| {
         io::Error::new(
             error.kind(),
-            format!("{error}; last observed text: {observed:?}"),
+            format!(
+                "{error}; last observed text: {observed:?}; keyboard focus: {:?}; validation: {:?}",
+                automation.focused(settings, std::process::id(), id),
+                automation.text(settings, std::process::id(), "validation-error")
+            ),
         )
     })?;
     report(&format!("PASS: {id} text equals {expected:?}"));
