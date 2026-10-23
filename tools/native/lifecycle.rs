@@ -552,7 +552,7 @@ pub(super) struct Process {
 }
 
 impl Process {
-    fn start(executable: &Path, directory: &Path) -> io::Result<Self> {
+    pub(super) fn start(executable: &Path, directory: &Path) -> io::Result<Self> {
         Ok(Self {
             child: Command::new(executable)
                 .arg("--data-dir")
@@ -575,7 +575,7 @@ impl Process {
         self.child.id()
     }
 
-    fn wait_exit(&mut self) -> io::Result<()> {
+    pub(super) fn wait_exit(&mut self) -> io::Result<()> {
         let status = wait("child process exit", || self.child.try_wait())?;
         require(status.success(), &format!("child process failed: {status}"))
     }

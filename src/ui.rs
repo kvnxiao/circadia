@@ -88,6 +88,7 @@ fn run_with_native(directory: Option<PathBuf>, native: crate::Native) -> io::Res
         directory,
         running_executable,
         icon: executable.with_file_name("circadia.ico"),
+        executable,
         primary: Rc::clone(&primary),
         result: Rc::clone(&result),
         native: RefCell::new(Some(native)),
@@ -102,6 +103,7 @@ struct Input {
     directory: PathBuf,
     running_executable: String,
     icon: PathBuf,
+    executable: PathBuf,
     primary: Rc<PrimaryInstance>,
     result: Rc<RefCell<Option<io::Error>>>,
 }
@@ -385,6 +387,7 @@ impl Application for Desktop {
                 "settings",
                 settings::Input {
                     running_executable: input.running_executable.clone(),
+                    executable: input.executable.clone(),
                     directory: input.directory.clone(),
                     activation: self.settings_activation,
                     snapshot: self.snapshot.clone(),

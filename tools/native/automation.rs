@@ -23,7 +23,6 @@ pub(super) struct Automation {
 }
 
 impl Automation {
-    #[cfg(feature = "graph-measurement")]
     #[expect(
         unsafe_code,
         reason = "toggle an identified control in the owned settings window"
@@ -188,6 +187,12 @@ impl Automation {
     ) -> io::Result<bool> {
         let mut matches = Vec::new();
         for element in self.elements(window, process)? {
+            if !matches!(
+                element_id(&element)?.as_str(),
+                "PrimaryButton" | "SecondaryButton" | "CloseButton"
+            ) {
+                continue;
+            }
             // SAFETY: The live interface returns a scalar through owned binding
             // storage.
             if unsafe { element.CurrentControlType() }.map_err(io::Error::other)?
@@ -209,7 +214,13 @@ impl Automation {
             }
         }
         if matches.len() > 1 {
-            return Err(io::Error::other("dialog button name is ambiguous"));
+            let identifiers = matches
+                .iter()
+                .map(element_id)
+                .collect::<io::Result<Vec<_>>>()?;
+            return Err(io::Error::other(format!(
+                "dialog button {name} is ambiguous: {identifiers:?}"
+            )));
         }
         let Some(element) = matches.pop() else {
             return Ok(false);

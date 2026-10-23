@@ -15,6 +15,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_RESTORE;
 use windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
 use windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow;
+use windows_sys::Win32::UI::WindowsAndMessaging::WM_ACTIVATE;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_CLOSE;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_NCDESTROY;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_SHOWWINDOW;
@@ -60,6 +61,7 @@ struct CloseState {
     permitted: Cell<bool>,
     notify: Callback<()>,
     visibility: Callback<bool>,
+    activated: Callback<()>,
 }
 
 impl CloseRequest {
@@ -67,8 +69,9 @@ impl CloseRequest {
         window: &WindowHandle<'_>,
         notify: Callback<()>,
         visibility: Callback<bool>,
+        activated: Callback<()>,
     ) -> io::Result<Self> {
-        Self::install_raw(window.as_raw(), notify, visibility)
+        Self::install_raw(window.as_raw(), notify, visibility, activated)
     }
 
     #[expect(
@@ -79,6 +82,7 @@ impl CloseRequest {
         window: HWND,
         notify: Callback<()>,
         visibility: Callback<bool>,
+        activated: Callback<()>,
     ) -> io::Result<Self> {
         // SAFETY: This query accepts an opaque window handle and optional null
         // process output; an invalid handle returns zero.
@@ -93,6 +97,7 @@ impl CloseRequest {
             permitted: Cell::new(false),
             notify,
             visibility,
+            activated,
         });
         let data = Rc::into_raw(Rc::clone(&state));
         // SAFETY: The verified window belongs to this thread. The reference
@@ -142,6 +147,9 @@ unsafe extern "system" fn close_message(
     if message == WM_SIZE {
         state.visibility.call(visible(window));
     }
+    if message == WM_ACTIVATE && wparam & 0xffff != 0 {
+        state.activated.call(());
+    }
     if message == WM_SHOWWINDOW {
         // SAFETY: This query uses the live window supplied to its owning
         // subclass.
@@ -189,6 +197,7 @@ mod tests {
             window.hwnd(),
             Callback::new(move |()| received.set(received.get() + 1)),
             Callback::new(|_| {}),
+            Callback::new(|()| {}),
         )
         .expect("close callback registration");
         window.close();
@@ -218,9 +227,13 @@ mod tests {
             .quit_on_close(false)
             .create()
             .expect("hidden test window");
-        let guard =
-            CloseRequest::install_raw(window.hwnd(), Callback::new(|()| {}), Callback::new(|_| {}))
-                .expect("close registration");
+        let guard = CloseRequest::install_raw(
+            window.hwnd(),
+            Callback::new(|()| {}),
+            Callback::new(|_| {}),
+            Callback::new(|()| {}),
+        )
+        .expect("close registration");
         let state = Rc::downgrade(&guard.0);
         drop(guard);
         assert!(state.upgrade().is_some(), "window must own callback state");

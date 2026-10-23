@@ -23,6 +23,9 @@ mod preview;
 #[path = "native/settings.rs"]
 mod settings;
 #[cfg(windows)]
+#[path = "native/startup.rs"]
+mod startup;
+#[cfg(windows)]
 #[path = "native/tray.rs"]
 mod tray;
 
@@ -52,6 +55,12 @@ fn main() -> std::io::Result<()> {
         .is_some_and(|value| value == "--measure-graph")
     {
         return graph::run();
+    }
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|value| value == "--startup")
+    {
+        return startup::run();
     }
     lifecycle::run()
 }

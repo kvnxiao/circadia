@@ -1,6 +1,6 @@
 # Circadia
 
-Circadia is a Windows 11 x64 tray application under development that schedules native Windows Night Light. The [specification](docs/specs/SPEC.md) defines the application contract. The executable has a tray menu and native settings for schedule edits, a generated graph, Preview playback, and manual suppression. Retry requests another attempt at schedule calculation and native access. Settings supports Save, Discard, external-file conflicts, and adding or removing executable filenames. Adding an application opens a native file picker; the selected executable is not run. Closing with unsaved changes offers Save, Discard, or Keep Editing. Sign-in registration and complete application conformance checks are still being implemented.
+Circadia is a Windows 11 x64 tray application under development that schedules native Windows Night Light. The [specification](docs/specs/SPEC.md) defines the application contract. The executable has a tray menu and native settings for schedule edits, a generated graph, Preview playback, and manual suppression. Retry requests another attempt at schedule calculation and native access. Settings supports Save, Discard, external-file conflicts, and adding or removing executable filenames. Adding an application opens a native file picker; the selected executable is not run. Closing with unsaved changes offers Save, Discard, or Keep Editing. Performance baselines and complete application conformance checks are still being implemented.
 
 ## Development
 
@@ -59,6 +59,16 @@ Settings displays both executable lists, labels included but excluded entries as
 The library accepts editable `ConfigInput` values and produces a `Config` only after validation. Disk loading, live editing, and persistence use that same validation path. Valid unsaved edits supply the active configuration during an editing session. Invalid edits preserve the last valid draft. Save adopts the draft only after writing the primary file; Discard returns to the accepted configuration.
 
 A valid external change updates the accepted configuration and marks an open draft stale, blocking Save until the draft is discarded or reloaded. Save and tray mutations also check the current file before writing, so an external edit does not depend on its notification being processed first. Tray mutations preserve unrelated externally changed fields.
+
+## Start at sign-in
+
+Start at sign-in defaults off. Change its switch in Launch preferences and choose Save to register or remove startup for the current Windows user. Discard cancels that change. Startup follows the saved Start minimized preference.
+
+Settings shows Windows' startup state separately from the saved preference. If Task Manager or Windows Settings disables Circadia, enable it in **Windows Settings > Apps > Startup**. Circadia does not override that Windows choice. Status refreshes when settings opens or becomes active; **Refresh startup status** reads it again.
+
+A registration failure preserves the successful configuration Save and displays an error. Close-with-Save keeps settings open when registration fails. **Retry saved startup preference** applies the saved choice explicitly. Relaunching, editing the configuration file, and saving unrelated settings do not retry registration.
+
+Registration stores the current executable and data directory paths. After moving either directory, run Circadia from the new location and retry the saved startup preference. Windows limits the complete startup command to 260 characters; Circadia reports an error if these paths exceed that limit. Windows may delay startup after sign-in. The [startup integration research](docs/research/sign-in-startup.md) describes the mechanism and verification limits.
 
 ## Local data
 

@@ -20,6 +20,9 @@ native-explorer: build-self-contained
 native-settings: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- --settings target/debug/circadia.exe
 
+native-startup: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --startup target/debug/circadia.exe
+
 measure-graph:
     cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-graph
 

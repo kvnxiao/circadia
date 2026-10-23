@@ -18,7 +18,7 @@ The harness creates temporary configuration directories and checks both Start mi
 - Second-launch settings opening, restoration after minimizing, and unchanged Night Light settings and state timestamps.
 - Settings closure and reopening in the same process.
 - Manual suppression, a temporary 6500 K override, and restoration of the configured temperature.
-- Atomic configuration replacement with settings closed and with an open settings editing session, called a draft. The accepted configuration is the validated base loaded from disk, restored from backup, saved, or updated by a tray action. Defaults supply that base when both files are absent.
+- Atomic configuration replacement with settings closed and with an open settings editing session, called a draft. The accepted configuration is the validated base loaded from disk, restored from backup, saved, or updated by a tray action. Defaults supply that base when the primary configuration and backup files are absent.
 - Quit through UI Automation.
 - A resume notification without a preceding suspend notification, then a suspend/resume pair, then a taskbar-recreation notification. Each case reapplies the current temperature once. Repeated notifications within each case preserve native timestamps.
 - Session-end query, cancellation, and confirmed cleanup through messages sent directly to the child application's hidden window.
@@ -75,9 +75,32 @@ The focus case starts a separate harness process with a blank native window and 
 
 The picker cases create an isolated temporary folder with copies of the harness executable. The test changes the dialog's address bar to that folder, verifies the directory, and selects the exact fixture file. It does not execute the selected copies or depend on files in Documents.
 
-The location check can display Windows' permission prompt and use network-backed positioning. It does not change Windows location privacy settings. Unit tests separately exercise denied access, unavailable access, cancellation requests, discarded results, and invalid acquired coordinates. Sign-in startup registration coverage is still being implemented.
+The location check can display Windows' permission prompt and use network-backed positioning. It does not change Windows location privacy settings. Unit tests separately exercise denied access, unavailable access, cancellation requests, discarded results, and invalid acquired coordinates.
 
 The cases use both constant and changing schedules. Registry readback verifies requested temperatures and cleanup, not displayed color or smoothness.
+
+## Sign-in startup
+
+Close any running Circadia instance, then run:
+
+```bash
+just native-startup
+```
+
+This recipe builds the application and uses isolated configuration to test startup registration. The Windows Run registry value stores the command to launch at sign-in; a separate StartupApproved registry value records whether Windows permits that startup entry to run. The recipe refuses to run if either Circadia value already exists under the current Windows user. Existing user registration is preserved.
+
+The test checks:
+
+- Editing and Discard do not register startup; Save does.
+- The registered command selects the tested executable and isolated data directory.
+- An injected Windows-disabled approval remains unchanged after an unrelated Save and an explicit registration retry.
+- Refresh reads an injected enabled approval and clears the resolved registration error without another retry. An unrelated close-with-Save then closes settings.
+- Saving startup disabled removes the Run command.
+- A command exceeding Windows' 260-character limit fails registration while preserving the saved preference and Bedtime. Close-with-Save keeps settings open with that error.
+
+The harness removes its temporary Run and approval values after checking their ownership. If either value changed externally, cleanup reports the conflict and preserves that value. Production Circadia never writes the Windows approval value. These checks inject approval records; they do not exercise Task Manager or an actual sign-in.
+
+This recipe controls Circadia through UI Automation without moving the cursor or sending keyboard input. Its windows can take focus. It changes live Night Light and uses the lifecycle harness's graceful cleanup, which requests Night Light off without restoring the prior schedule or temperature.
 
 ## Graph rendering
 
