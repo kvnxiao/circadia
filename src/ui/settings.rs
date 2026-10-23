@@ -54,6 +54,7 @@ pub(super) struct Input {
     pub(super) snapshot: Option<Arc<ControllerSnapshot>>,
     pub(super) calculation: Option<Arc<CalculationResult>>,
     pub(super) preview_epoch: u64,
+    pub(super) exiting: bool,
     pub(super) status: String,
     pub(super) detail: String,
     pub(super) manual_label: &'static str,
@@ -84,6 +85,7 @@ impl PartialEq for Input {
             && self.executable == other.executable
             && self.directory == other.directory
             && self.preview_epoch == other.preview_epoch
+            && self.exiting == other.exiting
             && self.status == other.status
             && self.detail == other.detail
             && self.manual_label == other.manual_label
@@ -155,6 +157,7 @@ pub(super) struct Settings {
     error: Option<String>,
     pending: bool,
     close_prompt: bool,
+    exiting: bool,
     graph: graph::Graph,
     visibility: Visibility,
     timer: Option<ComponentTimer>,
@@ -211,6 +214,7 @@ impl Component for Settings {
             error: None,
             pending: false,
             close_prompt: false,
+            exiting: input.exiting,
             graph: graph::Graph::default(),
             visibility: Visibility::Unplaced,
             timer: None,
@@ -227,6 +231,12 @@ impl Component for Settings {
     }
 
     fn input_changed(&mut self, input: &Input, context: &ComponentContext<Self>) {
+        self.exiting = input.exiting;
+        if input.exiting {
+            self.close_prompt = false;
+            self.close(context);
+            return;
+        }
         if self
             .snapshot
             .as_ref()
@@ -297,12 +307,19 @@ impl Component for Settings {
     }
 
     fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
+        if self.exiting
+            && !matches!(
+                message,
+                Message::PlacementChanged | Message::CloseInstalled(_)
+            )
+        {
+            return;
+        }
         match message {
             Message::PlacementChanged if self.visibility == Visibility::Unplaced => {
                 self.placed(context);
             }
-            Message::CloseInstalled(Ok(guard)) => self.close_request = Some(guard),
-            Message::CloseInstalled(Err(error)) => self.error = Some(error.to_string()),
+            Message::CloseInstalled(result) => self.close_installed(result, context),
             Message::Visibility(visible) => {
                 self.visibility = if visible {
                     Visibility::Visible
@@ -370,18 +387,7 @@ impl Component for Settings {
                     context,
                 );
             }
-            Message::Dialog(result) => {
-                self.close_prompt = false;
-                match result {
-                    ContentDialogResult::Primary => self.save(true, context),
-                    ContentDialogResult::Secondary => self.start(
-                        ControllerCommand::Discard,
-                        Action::Discard { close: true },
-                        context,
-                    ),
-                    _ => {}
-                }
-            }
+            Message::Dialog(result) => self.close_decision(result, context),
             Message::Completed(action, completion) => self.complete(action, completion, context),
             _ => {}
         }
@@ -464,6 +470,33 @@ impl Component for Settings {
 }
 
 impl Settings {
+    fn close_decision(&mut self, result: ContentDialogResult, context: &ComponentContext<Self>) {
+        self.close_prompt = false;
+        match result {
+            ContentDialogResult::Primary => self.save(true, context),
+            ContentDialogResult::Secondary => self.start(
+                ControllerCommand::Discard,
+                Action::Discard { close: true },
+                context,
+            ),
+            _ => {}
+        }
+    }
+
+    fn close_installed(
+        &mut self,
+        result: std::io::Result<CloseRequest>,
+        context: &ComponentContext<Self>,
+    ) {
+        match result {
+            Ok(guard) => self.close_request = Some(guard),
+            Err(error) => self.error = Some(error.to_string()),
+        }
+        if self.exiting {
+            self.close(context);
+        }
+    }
+
     fn placed(&mut self, context: &ComponentContext<Self>) {
         self.visibility = Visibility::Hidden;
         self.refresh_startup(context);
@@ -1320,8 +1353,8 @@ impl Settings {
     fn close(&self, context: &ComponentContext<Self>) {
         if let Some(guard) = &self.close_request {
             guard.permit();
-            let _closed = context.close_window();
         }
+        let _closed = context.close_window();
     }
 
     fn fields(

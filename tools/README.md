@@ -54,7 +54,7 @@ This recipe runs the lifecycle checks and exercises the native settings controls
 - Starting manual suppression stops Preview and disables it with an explanation. Stopping manual suppression restores the configured output.
 - Closing during Preview stops playback before the close decision. Keep Editing preserves the draft without restarting playback.
 - Changing Preview output reaches the captured draft's 2200 K and 6200 K levels even after an external configuration replacement. Save remains disabled after playback; Discard selects the latest accepted configuration.
-- Stop, synthetic clock changes, and synthetic session lock restore an unsaved 3000 K draft. Discard instead restores accepted 3400 K control.
+- Stop, synthetic clock changes, and synthetic session lock restore an unsaved 3000 K draft. Discard restores the latest accepted configuration's 3400 K output.
 - Synthetic suspend/resume stops Preview without restarting it. Quit and confirmed session end clear an active native preview flag and turn Night Light off.
 - Focusing a listed test window keeps Preview running until completion, then starts automatic suppression. Returning focus to settings restores the schedule after the focus delay.
 - Valid temperature edits affect Night Light before Save.
@@ -101,6 +101,24 @@ The test checks:
 The harness removes its temporary Run and approval values after checking their ownership. If either value changed externally, cleanup reports the conflict and preserves that value. Production Circadia never writes the Windows approval value. These checks inject approval records; they do not exercise Task Manager or an actual sign-in.
 
 This recipe controls Circadia through UI Automation without moving the cursor or sending keyboard input. Its windows can take focus. It changes live Night Light and uses the lifecycle harness's graceful cleanup, which requests Night Light off without restoring the prior schedule or temperature.
+
+## Shutdown with an open dialog
+
+Close any running Circadia instance, then run:
+
+```bash
+just native-shutdown
+```
+
+The recipe runs three application instances in sequence with isolated configuration. It checks confirmed session end with the unsaved-changes dialog open, Quit through UI Automation with that dialog open, and session end during settings startup. The test requires:
+
+- Each child process exits successfully.
+- Native readback shows the preview flag cleared and Night Light off.
+- The saved configuration keeps its original Bedtime; the unconfirmed edit is not saved.
+
+For the dialog cases, the harness waits until **Keep Editing** appears before requesting exit. The startup case requests session end as soon as the settings window is detected, without waiting for editable controls. This exercises early shutdown but does not force every ordering of Windows events.
+
+These are synthetic session messages; the recipe does not sign out or shut down Windows. It uses UI Automation without moving the cursor or sending keyboard input. Its windows can take focus, and it changes live Night Light with the same cleanup behavior as the lifecycle checks. On failure, it prints the retained temporary configuration directory.
 
 ## Graph rendering
 
