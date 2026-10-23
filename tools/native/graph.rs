@@ -11,7 +11,10 @@ use circadia::GraphMeasurement;
 use std::io;
 use std::process::Command;
 use std::time::Duration;
+use std::time::Instant;
+use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
+use windows_sys::Win32::UI::WindowsAndMessaging::WM_POWERBROADCAST;
 use winsafe::HWND;
 
 pub(super) fn run() -> io::Result<()> {
@@ -162,6 +165,8 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
             .filter(|enabled| *enabled))
     })?;
     measure_preview(measurement, &automation, &settings)?;
+    let resumed = resume_preview(measurement, &automation, &settings, &mut input)?;
+    samples.push(resumed);
     summarize(&samples)
 }
 
@@ -305,6 +310,80 @@ fn measure_preview(
         advanced.0 - initial.0
     ));
     measurement.hold_output(false)
+}
+
+fn resume_preview(
+    measurement: &GraphMeasurement,
+    automation: &Automation,
+    settings: &HWND,
+    input: &mut ConfigInput,
+) -> io::Result<Duration> {
+    let process = std::process::id();
+    wait("Preview available before resume check", || {
+        Ok(automation
+            .enabled(settings, process, "preview")?
+            .filter(|enabled| *enabled))
+    })?;
+    automation.set_value(settings, process, "preview_seconds", "60")?;
+    input.preview_seconds = 60;
+    wait("long Preview duration", || {
+        Ok(automation
+            .value(settings, process, "preview_seconds")?
+            .filter(|value| value == "60"))
+    })?;
+    measurement.hold_output(true)?;
+    let started = Instant::now();
+    automation.invoke(settings, process, "preview")?;
+    wait("resume test output blocked", || {
+        Ok(measurement.output_blocked()?.then_some(()))
+    })?;
+    wait("Preview disables editing before resume", || {
+        Ok(automation
+            .enabled(settings, process, "wake")?
+            .filter(|enabled| !*enabled))
+    })?;
+    let receiver = window(process, "Circadia event receiver", false)?
+        .ok_or_else(|| io::Error::other("application event receiver is missing"))?;
+    native_message(
+        &receiver,
+        WM_POWERBROADCAST,
+        PBT_APMRESUMEAUTOMATIC as usize,
+    )?;
+    wait(
+        "resume cancels Preview before native output returns",
+        || {
+            Ok(automation
+                .enabled(settings, process, "wake")?
+                .filter(|enabled| *enabled))
+        },
+    )?;
+    require(
+        started.elapsed() < Duration::from_secs(60),
+        "Preview could have completed naturally before cancellation was verified",
+    )?;
+    require(
+        measurement.output_blocked()?,
+        "resume cancellation waited for native output",
+    )?;
+    input.sleep_kelvin = 2400;
+    let elapsed = sample(
+        measurement,
+        automation,
+        settings,
+        input,
+        "sleep_kelvin",
+        "2400",
+        "edit after resume",
+    )?;
+    require(
+        measurement.output_blocked()?,
+        "editing after resume waited for native output",
+    )?;
+    report(
+        "PASS: resume without suspend cancels Preview and permits graph edits while native output remains blocked",
+    );
+    measurement.hold_output(false)?;
+    Ok(elapsed)
 }
 
 fn environment() -> io::Result<()> {

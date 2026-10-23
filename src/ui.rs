@@ -460,6 +460,7 @@ impl Desktop {
             ControllerCommand::Manual(ManualCommand::Start)
                 | ControllerCommand::Lock
                 | ControllerCommand::Suspend
+                | ControllerCommand::Resume { .. }
                 | ControllerCommand::Recompute(Recompute::Clock)
         ) {
             self.preview_epoch = self.preview_epoch.wrapping_add(1);

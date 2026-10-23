@@ -45,6 +45,8 @@ just native-settings
 
 Preview plays the schedule from the current time through the same local time on the next date, compressed into a configured duration. It animates the graph and requests the corresponding Night Light temperatures.
 
+A schedule target specifies a temperature to reach by a clock or solar-event time. Sleep is the temperature reached at Bedtime; optional Sunrise and Sunset targets anchor temperature changes to those solar events.
+
 Automatic suppression requests 6500 K while a listed, non-excluded application has foreground focus. The focus delay is the configured wait before a changed foreground match starts or ends automatic suppression.
 
 This recipe runs the lifecycle checks and exercises the native settings controls with both Start minimized preferences. It verifies:
@@ -94,7 +96,7 @@ The test checks:
 - Editing and Discard do not register startup; Save does.
 - The registered command selects the tested executable and isolated data directory.
 - An injected Windows-disabled approval remains unchanged after an unrelated Save and an explicit registration retry.
-- Refresh reads an injected enabled approval and clears the resolved registration error without another retry. An unrelated close-with-Save then closes settings.
+- The Refresh startup status button reads an injected enabled approval and clears the resolved registration error without another retry. An unrelated close-with-Save then closes settings.
 - Saving startup disabled removes the Run command.
 - A command exceeding Windows' 260-character limit fails registration while preserving the saved preference and Bedtime. Close-with-Save keeps settings open with that error.
 
@@ -132,13 +134,15 @@ The recipe builds an optimized application with its bundled runtime and measurem
 
 Each sample starts when Reactor delivers the matching native text-change event. It ends at the first XAML `CompositionTarget.Rendering` callback after the UI applies the graph calculated from that edit. The graph must be visible. This measures application rendering readiness, not physical display presentation or visible Night Light response.
 
-The tool records 20 edits in total. Eighteen change the Sleep temperature, Wake clock, or Bedtime clock, split evenly between disabled solar timing and enabled Sunrise/Sunset targets. Two more Sleep-temperature edits test solar calculation failure and recovery. The tool fails if any sample exceeds 100 ms. A simulated temperature operation remains blocked during those edits. A separate two-second Preview must advance through rendered graph positions and return to editable settings while another output operation remains blocked.
+The tool records 21 edits in total. Eighteen change the Sleep temperature, Wake clock, or Bedtime clock, split evenly between disabled solar timing and enabled Sunrise/Sunset targets. Two more Sleep-temperature edits test solar calculation failure and recovery. The last edit follows the resume check below. The tool fails if any sample exceeds 100 ms. A simulated temperature operation remains blocked during those edits.
+
+A separate two-second Preview must advance through rendered graph positions and return to editable settings while another output operation remains blocked. The resume check starts a 60-second Preview and sends a synthetic resume notification without a preceding suspend notification. Editing must become available within the harness's 20-second timeout, and a Sleep-temperature edit must update the graph while output remains blocked. This checks cancellation before playback could finish naturally; it does not put Windows to sleep or verify hardware resume delivery.
 
 The tool prints the processor, logical processor count, Windows build, primary display mode, settings DPI, build profile, source revision, and individual results. Uncommitted source changes are included in the build.
 
 The `graph-measurement` feature enables the simulated backend, solar failure injection, and rendering instrumentation. Ordinary application builds exclude these measurement hooks. `just check` compiles the measurement feature but does not launch this interactive run.
 
-CPU and memory measurements are still being implemented. Final conformance will measure idle, Preview, fast scheduled transitions, and ordinary fades triggered by suppression or schedule recomputation. These release-build measurements also cover settings initially closed, open, and closed again. The public README will report measured baselines with their machine and scenario details.
+CPU and memory measurements are still being implemented. Final conformance will measure idle, Preview, scheduled transitions at the minimum one-minute duration, and ordinary fades triggered by suppression or schedule recomputation. These release-build measurements also cover settings initially closed, open, and closed again. The public README will report measured baselines with their machine and scenario details.
 
 ## Explorer recovery
 
