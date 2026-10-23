@@ -32,6 +32,9 @@ native-picker: build-self-contained
 measure-graph:
     cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-graph
 
+native-recovery:
+    cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --native-recovery
+
 measure-output:
     cargo +stable run --release --bin native-lifecycle --features self-contained,output-measurement --locked -- --measure-output
 

@@ -1,6 +1,6 @@
 # Native application checks
 
-Run these tools from the repository root on an interactive Windows 11 x64 desktop with an English Windows Shell. Install the development tools listed in the [project README](../README.md). Live native checks are separate from `just check`. The lifecycle, settings, and Explorer checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, shutdown, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
+Run these tools from the repository root on an interactive Windows 11 x64 desktop with an English Windows Shell. Install the development tools listed in the [project README](../README.md). Live native checks are separate from `just check`. The lifecycle, settings, and Explorer checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, shutdown, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
 
 ## Application lifecycle
 
@@ -27,7 +27,7 @@ The second-launch check verifies reuse and restoration of the existing window. A
 
 The harness changes live Night Light temperatures, disables the native Night Light schedule, moves focus, and sends mouse and keyboard input. It leaves the cursor at its last click position. At each startup, the library dates its first successful settings write at least 699 seconds after the previous stored timestamp. This can place native timestamps ahead of the current time.
 
-Successful cleanup clears Windows' native preview flag, which applies changing temperatures immediately, and requests Night Light off. It does not restore the schedule or temperature from before the test. Configuration isolation does not isolate these Windows settings.
+Successful cleanup clears Windows' native preview flag, used to request immediate application of changing temperatures, and requests Night Light off. It does not restore the schedule or temperature from before the test. Configuration isolation does not isolate these Windows settings.
 
 On failure, the harness attempts graceful cleanup of its child. If the child cannot exit, the harness forcibly terminates it and reports that Night Light may retain its state at termination. The harness prints the retained temporary directory for inspection.
 
@@ -146,13 +146,38 @@ The recipe builds an optimized application with its bundled runtime and measurem
 
 Each sample starts when Reactor delivers the matching native text-change event. It ends at the first XAML `CompositionTarget.Rendering` callback after the UI applies the graph calculated from that edit. The graph must be visible. This measures application rendering readiness, not physical display presentation or visible Night Light response.
 
-The tool records 21 edits in total. Eighteen change the Sleep temperature, Wake clock, or Bedtime clock, split evenly between disabled solar timing and enabled Sunrise/Sunset targets. Two more Sleep-temperature edits test solar calculation failure and recovery. The last edit follows the resume check below. The tool fails if any sample exceeds 100 ms. A simulated temperature operation remains blocked during those edits.
+The tool records 21 graph-latency samples. Eighteen change the Sleep temperature, Wake clock, or Bedtime clock, split evenly between disabled solar timing and enabled Sunrise/Sunset targets. Two more Sleep-temperature edits test solar calculation failure and recovery. The last edit follows the resume check below. The tool fails if any sample exceeds 100 ms. A simulated temperature operation remains blocked during those edits.
+
+Separate form checks verify the unused Morning/Evening label, accepted temperature rounding, rejection of invalid input, and correction of invalid temperature order.
 
 A separate two-second Preview must advance through rendered graph positions and return to editable settings while another output operation remains blocked. The resume check starts a 60-second Preview and sends a synthetic resume notification without a preceding suspend notification. Editing must become available within the harness's 20-second timeout, and a Sleep-temperature edit must update the graph while output remains blocked. This checks cancellation before playback could finish naturally; it does not put Windows to sleep or verify hardware resume delivery.
 
 The tool prints the processor, logical processor count, Windows build, primary display mode, settings DPI, build profile, source revision, and individual results. Uncommitted source changes are included in the build.
 
-The `graph-measurement` feature enables the simulated backend, solar failure injection, and rendering instrumentation. Ordinary application builds exclude these measurement hooks. `just check` compiles the measurement feature but does not launch this interactive run.
+The `graph-measurement` feature enables the simulated backend, controlled solar and native failures, and rendering instrumentation. Ordinary application builds exclude these hooks. `just check` compiles the feature but does not launch this interactive run.
+
+## Native failure recovery
+
+Close any running Circadia instance, then run:
+
+```bash
+just native-recovery
+```
+
+The recipe runs the complete release application with its bundled runtime, isolated configuration, and a simulated Night Light backend. UI Automation operates the real settings controls without moving the cursor, sending keys, or requiring foreground focus. Settings can take focus when it opens. The recipe does not change Windows Night Light.
+
+The checks verify:
+
+- Failed observation registration still permits live edits and output. Retry restores observation, and repeated failures produce one diagnostic entry before recovery.
+- Failed settings reads prevent temperature, schedule, and on/off writes while Preview advances on the graph. Recovery applies the current 6500 K position instead of earlier playback steps.
+- Stop and natural Preview completion restore editing while access still fails. Automatic recovery selects the current live draft without replaying obsolete temperatures.
+- A temperature operation reports failure after storing 2300 K, and its subsequent preview cleanup also fails. The stored temperature and enabled state are preserved, and settings shows both errors.
+- Retry replaces a pending 800 ms delay and requests application of the current target even when the stored temperature already equals it. Successful recovery clears both errors.
+- Recorded simulated public operations execute without overlap.
+
+Wake and Bedtime are configured relative to the current local clock so Preview moves from a 2200 K Sleep period to 6500 K Daytime. A separate live edit to 2300 K exercises partial storage. The tool prints each completed operation's start, duration, request, failure, and resulting simulated state. Capture is bounded; overflow fails the check. On failure, the tool retains and prints the temporary configuration directory.
+
+These checks establish application behavior after controlled failures at the native adapter boundary. They do not establish Windows access permissions, actual watcher failure delivery, or displayed color. The existing live native recipes exercise successful Windows operations separately.
 
 ## Native output timing
 

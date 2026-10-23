@@ -1,14 +1,6 @@
 use crate::Config;
-use crate::DiagnosticOperation;
 use crate::Native;
-use crate::NativeFailure;
-use crate::NativeNotifications;
-use crate::NativeSettings;
-use crate::ObservationMode;
-use crate::TemperatureMode;
-use crate::native::NativeBackend;
 use std::io;
-use std::os::windows::io::BorrowedHandle;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Condvar;
@@ -18,8 +10,11 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
-use win_nightlight_lib::ColorTemperature;
 use windows_reactor::LiveRenderingSubscription;
+
+mod native;
+pub use native::SimulatedNativeCall;
+pub use native::SimulatedNativeFault;
 
 static ACTIVE: OnceLock<GraphMeasurement> = OnceLock::new();
 
@@ -55,6 +50,7 @@ struct Shared {
     released: Condvar,
     lifecycle: Mutex<Lifecycle>,
     ready: Condvar,
+    native: Mutex<native::Simulation>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -80,15 +76,7 @@ impl GraphMeasurement {
     /// # Errors
     /// Report duplicate measurement initialization or desktop failures.
     pub fn run(&self, directory: PathBuf) -> io::Result<()> {
-        let native = Native::with_backend(Backend {
-            shared: Arc::clone(&self.0),
-            settings: NativeSettings {
-                schedule_enabled: false,
-                temperature: Some(3400),
-                previewing: false,
-            },
-            active: true,
-        });
+        let native = Native::with_backend(native::Backend::new(Arc::clone(&self.0)));
         let result = ACTIVE
             .set(self.clone())
             .map_err(|_error| io::Error::other("measurement already started"))
@@ -227,6 +215,37 @@ impl GraphMeasurement {
             .map_err(|_error| io::Error::other("measurement lock failed"))?;
         Ok(gate.held && gate.entered)
     }
+
+    /// Replace the injected native failures without changing live Night Light.
+    ///
+    /// # Errors
+    /// Report poisoned simulation synchronization.
+    pub fn fail_native(&self, faults: &[SimulatedNativeFault]) -> io::Result<()> {
+        self.0
+            .native
+            .lock()
+            .map_err(|_error| io::Error::other("native simulation lock failed"))?
+            .faults = faults.iter().copied().collect();
+        Ok(())
+    }
+
+    /// Read completed simulated calls, including failures and stored values.
+    ///
+    /// # Errors
+    /// Report poisoned synchronization or an exhausted capture capacity.
+    pub fn native_calls(&self) -> io::Result<Vec<SimulatedNativeCall>> {
+        let simulation = self
+            .0
+            .native
+            .lock()
+            .map_err(|_error| io::Error::other("native simulation lock failed"))?;
+        if simulation.overflowed {
+            return Err(io::Error::other(
+                "native simulation call capture overflowed",
+            ));
+        }
+        Ok(simulation.calls.clone())
+    }
 }
 
 pub(super) fn desktop_ready() {
@@ -307,65 +326,6 @@ fn rendering() {
     {
         sample.elapsed = Some(entered.elapsed());
         active.0.rendered.notify_all();
-    }
-}
-
-struct Backend {
-    shared: Arc<Shared>,
-    settings: NativeSettings,
-    active: bool,
-}
-
-impl NativeBackend for Backend {
-    fn restore_watchers(&mut self) -> Vec<NativeFailure> {
-        Vec::new()
-    }
-    fn notifications(&mut self, _: ObservationMode) -> NativeNotifications {
-        NativeNotifications::default()
-    }
-    fn handles(&self) -> Vec<BorrowedHandle<'_>> {
-        Vec::new()
-    }
-    fn settings(&mut self) -> Result<NativeSettings, NativeFailure> {
-        Ok(self.settings)
-    }
-    fn active(&mut self) -> Result<bool, NativeFailure> {
-        Ok(self.active)
-    }
-    fn disable_schedule(&mut self) -> Result<(), NativeFailure> {
-        self.settings.schedule_enabled = false;
-        Ok(())
-    }
-    fn end_preview(&mut self) -> Result<(), NativeFailure> {
-        self.settings.previewing = false;
-        Ok(())
-    }
-    fn set_active(&mut self, active: bool) -> Result<(), NativeFailure> {
-        self.active = active;
-        Ok(())
-    }
-
-    fn temperature(
-        &mut self,
-        value: ColorTemperature,
-        mode: TemperatureMode,
-    ) -> Result<(), NativeFailure> {
-        let failure = || NativeFailure::injected(DiagnosticOperation::TemperatureWrite);
-        let mut gate = self.shared.gate.lock().map_err(|_error| failure())?;
-        gate.entered = true;
-        let (gate, timeout) = self
-            .shared
-            .released
-            .wait_timeout_while(gate, Duration::from_secs(30), |gate| gate.held)
-            .map_err(|_error| failure())?;
-        if timeout.timed_out() {
-            return Err(failure());
-        }
-        drop(gate);
-        self.settings.temperature = Some(value.kelvin().cast_signed());
-        self.settings.previewing =
-            matches!(mode, TemperatureMode::Hold | TemperatureMode::ApplyHeld);
-        Ok(())
     }
 }
 

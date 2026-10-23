@@ -138,6 +138,8 @@ The graph spans the most recent daily boundary through the next boundary, each a
 
 `just measure-output` uses live Night Light to measure output start delay and public-call duration during fades, Preview, and a one-minute scheduled transition. It tests fades at 1, 60, and 240 Hz and verifies final native temperatures and cleanup. See the [output timing method and side effects](tools/README.md#native-output-timing).
 
+`just native-recovery` injects read, observation, and partial-write failures into a simulated Night Light backend while operating the real settings window. It checks error status, Retry, diagnostics, and Preview recovery without changing Windows Night Light or sending mouse or keyboard input. See the [recovery checks and limits](tools/README.md#native-failure-recovery).
+
 ## Foreground and manual suppression
 
 Foreground identity uses window metadata and process handles with only `PROCESS_QUERY_LIMITED_INFORMATION` access. `winsafe` provides safe metadata and process-query wrappers. For `ApplicationFrameHost.exe`, descendant windows must identify one application filename; inaccessible or conflicting identities are nonmatching. Failed queries, including paths beyond the wrapper's supported buffer, do not trigger elevation or a broader process query.
