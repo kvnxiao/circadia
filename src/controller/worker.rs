@@ -1165,6 +1165,11 @@ impl<F: FnMut() -> Foreground> Worker<F> {
     fn persist_command(&mut self, result: Result<PersistResult, SessionError>) -> CommandOutcome {
         match result {
             Ok(result) => {
+                if let Some(startup) = &mut self.startup
+                    && let Some(restore) = &mut Arc::make_mut(startup).restore
+                {
+                    restore.write_error = None;
+                }
                 self.persisted(result);
                 self.recovered(DiagnosticOperation::ConfigurationWrite);
                 CommandOutcome::Applied

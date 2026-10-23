@@ -118,6 +118,20 @@ impl Form {
         self.values.insert(field, value);
     }
 
+    pub(super) fn normalize_temperatures(&mut self, focused: Option<Field>) {
+        let Ok(input) = self.input() else {
+            return;
+        };
+        let Ok(config) = input.validate() else {
+            return;
+        };
+        for field in [Field::Daytime, Field::Middle, Field::Sleep] {
+            if Some(field) != focused {
+                self.set(field, field.initial(config.input()));
+            }
+        }
+    }
+
     pub(super) fn locate(
         &mut self,
         coordinates: Coordinates,
@@ -266,5 +280,67 @@ mod tests {
             "2395",
             "validation must not rewrite an active text field"
         );
+    }
+
+    #[test_case(Field::Daytime, "6495", "6500")]
+    #[test_case(Field::Middle, "3855", "3860")]
+    #[test_case(Field::Sleep, "2395", "2400")]
+    fn committed_temperature_shows_accepted_value(field: Field, text: &str, expected: &str) {
+        let mut form = Form::new(&ConfigInput::default());
+        form.set(field, text.into());
+        form.normalize_temperatures(Some(field));
+        assert_eq!(form.text(field), text, "typing remains unchanged");
+        form.normalize_temperatures(None);
+        assert_eq!(form.text(field), expected);
+    }
+
+    #[test_case(Field::Middle, ""; "empty")]
+    #[test_case(Field::Middle, "-"; "partial")]
+    #[test_case(Field::Middle, "3855.5"; "fraction")]
+    #[test_case(Field::Daytime, "6501"; "outside range")]
+    #[test_case(Field::Sleep, "4000"; "unordered")]
+    fn invalid_temperature_commit_preserves_all_fields(field: Field, text: &str) {
+        let mut form = Form::new(&ConfigInput::default());
+        form.set(field, text.into());
+        let original = form.clone();
+        form.normalize_temperatures(None);
+        assert!(form == original);
+    }
+
+    #[test]
+    fn commitment_does_not_replace_an_invalid_draft_with_normalized_values() {
+        let mut form = Form::new(&ConfigInput::default());
+        form.set(Field::Middle, "3855".into());
+        form.set(Field::Wake, "unfinished".into());
+        let original = form.clone();
+        form.normalize_temperatures(None);
+        assert!(form == original);
+    }
+
+    #[test]
+    fn correcting_a_clock_commits_previously_unaccepted_temperature_text() {
+        let mut form = Form::new(&ConfigInput::default());
+        form.set(Field::Wake, "unfinished".into());
+        form.set(Field::Middle, "3855".into());
+        form.normalize_temperatures(None);
+        assert_eq!(form.text(Field::Middle), "3855");
+        form.set(Field::Wake, "07:00".into());
+        form.normalize_temperatures(Some(Field::Wake));
+        assert_eq!(form.text(Field::Middle), "3860");
+        assert_eq!(form.text(Field::Wake), "07:00");
+    }
+
+    #[test]
+    fn correcting_temperature_order_commits_both_accepted_values() {
+        let mut form = Form::new(&ConfigInput::default());
+        form.set(Field::Sleep, "3855".into());
+        form.normalize_temperatures(None);
+        assert_eq!(form.text(Field::Sleep), "3855");
+        form.set(Field::Middle, "3955".into());
+        form.normalize_temperatures(Some(Field::Middle));
+        assert_eq!(form.text(Field::Sleep), "3860");
+        assert_eq!(form.text(Field::Middle), "3955");
+        form.normalize_temperatures(None);
+        assert_eq!(form.text(Field::Middle), "3960");
     }
 }
