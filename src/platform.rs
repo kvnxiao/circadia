@@ -7,4 +7,5 @@ pub(crate) mod lifecycle_inputs;
 pub(crate) mod location;
 pub(crate) mod picker;
 pub(crate) mod settings_window;
+pub(crate) mod startup;
 pub(crate) mod wake;

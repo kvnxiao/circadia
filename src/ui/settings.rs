@@ -2,6 +2,7 @@ mod form;
 mod graph;
 mod location;
 mod preview;
+mod startup;
 
 use crate::CalculationResult;
 use crate::CommandOutcome;
@@ -47,6 +48,7 @@ use windows_reactor::WindowVisuals;
 #[derive(Clone)]
 pub(super) struct Input {
     pub(super) running_executable: String,
+    pub(super) executable: std::path::PathBuf,
     pub(super) directory: std::path::PathBuf,
     pub(super) activation: u64,
     pub(super) snapshot: Option<Arc<ControllerSnapshot>>,
@@ -79,6 +81,7 @@ impl PartialEq for Input {
             }
             && self.activation == other.activation
             && self.running_executable == other.running_executable
+            && self.executable == other.executable
             && self.directory == other.directory
             && self.preview_epoch == other.preview_epoch
             && self.status == other.status
@@ -128,6 +131,7 @@ pub(super) enum Preference {
     Sunrise,
     Sunset,
     StartMinimized,
+    StartAtSignIn,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -158,6 +162,8 @@ pub(super) struct Settings {
     preview_epoch: u64,
     preview_request: u64,
     location_epoch: u64,
+    registration: crate::platform::startup::Registration,
+    startup: startup::Startup,
 }
 
 pub(super) enum Message {
@@ -177,6 +183,8 @@ pub(super) enum Message {
     PickedExecutable(ExecutableList, std::io::Result<Option<String>>),
     Located(u64, std::io::Result<crate::Coordinates>),
     OpenDiagnostics(std::path::PathBuf),
+    RefreshStartup,
+    RetryStartup,
     Save,
     Discard,
     Dialog(ContentDialogResult),
@@ -210,6 +218,11 @@ impl Component for Settings {
             preview_epoch: input.preview_epoch,
             preview_request: 0,
             location_epoch: 0,
+            registration: crate::platform::startup::Registration::new(
+                input.executable.clone(),
+                input.directory.clone(),
+            ),
+            startup: startup::Startup::default(),
         }
     }
 
@@ -286,14 +299,7 @@ impl Component for Settings {
     fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
         match message {
             Message::PlacementChanged if self.visibility == Visibility::Unplaced => {
-                self.visibility = Visibility::Hidden;
-                let close = context.callback(|()| Message::CloseRequested);
-                let visibility = context.callback(Message::Visibility);
-                let _queued = context.run_window(move |window| {
-                    let result = CloseRequest::install(&window, close, visibility);
-                    crate::platform::settings_window::activate(&window);
-                    Message::CloseInstalled(result)
-                });
+                self.placed(context);
             }
             Message::CloseInstalled(Ok(guard)) => self.close_request = Some(guard),
             Message::CloseInstalled(Err(error)) => self.error = Some(error.to_string()),
@@ -323,6 +329,12 @@ impl Component for Settings {
                 self.edit_preference(preference, value, context);
             }
             Message::Save => self.save(false, context),
+            Message::RefreshStartup => self.refresh_startup(context),
+            Message::RetryStartup
+                if self.editable() && !self.stale() && self.startup.intent.is_none() =>
+            {
+                self.retry_startup(context);
+            }
             Message::OpenDiagnostics(directory) => {
                 if let Err(error) = crate::platform::settings_window::open_diagnostics(&directory) {
                     self.error = Some(super::status::error_text(&error));
@@ -452,6 +464,19 @@ impl Component for Settings {
 }
 
 impl Settings {
+    fn placed(&mut self, context: &ComponentContext<Self>) {
+        self.visibility = Visibility::Hidden;
+        self.refresh_startup(context);
+        let close = context.callback(|()| Message::CloseRequested);
+        let visibility = context.callback(Message::Visibility);
+        let activated = context.callback(|()| Message::RefreshStartup);
+        let _queued = context.run_window(move |window| {
+            let result = CloseRequest::install(&window, close, visibility, activated);
+            crate::platform::settings_window::activate(&window);
+            Message::CloseInstalled(result)
+        });
+    }
+
     fn edit_field(&mut self, field: Field, value: &str, context: &ComponentContext<Self>) {
         if matches!(field, Field::Latitude | Field::Longitude) {
             self.location_epoch = self.location_epoch.wrapping_add(1);
@@ -473,6 +498,10 @@ impl Settings {
                 Preference::Sunrise => form.preferences.sunrise = value,
                 Preference::Sunset => form.preferences.sunset = value,
                 Preference::StartMinimized => form.preferences.start_minimized = value,
+                Preference::StartAtSignIn => {
+                    form.preferences.start_at_sign_in = value;
+                    self.startup.intent = Some(value);
+                }
             }
         }
         self.edit(context);
@@ -819,27 +848,121 @@ impl Settings {
                 form,
                 context,
             ),
-            card(
-                "Launch preferences",
-                vec![
-                    ToggleSwitch::new()
-                        .header(
-                            TextBlock::new().text("Start minimized on future launches after Save"),
-                        )
-                        .is_on(form.preferences.start_minimized)
-                        .is_enabled(self.editable())
-                        .automation_id("start-minimized")
-                        .on_toggled(context.callback(|value| {
-                            Message::Preference(Preference::StartMinimized, value)
-                        }))
-                        .into(),
-                ],
-            ),
+            self.startup_section(form, context),
         ]
     }
 }
 
 impl Settings {
+    fn saved_startup_preference(&self) -> Option<bool> {
+        self.snapshot
+            .as_ref()?
+            .accepted
+            .as_ref()
+            .map(|accepted| accepted.config().input().start_at_sign_in)
+    }
+
+    fn retry_startup(&mut self, context: &ComponentContext<Self>) {
+        if let Some(requested) = self.saved_startup_preference() {
+            let result = self.startup.apply(
+                requested,
+                |value| self.registration.set(value),
+                || self.registration.read(),
+            );
+            self.record_startup(result, context);
+        }
+    }
+
+    fn refresh_startup(&mut self, context: &ComponentContext<Self>) {
+        let requested = self.saved_startup_preference();
+        if self.startup.refresh(self.registration.read(), requested) {
+            self.record_startup(Ok(()), context);
+        }
+    }
+
+    fn record_startup(
+        &self,
+        result: Result<(), crate::DiagnosticFailure>,
+        context: &ComponentContext<Self>,
+    ) {
+        self.send(
+            ControllerCommand::Diagnostic {
+                operation: crate::DiagnosticOperation::StartupRegistration,
+                result,
+            },
+            Action::Edit,
+            context,
+        );
+    }
+
+    fn startup_section(&self, form: &Form, context: &ViewContext<'_, Self>) -> View {
+        let error = self
+            .startup
+            .registration_error
+            .as_ref()
+            .or(self.startup.read_error.as_ref())
+            .map(|error| super::status::error_text(error.as_ref()))
+            .unwrap_or_default();
+        card(
+            "Launch preferences",
+            vec![
+                ToggleSwitch::new()
+                    .header(TextBlock::new().text("Start at sign-in after Save"))
+                    .is_on(form.preferences.start_at_sign_in)
+                    .is_enabled(self.editable())
+                    .automation_id("start-at-sign-in")
+                    .on_toggled(
+                        context.callback(|value| {
+                            Message::Preference(Preference::StartAtSignIn, value)
+                        }),
+                    )
+                    .into(),
+                TextBlock::new()
+                    .text(
+                        self.startup
+                            .status(self.saved_startup_preference().unwrap_or(false)),
+                    )
+                    .text_wrapping(TextWrapping::Wrap)
+                    .automation_id("startup-status")
+                    .into(),
+                TextBlock::new()
+                    .text(error)
+                    .text_wrapping(TextWrapping::Wrap)
+                    .automation_id("startup-error")
+                    .into(),
+                Button::new()
+                    .content("Retry saved startup preference")
+                    .min_height(40.0)
+                    .is_enabled(
+                        self.editable()
+                            && !self.stale()
+                            && self.startup.intent.is_none()
+                            && self.saved_startup_preference().is_some(),
+                    )
+                    .automation_id("retry-startup")
+                    .on_click(context.callback(|()| Message::RetryStartup))
+                    .into(),
+                Button::new()
+                    .content("Refresh startup status")
+                    .min_height(40.0)
+                    .automation_id("refresh-startup")
+                    .on_click(context.callback(|()| Message::RefreshStartup))
+                    .into(),
+                ToggleSwitch::new()
+                    .header(TextBlock::new().text("Start minimized on future launches after Save"))
+                    .is_on(form.preferences.start_minimized)
+                    .is_enabled(self.editable())
+                    .automation_id("start-minimized")
+                    .on_toggled(
+                        context.callback(|value| {
+                            Message::Preference(Preference::StartMinimized, value)
+                        }),
+                    )
+                    .into(),
+            ],
+        )
+    }
+
     fn executable_section(
         &self,
         form: &Form,
@@ -1026,6 +1149,7 @@ impl Settings {
     }
 
     fn reset_form(&mut self, snapshot: Option<&ControllerSnapshot>) {
+        self.startup.intent = None;
         if let Some(draft) = snapshot.and_then(|snapshot| snapshot.draft.as_ref()) {
             let form = Form::new(draft.input());
             self.baseline = Some(form.clone());
@@ -1049,7 +1173,8 @@ impl Settings {
     }
 
     fn dirty(&self) -> bool {
-        self.form != self.baseline
+        self.startup.intent.is_some()
+            || self.form != self.baseline
             || self
                 .snapshot
                 .as_ref()
@@ -1155,6 +1280,21 @@ impl Settings {
             return;
         }
         self.pending = false;
+        if matches!(action, Action::Save { .. })
+            && matches!(completion.result, Ok(CommandOutcome::Applied))
+        {
+            self.error = None;
+            if let Some(result) = self.startup.saved(
+                |value| self.registration.set(value),
+                || self.registration.read(),
+            ) {
+                self.record_startup(result, context);
+            }
+            if self.startup.registration_error.is_some() {
+                self.reset_form(completion.snapshot.as_deref());
+                return;
+            }
+        }
         match completion.result {
             Ok(CommandOutcome::Applied) => {
                 self.error = None;

@@ -36,7 +36,7 @@ windows-future = "0.3"
 windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "722f202100c3bd428627941d3834d87ad6679d1c" }
 windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "722f202100c3bd428627941d3834d87ad6679d1c" }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_Threading", "Win32_System_Time", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
-winsafe = { version = "0.0.29", features = ["user", "shell"] }
+winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
 
 [build-dependencies]
 fs-err = "3.3"
