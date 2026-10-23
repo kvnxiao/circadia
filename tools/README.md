@@ -142,7 +142,35 @@ The tool prints the processor, logical processor count, Windows build, primary d
 
 The `graph-measurement` feature enables the simulated backend, solar failure injection, and rendering instrumentation. Ordinary application builds exclude these measurement hooks. `just check` compiles the measurement feature but does not launch this interactive run.
 
-CPU and memory measurements are still being implemented. Final conformance will measure idle, Preview, scheduled transitions at the minimum one-minute duration, and ordinary fades triggered by suppression or schedule recomputation. These release-build measurements also cover settings initially closed, open, and closed again. The public README will report measured baselines with their machine and scenario details.
+## CPU and memory
+
+Close any running Circadia instance, then run:
+
+```bash
+just measure-resources
+```
+
+The recipe builds the ordinary release application with its bundled runtime. A separate Rust harness samples that application's process once per second. The application's resource totals exclude the harness. The full run takes roughly 15 minutes and measures:
+
+| Scenario | Sample duration | Configuration |
+| :-- | :-- | :-- |
+| Idle, settings initially closed | 600 seconds | Constant 3400 K |
+| Idle, settings open | 60 seconds | Same process and configuration |
+| Idle, settings closed again | 60 seconds | Same process and configuration |
+| Preview, settings open | 45 seconds | 60-second playback, 2200–6200 K, four-hour scheduled transitions |
+| Scheduled transition, settings closed | 45 seconds | One-minute transition from 2200 K to 6200 K |
+| Fade into manual suppression, settings open | 8 seconds | Ten-second fade from 2400 K to 6500 K |
+| Fade out of manual suppression, settings open | 8 seconds | Ten-second fade from 6500 K to 2400 K |
+
+All scenarios use the default ceiling of 60 changing Night Light output steps or automatic correction attempts per second. The three idle observations each start after a five-second settling period. Preview and the first manual fade also start after settings has settled for five seconds. Preview and scheduled transitions use clocks chosen relative to the run's start; the harness prints the complete configuration. Each active scenario checks that sampling finishes while the operation remains active. Preview and the scheduled-transition check also require native temperature to change during sampling.
+
+The tool prints raw samples and summary rows with CPU seconds, CPU percentage, working set, private bytes, and sampled context-switch counts. Each sample also reads native temperature; the summary counts changes between observations. A run fails if the application records an error in its isolated diagnostics log. CPU percentage divides process CPU time by elapsed wall time and logical processor count: 100% represents all logical processors busy. Memory summaries give the median and peak of the observed values; they do not capture peaks between samples. CPU accounting resolution can produce zero CPU time for a short observation.
+
+Context-switch deltas come from thread snapshots matched by thread ID and creation time. If a thread exits between samples, its activity after the last observation is omitted. These counts are a sampled lower bound, not an exact total across the process lifetime. The [counter method and compatibility limits](../docs/research/resource-measurement.md) describe the Windows APIs.
+
+Use `just measure-resources --quick` for a harness check with two-second observations and no settling periods. Those short results are not release baselines. The tool prints the executable, source revision, build profile, processor, logical processor count, physical memory, Windows build, connected display modes, and settings DPI and dimensions. Keep the raw output alongside any published results; measurements are specific to that machine and workload.
+
+This recipe changes live Night Light and uses UI Automation without moving the cursor or sending keyboard input. Settings can take focus. Each application run ends through graceful cleanup, which clears native preview and requests Night Light off without restoring the prior schedule or temperature. Failure retains the temporary configuration directory. It does not invoke actual sleep, sign-out, or shutdown.
 
 ## Explorer recovery
 

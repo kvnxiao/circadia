@@ -10,7 +10,7 @@ repository = "https://github.com/kvnxiao/circadia"
 
 [features]
 self-contained = ["dep:windows-reactor-setup"]
-native-tests = ["windows/Win32_Foundation", "windows/Win32_System_Com", "windows/Win32_UI_Accessibility", "winsafe/ole"]
+native-tests = ["windows/Win32_Foundation", "windows/Win32_System_Com", "windows/Win32_UI_Accessibility", "windows-sys/Wdk_System_SystemInformation", "windows-sys/Win32_System_ProcessStatus", "winsafe/ole"]
 graph-measurement = ["native-tests", "windows-reactor/test"]
 
 [[bin]]

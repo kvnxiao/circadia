@@ -20,6 +20,9 @@ mod picker;
 #[path = "native/preview.rs"]
 mod preview;
 #[cfg(windows)]
+#[path = "native/resources.rs"]
+mod resources;
+#[cfg(windows)]
 #[path = "native/settings.rs"]
 mod settings;
 #[cfg(windows)]
@@ -34,6 +37,12 @@ mod tray;
 
 #[cfg(windows)]
 fn main() -> std::io::Result<()> {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|value| value == "--measure-resources")
+    {
+        return resources::run();
+    }
     if std::env::args_os()
         .nth(1)
         .is_some_and(|value| value == "--foreground-fixture")
