@@ -438,6 +438,21 @@ impl Component for Settings {
             ));
         }
         if let Some(form) = &self.form {
+            #[cfg(feature = "graph-measurement")]
+            super::measurement::settings(super::measurement::SettingsMeasurement {
+                focused_field: self.focused_field.map(Field::id),
+                middle_text: form.text(Field::Middle).to_owned(),
+                validated_middle_kelvin: form
+                    .input()
+                    .ok()
+                    .and_then(|input| input.validate().ok())
+                    .map(|config| config.input().middle_kelvin),
+                live_middle_kelvin: self
+                    .snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.draft.as_ref())
+                    .map(|draft| draft.live().config().input().middle_kelvin),
+            });
             sections.extend(self.form_sections(form, &input.running_executable, context));
         }
         sections.push(

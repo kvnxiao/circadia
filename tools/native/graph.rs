@@ -110,7 +110,7 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
             .enabled(&settings, process, "preview")?
             .filter(|enabled| *enabled))
     })?;
-    check_temperature_fields(&automation, &settings)?;
+    check_temperature_fields(measurement, &automation, &settings)?;
     wait("graph inside the visible viewport", || {
         Ok(automation.show_graph(&settings, process)?.then_some(()))
     })?;
@@ -204,7 +204,11 @@ fn wait_middle_usage(automation: &Automation, settings: &HWND, unused: bool) -> 
     .map(|_| ())
 }
 
-fn check_temperature_fields(automation: &Automation, settings: &HWND) -> io::Result<()> {
+fn check_temperature_fields(
+    measurement: &GraphMeasurement,
+    automation: &Automation,
+    settings: &HWND,
+) -> io::Result<()> {
     let process = std::process::id();
     wait_middle_usage(automation, settings, true)?;
     require(
@@ -212,69 +216,85 @@ fn check_temperature_fields(automation: &Automation, settings: &HWND) -> io::Res
         "unused middle temperature must remain editable",
     )?;
     automation.set_value(settings, process, "middle_kelvin", "3855")?;
-    wait_temperature_text(automation, settings, "middle_kelvin", "3860")?;
+    wait_middle_temperature(measurement, automation, settings, "3855", Some(3860), 3860)?;
     for invalid in ["6501", "3855.5"] {
         automation.set_value(settings, process, "middle_kelvin", invalid)?;
-        wait("invalid temperature disables Save and Preview", || {
+        crate::automation::wait("invalid temperature disables Save and Preview", || {
             Ok(
                 (automation.enabled(settings, process, "save")? == Some(false)
                     && automation.enabled(settings, process, "preview")? == Some(false))
                 .then_some(()),
             )
         })?;
-        wait_temperature_text(automation, settings, "middle_kelvin", invalid)?;
+        wait_middle_temperature(measurement, automation, settings, invalid, None, 3860)?;
     }
     automation.set_value(settings, process, "wake", "unfinished")?;
     automation.set_value(settings, process, "middle_kelvin", "3855")?;
-    wait_temperature_text(automation, settings, "middle_kelvin", "3855")?;
+    wait_middle_temperature(measurement, automation, settings, "3855", None, 3860)?;
     automation.set_value(settings, process, "wake", "07:00")?;
-    wait_temperature_text(automation, settings, "middle_kelvin", "3860")?;
+    wait_middle_temperature(measurement, automation, settings, "3855", Some(3860), 3860)?;
+    automation.set_value(settings, process, "middle_kelvin", "3860")?;
+    wait_middle_temperature(measurement, automation, settings, "3860", Some(3860), 3860)?;
     automation.set_value(settings, process, "sleep_kelvin", "4000")?;
-    wait("temperature order disables Save", || {
+    crate::automation::wait("temperature order disables Save", || {
         Ok(automation
             .enabled(settings, process, "save")?
             .filter(|enabled| !enabled))
     })?;
-    wait_temperature_text(automation, settings, "middle_kelvin", "3860")?;
+    wait_middle_temperature(measurement, automation, settings, "3860", None, 3860)?;
     automation.set_value(settings, process, "middle_kelvin", "4055")?;
-    wait_temperature_text(automation, settings, "middle_kelvin", "4060")?;
-    wait("corrected temperature order enables Save", || {
+    wait_middle_temperature(measurement, automation, settings, "4055", Some(4060), 4060)?;
+    crate::automation::wait("corrected temperature order enables Save", || {
         Ok(automation
             .enabled(settings, process, "save")?
             .filter(|enabled| *enabled))
     })?;
     automation.set_value(settings, process, "sleep_kelvin", "2400")?;
     automation.set_value(settings, process, "middle_kelvin", "3400")?;
-    wait_temperature_text(automation, settings, "middle_kelvin", "3400")?;
+    wait_middle_temperature(measurement, automation, settings, "3400", Some(3400), 3400)?;
     report(
-        "PASS: temperature labels, rounded values, invalid input, and repaired ordering through native controls without changing focus",
+        "PASS: temperature labels, accepted rounding, invalid input, and repaired ordering through native controls without mouse or keyboard input",
     );
     Ok(())
 }
 
-fn wait_temperature_text(
+fn wait_middle_temperature(
+    measurement: &GraphMeasurement,
     automation: &Automation,
     settings: &HWND,
-    id: &str,
-    expected: &str,
+    raw: &str,
+    validated: Option<i64>,
+    live: i64,
 ) -> io::Result<()> {
-    let description = format!("{id} text to equal {expected:?}");
+    let description =
+        format!("middle temperature from {raw:?}, validated {validated:?}, live {live}");
+    let rounded = validated.map(|value| value.to_string());
     let mut observed = None;
-    wait(&description, || {
-        observed = automation.value(settings, std::process::id(), id)?;
-        Ok((observed.as_deref() == Some(expected)).then_some(()))
+    let state = crate::automation::wait(&description, || {
+        let Some(state) = measurement.settings_state()? else { return Ok(None) };
+        observed = automation.value(settings, std::process::id(), "middle_kelvin")?;
+        let text_matches = rounded.as_deref().map_or(state.middle_text == raw, |rounded| {
+            state.middle_text == rounded
+                || (state.focused_field == Some("middle_kelvin") && state.middle_text == raw)
+        });
+        Ok((text_matches
+            && observed.as_deref() == Some(state.middle_text.as_str())
+            && state.validated_middle_kelvin == validated
+            && state.live_middle_kelvin == Some(live))
+            .then_some(state))
     })
     .map_err(|error| {
         io::Error::new(
             error.kind(),
             format!(
-                "{error}; last observed text: {observed:?}; keyboard focus: {:?}; validation: {:?}",
-                automation.focused(settings, std::process::id(), id),
-                automation.text(settings, std::process::id(), "validation-error")
+                "{error}; last observed text: {observed:?}; keyboard focus: {:?}; validation: {:?}; settings: {:?}",
+                automation.focused(settings, std::process::id(), "middle_kelvin"),
+                automation.text(settings, std::process::id(), "validation-error"),
+                measurement.settings_state(),
             ),
         )
     })?;
-    report(&format!("PASS: {id} text equals {expected:?}"));
+    report(&format!("PASS: {description}; {state:?}"));
     Ok(())
 }
 
