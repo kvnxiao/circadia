@@ -789,8 +789,11 @@ fn preview_calculation_starts_before_a_blocked_native_call_returns() {
     );
 }
 
-#[test]
-fn queued_preview_blocks_edits_until_an_ordered_stop_without_waiting_for_native_output() {
+#[test_case(ControllerCommand::StopPreview; "stop")]
+#[test_case(ControllerCommand::Resume { epoch: 1, foreground: Foreground::Unknown }; "resume without suspend")]
+fn queued_preview_blocks_edits_until_cancellation_without_waiting_for_native_output(
+    cancellation: ControllerCommand,
+) {
     let directory = tempfile::tempdir().expect("directory");
     ConfigStore::new(directory.path())
         .save(&input(3400).validate().expect("config"))
@@ -813,12 +816,15 @@ fn queued_preview_blocks_edits_until_an_ordered_stop_without_waiting_for_native_
         )))
         .expect("queued Preview");
     let rejected = client.submit(ControllerCommand::Edit(Box::new(input(3000))));
-    client
-        .submit(ControllerCommand::StopPreview)
-        .expect("ordered Stop");
-    let changed = client
-        .submit(ControllerCommand::Edit(Box::new(input(3000))))
-        .expect("edit admitted after Stop");
+    client.submit(cancellation).expect("ordered cancellation");
+    let changed = match client.submit(ControllerCommand::Edit(Box::new(input(3000)))) {
+        Ok(changed) => changed,
+        Err(error) => {
+            release.send(()).expect("release native call after failure");
+            drop(worker.shutdown());
+            panic!("edit admission after cancellation failed: {error}");
+        }
+    };
     let deadline = Instant::now() + Duration::from_secs(2);
     let calculated = loop {
         if let Some(result) = client.calculations().latest().expect("calculation")
@@ -848,7 +854,7 @@ fn queued_preview_blocks_edits_until_an_ordered_stop_without_waiting_for_native_
     );
     assert!(
         calculated.is_some(),
-        "edits after Stop must calculate while native output is still blocked"
+        "edits after cancellation must calculate while native output is still blocked"
     );
     assert!(!snapshot.preview_active);
     assert_eq!(
@@ -861,6 +867,54 @@ fn queued_preview_blocks_edits_until_an_ordered_stop_without_waiting_for_native_
             .input()
             .daytime_kelvin,
         3000
+    );
+}
+
+#[test]
+fn duplicate_resume_does_not_enable_edits_during_a_later_queued_preview() {
+    let directory = tempfile::tempdir().expect("directory");
+    ConfigStore::new(directory.path())
+        .save(&input(3400).validate().expect("config"))
+        .expect("saved config");
+    let (entered, started) = mpsc::sync_channel(1);
+    let (release, finish) = mpsc::sync_channel(1);
+    let records = Arc::new(Mutex::new(Records {
+        blocked: Some((entered, finish)),
+        ..Records::default()
+    }));
+    let (worker, _notified) = start(&directory, &records);
+    let client = worker.client();
+    started
+        .recv_timeout(Duration::from_secs(10))
+        .expect("blocked native call");
+    client.submit(ControllerCommand::BeginEdit).expect("draft");
+    client
+        .submit(ControllerCommand::Resume {
+            epoch: 1,
+            foreground: Foreground::Unknown,
+        })
+        .expect("first resume");
+    client
+        .submit(ControllerCommand::Preview(Box::new(
+            input(3400).validate().expect("config"),
+        )))
+        .expect("queued Preview");
+    client
+        .submit(ControllerCommand::Resume {
+            epoch: 1,
+            foreground: Foreground::Unknown,
+        })
+        .expect("duplicate resume");
+    let changed = client.submit(ControllerCommand::Edit(Box::new(input(3000))));
+    release.send(()).expect("release native call");
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+    assert_eq!(
+        changed
+            .expect_err("duplicate resume must preserve Preview edit restrictions")
+            .kind(),
+        io::ErrorKind::WouldBlock
     );
 }
 

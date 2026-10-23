@@ -260,6 +260,7 @@ pub struct ControllerSnapshot {
 struct Envelope {
     id: u64,
     command: ControllerCommand,
+    interrupts_output: bool,
     calculation: Option<u64>,
     completion: mpsc::SyncSender<CommandOutcome>,
     entered: ControlTime,
@@ -412,6 +413,7 @@ impl ControllerClient {
         queue.commands.push_back(Envelope {
             id,
             command,
+            interrupts_output: interrupts,
             calculation,
             completion,
             entered,
@@ -459,6 +461,7 @@ fn queued_preview_active(active: bool, commands: &VecDeque<Envelope>) -> bool {
         .iter()
         .fold(active, |active, envelope| match &envelope.command {
             ControllerCommand::Preview(_) => true,
+            ControllerCommand::Resume { .. } if envelope.interrupts_output => false,
             ControllerCommand::StopPreview
             | ControllerCommand::Discard
             | ControllerCommand::LoadLatest
