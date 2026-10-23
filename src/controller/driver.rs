@@ -60,6 +60,8 @@ pub struct NativeDriver {
     recovery: NativeRecovery,
     rate: OutputRate,
     correction: bool,
+    #[cfg(feature = "output-measurement")]
+    measured_correction: Option<Duration>,
 }
 
 impl NativeDriver {
@@ -71,6 +73,8 @@ impl NativeDriver {
             recovery: NativeRecovery::default(),
             rate: OutputRate::default(),
             correction: false,
+            #[cfg(feature = "output-measurement")]
+            measured_correction: None,
         }
     }
 
@@ -170,7 +174,12 @@ impl NativeDriver {
             errors,
             ..
         } = self.native.notifications(mode);
-        self.correction |= self.runtime.output().differs(settings, active);
+        let differs = self.runtime.output().differs(settings, active);
+        #[cfg(feature = "output-measurement")]
+        if differs && !self.correction {
+            self.measured_correction = Some(now().output.elapsed);
+        }
+        self.correction |= differs;
         let read_failed = errors
             .iter()
             .any(|error| error.operation() != DiagnosticOperation::Observation);
@@ -198,6 +207,8 @@ impl NativeDriver {
             },
         )?;
         if !errors.is_empty() {
+            #[cfg(feature = "output-measurement")]
+            crate::measurement::fail("native observation failed during output measurement");
             report.observation = Some(errors);
         }
         Ok(report)
@@ -291,7 +302,22 @@ impl NativeDriver {
             .map(|config| Duration::from_millis(config.input().ordinary_fade_ms.unsigned_abs()))
             .ok_or_else(ControlError::timing)?;
         let begun = self.native.access_begun();
-        self.rate.started(now().output.elapsed);
+        let started = now().output.elapsed;
+        self.rate.started(started);
+        #[cfg(feature = "output-measurement")]
+        {
+            let rate = self
+                .runtime
+                .config()
+                .and_then(|config| u16::try_from(config.input().output_rate_hz).ok())
+                .unwrap_or_default();
+            crate::measurement::begin(
+                started,
+                self.runtime.output().measured_deadlines(),
+                self.measured_correction,
+                rate,
+            );
+        }
         let runtime = &mut self.runtime;
         let attempt = self.native.control_while(current, |fresh| {
             let at = now();
@@ -313,6 +339,11 @@ impl NativeDriver {
         report.scheduled = self
             .runtime
             .native_completed(&attempt, now().output.elapsed);
+        #[cfg(feature = "output-measurement")]
+        {
+            crate::measurement::end(&attempt, report.control_error.is_some());
+            self.measured_correction = None;
+        }
         self.correction = false;
         if !begun && self.native.access_begun() {
             report.observation = Some(Vec::new());

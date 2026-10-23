@@ -10,6 +10,8 @@ use crate::DiagnosticOperation;
 use std::error::Error;
 use std::os::windows::io::AsHandle;
 use std::os::windows::io::BorrowedHandle;
+#[cfg(feature = "output-measurement")]
+use std::time::Instant;
 use win_nightlight_lib::ColorTemperature;
 use win_nightlight_lib::ErrorKind;
 use win_nightlight_lib::Nightlight;
@@ -42,7 +44,12 @@ impl NativeBackend for SystemBackend {
             if slot.is_some() {
                 continue;
             }
-            match create() {
+            #[cfg(feature = "output-measurement")]
+            let started = Instant::now();
+            let result: Result<Watcher, win_nightlight_watch::Error> = create();
+            #[cfg(feature = "output-measurement")]
+            crate::measurement::call("register_watcher", None, started, result.is_ok());
+            match result {
                 Ok(watcher) => *slot = Some(watcher),
                 Err(error) => {
                     errors.push(watch_failure(DiagnosticOperation::Observation, error));
@@ -72,22 +79,36 @@ impl NativeBackend for SystemBackend {
     }
 
     fn settings(&mut self) -> Result<NativeSettings, NativeFailure> {
-        self.nightlight
-            .read_settings()
+        #[cfg(feature = "output-measurement")]
+        let started = Instant::now();
+        let result = self.nightlight.read_settings();
+        #[cfg(feature = "output-measurement")]
+        crate::measurement::call("read_settings", None, started, result.is_ok());
+        result
             .map(|settings| settings_values(&settings))
             .map_err(|error| access_failure(DiagnosticOperation::NativeSettingsRead, error))
     }
 
     fn active(&mut self) -> Result<bool, NativeFailure> {
-        self.nightlight
-            .read_state()
+        #[cfg(feature = "output-measurement")]
+        let started = Instant::now();
+        let result = self.nightlight.read_state();
+        #[cfg(feature = "output-measurement")]
+        crate::measurement::call("read_state", None, started, result.is_ok());
+        result
             .map(|state| state.is_active())
             .map_err(|error| access_failure(DiagnosticOperation::NativeStateRead, error))
     }
 
     fn disable_schedule(&mut self) -> Result<(), NativeFailure> {
-        self.nightlight
-            .update_settings(|settings| settings.set_schedule(win_nightlight_lib::Schedule::Off))
+        #[cfg(feature = "output-measurement")]
+        let started = Instant::now();
+        let result = self
+            .nightlight
+            .update_settings(|settings| settings.set_schedule(win_nightlight_lib::Schedule::Off));
+        #[cfg(feature = "output-measurement")]
+        crate::measurement::call("disable_schedule", None, started, result.is_ok());
+        result
             .map(|_written| ())
             .map_err(|error| access_failure(DiagnosticOperation::NativeScheduleWrite, error))
     }
@@ -97,27 +118,51 @@ impl NativeBackend for SystemBackend {
         value: ColorTemperature,
         mode: TemperatureMode,
     ) -> Result<(), NativeFailure> {
-        match mode {
+        #[cfg(feature = "output-measurement")]
+        let started = Instant::now();
+        let result = match mode {
             TemperatureMode::Set => self.nightlight.set_color_temperature(value),
             TemperatureMode::Apply => self.nightlight.apply_color_temperature(value),
             TemperatureMode::Hold | TemperatureMode::ApplyHeld | TemperatureMode::FinishHeld => {
                 self.nightlight.preview_color_temperature(value)
             }
-        }
-        .map(|_previous_or_written| ())
-        .map_err(|error| access_failure(DiagnosticOperation::TemperatureWrite, error))
+        };
+        #[cfg(feature = "output-measurement")]
+        crate::measurement::call(
+            match mode {
+                TemperatureMode::Set => "set_color_temperature",
+                TemperatureMode::Apply => "apply_color_temperature",
+                TemperatureMode::Hold
+                | TemperatureMode::ApplyHeld
+                | TemperatureMode::FinishHeld => "preview_color_temperature",
+            },
+            Some(value.kelvin()),
+            started,
+            result.is_ok(),
+        );
+        result
+            .map(|_previous_or_written| ())
+            .map_err(|error| access_failure(DiagnosticOperation::TemperatureWrite, error))
     }
 
     fn end_preview(&mut self) -> Result<(), NativeFailure> {
-        self.nightlight
-            .end_preview()
+        #[cfg(feature = "output-measurement")]
+        let started = Instant::now();
+        let result = self.nightlight.end_preview();
+        #[cfg(feature = "output-measurement")]
+        crate::measurement::call("end_preview", None, started, result.is_ok());
+        result
             .map(|_previous| ())
             .map_err(|error| access_failure(DiagnosticOperation::PreviewCleanup, error))
     }
 
     fn set_active(&mut self, active: bool) -> Result<(), NativeFailure> {
-        self.nightlight
-            .set_active(active)
+        #[cfg(feature = "output-measurement")]
+        let started = Instant::now();
+        let result = self.nightlight.set_active(active);
+        #[cfg(feature = "output-measurement")]
+        crate::measurement::call("set_active", None, started, result.is_ok());
+        result
             .map(|_written| ())
             .map_err(|error| access_failure(DiagnosticOperation::NativeActivationWrite, error))
     }
@@ -133,16 +178,27 @@ fn consume(
         return;
     };
     let result = match mode {
-        ObservationMode::Read => watcher.read_pending().map(|snapshot| {
-            let Some(snapshot) = snapshot else {
-                return;
-            };
-            report.changed = true;
-            match snapshot {
-                Snapshot::Settings(settings) => report.settings = Some(settings_values(&settings)),
-                Snapshot::State(state) => report.active = Some(state.is_active()),
+        ObservationMode::Read => {
+            #[cfg(feature = "output-measurement")]
+            let started = Instant::now();
+            let result = watcher.read_pending();
+            #[cfg(feature = "output-measurement")]
+            if !matches!(&result, Ok(None)) {
+                crate::measurement::call("read_notification", None, started, result.is_ok());
             }
-        }),
+            result.map(|snapshot| {
+                let Some(snapshot) = snapshot else {
+                    return;
+                };
+                report.changed = true;
+                match snapshot {
+                    Snapshot::Settings(settings) => {
+                        report.settings = Some(settings_values(&settings));
+                    }
+                    Snapshot::State(state) => report.active = Some(state.is_active()),
+                }
+            })
+        }
         ObservationMode::Defer => watcher
             .discard_pending()
             .map(|changed| report.changed |= changed),

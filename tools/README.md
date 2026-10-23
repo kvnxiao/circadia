@@ -142,6 +142,29 @@ The tool prints the processor, logical processor count, Windows build, primary d
 
 The `graph-measurement` feature enables the simulated backend, solar failure injection, and rendering instrumentation. Ordinary application builds exclude these measurement hooks. `just check` compiles the measurement feature but does not launch this interactive run.
 
+## Native output timing
+
+Close any running Circadia instance, then run:
+
+```bash
+just measure-output
+```
+
+The recipe builds the complete release application with its bundled runtime and the `output-measurement` feature. A driver thread edits the real settings controls through UI Automation. The run takes roughly three minutes and exercises:
+
+- Ten-second fades into and out of manual suppression at 1, 60, and 240 Hz, between 2400 K and 6500 K.
+- Half-second fades in both directions at 60 and 240 Hz to exercise the rate ceiling during faster changes.
+- A ten-second Preview at 240 Hz, with 2400–6200 K temperatures and four-hour scheduled transitions.
+- A one-minute scheduled transition from 2400 K to 6200 K at 60 Hz with Settings closed.
+
+The trace preserves each output's original due time before a delayed wake or synchronous native call. Eligibility also accounts for the configured attempt-rate ceiling and completion of the preceding native call. Startup, native preview setup/cleanup, immediate Preview entry/exit, explicit recovery, resume/taskbar refresh, Discard, and shutdown remain serialized but bypass the rate interval.
+
+Each temperature-call record includes the attempt start, public-call start, and public-call completion. Reading current Night Light settings and state after starting an attempt counts toward its temperature-call start delay. Call duration is reported separately. Automatic correction attempts restore Circadia's intended native values after Windows or another application changes them; they share the output-rate ceiling.
+
+The tool requires at least 95% of temperature calls in each scenario to start within 20 ms of eligibility. It also checks final temperatures and Preview restoration, rejects native errors or incomplete traces, and verifies cleanup through native readback. The raw trace and scenario summaries print after the application exits. Ordinary builds exclude the instrumentation; measured call timings include its overhead and do not establish displayed color or smoothness.
+
+This recipe changes live Night Light without moving the cursor or sending keyboard input. Settings can take focus. Graceful exit clears native preview and requests Night Light off without restoring the previous native schedule or temperature. Failure retains the temporary configuration directory. The tool prints the source revision, executable, build profile, hardware, Windows build, display modes, and Settings dimensions; preserve those details with the raw results.
+
 ## CPU and memory
 
 Close any running Circadia instance, then run:

@@ -29,6 +29,9 @@ native-shutdown: build-self-contained
 measure-graph:
     cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-graph
 
+measure-output:
+    cargo +stable run --release --bin native-lifecycle --features self-contained,output-measurement --locked -- --measure-output
+
 measure-resources args="":
     cargo +stable build --release --bin circadia --features self-contained --locked
     cargo +stable run --release --bin native-lifecycle --features native-tests --locked -- --measure-resources target/release/circadia.exe {{args}}

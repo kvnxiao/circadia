@@ -26,7 +26,7 @@ Launching Circadia starts management of live Night Light. Start minimized defaul
 
 ## Resource baseline
 
-Measured on 2026-10-22 with application source `0043f53`, Rust 1.99.0, and an optimized release build with its bundled Windows App SDK runtime. The reference machine ran Windows 11 x64 build 26300.9711 on a Ryzen 7 9800X3D with 16 logical processors. Windows reported 95.7 GiB of physical memory. The attached display ran at 2560 × 1440, 480 Hz on an NVIDIA GeForce RTX 5090; Settings used 96 DPI and a 776 × 859 window.
+Measured on 2026-10-22 with application source `0043f53`, Rust 1.99.0, and an optimized release build with its bundled Windows App SDK runtime. The reference machine ran Windows 11 x64 build 26300.9711 on a Ryzen 7 9800X3D with 16 logical processors. Windows reported 95.7 GiB of physical memory. The attached display ran at 2560 × 1440, 480 Hz on an NVIDIA GeForce RTX 5090; Settings used 96 DPI with outer window dimensions of 776 × 859 pixels.
 
 CPU percentages represent the application's share of all 16 logical processors: process CPU seconds ÷ elapsed seconds ÷ 16 × 100. Memory cells show **median / peak** in MiB, sampled once per second. Working set measures resident pages; private bytes measure private committed memory. They are separate quantities and should not be added.
 
@@ -78,7 +78,7 @@ Temperature input rounds to the nearest 10 K, with ties toward higher kelvin. Va
 
 Settings displays both executable lists, labels included but excluded entries as inactive, and allows removal from either user list. List edits remain unsaved until Save; Discard restores the accepted lists. Tray changes persist immediately and survive subsequent field edits and Discard. Fixed exclusions cannot be removed.
 
-The library accepts editable `ConfigInput` values and produces a `Config` only after validation. Disk loading, live editing, and persistence use that same validation path. Valid unsaved edits supply the active configuration during an editing session. Invalid edits preserve the last valid draft. Save adopts the draft only after writing the primary file; Discard returns to the accepted configuration.
+Circadia's Rust library accepts editable `ConfigInput` values and produces a `Config` only after validation. Disk loading, live editing, and persistence use that same validation path. Valid unsaved edits supply the active configuration during an editing session. Invalid edits preserve the last valid draft. Save adopts the draft only after writing the primary file; Discard returns to the accepted configuration.
 
 A valid external change updates the accepted configuration and marks an open draft stale, blocking Save until the draft is discarded or reloaded. Save and tray mutations also check the current file before writing, so an external edit does not depend on its notification being processed first. Tray mutations preserve unrelated externally changed fields.
 
@@ -130,7 +130,9 @@ Dependency upgrades require rerunning the [solar reference checks](docs/research
 
 The graph spans the most recent daily boundary through the next boundary, each at the configured Wake clock minus four local hours. Preview captures the configuration and uniformly compresses the actual interval through tomorrow's matching local clock into its configured duration. Both use the first occurrence of repeated boundaries and the first valid instant after a gap. Clipping the graph preserves fractional endpoints and does not merge targets again.
 
-The native settings harness checks graph availability, changing Preview temperatures, and restoration after Stop and Discard. It also checks Preview cancellation through synthetic lock, suspend/resume, clock-change, and session-end messages, plus Quit. These checks read Windows Night Light records; they do not verify displayed color or actual OS power transitions. `just measure-graph` measures native input-to-render timing, including solar fallback, and verifies Preview animation while a simulated output call is blocked. See the [measurement method and limits](tools/README.md#graph-rendering).
+`just native-settings` runs the native lifecycle harness with additional settings checks for graph availability, changing Preview temperatures, and restoration after Stop and Discard. It also checks Preview cancellation through synthetic lock, suspend/resume, clock-change, and session-end messages, plus Quit. These checks read Windows Night Light records; they do not verify displayed color or actual OS power transitions. `just measure-graph` measures native input-to-render timing, including solar fallback, and verifies Preview animation while a simulated output call is blocked. See the [measurement method and limits](tools/README.md#graph-rendering).
+
+`just measure-output` uses live Night Light to measure output start delay and public-call duration during fades, Preview, and a one-minute scheduled transition. It tests fades at 1, 60, and 240 Hz and verifies final native temperatures and cleanup. See the [output timing method and side effects](tools/README.md#native-output-timing).
 
 ## Foreground and manual suppression
 
