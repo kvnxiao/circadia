@@ -863,6 +863,76 @@ fn configuration_error_keeps_native_access_closed_through_editing_and_rejected_a
 }
 
 #[test]
+fn external_configuration_reload_starts_native_access_after_startup_error() {
+    let directory = tempfile::tempdir().expect("directory");
+    let path = directory.path().join("config.toml");
+    fs_err::write(&path, "wake = [").expect("invalid configuration");
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    let waiting = wait_for(&client, &notified, |snapshot| {
+        snapshot.scheduling == SchedulingState::Waiting
+    });
+    assert!(waiting.accepted.is_none());
+    assert_eq!(records.lock().expect("native records").calls, []);
+
+    fs_err::write(
+        &path,
+        toml::to_string(&input(3000)).expect("valid replacement"),
+    )
+    .expect("external configuration correction");
+    let reload = client
+        .submit(ControllerCommand::Reload)
+        .expect("deliver the external file notification");
+    let recovered = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &reload)
+            && snapshot
+                .accepted
+                .as_ref()
+                .is_some_and(|layer| layer.last_scheduled() == Some(3000))
+    });
+    assert_eq!(recovered.scheduling, SchedulingState::Available);
+    assert!(recovered.storage_error.is_none());
+    assert_eq!(
+        recovered
+            .accepted
+            .as_ref()
+            .expect("accepted correction")
+            .config()
+            .input(),
+        &input(3000)
+    );
+    {
+        let native = records.lock().expect("native records");
+        assert!(
+            native
+                .calls
+                .starts_with(&[Call::Register, Call::Settings, Call::State])
+        );
+        assert_eq!(native.settings.temperature, Some(3000));
+        assert!(native.active);
+        assert!(!native.calls.contains(&Call::Activate(false)));
+    }
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+    assert!(exit.native.is_some());
+    let log = fs_err::read_to_string(directory.path().join("diagnostics.log"))
+        .expect("configuration diagnostics");
+    let entries: Vec<_> = log
+        .lines()
+        .map(|line| line.split_once('\t').expect("timestamp field").1)
+        .collect();
+    assert_eq!(
+        entries,
+        [
+            "configuration_read\tfailure\tinvalid_data\t-",
+            "configuration_read\trecovered\t-\t-"
+        ]
+    );
+}
+
+#[test]
 fn edits_save_and_discard_remain_ordered_while_native_output_blocks() {
     let directory = tempfile::tempdir().expect("directory");
     let store = ConfigStore::new(directory.path());
