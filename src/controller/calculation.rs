@@ -10,6 +10,7 @@ use crate::WindowsZone;
 use crate::graph_interval;
 use jiff::SignedDuration;
 use jiff::Timestamp;
+use jiff::civil::DateTime;
 use jiff::civil::Time;
 use std::fmt;
 use std::io;
@@ -58,7 +59,18 @@ pub struct CalculatedSchedule {
     /// Required solar calculation failure when the curve uses manual anchors.
     pub solar_error: Option<ScheduleError>,
     /// Activity intervals whose solar events could not form an ordered pair.
-    pub conflicts: Vec<ActivityInterval>,
+    pub conflicts: Vec<SolarConflict>,
+}
+
+/// Describe a solar ordering conflict in the calculation's Windows time zone.
+#[derive(Clone, Copy, Debug)]
+pub struct SolarConflict {
+    /// Actual bounds used to select conflicts for a displayed graph interval.
+    pub interval: ActivityInterval,
+    /// Adjusted Wake date and clock in the calculation's Windows time zone.
+    pub local_wake: DateTime,
+    /// Adjusted Bedtime date and clock in the calculation's Windows time zone.
+    pub local_bedtime: DateTime,
 }
 
 /// Tag a calculation so consumers reject results from superseded requests.
@@ -315,15 +327,16 @@ fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, Schedul
     };
     let mut views = vec![graph];
     let mut graph_end = graph.end;
-    if let Some(playback) = &preview {
-        while graph_end <= playback.interval().end {
-            let view = graph_interval(&request.config, &mut zone, graph_end)?;
-            if view.start != graph_end || view.end <= graph_end {
-                return Err(ScheduleError::curve());
-            }
-            graph_end = view.end;
-            views.push(view);
+    let through = preview
+        .as_ref()
+        .map_or(next_date, |playback| playback.interval().end.max(next_date));
+    while graph_end <= through {
+        let view = graph_interval(&request.config, &mut zone, graph_end)?;
+        if view.start != graph_end || view.end <= graph_end {
+            return Err(ScheduleError::curve());
         }
+        graph_end = view.end;
+        views.push(view);
     }
     let padding = Duration::from_millis(request.config.input().ordinary_fade_ms.unsigned_abs())
         .max(STARTUP_FADE);
@@ -334,6 +347,17 @@ fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, Schedul
         end,
     };
     let schedule = Schedule::calculate(&request.config, &mut zone, valid.start, valid.end)?;
+    let conflicts = schedule
+        .conflicts
+        .into_iter()
+        .map(|interval| {
+            Ok(SolarConflict {
+                interval,
+                local_wake: zone.local(interval.wake)?,
+                local_bedtime: zone.local(interval.bedtime)?,
+            })
+        })
+        .collect::<Result<_, ScheduleError>>()?;
     Ok(CalculatedSchedule {
         curve: Arc::new(schedule.curve),
         valid,
@@ -342,7 +366,7 @@ fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, Schedul
         preview,
         next_date,
         solar_error: schedule.solar_error,
-        conflicts: schedule.conflicts,
+        conflicts,
     })
 }
 
@@ -403,6 +427,27 @@ mod tests {
                 .kind(),
             io::ErrorKind::BrokenPipe
         );
+    }
+
+    #[test]
+    fn graph_views_cover_the_interval_until_the_next_date_recalculation() {
+        let mut zone = WindowsZone::current().expect("Windows zone");
+        let at = zone
+            .boundary("2026-02-01T00:00:00".parse().expect("local midnight"))
+            .expect("midnight instant");
+        let calculated = calculate(&CalculationRequest {
+            config: Config::default(),
+            at,
+            purpose: CalculationPurpose::Schedule,
+        })
+        .expect("schedule");
+        assert!(
+            calculated.views.last().expect("final view").end >= calculated.next_date,
+            "the graph must cross the 03:00 display boundary before the next midnight recalculation"
+        );
+        for view in &calculated.views {
+            assert!(calculated.curve.clip(*view).is_ok());
+        }
     }
 
     #[test]

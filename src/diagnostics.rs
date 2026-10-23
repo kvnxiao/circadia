@@ -329,7 +329,7 @@ mod tests {
             "'secret-game.exe' = [40.7128, -74.0060, 'personal window title'",
         )
         .expect("malformed private input");
-        let error = store.read_external().expect_err("malformed input");
+        let error = store.read_external(None).expect_err("malformed input");
         let mut log = DiagnosticLog::new(directory.path());
         assert_eq!(
             log.failure(

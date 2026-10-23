@@ -10,12 +10,15 @@ use crate::ScheduleError;
 use std::time::Duration;
 
 const STARTUP_FADE: Duration = Duration::from_secs(1);
+pub(crate) const COMMAND_QUEUE_CAPACITY: usize = 128;
+pub(crate) const COMMAND_QUEUE_BYTES: usize = 8 * 1024 * 1024;
 pub use calculation::CalculatedSchedule;
 pub use calculation::CalculationClient;
 pub use calculation::CalculationPurpose;
 pub use calculation::CalculationRequest;
 pub use calculation::CalculationResult;
 pub use calculation::CalculationWorker;
+pub use calculation::SolarConflict;
 pub use driver::NativeCycle;
 pub use driver::NativeDriver;
 pub use fade::TemperatureFade;

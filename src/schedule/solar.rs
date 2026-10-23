@@ -44,6 +44,10 @@ pub fn calculate_solar(
     start: Timestamp,
     end: Timestamp,
 ) -> Result<SolarCrossings, ScheduleError> {
+    #[cfg(feature = "graph-measurement")]
+    if crate::ui::measurement::solar_failure() {
+        return Err(ScheduleError::curve());
+    }
     let date = Offset::UTC.to_datetime(start).date();
     let delta = delta_t::estimate_from_date(i32::from(date.year()), u32::try_from(date.month())?)?;
     let julian_start = JULIAN_UNIX_EPOCH

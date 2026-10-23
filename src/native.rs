@@ -105,7 +105,7 @@ impl fmt::Debug for NativeFailure {
 }
 
 impl NativeFailure {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "graph-measurement"))]
     pub(crate) fn injected(operation: DiagnosticOperation) -> Self {
         Self {
             operation,
