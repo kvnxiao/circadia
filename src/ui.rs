@@ -234,6 +234,7 @@ struct Desktop {
     file_error: Option<String>,
     fatal: Option<io::Error>,
     exiting: bool,
+    settings_open: bool,
     directory: PathBuf,
     zone: Option<ZoneIdentity>,
     resume: ResumeEpoch,
@@ -323,6 +324,7 @@ impl Application for Desktop {
             file_error,
             fatal: None,
             exiting: false,
+            settings_open: false,
             directory: input.directory.clone(),
             zone: ZoneIdentity::current().ok(),
             resume: ResumeEpoch::default(),
@@ -332,10 +334,25 @@ impl Application for Desktop {
     }
 
     fn update(&mut self, message: Message, context: &ApplicationContext<Self>) {
+        if self.exiting && !matches!(message, Message::Opened | Message::Closed) {
+            return;
+        }
         match message {
             Message::Open => self.open_settings(context),
-            Message::Opened => self.queue(ControllerCommand::BeginEdit),
-            Message::Closed => self.queue(ControllerCommand::CloseUnchanged),
+            Message::Opened => {
+                self.settings_open = true;
+                if !self.exiting {
+                    self.queue(ControllerCommand::BeginEdit);
+                }
+            }
+            Message::Closed => {
+                self.settings_open = false;
+                if self.exiting {
+                    context.exit();
+                } else {
+                    self.queue(ControllerCommand::CloseUnchanged);
+                }
+            }
             Message::Settings(submission) => {
                 self.enqueue(
                     submission.command,
@@ -393,6 +410,7 @@ impl Application for Desktop {
                     snapshot: self.snapshot.clone(),
                     calculation: self.calculation.clone(),
                     preview_epoch: self.preview_epoch,
+                    exiting: self.exiting,
                     status: lines.join("\n"),
                     detail: self.details(),
                     manual_label,
@@ -673,7 +691,10 @@ impl Desktop {
         {
             session.result.borrow_mut().get_or_insert(error);
         }
-        context.exit();
+        // An open dialog must close before its native scheduler is dropped.
+        if !self.settings_open {
+            context.exit();
+        }
     }
 
     fn details(&self) -> String {

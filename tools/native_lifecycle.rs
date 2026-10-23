@@ -23,6 +23,9 @@ mod preview;
 #[path = "native/settings.rs"]
 mod settings;
 #[cfg(windows)]
+#[path = "native/shutdown.rs"]
+mod shutdown;
+#[cfg(windows)]
 #[path = "native/startup.rs"]
 mod startup;
 #[cfg(windows)]
@@ -61,6 +64,12 @@ fn main() -> std::io::Result<()> {
         .is_some_and(|value| value == "--startup")
     {
         return startup::run();
+    }
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|value| value == "--modal-shutdown")
+    {
+        return shutdown::run();
     }
     lifecycle::run()
 }
