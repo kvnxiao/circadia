@@ -1,6 +1,6 @@
 # Circadia
 
-Circadia is a Windows 11 x64 tray application under development that schedules native Windows Night Light. The [specification](docs/specs/SPEC.md) defines the application contract. The executable has a tray menu and native settings for schedule edits, a generated graph, Preview playback, and manual suppression. Retry requests another attempt at schedule calculation and native access. Settings supports Save, Discard, external-file conflicts, and adding or removing executable filenames. Adding an application opens a native file picker; the selected executable is not run. Closing with unsaved changes offers Save, Discard, or Keep Editing. Performance baselines and complete application conformance checks are still being implemented.
+Circadia is a Windows 11 x64 tray application under development that schedules native Windows Night Light. The [specification](docs/specs/SPEC.md) defines the application contract. The executable has a tray menu and native settings for schedule edits, a generated graph, Preview playback, and manual suppression. Retry requests another attempt at schedule calculation and native access. Settings supports Save, Discard, external-file conflicts, and adding or removing executable filenames. Adding an application opens a native file picker; the selected executable is not run. Closing with unsaved changes offers Save, Discard, or Keep Editing. Complete application conformance checks are still in progress.
 
 ## Development
 
@@ -23,6 +23,28 @@ just build-self-contained
 ```
 
 Launching Circadia starts management of live Night Light. Start minimized defaults on; open settings from the tray or launch the executable again. Closing settings keeps control running. Quit clears native preview and requests Night Light off.
+
+## Resource baseline
+
+Measured on 2026-10-22 with application source `0043f53`, Rust 1.99.0, and an optimized release build with its bundled Windows App SDK runtime. The reference machine ran Windows 11 x64 build 26300.9711 on a Ryzen 7 9800X3D with 16 logical processors. Windows reported 95.7 GiB of physical memory. The attached display ran at 2560 × 1440, 480 Hz on an NVIDIA GeForce RTX 5090; Settings used 96 DPI and a 776 × 859 window.
+
+CPU percentages represent the application's share of all 16 logical processors: process CPU seconds ÷ elapsed seconds ÷ 16 × 100. Memory cells show **median / peak** in MiB, sampled once per second. Working set measures resident pages; private bytes measure private committed memory. They are separate quantities and should not be added.
+
+| Scenario | Seconds | CPU seconds | CPU % | Working set MiB | Private MiB | Sampled context switches |
+| :-- | --: | --: | --: | --: | --: | --: |
+| Idle, Settings initially closed | 600.000 | 0.203 | 0.0021 | 66.1 / 66.2 | 119.5 / 119.7 | 56,718 |
+| Idle, Settings open | 60.000 | 0.063 | 0.0065 | 121.4 / 122.1 | 163.9 / 164.3 | 11,419 |
+| Idle, Settings closed again | 60.000 | 0.031 | 0.0033 | 120.9 / 120.9 | 162.3 / 162.3 | 11,279 |
+| Preview, Settings open | 45.000 | 4.125 | 0.5729 | 122.1 / 122.6 | 163.8 / 163.9 | 133,533 |
+| One-minute scheduled transition, Settings closed | 45.000 | 0.188 | 0.0260 | 66.0 / 66.0 | 119.7 / 119.7 | 7,508 |
+| Fade into manual suppression, Settings open | 8.000 | 0.469 | 0.3662 | 122.7 / 122.7 | 164.1 / 164.1 | 16,336 |
+| Fade out of manual suppression, Settings open | 8.001 | 0.625 | 0.4882 | 122.8 / 122.8 | 164.2 / 164.2 | 16,614 |
+
+All scenarios used a 60 Hz output-rate ceiling and disabled solar timing. The idle cases used constant 3400 K output in the same process. Preview used a 60-second playback with four-hour scheduled transitions between 2200 K and 6200 K. The one-minute transition used those same endpoints; each ordinary fade lasted ten seconds between 2400 K and 6500 K. Active samples cover part of each operation, as shown in the table. The harness verified changing native temperatures and completed without recorded application errors.
+
+These are observations from one run, not guaranteed resource limits. Opening Settings allocated resources that remained after it closed; this single cycle does not establish long-term memory growth. Context switches sum the observed increases in each application thread's counter. They omit unobserved activity from threads that exit between samples, and sampled memory peaks omit peaks between observations. Resource counters alone do not prove event-driven idle behavior or visible display smoothness.
+
+Run `just measure-resources` to reproduce the scenarios. The separate harness reports raw samples, exact configuration, and machine metadata; its resource use is excluded from the table. See the [tool instructions](tools/README.md#cpu-and-memory) for settling periods and live Night Light effects, and the [counter methodology](docs/research/resource-measurement.md) for API and sampling limits.
 
 ## Configuration
 
@@ -97,7 +119,14 @@ Jiff supplies date and instant arithmetic without an IANA database. Windows call
 
 Solar calculation uses the locked `solar-positioning` 0.7.1 Solar Position Algorithm implementation. Sunrise and Sunset occur when the Sun's center crosses 50 arcminutes below the geometric horizon at sea level, using a fixed allowance for solar radius and refraction. Calculation runs locally for activity intervals that can affect the requested curve and does not persist results. Each activity interval extends from an adjusted Wake through its following Bedtime.
 
-Sunrise candidates include Wake and exclude Bedtime; Sunset candidates lie strictly between them. If both enabled inputs have candidates, selection retains the earliest Sunrise and the earliest Sunset after it. If no Sunset follows that Sunrise, both solar targets are omitted and the interval is reported as a timing conflict. If only one enabled input has candidates, its earliest event is retained. A missing crossing is a successful empty result. A required calculation failure returns the Wake/Bedtime-only curve with the error. Dependency upgrades require rerunning the [solar reference checks](docs/research/solar-calculation.md).
+Sunrise qualifies at or after Wake and before Bedtime. Sunset qualifies strictly after Wake and before Bedtime. Selection follows these rules:
+
+- If both enabled inputs have candidates, retain the earliest Sunrise and the earliest Sunset after it. If no Sunset follows that Sunrise, omit both solar targets and report a timing conflict.
+- If only one enabled input has candidates, retain its earliest event.
+- A missing crossing is a successful empty result.
+- A required calculation failure returns the Wake/Bedtime-only curve with the error.
+
+Dependency upgrades require rerunning the [solar reference checks](docs/research/solar-calculation.md).
 
 The graph spans the most recent daily boundary through the next boundary, each at the configured Wake clock minus four local hours. Preview captures the configuration and uniformly compresses the actual interval through tomorrow's matching local clock into its configured duration. Both use the first occurrence of repeated boundaries and the first valid instant after a gap. Clipping the graph preserves fractional endpoints and does not merge targets again.
 
@@ -129,7 +158,7 @@ Neither calculation nor native-call latency extends playback. Edits and Save are
 
 Native access uses public `win-nightlight-lib` and `win-nightlight-watch` 0.5.0 operations, with one Night Light handle for the worker's lifetime. Each control attempt reads current settings and state before selecting writes. It disables the native schedule before enabling Night Light and preserves unrelated values. Cleanup clears Windows' native preview flag. Temperature writes and application through that flag are tracked separately, including successful storage followed by a cleanup failure.
 
-The worker waits for commands, native notifications, or the next required deadline. It calculates the next 10 K change directly and skips obsolete steps after slow calls. Constant output does not cause repeated temperature operations. Startup uses a one-second fade; ordinary transitions use the configured duration. Native failures share completion-relative retry delays of 100, 200, 400, and then 800 ms. Restoring a lost change-notification registration schedules confirmation of current Night Light values without restarting an active fade.
+The worker waits for commands, native notifications, or the next required deadline. It calculates the next 10 K change directly and skips obsolete steps after slow calls. Constant output does not cause repeated temperature operations. Startup uses a one-second fade; ordinary transitions use the configured duration. Native failures share retry delays of 100, 200, 400, and then 800 ms. Each delay starts when the preceding failed attempt finishes. Restoring a lost change-notification registration schedules confirmation of current Night Light values without restarting an active fade.
 
 Suspend cancels Preview and pending output while preserving manual suppression's deadline. Resume recomputes current inputs and requests application of the current temperature even when its stored value matches. Windows resume timestamps, explicit suspend notifications, and sleep-inclusive versus awake-only counters identify notifications for one wake from sleep; duplicates do not authorize additional attempts. Taskbar recreation compares the Shell window and process identity before requesting another application of the current Night Light temperature.
 

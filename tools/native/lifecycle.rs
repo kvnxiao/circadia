@@ -5,6 +5,8 @@ use circadia::ConfigStore;
 use circadia::InstanceClaim;
 use std::io;
 use std::io::Write;
+use std::os::windows::io::AsHandle;
+use std::os::windows::io::BorrowedHandle;
 use std::path::Path;
 use std::process::Child;
 use std::process::Command;
@@ -565,6 +567,10 @@ pub(super) struct Process {
 }
 
 impl Process {
+    pub(super) fn handle(&self) -> BorrowedHandle<'_> {
+        self.child.as_handle()
+    }
+
     pub(super) fn start(executable: &Path, directory: &Path) -> io::Result<Self> {
         Ok(Self {
             child: Command::new(executable)
