@@ -267,6 +267,133 @@ enum PreviewRecomputeCase {
     FailAfterStop,
 }
 
+#[test]
+fn solar_fallback_during_preview_preserves_position_and_original_deadline() {
+    let config = ConfigInput {
+        sunrise: true,
+        sunset: true,
+        coordinates: Some(crate::Coordinates {
+            latitude: 40.0,
+            longitude: -74.0,
+        }),
+        ..ConfigInput::default()
+    }
+    .validate()
+    .expect("solar configuration");
+    let mut session = ConfigSession::new(Some(config));
+    let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
+    store(&mut runtime, &mut session, 3400, time(0));
+    let request = runtime
+        .preview_request(time(100).output, time(100))
+        .expect("preview");
+    runtime.expect_calculation(2);
+    runtime
+        .calculated(result(2, request, 3000), time(100))
+        .expect("playback starts");
+    assert_eq!(store(&mut runtime, &mut session, 3400, time(100)), 3000);
+    let request = runtime
+        .configure(session.active(), OutputUpdate::Fade, time(5100))
+        .expect("recompute during playback")
+        .expect("calculation request");
+    assert_eq!(
+        request.at,
+        Timestamp::from_millisecond(100).expect("captured start")
+    );
+    assert_eq!(request.purpose, CalculationPurpose::Preview);
+    let mut calculated = Arc::try_unwrap(result(3, request, 2400)).expect("unshared result");
+    let fallback = calculated.result.as_mut().expect("successful fallback");
+    fallback.solar_error = Some(ScheduleError::curve());
+    fallback.curve = Arc::new(
+        Curve::new(
+            [
+                (-3600, 2400),
+                (25_200, 6500),
+                (82_800, 2400),
+                (111_600, 6500),
+            ]
+            .into_iter()
+            .map(|(seconds, kelvin)| Target {
+                instant: Timestamp::from_second(seconds).expect("manual target instant"),
+                kelvin,
+            })
+            .collect(),
+            60,
+        )
+        .expect("Wake and Bedtime fallback"),
+    );
+    runtime.expect_calculation(3);
+    assert!(
+        runtime
+            .calculated(Arc::new(calculated), time(5100))
+            .expect("fallback accepted")
+    );
+    assert_eq!(runtime.state(), SchedulingState::SolarFallback);
+    let preview = runtime.preview().expect("playback continues");
+    assert_eq!(preview.start, Duration::from_millis(100));
+    assert_eq!(preview.end, Duration::from_millis(10_100));
+    assert_eq!(store(&mut runtime, &mut session, 3000, time(5100)), 6500);
+    assert_eq!(
+        runtime.logical_deadline(time(5100)).expect("deadline"),
+        Some(Duration::from_millis(10_100))
+    );
+    runtime
+        .advance(time(10_100))
+        .expect("original completion time");
+    assert!(!runtime.preview_active());
+    assert_eq!(store(&mut runtime, &mut session, 6500, time(10_100)), 2400);
+    assert_eq!(
+        runtime
+            .logical_deadline(time(10_100))
+            .expect("no playback deadline"),
+        None
+    );
+}
+
+#[test]
+fn schedule_failure_during_preview_cancels_playback_and_applies_retained_output() {
+    let mut session = ConfigSession::new(Some(Config::default()));
+    let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
+    store(&mut runtime, &mut session, 3400, time(0));
+    let request = runtime
+        .preview_request(time(100).output, time(100))
+        .expect("preview");
+    runtime.expect_calculation(2);
+    runtime
+        .calculated(result(2, request, 3000), time(100))
+        .expect("playback starts");
+    assert_eq!(store(&mut runtime, &mut session, 3400, time(100)), 3000);
+    assert!(runtime.preview_active());
+    fail(&mut runtime, &session, 3, OutputUpdate::Fade, time(5100));
+    assert_eq!(runtime.state(), SchedulingState::Retained);
+    assert!(!runtime.preview_active());
+    assert!(!runtime.suppression().preview);
+    assert_eq!(
+        runtime
+            .logical_deadline(time(5100))
+            .expect("playback canceled"),
+        None
+    );
+    let request = runtime
+        .output()
+        .prepare(
+            NativeSnapshot {
+                settings: NativeSettings {
+                    schedule_enabled: false,
+                    temperature: Some(3000),
+                    previewing: false,
+                },
+                active: true,
+            },
+            time(5100).output,
+            Duration::from_millis(500),
+        )
+        .expect("restoration selection")
+        .expect("immediate retained request");
+    assert_eq!(request.temperature.kelvin(), 3400);
+    assert_eq!(request.mode, TemperatureMode::Apply);
+    assert_eq!(runtime.output().fade_deadline(), None);
+}
+
 #[test_case(PreviewRecomputeCase::StopRunning; "stop running playback")]
 #[test_case(PreviewRecomputeCase::ExpirePending; "expire pending playback")]
 #[test_case(PreviewRecomputeCase::FailAfterStop; "retain after calculation failure")]

@@ -375,6 +375,110 @@ fn repeated_explicit_retry_requests_share_one_attempt_and_preserve_backoff() {
 }
 
 #[test]
+fn manual_expiry_preserves_pending_recovery_and_then_fades_to_the_schedule() {
+    let mut fixture = Fixture::new(60);
+    fixture.cycle(0);
+    fixture
+        .driver
+        .runtime_mut()
+        .manual(ManualCommand::Start, at(100))
+        .expect("start the one-hour manual interval");
+    fixture.cycle(100);
+    fixture.cycle(600);
+    assert_eq!(
+        fixture
+            .records
+            .lock()
+            .expect("native records")
+            .settings
+            .temperature,
+        Some(6500)
+    );
+    {
+        let mut records = fixture.records.lock().expect("native records");
+        records.settings.temperature = Some(6000);
+        records.notifications = NativeNotifications {
+            changed: true,
+            settings: Some(records.settings),
+            active: Some(true),
+            errors: Vec::new(),
+        };
+        records.fail = Some(DiagnosticOperation::TemperatureWrite);
+    }
+    fixture.observe(1_800_100);
+    for failed_at in [1_800_100, 1_800_200, 1_800_400, 1_800_800, 3_600_000] {
+        let attempt = fixture.cycle(failed_at).attempt.expect("failed correction");
+        assert_eq!(
+            attempt.error.expect("temperature write failed").operation(),
+            DiagnosticOperation::TemperatureWrite
+        );
+        assert!(fixture.driver.runtime().suppression().manual);
+    }
+    assert_eq!(
+        fixture
+            .driver
+            .runtime()
+            .manual_remaining(at(3_600_000).uptime),
+        Some(Duration::from_millis(100))
+    );
+    assert_eq!(
+        fixture.driver.recovery().deadline(),
+        Some(Duration::from_millis(3_600_800))
+    );
+    assert_eq!(
+        fixture
+            .driver
+            .next_deadline(at(3_600_000))
+            .expect("manual expiry precedes recovery"),
+        Some(Duration::from_millis(3_600_100))
+    );
+    fixture.records.lock().expect("native records").fail = None;
+    fixture.take_calls();
+    for waiting_at in [3_600_100, 3_600_799] {
+        let report = fixture.cycle(waiting_at);
+        assert!(report.attempt.is_none());
+        assert!(report.cleanup.is_none());
+        assert!(!fixture.driver.runtime().suppression().manual);
+        assert_eq!(
+            fixture
+                .driver
+                .runtime()
+                .manual_remaining(at(waiting_at).uptime),
+            None
+        );
+        assert_eq!(
+            fixture
+                .driver
+                .next_deadline(at(waiting_at))
+                .expect("unchanged recovery deadline"),
+            Some(Duration::from_millis(3_600_800))
+        );
+    }
+    assert_eq!(fixture.take_calls(), []);
+    for (now, kelvin, mode, cleanup) in [
+        (3_600_800, 6500, TemperatureMode::ApplyHeld, false),
+        (3_601_050, 4950, TemperatureMode::Hold, false),
+        (3_601_300, 3400, TemperatureMode::Hold, true),
+    ] {
+        let attempt = fixture.cycle(now).attempt.expect("recovered output");
+        assert!(attempt.error.is_none());
+        let mut expected = vec![Call::Settings, Call::State, Call::Temperature(kelvin, mode)];
+        if cleanup {
+            expected.push(Call::Cleanup);
+        }
+        assert_eq!(fixture.take_calls(), expected);
+        assert_eq!(fixture.driver.recovery().deadline(), None);
+    }
+    assert_eq!(
+        fixture
+            .driver
+            .next_deadline(at(3_601_300))
+            .expect("idle after recovery"),
+        None
+    );
+}
+
+#[test]
 fn corrections_share_the_output_ceiling_and_reconfirm_queued_mismatches() {
     let mut fixture = Fixture::new(1);
     fixture.cycle(0);
