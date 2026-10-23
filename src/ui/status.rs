@@ -224,6 +224,7 @@ mod tests {
 
     fn restored() -> Arc<StartupConfig> {
         Arc::new(StartupConfig {
+            unsaved_defaults: false,
             accepted: Some(Config::default()),
             restore: Some(RestoreNotice {
                 cause: RestoreCause::Missing,

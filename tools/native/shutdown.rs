@@ -19,6 +19,8 @@ enum ExitCase {
     SessionEndDialog,
     QuitDialog,
     SessionEndOpening,
+    SessionEndPicker,
+    QuitPicker,
 }
 
 pub(super) fn run() -> io::Result<()> {
@@ -43,6 +45,8 @@ pub(super) fn run() -> io::Result<()> {
         ExitCase::SessionEndDialog,
         ExitCase::QuitDialog,
         ExitCase::SessionEndOpening,
+        ExitCase::SessionEndPicker,
+        ExitCase::QuitPicker,
     ]
     .into_iter()
     .try_for_each(|case| exercise(&executable, directory.path(), case));
@@ -81,11 +85,13 @@ fn exercise(executable: &Path, directory: &Path, case: ExitCase) -> io::Result<(
         window(process, "Circadia", true)
     })?;
     if !matches!(case, ExitCase::SessionEndOpening) {
-        open_close_dialog(&automation, &native, &settings, process)?;
+        open_dialog(&automation, &native, &settings, process, case)?;
     }
     match case {
-        ExitCase::QuitDialog => automation.invoke(&settings, process, "quit")?,
-        ExitCase::SessionEndDialog | ExitCase::SessionEndOpening => {
+        ExitCase::QuitDialog | ExitCase::QuitPicker => {
+            automation.invoke(&settings, process, "quit")?;
+        }
+        ExitCase::SessionEndDialog | ExitCase::SessionEndOpening | ExitCase::SessionEndPicker => {
             let receiver = window(process, "Circadia event receiver", false)?
                 .ok_or_else(|| io::Error::other("application event receiver is missing"))?;
             native_message(&receiver, WM_ENDSESSION, 1)?;
@@ -104,11 +110,12 @@ fn exercise(executable: &Path, directory: &Path, case: ExitCase) -> io::Result<(
     Ok(())
 }
 
-fn open_close_dialog(
+fn open_dialog(
     automation: &Automation,
     native: &Nightlight,
     settings: &winsafe::HWND,
     process: u32,
+    case: ExitCase,
 ) -> io::Result<()> {
     wait("editable shutdown settings", || {
         Ok(automation
@@ -122,12 +129,19 @@ fn open_close_dialog(
             .text(settings, process, "draft-status")?
             .filter(|text| text == "Unsaved changes"))
     })?;
-    automation.close(settings, process)?;
-    wait("open settings close dialog", || {
-        Ok(automation
-            .text(settings, process, "CloseButton")?
-            .filter(|text| text == "Keep Editing"))
-    })?;
+    if matches!(case, ExitCase::SessionEndPicker | ExitCase::QuitPicker) {
+        automation.invoke(settings, process, "add-suppression")?;
+        wait("open executable picker", || {
+            window(process, "Add application to Circadia", true)
+        })?;
+    } else {
+        automation.close(settings, process)?;
+        wait("open settings close dialog", || {
+            Ok(automation
+                .text(settings, process, "CloseButton")?
+                .filter(|text| text == "Keep Editing"))
+        })?;
+    }
     Ok(())
 }
 

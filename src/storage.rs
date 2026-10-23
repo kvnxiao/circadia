@@ -18,6 +18,7 @@ pub struct ConfigStore {
 /// Select the configuration available at process startup.
 #[derive(Debug)]
 pub struct StartupConfig {
+    pub(crate) unsaved_defaults: bool,
     /// Accepted inputs, or none while configuration requires correction.
     pub accepted: Option<Config>,
     /// Backup restoration notice, retained until the next successful Save.
@@ -145,6 +146,7 @@ impl ConfigStore {
     pub fn load(&self) -> StartupConfig {
         match read_config(&self.primary_path()) {
             Ok(Some((config, contents))) => StartupConfig {
+                unsaved_defaults: false,
                 accepted: Some(config),
                 restore: None,
                 problems: atomic_write(&self.backup_path(), contents.as_bytes())
@@ -203,6 +205,7 @@ impl ConfigStore {
             Ok(Some(backup)) => backup,
             Ok(None) => {
                 return StartupConfig {
+                    unsaved_defaults: problems.is_empty(),
                     accepted: problems.is_empty().then(Config::default),
                     restore: None,
                     problems,
@@ -211,6 +214,7 @@ impl ConfigStore {
             Err(error) => {
                 problems.push(error);
                 return StartupConfig {
+                    unsaved_defaults: false,
                     accepted: None,
                     restore: None,
                     problems,
@@ -242,6 +246,7 @@ impl ConfigStore {
             Err(error) => notice.write_error = Some(error),
         }
         StartupConfig {
+            unsaved_defaults: false,
             accepted: Some(backup.0),
             restore: Some(notice),
             problems,

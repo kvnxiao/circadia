@@ -52,6 +52,7 @@ pub(super) fn run() -> io::Result<()> {
     let thread = std::thread::Builder::new()
         .name("circadia-graph-input".into())
         .spawn(move || {
+            driver.wait_ready()?;
             let result = exercise(&driver, input);
             let released = driver.hold_output(false);
             let closed =

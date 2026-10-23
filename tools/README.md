@@ -1,6 +1,6 @@
 # Native application checks
 
-Run these tools from the repository root on an interactive Windows 11 x64 desktop with an English Windows Shell. Install the development tools listed in the [project README](../README.md). Live native checks are separate from `just check`. Avoid using the mouse or keyboard while the harness controls them.
+Run these tools from the repository root on an interactive Windows 11 x64 desktop with an English Windows Shell. Install the development tools listed in the [project README](../README.md). Live native checks are separate from `just check`. The lifecycle, settings, and Explorer checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, shutdown, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
 
 ## Application lifecycle
 
@@ -75,11 +75,23 @@ The failed-save case opens the temporary configuration file with sharing restric
 
 The focus case starts a separate harness process with a blank native window and adds its executable filename to the temporary suppression list. That process does not control Night Light. The harness closes it after the check; Circadia still uses one application process.
 
-The picker cases create an isolated temporary folder with copies of the harness executable. The test changes the dialog's address bar to that folder, verifies the directory, and selects the exact fixture file. It does not execute the selected copies or depend on files in Documents.
+The picker cases create an isolated temporary folder with copies of the harness executable. The test sets the filename field to that folder and invokes Open, then verifies that the address bar shows the requested directory. It selects the exact fixture file and invokes Open again. All actions use UI Automation without a foreground-focus requirement. The test does not execute the selected copies or depend on files in Documents.
 
 The location check can display Windows' permission prompt and use network-backed positioning. It does not change Windows location privacy settings. Unit tests separately exercise denied access, unavailable access, cancellation requests, discarded results, and invalid acquired coordinates.
 
 The cases use both constant and changing schedules. Registry readback verifies requested temperatures and cleanup, not displayed color or smoothness.
+
+## Executable picker without desktop input
+
+Close any running Circadia instance, then run:
+
+```bash
+just native-picker
+```
+
+This recipe runs the picker cancellation, folder navigation, exact-file selection, exclusion, and Discard cases separately from the lifecycle checks. It does not move the cursor, send keys, or require the picker to retain foreground focus. You can use another application during these checks, although the settings and picker windows can take focus when they open.
+
+It uses isolated configuration and changes live Night Light. Successful exit clears native preview and turns Night Light off; it does not restore the previous native schedule or temperature. On failure, the harness attempts graceful exit and prints the retained temporary directory.
 
 ## Sign-in startup
 
@@ -112,13 +124,13 @@ Close any running Circadia instance, then run:
 just native-shutdown
 ```
 
-The recipe runs three application instances in sequence with isolated configuration. It checks confirmed session end with the unsaved-changes dialog open, Quit through UI Automation with that dialog open, and session end during settings startup. The test requires:
+The recipe runs five application instances in sequence with isolated configuration. It checks confirmed session end and Quit through UI Automation with either the unsaved-changes dialog or executable picker open. It also checks session end during settings startup. The test requires:
 
 - Each child process exits successfully.
 - Native readback shows the preview flag cleared and Night Light off.
 - The saved configuration keeps its original Bedtime; the unconfirmed edit is not saved.
 
-For the dialog cases, the harness waits until **Keep Editing** appears before requesting exit. The startup case requests session end as soon as the settings window is detected, without waiting for editable controls. This exercises early shutdown but does not force every ordering of Windows events.
+For the unsaved-changes cases, the harness waits until **Keep Editing** appears before requesting exit. For the picker cases, it waits for the owned executable dialog. The startup case requests session end as soon as the settings window is detected, without waiting for editable controls. This exercises early shutdown but does not force every ordering of Windows events.
 
 These are synthetic session messages; the recipe does not sign out or shut down Windows. It uses UI Automation without moving the cursor or sending keyboard input. Its windows can take focus, and it changes live Night Light with the same cleanup behavior as the lifecycle checks. On failure, it prints the retained temporary configuration directory.
 
@@ -157,7 +169,7 @@ The recipe builds the complete release application with its bundled runtime and 
 - A ten-second Preview at 240 Hz, with 2400–6200 K temperatures and four-hour scheduled transitions.
 - A one-minute scheduled transition from 2400 K to 6200 K at 60 Hz with Settings closed.
 
-The trace preserves each output's original due time before a delayed wake or synchronous native call. Eligibility also accounts for the configured attempt-rate ceiling and completion of the preceding native call. Startup, native preview setup/cleanup, immediate Preview entry/exit, explicit recovery, resume/taskbar refresh, Discard, and shutdown remain serialized but bypass the rate interval.
+The trace preserves each output's original due time before a delayed wake or synchronous native call. Eligibility also accounts for the configured attempt-rate ceiling and completion of the preceding native call. Startup, native preview setup/cleanup, immediate Preview entry/exit, explicit recovery, resume/taskbar refresh, Discard, and shutdown remain serialized but bypass the rate interval. Explicit recovery means a retry requested by Settings Retry, a valid Preview request, successful Save, or a manual-suppression command.
 
 Each temperature-call record includes the attempt start, public-call start, and public-call completion. Reading current Night Light settings and state after starting an attempt counts toward its temperature-call start delay. Call duration is reported separately. Automatic correction attempts restore Circadia's intended native values after Windows or another application changes them; they share the output-rate ceiling.
 

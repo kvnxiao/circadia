@@ -712,7 +712,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             origin: shared.origin,
             shared,
             driver: NativeDriver::new(runtime, native),
-            session: ConfigSession::new(startup.accepted.clone()),
+            session: ConfigSession::from_startup(&startup),
             store,
             own_executable,
             startup: Some(startup),
@@ -1212,6 +1212,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 }
                 return None;
             }
+            Ok(_) if !self.session.configuration_file_expected() => return None,
             Ok(_) => StorageError::missing_configuration(),
             Err(error) => error,
         };

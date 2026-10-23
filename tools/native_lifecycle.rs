@@ -89,6 +89,12 @@ fn main() -> std::io::Result<()> {
     }
     if std::env::args_os()
         .nth(1)
+        .is_some_and(|value| value == "--picker")
+    {
+        return picker::run();
+    }
+    if std::env::args_os()
+        .nth(1)
         .is_some_and(|value| value == "--modal-shutdown")
     {
         return shutdown::run();

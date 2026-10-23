@@ -26,6 +26,9 @@ native-startup: build-self-contained
 native-shutdown: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- --modal-shutdown target/debug/circadia.exe
 
+native-picker: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --picker target/debug/circadia.exe
+
 measure-graph:
     cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-graph
 
