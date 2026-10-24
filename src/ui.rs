@@ -31,10 +31,14 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io;
+use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::mpsc::TryRecvError;
+use std::time::Duration;
+use std::time::Instant;
 use windows_reactor::App;
 use windows_reactor::Application;
 use windows_reactor::ApplicationContext;
@@ -44,7 +48,6 @@ use windows_reactor::Callback;
 use windows_reactor::Key;
 use windows_reactor::LocalSender;
 use windows_reactor::Menu;
-use windows_reactor::MenuItem;
 use windows_reactor::NotifyIcon;
 
 /// Run the native tray application after claiming the current user session.
@@ -85,31 +88,48 @@ fn run_with_native(directory: Option<PathBuf>, native: crate::Native) -> io::Res
         .to_owned();
     let result = Rc::new(RefCell::new(None));
     let application = App::run_application::<Desktop>(Input {
+        startup: RefCell::new(Some(Startup {
+            native,
+            running_executable: running_executable.clone(),
+            primary: Rc::clone(&primary),
+            result: Rc::clone(&result),
+        })),
         directory,
         running_executable,
         icon: executable.with_file_name("circadia.ico"),
         executable,
-        primary: Rc::clone(&primary),
-        result: Rc::clone(&result),
-        native: RefCell::new(Some(native)),
     })
     .map_err(io::Error::other);
     let shutdown = result.borrow_mut().take().map_or(Ok(()), Err);
     application.and(shutdown)
 }
 
+// The standard library reports this message when a panic reaches a frame that
+// cannot unwind, such as a WinUI callback, and aborts the process after the
+// hook returns. Other panics unwind and can be caught, so they must not stop
+// the controller.
+fn aborts_process(info: &std::panic::PanicHookInfo<'_>) -> bool {
+    info.payload_as_str() == Some("panic in a function that cannot unwind")
+}
+
 struct Input {
-    native: RefCell<Option<crate::Native>>,
+    startup: RefCell<Option<Startup>>,
     directory: PathBuf,
     running_executable: String,
     icon: PathBuf,
     executable: PathBuf,
+}
+
+struct Startup {
+    native: crate::Native,
+    running_executable: String,
     primary: Rc<PrimaryInstance>,
     result: Rc<RefCell<Option<io::Error>>>,
 }
 
 #[derive(Clone)]
 enum Message {
+    Start,
     Open,
     Opened,
     Closed,
@@ -152,10 +172,14 @@ struct Session {
 }
 
 impl Session {
-    fn start(input: &Input, sender: LocalSender<Message>) -> io::Result<(Self, Option<String>)> {
+    fn start(
+        startup: Startup,
+        directory: &Path,
+        sender: LocalSender<Message>,
+    ) -> io::Result<(Self, Option<String>)> {
         let runtime = Rc::new(RefCell::new(None::<Runtime>));
         let ending = Rc::clone(&runtime);
-        let exit_result = Rc::clone(&input.result);
+        let exit_result = Rc::clone(&startup.result);
         let window = LifecycleWindow::new(
             move |event| {
                 let _delivered = sender.send(Message::Native(event));
@@ -169,31 +193,36 @@ impl Session {
             focused.set(true);
             let _notified = focus_wake.notify();
         })?;
-        let watched = FileChanges::start(&input.directory, window.wake());
+        let watched = FileChanges::start(directory, window.wake());
         let file_error = watched
             .as_ref()
             .err()
             .map(|error| status::error_text(error));
         let wake = window.wake();
         let controller = ControllerWorker::with_native(
-            input.directory.clone(),
-            input.running_executable.clone(),
+            directory.to_owned(),
+            startup.running_executable,
             move || wake.notify(),
-            input
-                .native
-                .borrow_mut()
-                .take()
-                .ok_or_else(|| io::Error::other("controller already started"))?,
+            startup.native,
             read_foreground,
         )?;
         let client = controller.client();
+        let hooked = client.clone();
+        let deadline = OnceLock::<Instant>::new();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if aborts_process(info) {
+                hooked.finish_after_panic(&deadline, Duration::from_secs(2));
+            }
+            previous(info);
+        }));
         #[cfg(feature = "graph-measurement")]
         crate::activity::bind(&client);
         *runtime.borrow_mut() = Some(Runtime {
             controller,
             files: watched.ok(),
         });
-        input.primary.publish_ready()?;
+        startup.primary.publish_ready()?;
         #[cfg(feature = "graph-measurement")]
         measurement::desktop_ready();
         #[cfg(feature = "output-measurement")]
@@ -205,7 +234,7 @@ impl Session {
                 focus_pending,
                 _foreground: foreground,
                 window,
-                result: Rc::clone(&input.result),
+                result: startup.result,
             },
             file_error,
         ))
@@ -232,6 +261,7 @@ fn finish_runtime(runtime: &RefCell<Option<Runtime>>, result: &RefCell<Option<io
 
 struct Desktop {
     session: Option<Session>,
+    startup: Option<Startup>,
     snapshot: Option<Arc<ControllerSnapshot>>,
     calculation: Option<Arc<CalculationResult>>,
     pending: VecDeque<PendingCommand>,
@@ -311,17 +341,20 @@ impl Application for Desktop {
     type Message = Message;
 
     fn create(input: &Input, context: &ApplicationContext<Self>) -> Self {
-        let started = Session::start(input, context.sender());
-        let (session, file_error) = match started {
-            Ok((session, error)) => (Some(session), error),
-            Err(error) => {
-                *input.result.borrow_mut() = Some(error);
-                context.exit();
-                (None, None)
+        let startup = input.startup.borrow_mut().take();
+        // Reactor creates the tray icon in the render that follows `create` and
+        // only then drains this message, so a failed icon creation aborts
+        // before the controller can write Night Light.
+        if !context.sender().send(Message::Start) {
+            if let Some(startup) = &startup {
+                *startup.result.borrow_mut() =
+                    Some(io::Error::other("application message queue is closed"));
             }
-        };
+            context.exit();
+        }
         Self {
-            session,
+            session: None,
+            startup,
             snapshot: None,
             calculation: None,
             pending: VecDeque::new(),
@@ -330,7 +363,7 @@ impl Application for Desktop {
             settings_activation: 0,
             preview_epoch: 0,
             error: None,
-            file_error,
+            file_error: None,
             fatal: None,
             exiting: false,
             settings_open: false,
@@ -347,6 +380,7 @@ impl Application for Desktop {
             return;
         }
         match message {
+            Message::Start => self.start(context),
             Message::Open => self.open_settings(context),
             Message::Opened => {
                 self.settings_open = true;
@@ -387,27 +421,10 @@ impl Application for Desktop {
     }
 
     fn view(&self, input: &Input, context: &ApplicationViewContext<Self>) -> ApplicationView {
-        if self.session.is_none() {
-            return ApplicationView::new();
-        }
         let lines = status::lines(self.snapshot.as_deref());
         let manual = self.manual_command();
-        let manual_label = match manual {
-            ManualCommand::Start => "Suppress for one hour",
-            ManualCommand::Stop => "Stop manual suppression",
-        };
-        let mut items = vec![MenuItem::item("settings", "Settings")];
-        let manual_key = match manual {
-            ManualCommand::Start => "manual-start",
-            ManualCommand::Stop => "manual-stop",
-        };
-        items.push(if status::manual_available(self.snapshot.as_deref()) {
-            MenuItem::item(manual_key, manual_label)
-        } else {
-            MenuItem::disabled(manual_key, manual_label)
-        });
-        items.extend(status::recent_menu_items(self.snapshot.as_deref()));
-        items.push(MenuItem::item("quit", "Quit"));
+        let manual_label = status::manual_label(manual);
+        let items = status::menu_items(self.snapshot.as_deref(), manual);
         ApplicationView::new()
             .window::<settings::Settings>(
                 "settings",
@@ -435,10 +452,7 @@ impl Application for Desktop {
             .notify_icon(
                 "tray",
                 NotifyIcon::new(input.icon.clone())
-                    .tooltip(format!(
-                        "Circadia: {}",
-                        lines.first().cloned().unwrap_or_default()
-                    ))
+                    .tooltip(status::tooltip(&lines))
                     .on_activate(context.callback(|_| Message::Open))
                     .menu(Menu::new(items, context.callback(Message::Menu))),
             )
@@ -446,6 +460,23 @@ impl Application for Desktop {
 }
 
 impl Desktop {
+    fn start(&mut self, context: &ApplicationContext<Self>) {
+        let Some(startup) = self.startup.take() else {
+            return;
+        };
+        let result = Rc::clone(&startup.result);
+        match Session::start(startup, &self.directory, context.sender()) {
+            Ok((session, file_error)) => {
+                self.session = Some(session);
+                self.file_error = file_error;
+            }
+            Err(error) => {
+                result.borrow_mut().get_or_insert(error);
+                self.quit(context);
+            }
+        }
+    }
+
     fn open_settings(&mut self, context: &ApplicationContext<Self>) {
         self.settings_activation = self.settings_activation.wrapping_add(1);
         context.show_window("settings");
@@ -775,6 +806,44 @@ impl ResumeEpoch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const ABORTING_PANIC_CHILD: &str = "CIRCADIA_ABORTING_PANIC_CHILD";
+
+    #[test]
+    fn a_panic_leaving_a_callback_that_cannot_unwind_is_recognized_as_aborting() {
+        if std::env::var_os(ABORTING_PANIC_CHILD).is_some() {
+            std::panic::set_hook(Box::new(exit_when_aborting));
+            callback_that_cannot_unwind();
+        }
+        let child = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "ui::tests::a_panic_leaving_a_callback_that_cannot_unwind_is_recognized_as_aborting",
+            ])
+            .env(ABORTING_PANIC_CHILD, "1")
+            .output()
+            .expect("child test ran");
+        assert_eq!(
+            child.status.code(),
+            Some(85),
+            "{}",
+            String::from_utf8_lossy(&child.stdout)
+        );
+    }
+
+    #[expect(
+        clippy::exit,
+        reason = "exit before the non-unwinding panic aborts the child test process"
+    )]
+    fn exit_when_aborting(info: &std::panic::PanicHookInfo<'_>) {
+        if aborts_process(info) {
+            std::process::exit(85);
+        }
+    }
+
+    extern "C" fn callback_that_cannot_unwind() {
+        panic!("callback failed");
+    }
 
     #[test]
     fn an_applied_action_waits_for_its_published_settings_state() {

@@ -40,6 +40,7 @@ use crate::elapsed_since_boot;
 use crate::read_foreground;
 use jiff::Timestamp;
 use jiff::civil::Time;
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt;
@@ -48,6 +49,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -59,6 +61,10 @@ use std::time::SystemTime;
 
 #[cfg(test)]
 mod tests;
+
+thread_local! {
+    static CONTROLLER_THREAD: Cell<bool> = const { Cell::new(false) };
+}
 
 /// Identify a Windows or user event requiring fresh scheduling inputs.
 #[derive(Clone, Copy, Debug)]
@@ -461,6 +467,27 @@ impl ControllerClient {
         self.0.stopping.store(true, Ordering::Release);
         self.0.wake.signal()
     }
+
+    pub(crate) fn finish_after_panic(&self, deadline: &OnceLock<Instant>, wait: Duration) {
+        if CONTROLLER_THREAD.try_with(Cell::get).unwrap_or(false) {
+            return;
+        }
+        // Several aborting panics can reach the hook; later calls share the
+        // first deadline instead of extending it.
+        let deadline = *deadline.get_or_init(|| {
+            drop(self.request_exit());
+            Instant::now()
+                .checked_add(wait)
+                .unwrap_or_else(Instant::now)
+        });
+        while !self.is_finished() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            std::thread::sleep(remaining.min(Duration::from_millis(10)));
+        }
+    }
 }
 
 fn queued_preview_active(active: bool, commands: &VecDeque<Envelope>) -> bool {
@@ -563,6 +590,7 @@ impl ControllerWorker {
         let thread = std::thread::Builder::new()
             .name("circadia-controller".into())
             .spawn(move || {
+                CONTROLLER_THREAD.set(true);
                 let _admission = StopAdmission(Arc::clone(&shared));
                 let mut worker = Worker::new(
                     &directory,

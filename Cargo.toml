@@ -34,8 +34,8 @@ win-nightlight-watch = "0.5.0"
 windows-result = "0.100.0"
 windows = { version = "0.62", features = ["Devices_Geolocation", "Foundation"] }
 windows-future = "0.3"
-windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "722f202100c3bd428627941d3834d87ad6679d1c" }
-windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "722f202100c3bd428627941d3834d87ad6679d1c" }
+windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "ebc5a99d08be3f23cef4d428661357fad3d1c0db" }
+windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "ebc5a99d08be3f23cef4d428661357fad3d1c0db" }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_Threading", "Win32_System_Time", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
 
@@ -43,7 +43,7 @@ winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
 fs-err = "3.3"
 
 [target.'cfg(windows)'.build-dependencies]
-windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "722f202100c3bd428627941d3834d87ad6679d1c", optional = true }
+windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "ebc5a99d08be3f23cef4d428661357fad3d1c0db", optional = true }
 
 [dev-dependencies]
 test-case = "3"

@@ -22,7 +22,7 @@ just build-self-contained
 ./target/debug/circadia.exe
 ```
 
-Launching Circadia starts management of live Night Light. Start minimized defaults on; open settings from the tray or launch the executable again. Closing settings keeps control running. Quit clears native preview and requests Night Light off.
+Launching Circadia starts management of live Night Light. Start minimized defaults on; open settings from the tray or launch the executable again. Closing settings keeps control running. Quit clears native preview and requests Night Light off. If an internal error in the settings window or tray ends Circadia after it has begun accessing Night Light, it makes the same two requests without a fade and waits at most 2 seconds for them before the process ends.
 
 ## Resource baseline
 
