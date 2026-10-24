@@ -4,11 +4,11 @@ This probe uses the selected Reactor revision to exercise a native temperature g
 
 ## Dependencies and environment
 
-The single crate pins `windows-reactor` and its optional setup helper to `windows-rs` revision `ebc5a99d08be3f23cef4d428661357fad3d1c0db` (2026-10-23), the same reference pin as the application. The pin follows windows-rs `master` under the [tracking policy](../../docs/research/windows-reactor-ui.md#tracking-policy). Both still declare version 0.100.0, which does not identify the published release. `Cargo.lock` records the full dependency graph, including `winsafe` 0.0.29 and `num-traits` 0.2.19. The manifest declares Rust 1.95 as its minimum.
+The single crate pins `windows-reactor` and its optional setup helper to `windows-rs` revision `0496ec19116f1dac690daf31fcb96769118d9bac` (2026-10-24), the same reference pin as the application. The pin follows windows-rs `master` under the [tracking policy](../../docs/research/windows-reactor-ui.md#tracking-policy). Both still declare version 0.100.0, which does not identify the published release. `Cargo.lock` records the full dependency graph, including `winsafe` 0.0.29 and `num-traits` 0.2.19. The manifest declares Rust 1.95 as its minimum.
 
 Use Windows with Rust's MSVC toolchain, the linker and Windows SDK, stable Rust, nightly rustfmt, and `just`. Dependency checks also require `cargo-audit` and `cargo-machete`; the minimum-version check requires `jq` and Rust 1.95 installed through rustup. The recorded environment is Windows 11 x64 build 26300.9711 with Rust 1.99.0.
 
-Default deployment needs a compatible installed Windows App SDK runtime. The `self-contained` feature uses the pinned setup helper to stage private runtime 2.5.1 under `target/`; the setup helper stages 2.5.1 at both `722f202` and `ebc5a99`. Initial builds can download dependencies and runtime packages; the advisory check can update its database. The build also stages `probe.ico` beside the executable. Include the icon and complete runtime layout when copying a deployment directory.
+Default deployment needs a compatible installed Windows App SDK runtime. The `self-contained` feature uses the pinned setup helper to stage private runtime 2.5.1 under `target/`; the setup helper stages 2.5.1 at `722f202`, `ebc5a99`, and `0496ec1`. Initial builds can download dependencies and runtime packages; the advisory check can update its database. The build also stages `probe.ico` beside the executable. Include the icon and complete runtime layout when copying a deployment directory.
 
 The [source archive](../../docs/research/archives/README.md) preserves the published-release comparison and the combined location experiment. Location APIs and the latitude sample are absent from the active probe.
 
@@ -47,7 +47,7 @@ Each script terminates its own probe process in `finally` if necessary, closing 
 
 ## Results and limits
 
-On 2026-10-23 at the current pin, `ebc5a99`, the 18 unit tests, formatting, Clippy, rustdoc, dependency checks, Rust 1.95 compilation, and both builds passed. Desktop-script results at `ebc5a99` are pending. The remaining results in this section were observed at the previous pin, `722f202100c3bd428627941d3834d87ad6679d1c`.
+On 2026-10-24 at the current pin, `0496ec1`, and on 2026-10-23 at the previous pin, `ebc5a99`, the 18 unit tests, formatting, Clippy, rustdoc, dependency checks, Rust 1.95 compilation, and both builds passed. Desktop-script results at both commits are pending. The remaining results in this section were observed at the earlier pin, `722f202100c3bd428627941d3834d87ad6679d1c`.
 
 On 2026-10-16, revision `722f202` passed 18 unit tests and native checks at 100% scaling on the recorded desktop. Those checks covered graph interaction, settings close/reopen, preserved application state, access to the settings window's native handle inside Reactor's scoped window callback, executable selection/cancellation, and foreground lookup. A copied self-contained deployment also ran on that developer machine. The detailed [recorded results](../../docs/research/windows-reactor-ui.md#combined-pinned-revision-validation) include the retired location check.
 

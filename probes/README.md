@@ -6,7 +6,7 @@ Probes establish dependency capabilities and limitations before Circadia relies 
 
 | Probe | Research question | Validation scope |
 | :-- | :-- | :-- |
-| [Windows Reactor](windows-reactor/README.md) | Can the selected Reactor revision support graph editing, a tray process, an executable file picker owned by settings, and foreground lookup? | Graph/curve unit tests and the UI, pointer, lifecycle, and native-integration scripts pass; pointer checks ran at 100% scaling. The probe tests point editing; the MVP uses a generated graph without point editing. |
+| [Windows Reactor](windows-reactor/README.md) | Can the selected Reactor revision support graph editing, a tray process, an executable file picker owned by settings, and foreground lookup? | Graph/curve unit tests pass at the current pin. The UI, pointer, lifecycle, and native-integration scripts passed at `722f202`, with pointer checks at 100% scaling, and have not run at a later pin. The probe tests point editing; the MVP uses a generated graph without point editing. |
 | [Windows clock conversion](windows-clock/README.md) | Can Windows rules omit skipped times, select the first repeated instant, and support elapsed interpolation? | Eighteen read-only tests cover conversion, date boundaries, omitted points, and interpolation. A separate explicit command exercises host settings. |
 | [Local solar calculation timing](solar-timing/README.md) | Does per-date local calculation cost justify a persistent cache? | Four ordinary/polar cases, 1,000 timed calls each, independent event-count expectations, and separate process-overhead measurement. Uses the archived locked calculator in an extracted workspace. |
 
