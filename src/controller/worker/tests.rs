@@ -1449,3 +1449,138 @@ fn duplicate_resume_preserves_generation_and_requires_only_one_application() {
         ]
     );
 }
+
+fn saved(directory: &TempDir) {
+    ConfigStore::new(directory.path())
+        .save(&input(3400).validate().expect("config"))
+        .expect("saved config");
+}
+
+fn scheduled(snapshot: &ControllerSnapshot) -> bool {
+    snapshot
+        .accepted
+        .as_ref()
+        .is_some_and(|layer| layer.last_scheduled() == Some(3400))
+}
+
+#[test]
+fn panic_cleanup_ends_preview_and_turns_night_light_off_once() {
+    let directory = tempfile::tempdir().expect("directory");
+    saved(&directory);
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    wait_for(&client, &notified, scheduled);
+    let before = records.lock().expect("records").calls.len();
+    let deadline = OnceLock::new();
+    client.finish_after_panic(&deadline, Duration::from_secs(10));
+    assert!(client.is_finished());
+    let requested = deadline.get().copied().expect("exit requested");
+    let started = Instant::now();
+    client.finish_after_panic(&deadline, Duration::from_secs(10));
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(deadline.get().copied(), Some(requested));
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+    let calls = records.lock().expect("records").calls.clone();
+    assert_eq!(
+        calls.get(before..),
+        Some([Call::Cleanup, Call::Activate(false)].as_slice())
+    );
+}
+
+#[test]
+fn panic_cleanup_stops_waiting_at_its_deadline_while_a_native_call_blocks() {
+    let directory = tempfile::tempdir().expect("directory");
+    saved(&directory);
+    let (entered, blocked) = mpsc::sync_channel(1);
+    let (release, finish) = mpsc::sync_channel(1);
+    let records = Arc::new(Mutex::new(Records {
+        blocked: Some((entered, finish)),
+        ..Records::default()
+    }));
+    let (worker, _notified) = start(&directory, &records);
+    let client = worker.client();
+    blocked
+        .recv_timeout(Duration::from_secs(10))
+        .expect("native operation blocked");
+    let started = Instant::now();
+    client.finish_after_panic(&OnceLock::new(), Duration::from_millis(200));
+    let waited = started.elapsed();
+    assert!(waited >= Duration::from_millis(200), "{waited:?}");
+    assert!(waited < Duration::from_secs(5), "{waited:?}");
+    assert!(!client.is_finished());
+    release.send(()).expect("finish native call");
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    let calls = records.lock().expect("records").calls.clone();
+    assert!(
+        matches!(
+            calls.as_slice(),
+            [
+                ..,
+                Call::Temperature(..),
+                Call::Cleanup,
+                Call::Activate(false)
+            ]
+        ),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn panic_cleanup_before_native_access_exits_without_night_light_calls() {
+    let directory = tempfile::tempdir().expect("directory");
+    fs_err::write(directory.path().join("config.toml"), "wake = [").expect("invalid config");
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    wait_for(&client, &notified, |snapshot| {
+        snapshot.scheduling == SchedulingState::Waiting
+    });
+    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(10));
+    assert!(client.is_finished());
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert!(exit.native.is_none());
+    assert_eq!(records.lock().expect("records").calls, []);
+}
+
+#[test]
+fn panic_cleanup_on_the_controller_thread_returns_without_requesting_exit() {
+    let directory = tempfile::tempdir().expect("directory");
+    saved(&directory);
+    let records = Arc::new(Mutex::new(Records::default()));
+    let registered = Arc::new(OnceLock::<ControllerClient>::new());
+    let outcome = Arc::new(Mutex::new(None));
+    let (hooked, observed) = (Arc::clone(&registered), Arc::clone(&outcome));
+    let (worker, notified) = start_with_foreground(&directory, &records, move || {
+        if let Some(client) = hooked.get() {
+            let deadline = OnceLock::new();
+            let started = Instant::now();
+            client.finish_after_panic(&deadline, Duration::from_secs(10));
+            *observed.lock().expect("outcome") =
+                Some((deadline.get().is_some(), started.elapsed()));
+        }
+        Foreground::Unknown
+    });
+    let client = worker.client();
+    wait_for(&client, &notified, scheduled);
+    registered
+        .set(client.clone())
+        .expect("client registered once");
+    let id = client
+        .submit(ControllerCommand::Recompute(Recompute::Unlock))
+        .expect("recompute");
+    let snapshot = wait_for(&client, &notified, |snapshot| acknowledged(snapshot, &id));
+    assert!(!snapshot.stopped);
+    let (requested, waited) = outcome
+        .lock()
+        .expect("outcome")
+        .expect("cleanup called on the controller thread");
+    assert!(!requested);
+    assert!(waited < Duration::from_secs(1), "{waited:?}");
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+}
