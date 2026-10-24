@@ -12,34 +12,34 @@ Read the shared terms and invariants in [SPEC.md](SPEC.md) before this area. Thi
 
 The user specifies Wake and Bedtime as distinct local clock times in whole minutes from 00:00 through 23:59. They repeat daily in the computer's Windows time zone, honoring its actual automatic daylight-saving adjustment setting. Circadia does not derive either saved clock from the other or from location. Bedtime can be after midnight.
 
-For Wake 07:00 and Bedtime 01:00, Bedtime belongs to the next calendar date. Changing either clock regenerates the curve. Circadia does not move either clock to resolve a solar conflict. The clock-change rules below adjust dated occurrences without changing saved clocks. Invalid input preserves the last valid graph and disables Save and Preview.
+For Wake 07:00 and Bedtime 01:00, Bedtime belongs to the next calendar date. Changing either clock regenerates the curve. Circadia does not move either clock to resolve a solar conflict. The clock-change rules below adjust dated occurrences without changing saved clocks. Settings shows and accepts clock times in the user's regional clock format under [REQ-regional-formats](localization.md#req-regional-formats--follow-the-regional-format). Invalid input keeps the last valid schedule and graph, reports the error at the edited field, and blocks Preview.
 
 **Scenarios:**
 
 - Wake is 07:00 and Bedtime is 01:00: the activity interval includes the evening and ends the following day.
 - Bedtime changes from 23:00 to 22:30: the Sleep target moves to 22:30 and the preceding transition is regenerated.
-- Both clocks are 07:00: the draft identifies the equal clocks and cannot be saved.
+- Bedtime is 07:00 and the user sets Wake to 07:00: the Wake field reports the equal clocks, and the accepted Wake does not change.
 - Both clocks and temperature settings are valid, with solar timing disabled: the schedule works without location access.
 - Windows uses Eastern time with automatic daylight-saving adjustment disabled in July: Wake 07:00 occurs at 12:00 UTC. With adjustment enabled, it occurs at 11:00 UTC on an ordinary July date.
 
 ### REQ-configure-period-temperatures — Configure three ordered temperatures
 
-Settings exposes Daytime, Morning/Evening, and Sleep temperatures. Morning and evening use the same middle temperature. Accepted values satisfy Daytime >= Morning/Evening >= Sleep. Equal values are allowed. An edit that violates this order shows an error and disables Save and Preview; it does not change another temperature to accommodate the edit.
+Settings exposes Daytime, Morning/Evening, and Sleep temperatures. Morning and evening use the same middle temperature. Accepted values satisfy Daytime >= Morning/Evening >= Sleep. Equal values are allowed. An edit that violates this order shows an error at the edited field and does not change the accepted configuration; it does not change another temperature to accommodate the edit.
 
-Each temperature is a whole number from 1200 K through 6500 K. Accepted input rounds to the nearest 10 K, with ties toward higher kelvin. Range validation occurs before rounding; order validation uses the rounded values. Fractional kelvin input is rejected. Numeric fields show the accepted values.
+Each temperature is a whole number from 1200 K through 6500 K. Accepted input rounds to the nearest 10 K, with ties toward higher kelvin. Range validation occurs before rounding; order validation uses the rounded values. Fractional kelvin input is rejected. After a valid edit, the field shows the accepted rounded value.
 
 Users configure these temperatures and timing settings. They do not add, remove, or drag individual curve points, supply offsets, or draw transition curves.
 
-When both solar inputs are off, Morning/Evening remains editable and is labeled unused by the Wake/Bedtime-only curve. It still participates in temperature-order validation. Circadia does not silently clamp another temperature to resolve an invalid order.
+When solar timing is disabled, Morning/Evening remains editable and is labeled unused by the Wake/Bedtime-only curve. It still participates in temperature-order validation. Circadia does not silently clamp another temperature to resolve an invalid order.
 
 **Scenarios:**
 
 - Daytime 6500 K, Morning/Evening 3400 K, and Sleep 2200 K are valid.
 - Morning/Evening and Sleep are both 2200 K: that evening-to-sleep interval is constant.
-- Sleep is changed to 4000 K while Morning/Evening is 3400 K: Save is disabled and the other fields retain their values.
+- Sleep is changed to 4000 K while Morning/Evening is 3400 K: the Sleep field reports the ordering error, the accepted Sleep is unchanged, and the other fields retain their values.
 - The user enters 3855 K: it becomes 3860 K if the resulting order is valid. Entering 6501 K or fractional kelvin is rejected.
-- Both solar inputs are off: Morning/Evening remains editable but does not affect the curve. Wake reaches Daytime directly.
-- Both solar inputs are off and Sleep changes to 3600 K while Morning/Evening is 3400 K: settings identifies the ordering error and the user can directly raise the middle value before saving.
+- Solar timing is disabled: Morning/Evening remains editable but does not affect the curve. Wake reaches Daytime directly.
+- Solar timing is disabled and Sleep changes to 3600 K while Morning/Evening is 3400 K: the Sleep field reports the ordering error. Raising Morning/Evening to 3700 K applies that value and then the 3600 K still entered in the Sleep field, which is now in order.
 
 ### REQ-configure-scheduled-transition — Configure the scheduled transition duration
 
@@ -51,30 +51,33 @@ This duration is separate from the ordinary fade for suppression changes, recomp
 
 - The duration is 60 minutes and targets are several hours apart: each change takes place during the hour before its target.
 - The duration is 60 minutes and targets are 30 minutes apart: the later transition uses 30 minutes.
-- Durations of 1 and 240 minutes are accepted. Zero, a negative value, 241 minutes, or fractional minutes disables Save and Preview and shows an error.
+- Durations of 1 and 240 minutes are accepted. Zero, a negative value, 241 minutes, or fractional minutes is rejected at the field with an error and blocks Preview while it remains.
 
 ## Optional solar timing
 
 ### REQ-configure-solar-location — Select coordinates explicitly
 
-Solar timing requires valid latitude and longitude. Settings offers a current-location action and manual coordinate entry. The current-location action requests Windows location access while settings is in the foreground, obtains a single position, and places it in the draft. Circadia does not request location merely because it starts or settings opens. Valid coordinates become active in the live draft immediately; Save persists them.
+Solar timing requires valid latitude and longitude. Settings offers manual coordinate entry and a saved Use my Windows location setting, initially off. While that setting is on, Circadia requests one position from Windows when the user turns the setting on and each time the settings window opens, and applies the result to the configuration's coordinates as a settings edit. A position that arrives during Preview applies when playback ends. Manual coordinate entry is unavailable while the setting is on. Each request runs while settings is in the foreground; Circadia does not request location at startup, in the background, or when settings changes page. With the setting off, manual coordinates apply and Circadia does not request location access. Valid coordinates take effect immediately and are saved.
 
-Latitude must be finite and within -90 through +90 degrees; longitude must be finite and within -180 through +180 degrees. The active configuration's coordinates remain in use until the user changes them. Circadia does not track travel automatically, infer the computer's time zone from coordinates, or offer city/address search in the MVP.
+Latitude must be finite and within -90 through +90 degrees; longitude must be finite and within -180 through +180 degrees. Settings shows and accepts coordinates with the decimal separator of the user's regional format; the configuration file stores them independently of locale. The accepted configuration's coordinates remain in use until a settings edit or a successful location request changes them. Circadia does not track travel in the background, infer the computer's time zone from coordinates, or offer city/address search in the MVP.
 
-If permission is denied, location services are disabled, or a position cannot be obtained, settings reports the failure and preserves the existing coordinates. Manual entry remains available. An unfinished request does not prevent the active schedule from running. Closing settings cancels the request or discards its eventual result without changing the draft or saved configuration.
+If permission is denied, location services are disabled, or a position cannot be obtained, settings reports the failure at the location setting and keeps the existing coordinates. An unfinished request does not prevent the active schedule from running. Closing settings cancels an unfinished request or discards its eventual result without changing the configuration.
 
 **Scenarios:**
 
-- The user enables solar timing and manually enters 40.7128, -74.0060: saving does not require Windows location permission.
-- The user requests the current location and grants access: the detected coordinates appear in the draft; they become active when the resulting draft is valid, and Save persists them.
-- Windows denies access: the saved coordinates and accepted schedule remain unchanged, and manual entry is available.
-- A position arrives after settings closes: it does not overwrite saved coordinates or change the accepted schedule.
-- Latitude 91, longitude -181, or a nonfinite value is entered: the draft cannot be saved with solar timing enabled.
+- The user turns solar timing on and manually enters 40.7128, -74.0060: the coordinates apply and are saved without Windows location permission.
+- The user turns Use my Windows location on and grants access: the detected coordinates replace the manual ones, apply immediately, and are saved; the coordinate fields become unavailable.
+- Use my Windows location is on and the user opens settings a week later after traveling: Circadia requests one new position and applies it.
+- Use my Windows location is on and Circadia starts at sign-in with settings closed: Circadia does not request location.
+- Windows denies access: the existing coordinates and accepted schedule remain unchanged, and the location setting shows the failure.
+- A position arrives after settings closes: it does not change the configuration.
+- Latitude 91, longitude -181, or a nonfinite value is entered while solar timing is enabled: the field reports the error and the accepted coordinates remain.
+- The user's regional format uses a comma as decimal separator: settings shows 40,7128 and accepts 40,7128; the configuration file stores 40.7128.
 - The computer travels while saved coordinates remain unchanged: solar timing still uses those coordinates and the current Windows time zone.
 
 ### REQ-compute-solar-events — Calculate optional Sunrise and Sunset targets locally
 
-The user can independently enable Sunrise and Sunset as optional timing inputs. Solar timing is enabled when either or both switches are on. An enabled input uses solar events calculated locally from the active configuration's coordinates for the dates needed by evaluation, the graph, or Preview. Circadia does not persist solar results, precompute a rolling date window, or maintain caches for previously visited locations. It does not use the native Windows Night Light schedule or an online daily solar service. Sunrise and Sunset use the Sun's center crossing exactly −50 arcminutes (about −0.833°) of geometric elevation at sea level, the conventional horizon with a fixed allowance for solar radius and refraction. It does not adjust for observer elevation, weather, or terrain obstruction, or estimate room brightness.
+A solar timing switch, initially off, controls two inputs that the user selects independently: Sunrise and Sunset, both initially selected. Turning the switch off keeps the inputs' selections for the next time it is turned on. Solar timing is enabled when the switch is on and at least one input is selected, and an input is enabled only under those conditions. An enabled input uses solar events calculated locally from the accepted configuration's coordinates for the dates needed by evaluation, the graph, or Preview. Circadia does not persist solar results, precompute a rolling date window, or maintain caches for previously visited locations. It does not use the native Windows Night Light schedule or an online daily solar service. Sunrise and Sunset use the Sun's center crossing exactly −50 arcminutes (about −0.833°) of geometric elevation at sea level, the conventional horizon with a fixed allowance for solar radius and refraction. It does not adjust for observer elevation, weather, or terrain obstruction, or estimate room brightness.
 
 Solar results are actual instants interpreted in the computer's Windows time zone. Calculation and selection retain their precision; this requirement does not require displaying numeric solar timestamps. The calculation supports zero or multiple events of either kind and does not assume a maximum of two.
 
@@ -88,7 +91,7 @@ At most one Sunrise and one Sunset are retained. Selection uses actual instants 
 
 Extra events cannot create another sleep/wake cycle. A Sunrise coincident with Wake produces the single Daytime target defined by REQ-evaluate-daily-curve and prevents selection of a later Sunrise for that interval. An ordering conflict is a successful calculation with unusable timing, not a calculation failure.
 
-Settings reports a timing conflict for each affected activity interval that the settings graph currently displays. During Preview this means the displayed playback view. It does not claim to validate every future date. A conflict remains a valid schedule with the conflicting solar targets omitted.
+Settings reports a timing conflict for each affected activity interval that the settings graph currently displays. During Preview, the graph displays the view that contains the playback instant. It does not claim to validate every future date. A conflict remains a valid schedule with the conflicting solar targets omitted.
 
 A disabled or naturally absent solar event is omitted before generating transitions. Circadia does not substitute a fixed clock, move a manual clock to accommodate solar timing, or reuse another date's event. An empty successful result and a calculation failure are distinct outcomes; callers receive the error instead of treating it as an empty result.
 
@@ -124,7 +127,7 @@ Interpolation uses elapsed real time and retains fractional kelvin. There is no 
 
 Wake and Bedtime occurrences use the selected Windows time zone and its actual daylight-saving adjustment setting. Their nominal interval is the clock-face difference between consecutive dated Wake and Bedtime clocks, before applying UTC offsets; adjustment applies it as elapsed time. Unchanged inputs produce the same dated occurrences regardless of process start time or evaluation order, including a start after the seasonal offset change. Each occurrence follows these rules relative to the preceding adjusted occurrence:
 
-1. The configured clock's candidate uses the selected zone's rules. A repeated clock initially selects its first occurrence.
+1. The candidate is the configured clock on the occurrence's date under the selected zone's rules. A repeated clock initially selects its first occurrence.
 2. If the configured clock is nonexistent, or that candidate is at or before the preceding adjusted occurrence, the occurrence is one nominal elapsed interval after its predecessor.
 3. If a seasonal offset transition occurs after the preceding adjusted occurrence and at or before the candidate, the occurrence is also one nominal elapsed interval after its predecessor. This preserves the interval even when the configured clock is later than the changed hour.
 4. Otherwise, the occurrence uses its configured clock's candidate. Adjustment propagates only while the preceding conditions require it.
@@ -170,3 +173,16 @@ Solar events remain their actual instants. Clock changes do not move them or rem
 - Automatic daylight-saving adjustment is disabled and the effective Windows rules have no transition that night: Wake and Bedtime use their configured clocks without a seasonal shift.
 - The computer changes from New York time to London time: configured clocks follow London local time, and solar results are regenerated using the saved coordinates. A five-hour difference between the zones does not itself add five hours to Wake.
 - The app restarts or evaluates the same dates in reverse order: unchanged inputs produce the same curve.
+
+## Explored alternatives
+
+- **Arbitrary points and offsets:** A general curve editor exposes ordering and collision decisions that the intended daily schedule does not need. Three ordered temperatures and generated transitions provide the selected user experience.
+- **Transitions starting at their target time:** This reaches the desired temperature too late. The schedule instead reaches each retained temperature by its target time.
+- **Moving Sunset to an earlier Bedtime:** This preserves an unnecessary middle target. Omitting Sunset lets the app generate the complete transition to Sleep before Bedtime.
+- **Repeated solar-driven cycles:** Following every crossing can add another warming/cooling cycle within one waking day. Solar targets are limited to one morning and one evening between Wake and the following Bedtime.
+- **Synthetic solar times during polar conditions:** Backup clocks or reused events would imply a solar event that does not occur. Missing events are omitted while Wake and Bedtime remain user-controlled.
+- **Persistent solar caches:** Multi-location caches introduce retention, location matching, invalidation, and persistence behavior. The selected design calculates required dates locally from the accepted configuration's coordinates.
+- **Omitting Wake or Bedtime in a clock gap:** Omitting either occurrence can prolong the preceding temperature through an entire day. Elapsed-interval adjustment preserves the occurrence and its nominal separation from the preceding Wake or Bedtime.
+- **Shifting every remaining target on a clock-change day:** This unnecessarily shifts the evening routine after an overnight change. The next target returns to its configured clock unless doing so would collapse or reverse Wake/Bedtime order.
+- **Using every existing configured clock across daylight-saving changes:** This keeps each occurrence aligned with a wall-clock alarm but shortens or lengthens the interval that spans the change. The selected policy preserves that interval by adjusting the first Wake or Bedtime after the change, then returns later occurrences to their configured clocks. When Bedtime is the adjusted occurrence, the following night is shorter or longer instead.
+- **Requesting location at each launch or daily:** Requests without a foreground settings window are unverified for an unpackaged app and would track travel in the background.

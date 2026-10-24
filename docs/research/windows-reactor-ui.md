@@ -1,26 +1,31 @@
 ---
-date: 2026-10-18
+date: 2026-10-23
 questions:
   - Which published windows-rs and Reactor versions support Circadia's settings and tray requirements?
   - Can Rust code draw and edit a temperature curve with native WinUI 3 controls?
   - Which capabilities need application code, native integration, or later Reactor releases?
   - How closely can Reactor match the native Windows 11 Settings appearance?
-  - Can the graph support insertion, reanchoring, 10 K point increments, and a temperature background?
+  - Can the graph support point insertion, reanchoring (changing the reference time that a point's signed offset is measured from), 10 K point increments, and a temperature background?
+  - Which Reactor changes at the current reference pin affect Circadia, how does its failure policy end the process, and when do its text inputs report edits?
 observed-in:
   - windows 0.62.2 from the Cargo registry
   - windows-reactor and windows-reactor-setup 0.100.0, source revision a57cc321bfdbac6bb98c488ba49f399da8fcb98a
-  - microsoft/windows-rs development revision 722f202100c3bd428627941d3834d87ad6679d1c
+  - microsoft/windows-rs development revision 722f202100c3bd428627941d3834d87ad6679d1c (2026-10-16)
+  - microsoft/windows-rs master ebc5a99d08be3f23cef4d428661357fad3d1c0db (2026-10-23), the current reference pin; source inspection, a cargo doc build, and cargo check and Clippy of Circadia 64a2c95 with only the rev values changed
+  - windows-reactor-setup at ebc5a99, staging Microsoft.WindowsAppSDK.Runtime 2.5.1
+  - microsoft/microsoft-ui-xaml controls/dev/NumberBox/NumberBox.cpp at 2b337b4b13f39dd6071da66dcffe4b3ae4ff4e86
+  - GitHub issue and pull request states retrieved 2026-10-23
   - Rust 1.99.0, x86_64-pc-windows-msvc
-recheck-when: Reactor publishes another release, its control schema or application lifetime APIs change, or the pending native interaction and deployment probes run on another Windows build.
+recheck-when: Each bump of the reference windows-rs commit, and when Microsoft publishes a Reactor release without preview status.
 ---
 
 # Windows Reactor support for Circadia's UI
 
 Keep Reactor for the MVP. Published Reactor 0.100.0 exposes enough native controls to build a point editor and draw a linear temperature graph. It also exposes pointer capture and movement events for a custom draggable graph. The main release-level limitation is tray application lifetime: the published application runner ends after its windows close. The inspected development revision adds application-owned tray icons and reopenable settings windows.
 
-Reactor is a preview, not a generally available UI contract. Microsoft explicitly permits public API refinement during the preview. Accept that maintenance cost, record the exact dependency source, and rerun these probes before upgrading. The repository's draft [spec](../specs/SPEC.md) still governs behavior; this research does not approve it or remove requirements.
+Reactor is a preview, not a generally available UI contract. Microsoft explicitly permits public API refinement during the preview. Circadia therefore follows windows-rs `master` through one reference pin and rechecks this document at each bump; [Tracking policy](#tracking-policy) states the rule. The current pin, `ebc5a99`, keeps the controls that the earlier findings rely on and adds accessibility properties and input fixes. Its fail-fast policy turns invalid declarations, internal Reactor bugs, and native failures after startup into panics, and on the UI thread such a panic aborts the process without running Circadia's exit cleanup. Its setup helper still stages Windows App SDK runtime 2.5.1. The repository's [spec](../specs/SPEC.md) governs behavior; this research does not approve it or remove requirements.
 
-Circadia's suppression list stores executable filenames chosen by the user. When a listed application has foreground focus, suppression temporarily changes the temperature target to 6500 K. The draft generates a curve from three ordered temperatures, manual Wake/Bedtime clocks, and optional solar targets. The current spec defines a live draft and configurable Preview from the current instant through tomorrow's matching local clock. These lifecycle requirements are not verified by the UI probe. The UI probes use three fixed fixture anchors; they verify controls and pointer behavior rather than the current schedule model.
+Circadia's suppression list stores executable filenames chosen by the user. When a listed application has foreground focus, suppression temporarily changes the temperature target to 6500 K. The spec generates a curve from three ordered temperatures, manual Wake/Bedtime clocks, and optional Sunrise and Sunset targets. Before the 2026-10-23 settings redesign, it also defined a live draft, in which the last valid unsaved settings edits controlled output until Save or Discard, and a Preview, compressed into a configurable 1 to 60 seconds, that plays the schedule from the current instant through the same local clock time on the next date; the [research index](README.md#statements-superseded-by-the-settings-redesign) records what the redesign replaced. The UI probe does not verify the live draft or Preview. The UI probes use three fixed anchor times (sunrise 06:00, sunset 18:00, and wake 07:00) from which point offsets are measured; they verify controls and pointer behavior rather than the current schedule model. Product statements in this document describe the draft spec as of 2026-10-18; the [research index](README.md#applicability-to-the-mvp) records which of them the settings redesign of 2026-10-23 changed.
 
 The [Windows compatibility assessment](windows-compatibility.md) records the selected runtime's declared minimum and supports a Windows 11 build 22000 baseline. The runtime checks here apply to build 26300.9711; minimum-build execution remains unverified.
 
@@ -32,13 +37,113 @@ The [Windows compatibility assessment](windows-compatibility.md) records the sel
 | `windows-reactor` | 0.100.0, latest returned by `cargo info windows-reactor` on 2026-10-16 | Published Component/View API; minimum Rust 1.95; MIT OR Apache-2.0. |
 | `windows-reactor-setup` | 0.100.0 | Optional build helper for self-contained deployment; stages Windows App SDK runtime 2.4.0. |
 | `windows-canvas` | 0.100.0 | Optional Direct2D drawing with a Reactor integration feature. The native XAML Canvas/Line probe does not need it. |
-| `windows-rs` development source | `722f202100c3bd428627941d3834d87ad6679d1c`, committed 2026-10-16 | Adds APIs beyond the published crate despite still declaring Reactor version 0.100.0. Its setup helper targets runtime 2.5.1. |
+| `windows-rs` development source | `722f202100c3bd428627941d3834d87ad6679d1c`, committed 2026-10-16 | Previous reference pin. Adds APIs beyond the published crate despite still declaring Reactor version 0.100.0. Its setup helper targets runtime 2.5.1. The recorded probe results below were observed at this revision. |
+| `windows-rs` reference pin | `ebc5a99d08be3f23cef4d428661357fad3d1c0db`, committed 2026-10-23 | Current reference pin, the latest `master` commit on 2026-10-23. Still declares Reactor version 0.100.0; its setup helper still stages runtime 2.5.1. See [Reference pin `ebc5a99`](#reference-pin-ebc5a99). |
 
-The published package's `.cargo_vcs_info.json` identifies release source `a57cc321bfdbac6bb98c488ba49f399da8fcb98a`. A manifest version alone does not distinguish that release from development source. The [source archive](archives/README.md) preserves the separate manifests and lockfiles used to compare these sources. The active probe has one manifest and lockfile for the selected development pin. The draft selects this development pin for Reactor and its setup helper. Spec approval and production integration remain separate from the recorded probe results.
+The published package's `.cargo_vcs_info.json` identifies release source `a57cc321bfdbac6bb98c488ba49f399da8fcb98a`. A manifest version alone does not distinguish that release from development source. The [source archive](archives/README.md) preserves the separate manifests and lockfiles used to compare these sources. The active probe has one manifest and lockfile for the reference pin. Spec approval and production integration remain separate from the recorded probe results.
 
 Published `windows` depends on `windows-core` 0.62.2; published Reactor depends on 0.100.0. Both compile in the same program. Their Rust COM wrappers, strings, and error types are distinct. Pass application data across that boundary, or design and test an explicit interop conversion. Do not assume that importing both crates gives interchangeable types.
 
 Source inspection establishes API availability. Compilation establishes that the selected calls type-check together. Native execution establishes only the interactions exercised on the recorded machine. None establishes optical Night Light behavior.
+
+### Tracking policy
+
+Circadia does not use the published `windows-reactor` 0.100.0 crate. While Reactor is in preview, Circadia follows windows-rs `master` for `windows-reactor`, `windows-window`, and `windows-reactor-setup` through one reference pin: each dependency's `rev` field names the same commit, so every build and test runs against a known revision. The application and the [Windows Reactor probe](../../probes/windows-reactor/README.md) use the same pin. The pin moves to the latest `master` commit:
+
+- At the start of each piece of work that changes the settings window, the tray, or other Reactor code.
+- When `master` adds a feature or fix that Circadia needs, such as one that replaces a workaround in [Settings design support](settings-design-support.md).
+- Before each release.
+
+Each bump is its own dependency change. It records the new commit and its date and reviews the Reactor commits since the previous pin, for example with `git log <previous pin>..<new commit> -- crates/libs/reactor crates/tools/reactor` in a windows-rs clone, for API changes, behavior changes, and features that replace a workaround. It changes the `rev` values in the application and probe manifests, updates both lockfiles, and runs the application checks, the affected `just native-*` desktop recipes, and the probe's scripts; a failing check keeps the previous pin until Circadia's code or an upstream fix resolves it. If the setup helper stages a runtime other than 2.5.1, the [Windows compatibility](windows-compatibility.md) research needs a recheck. The bump updates this document's `observed-in` and findings, the probe README, and the runtime manifest link in the [application tools](../../tools/README.md); other research documents keep the commit they observed as dated evidence. When Microsoft publishes a Reactor release without preview status, Circadia evaluates switching to the published crate and retires this policy.
+
+## Reference pin `ebc5a99`
+
+**Observed in windows-rs on 2026-10-23:** `master` was at `ebc5a99d08be3f23cef4d428661357fad3d1c0db`, committed 2026-10-23T11:39:39Z ("Add TreeView fixture and fix stale tree item text (#5198)"), and nothing followed it. `git log 722f202..ebc5a99 -- crates/libs/reactor crates/tools/reactor` lists 28 commits. Both revisions declare the same 71 controls. Numbers below are windows-rs pull requests.
+
+| Group | Pull requests | Effect on Circadia |
+| :-- | :-- | :-- |
+| Failure policy | 5194 | Invalid declarations, internal bugs, and native failures after startup panic instead of returning `Err` from `App::run`. See [Failure policy](#failure-policy). |
+| Public API additions | 5158 `TextBlock::font_family`, `line_height`, `character_spacing`; 5170 `automation_help_text`, `automation_full_description`, `automation_live_setting`, `ElementRef::request_notification`, `AutomationNotification` | Explicit text styles; screen-reader announcements for banners and status. `RadioButton` also gains an `Unchecked` event. |
+| Public API changes | 5187 `on_reordered` payload `Vec<String>` to `Vec<Key>` and `TabView::on_close_requested` payload `Rc<str>` to `Key`; 5194 removed `ComponentError`, `UpdateError`, and `GraphError`, and `ComponentHost::update` and `drain` (test feature) no longer return `Result` | Circadia at `64a2c95` uses none of these. |
+| Controlled values | 5183 `TextBox` generated from the schema with selection-preserving rewrites and deferred echo suppression; 5193 declared values restored after range changes; 5195 rejected `RadioButton` choices; 5192 stable selector indexes | Decides when edits can be validated; see [Text input events](#text-input-events). |
+| Event delivery | 5196 queued events reach the callback that was subscribed when they fired; 5110 lazy native event subscription | Fast input through capturing callbacks is no longer dropped when a render replaces the callback. |
+| Native property application | 5180 most properties set through WinUI dependency properties; clearing a property calls `ClearValue` | Omitting a previously declared property restores the style or theme value. |
+| Fixes in design elements | 5160 `ContentDialog` follows its window theme, including changes while open, and closing a window with an open dialog no longer panics; 5127 client sizing with custom title bars; 5198 stale `TreeView` item text | Applies to dialogs and a directly declared `TitleBar`. |
+| Internal and test-only | 5109, 5114, 5117, 5118, 5120, 5122, 5125, 5126, 5148, 5149, 5151, 5154, 5155, 5156, 5197 | No public behavior change found. |
+
+**Compile result, 2026-10-23:** A copy of Circadia at `64a2c95` outside the repository, with only the three `rev` values changed to `ebc5a99` and `cargo update` for those packages, passed `cargo check --all-targets --features graph-measurement,output-measurement` and `cargo clippy` with the same targets and features, both without diagnostics. The `self-contained` feature was not built, and no test or binary was run. [Settings design support](settings-design-support.md) compares the redesigned settings window's elements against this pin.
+
+### Failure policy
+
+**Observed in windows-rs at `ebc5a99`:** The [fail-fast table](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/docs/crates/windows-reactor.md#L423) in the Reactor guide assigns these outcomes:
+
+- An invalid declaration panics. This includes duplicate or undeclared window, icon, or menu keys.
+- An internal bug panics.
+- A failed native call after startup panics.
+- A startup failure, or an error returned from an application closure (`run_with`, `AppContext::callback`, `AppProxy::dispatch`), makes `App::run` return the error.
+- A native failure in an imperative request such as `request_focus_result` passes `Err(IntegrationError)` to its completion.
+- Work that the dispatcher rejects during shutdown, and notification-icon events beyond the queue capacity, are dropped.
+
+Pull request 5194 states that native window, menu, and icon failures that used to come back as `Err` from `App::run` now abort. At `722f202`, those failures were stored and returned by `App::run_application`, after which Circadia's `Session::drop` ran `finish_runtime`, which requests Night Light off through the controller.
+
+**Observed in windows-rs at `ebc5a99`:** Reactor runs reconciliation, rendering, and event dispatch on the UI thread inside COM delegate `Invoke` functions declared `unsafe extern "system"`, WinUI event handlers, and the `windows-window` [window procedure](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/window/src/window.rs#L433), which states that handlers run without `catch_unwind` so that a panic aborts at that boundary intentionally. The Reactor library outside tests has no `catch_unwind`, `set_hook`, or thread creation. A panic therefore never unwinds back through Circadia's `Drop` implementations, so `Session::drop` and `finish_runtime` do not run. Declaration-builder assertions, such as the one requiring finite `Line` coordinates, run inside Circadia's `view` and already aborted at `722f202`.
+
+Panic sites that Circadia's code at `64a2c95` can reach at `ebc5a99`, from the [application layer](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/native/app/application.rs#L130) and the [notification icon](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/native/notifyicon/mod.rs#L276):
+
+- Duplicate window, icon, or menu keys, and `show_window` with an undeclared key.
+- A tooltip of 128 or more UTF-16 code units, or one with a NUL character.
+- A failed `Shell_NotifyIconW` call on each tooltip change, for example while Explorer is restarting. Circadia's tooltip is "Circadia: " followed by the first line of its status summary, so the tooltip changes whenever that line changes.
+- A missing or unloadable `.ico` file, or an unavailable notification area, when the first render adds the icon, and a failed re-add after `TaskbarCreated`.
+- A native failure while opening or activating a settings window, or while showing or hiding the tray menu.
+
+**Observed in windows-rs at `ebc5a99`:** `ApplicationHost::new` calls the application's `create` before the first `render`. At `64a2c95`, Circadia's `create` starts the controller worker, so the controller can begin Night Light access before the first render creates the tray icon, and a startup icon failure can abort after Night Light writes have started.
+
+**Probe, Rust 1.99.0, 2026-10-23:** A probe program, run outside the repository, installed a panic hook and then panicked inside an `extern "system"` function on a thread named `ui`. The hook ran on the panicking thread, signalled a separate thread, and waited; the other thread completed a 300 ms task and replied. The hook then ran a second time with the message "panic in a function that cannot unwind", and the process ended with exit code `0xC0000409`. Code after the panicking call did not run. The same sequence occurred with `panic = "abort"`. **Observed in the Rust 1.99.0 standard library source:** on x86-64 Windows, the abort executes `__fastfail` with `FAST_FAIL_FATAL_APP_EXIT`, which bypasses exception filters, `atexit` handlers, and destructors. The panic hook is therefore the only in-process code that runs after a Reactor panic. The probe used a plain `extern "system"` function rather than a WinUI callback; the abort comes from Rust's non-unwinding ABI, so the same rule applies, but a panic inside Circadia's own Reactor process has not been observed.
+
+**Observed in Circadia at `64a2c95`:** the controller thread owns the single Night Light handle and runs exit cleanup when `request_exit` stops it; the UI thread reaches cleanup only through `Session::drop` or the session-end callback. `ControllerClient` is `Send + Sync + 'static`, so a process-wide panic hook can own a clone of it. While the UI thread's hook runs, the controller thread is still alive, so a hook that requests controller exit and waits a bounded time lets the controller perform its normal exit cleanup: turning off Night Light's [native preview flag](../specs/SPEC.md#background-and-terms) and attempting to turn Night Light off. This is inference from the probe and the code; Night Light writes from the hook path have not been tested.
+
+| Handling option | What it guarantees | Cost and limits |
+| :-- | :-- | :-- |
+| Accept the risk and document it | Nothing beyond the current behavior. | A Reactor native failure leaves Night Light at the last written temperature until the user changes it or Circadia runs again. |
+| Panic hook that requests controller exit and waits a bounded time | A best-effort preview cleanup and off request for panics on any thread other than the controller. | Must skip waiting on the controller thread, avoid UI-thread state, tolerate a second call, and chain to the previous hook. Does not cover a controller-thread panic, stack overflow, an external `__fastfail`, forced termination, or a native call that outlasts the wait. |
+| Remove reachable panic paths in Circadia | Declaration panics become test failures, and a startup icon failure no longer follows Night Light writes. | Unit tests for tooltip limits and menu key uniqueness; start the controller after the tray icon exists. Native Shell failures stay possible. |
+| Static tray tooltip | Removes the panic on tooltip changes. | Conflicts with the required status tooltip. |
+| Upstream request | A narrow request, such as tolerating `Shell_NotifyIconW` failure while Explorer is absent, is plausible. | Pull request 5194 rejected rollback and error propagation in general. |
+| Watchdog process or service | Not applicable. | Excluded by the spec's non-goals. |
+| Stay on `722f202` | Keeps error returns and cleanup on native failures. | Loses pull requests 5160, 5170, 5183, and 5196 and conflicts with the tracking policy. |
+
+The selected handling, settled on 2026-10-23, combines the second and third options with the bump to `ebc5a99`. A panic hook asks the controller thread for immediate exit cleanup, which clears native preview and turns Night Light off without a fade, waits a bounded time of about 2 seconds, and tolerates a second invocation. The controller starts only after the tray icon exists. Unit tests check that every tooltip is shorter than 128 UTF-16 code units with no NUL character and that menu keys are unique. An upstream issue about notification-area failures during Explorer restarts is drafted but not filed. The spec records the remaining risk: an abort that the hook cannot handle, such as a controller-thread panic, a stack overflow, or forced termination, can leave Night Light on. [Persistent crash logging](crash-logging.md) records how the hook also writes a crash record.
+
+### Text input events
+
+**Observed in windows-rs at `ebc5a99`:** [schema](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/tools/reactor/src/schema.toml#L196) declares `TextBox` text with `controlled = "TextChanged"` and `feedback = "deferred_exact"`: after Reactor writes declared text, it suppresses `TextChanged` echoes equal to the written value and delivers the first different text. If the next render keeps the previous declared text, Reactor writes it back, which rejects the edit. A rewrite keeps the caret and selection at the same indexes, clamped to the new text. Reactor subscribes to `TextChanged`, which Microsoft documents as raised after the new text renders, so `on_text_changed` runs once per keystroke, paste, or deletion. Pull request 5183 reports that before this change an application rewrite delivered each keystroke twice and moved the caret to the end; its live UI Automation test was not run here.
+
+**Observed in WinUI `NumberBox.cpp` at `2b337b4`:** the inner text becomes `Value` only when one of these occurs:
+
+- The control loses focus.
+- The user releases Enter; presses Up, Down, Page Up, or Page Down; turns the mouse wheel; or clicks a spin button.
+- The application changes `Text`.
+
+`ValueChanged` fires only when the coerced value differs from the previous one; clearing the field produces NaN, which Reactor reports as `None`. Reactor's `NumberBox` exposes no text-change event, so a `NumberBox` value can be validated only on commit.
+
+### Runtime version
+
+**Observed in windows-rs at `ebc5a99`:** [`RUNTIME_VER`](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor-setup/src/lib.rs#L11) is `"2.5.1"` for `Microsoft.WindowsAppSDK.Runtime`, unchanged from `722f202`, and the setup crate's `runtime.txt` and `app.manifest` assets are unchanged. Pull request 5109 made extraction caches per target architecture and made download and extraction errors fail the build. The [Windows compatibility](windows-compatibility.md) research needs no recheck for this bump.
+
+### Issue and pull request status
+
+**Observed on GitHub, 2026-10-23:**
+
+| Item | State |
+| :-- | :-- |
+| Issue 4923, further `MenuFlyout` item kinds | Open; the last maintainer comment, on 2026-10-14, says the scope is undecided. |
+| Issue 4973, caller-provided `HICON` for window and notification icons | Open. |
+| Issue 4976, `MenuItem` icons, accelerators, and access keys | Closed 2026-10-23 as a duplicate of issue 5137. |
+| Issue 5137, access keys and keyboard accelerators on menu items | Open. |
+| Pull request 5170, live regions, descriptions, UI Automation notifications | Merged 2026-10-20 as `b95e107`. |
+| Pull request 5183, generated `TextBox` and `ListView` | Merged 2026-10-21 as `e787c43`. |
+| Pull request 5194, fail fast | Merged 2026-10-22 as `c866070`. |
+| Pull request 5196, queued events reach their subscribed callback | Merged 2026-10-23 as `aa9933c`. |
 
 ## Requirements and available controls
 
@@ -53,15 +158,17 @@ Source inspection establishes API availability. Compilation establishes that the
 | REQ-single-instance: activate an existing process | No single-instance coordinator found | Development `show_window` opens or activates a window within one process. It does not provide the second-process detection or signaling required by the spec. |
 | REQ-sign-in-start | Toggle control exists | Current-user startup registration and failure reporting need Windows integration. The probe toggle does not register startup. |
 | Night Light and configuration failures | Text, buttons, and `InfoBar` support status and errors | Text menu entries support concise control and suppression status. Settings can show detailed errors. A static icon does not itself communicate an error. |
-| Keyboard and assistive technology | Native form controls, automation names and IDs, programmatic focus | Native controls do not make a custom plot accessible automatically. Retain a complete field-based editor; test Narrator, tab order, focus after insertion/removal, contrast, and scaling. |
-| Temperature background and 10 K editing | Published `Brush` exposes theme and solid colors, but no gradient variant. `NumberBox` lacks a public step-size setter. | The probe draws a sampled gradient with translucent rectangles. Temperature text entry has an explicit Apply action that rounds to 10 K; native NumberBox arrow increments cannot be configured to that step through this API. |
-| REQ-event-driven-idle and REQ-lean-background | UI updates follow messages; background jobs are available | Do not use an animated drawing loop for a static graph. Measure before settings first opens, while it is open, and after it closes. A probe's memory snapshot is not conformance evidence. |
+| Keyboard and assistive technology | Native form controls, automation names and IDs, programmatic focus | Native controls do not make a custom plot accessible automatically. Retain a complete field-based editor; test Narrator, tab order, focus after insertion/removal, contrast, and scaling. **Observed in `ebc5a99`:** pull request 5170 adds `automation_help_text`, `automation_full_description`, and `automation_live_setting` on every element, raises `LiveRegionChanged` when a live region's text changes, and adds `ElementRef::request_notification` for UI Automation notifications. `722f202` has none of these. |
+| Temperature background and 10 K editing | Published `Brush` exposes theme and solid colors, but no gradient variant. Published 0.100.0 `NumberBox` lacks a public step-size setter. | The probe draws a sampled gradient with translucent rectangles. Temperature text entry has an explicit Apply action that rounds to 10 K, because the published API cannot configure NumberBox arrow increments. **Observed in `722f202` and `ebc5a99`:** `NumberBox::small_change` sets the spin and arrow step, so `small_change(10.0)` steps by 10 K. WinUI clamps a typed value to the range but does not round it to `SmallChange`, so the application still rounds committed values. Neither revision has a gradient `Brush`; `windows-canvas` provides gradients (see [Settings design support](settings-design-support.md)). |
+| [REQ-event-driven-idle](../specs/SPEC.md#req-event-driven-idle--perform-background-work-only-when-needed) and [REQ-lean-background](../specs/application.md#req-lean-background--measure-the-single-processs-resource-use) | UI updates follow messages; background jobs are available | Do not use an animated drawing loop for a static graph. Measure before settings first opens, while it is open, and after it closes. A probe's memory snapshot is not conformance evidence. |
 
-## Tray command and countdown limits
+## Tray menu limits for commands and a manual-suppression countdown
 
-**Observed by source inspection on 2026-10-18 at revision `722f202100c3bd428627941d3834d87ad6679d1c`:** The public `MenuItem` declaration supports plain commands with labels and enabled state, separators, and submenus. It has no checked-item property. The native builder creates `MenuFlyoutItem` for plain commands. Replacing menu content dismisses the open menu; changing only callbacks preserves it. The inspected application interface has no menu-opening or menu-closing callback for refreshing a countdown just when the menu opens.
+**Observed by source inspection on 2026-10-18 at revision `722f202100c3bd428627941d3834d87ad6679d1c`:** The public `MenuItem` declaration supports plain commands with labels and enabled state, separators, and submenus. It has no checked-item property. The native builder creates `MenuFlyoutItem` for plain commands. Replacing menu content dismisses the open menu; changing only callbacks preserves it. The inspected application interface has no menu-opening or menu-closing callback for refreshing the remaining manual-suppression time just when the menu opens.
 
-Stable start/stop labels therefore fit the verified API. A live countdown in visible settings avoids periodically replacing and dismissing the tray menu. Native command activation, accessibility, and Explorer restart recovery still need application checks; source inspection does not establish them.
+Tray labels that only offer to start or stop manual suppression, without a countdown, therefore fit the verified API. A live countdown in visible settings avoids periodically replacing and dismissing the tray menu. Native command activation, accessibility, and Explorer restart recovery still need application checks; source inspection does not establish them.
+
+**Observed by source inspection on 2026-10-23 at `ebc5a99`:** the menu declarations are unchanged: `MenuItem` has `Item` (key, label, enabled), `Separator`, and `Submenu` variants, with no checked state, icon, bold default item, secondary text, or opening callback. Issue 4923, which covers further menu item kinds including toggle items, is open. Issue 4976 closed on 2026-10-23 as a duplicate of the open issue 5137, which covers accelerators and access keys and, per the maintainer, icons. At this pin, invalid menu declarations such as duplicate keys, and native failures while showing or hiding the menu, panic; see [Failure policy](#failure-policy).
 
 Sources: [public menu declarations](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/declaration.rs#L754), [native menu items](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/native/transient_menu.rs#L334), and [application menu replacement](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/native/app/application.rs#L190).
 
@@ -89,7 +196,7 @@ context.window_visuals(
 );
 ```
 
-Reactor also exposes `ThemeBrush::CardBackground`, `CardStroke`, `PrimaryText`, and `Accent`. Use them with native controls instead of copying dark-theme RGB values from a screenshot. The development API's `window_frame` provides a title-bar layout. Match the remaining hierarchy and spacing through the layout controls; do not assume that selecting a backdrop creates a complete Settings-style page.
+Reactor's `ThemeBrush` has eight variants in published 0.100.0, `722f202`, and `ebc5a99`: `Accent`, `AccentText`, `PrimaryText`, `SolidBackground`, `CardBackground`, `CardStroke`, `SystemCritical`, and `SystemCriticalBackground`. It has no secondary text, tertiary text, or divider brush. Use the theme brushes with native controls instead of copying dark-theme RGB values from a screenshot. The development API's `window_frame` provides a title-bar layout. **Observed in `722f202` and `ebc5a99`:** `window_frame` creates a `TitleBar` with only a title, while a directly declared `TitleBar` accepts any `Icon` value through `icon` and a tall height through `preferred_height(WindowTitleBarHeight::Tall)`. Microsoft documents the tall option only as taller than the standard height based on system metrics. At `ebc5a99`, pull request 5127 fixes window client sizing with custom title bars. Match the remaining hierarchy and spacing through the layout controls; do not assume that selecting a backdrop creates a complete Settings-style page.
 
 The MVP can use this styling now. Native launch tests exercise the Mica configuration but do not verify the visible material or fidelity to the Windows Settings visual target. Compare active and inactive windows, both system themes, and contrast themes before accepting the final design. Verify readable solid-color fallbacks when Windows disables transparency. Preserve default control feedback and animation preferences rather than adding custom movement to every edit. See Microsoft's [layering guidance](https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/layering) and [typography guidance](https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/typography).
 
@@ -139,7 +246,7 @@ File selection, tray lifetime, and explicit location acquisition are draft MVP r
 
 ## Reproducible probes and outstanding evidence
 
-The [source archive](archives/README.md) preserves the published-release commands and results under `probes/windows-reactor/`. The [active probe README](../../probes/windows-reactor/README.md) documents the consolidated pinned revision. All 19 released-probe tests passed, including exact midpoint rounding. Windows UI Automation exercised point addition/removal, empty-curve rejection, recovery, and successful last-window exit. A separate SendInput test exercised native mouse delivery and capture at 100% scaling; geometry tests alone do not establish those interactions.
+The [source archive](archives/README.md) preserves the published-release commands and results under `probes/windows-reactor/`. All 19 tests of that published-release probe passed, including 10 K rounding of values exactly halfway between two levels. Windows UI Automation exercised point addition/removal, rejection of an empty curve and recovery after a valid point was added, and successful last-window exit. A separate SendInput test exercised native mouse delivery and capture at 100% scaling; geometry tests alone do not establish those interactions. The [active probe README](../../probes/windows-reactor/README.md) documents the probe at the current reference pin. The development-probe results in this document were observed at `722f202`. At `ebc5a99`, the probe's tests and builds passed; its desktop scripts (the PowerShell scripts listed in the active probe README) have not yet been run.
 
 The development probe passed tray-only startup, native handle access, settings close/reopen with preserved application state, repeated activation without duplicate windows, and explicit exit. Its test posts a synthetic notification callback to its own hidden callback window. Actual Shell mouse/keyboard interaction and Explorer restart recovery remain untested. The build with its own Windows App SDK runtime alongside the executable passed from a separate deployment directory on the developer machine; a clean-machine deployment test remains required.
 
@@ -157,6 +264,11 @@ The following remain separate integration work:
 - [Development control schema](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/tools/reactor/src/schema.toml): control coverage, including TimePicker's missing setter.
 - [Development Reactor guide](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/docs/crates/windows-reactor.md): preview status and usage; API examples must match the dependency source.
 - [Published setup helper](https://github.com/microsoft/windows-rs/tree/a57cc321bfdbac6bb98c488ba49f399da8fcb98a/crates/libs/reactor-setup) and [development setup helper](https://github.com/microsoft/windows-rs/tree/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor-setup): runtime pins and deployment behavior.
+- [Reference-pin Reactor source at `ebc5a99`](https://github.com/microsoft/windows-rs/tree/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor): inspected public and generated declarations, `src/native/app/application.rs`, `src/native/notifyicon/mod.rs`, `src/reconcile.rs`, and `src/native/winui/`; [setup helper](https://github.com/microsoft/windows-rs/tree/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor-setup); and the [Reactor guide's fail-fast table](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/docs/crates/windows-reactor.md#L423).
+- windows-rs pull requests [5110](https://github.com/microsoft/windows-rs/pull/5110), [5127](https://github.com/microsoft/windows-rs/pull/5127), [5158](https://github.com/microsoft/windows-rs/pull/5158), [5160](https://github.com/microsoft/windows-rs/pull/5160), [5170](https://github.com/microsoft/windows-rs/pull/5170), [5180](https://github.com/microsoft/windows-rs/pull/5180), [5183](https://github.com/microsoft/windows-rs/pull/5183), [5193](https://github.com/microsoft/windows-rs/pull/5193), [5194](https://github.com/microsoft/windows-rs/pull/5194), and [5196](https://github.com/microsoft/windows-rs/pull/5196); issues [4923](https://github.com/microsoft/windows-rs/issues/4923), [4973](https://github.com/microsoft/windows-rs/issues/4973), [4976](https://github.com/microsoft/windows-rs/issues/4976), and [5137](https://github.com/microsoft/windows-rs/issues/5137). States retrieved 2026-10-23.
+- WinUI [`NumberBox.cpp` at `2b337b4`](https://github.com/microsoft/microsoft-ui-xaml/blob/2b337b4b13f39dd6071da66dcffe4b3ae4ff4e86/controls/dev/NumberBox/NumberBox.cpp): value commit and coercion.
+- Microsoft Learn, retrieved 2026-10-23: [TextBox.TextChanged](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.controls.textbox.textchanged) and [TitleBarHeightOption](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.windowing.titlebarheightoption).
+- Rust 1.99.0 standard library source, `library/std/src/sys/pal/windows/mod.rs`, `abort_internal`.
 - [Windows bindings 0.62.2](https://docs.rs/crate/windows/0.62.2): package metadata; version also checked with Cargo.
 - [Geolocator.RequestAccessAsync](https://learn.microsoft.com/en-us/uwp/api/windows.devices.geolocation.geolocator.requestaccessasync): foreground/UI-thread consent requirement, retrieved 2026-10-16.
 - [Windows App SDK file pickers](https://learn.microsoft.com/en-us/windows/apps/develop/files/using-file-folder-pickers): AppWindow ownership and the distinction from legacy HWND interop, retrieved 2026-10-16.
@@ -175,6 +287,6 @@ The pinned graph uses the original fixed three-anchor fixtures. These results ve
 
 ## Active probe after consolidation
 
-On 2026-10-17, the selected pinned source was consolidated into one [Reactor probe](../../probes/windows-reactor/README.md). It retains the graph fixture, tray lifecycle, executable dialog, and foreground lookup. Location code and its direct `windows` dependency were removed; their recorded results and source remain in the archive. The 18 unit tests and static/build checks pass. All four adapted desktop scripts passed on Windows 11 x64 build 26300.9711 with the self-contained debug build. The pointer run measured scale factors of 1.0 on both axes. A final process check found no remaining probe processes. These checks do not verify the MVP Wake/Bedtime editor or Preview.
+On 2026-10-17, the source at the pin of that date, `722f202`, was consolidated into one [Reactor probe](../../probes/windows-reactor/README.md). It retains the graph fixture, tray lifecycle, executable dialog, and foreground lookup. Location code and its direct `windows` dependency were removed; their recorded results and source remain in the archive. The 18 unit tests and static/build checks pass. All four adapted desktop scripts passed on Windows 11 x64 build 26300.9711 with the self-contained debug build. The pointer run measured scale factors of 1.0 on both axes. A final process check found no remaining probe processes. These checks do not verify the MVP Wake/Bedtime editor or Preview.
 
 The initial pointer run failed at window closure with an unsupported UI Automation pattern; the user reported concurrent mouse input. The unmodified script passed on retry, including graph closure. Other checks passed on their first run. These checks did not invoke Night Light operations.
