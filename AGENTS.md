@@ -14,12 +14,14 @@
 - Write Python only for research probes under `probes/`. Do not add Python code anywhere else in the repository; for example, write application code and its tooling in Rust.
 - Keep the controller as the only component requesting Night Light writes. Route settings and tray configuration edits through the shared configuration validation and persistence path.
 - Use public Night Light library operations. Do not duplicate the undocumented registry codec or assume a proposed API exists in the pinned dependency.
-- Keep foreground inspection limited to window metadata and process identity. Do not request elevation, inject code, or read another application's memory to improve matching.
+- Keep foreground inspection limited to window metadata, process identity, and the identified executable file's version information. Do not request elevation, inject code, or read another application's memory to improve matching; for example, read an app's display name from its executable's version resource.
+- Track windows-rs `master` for `windows-reactor`, `windows-window`, and `windows-reactor-setup` while Reactor is in preview. Build against one reference commit, set through each manifest's `rev` field, and bump it to the latest `master` commit at the start of Reactor UI work, when Circadia needs a newer feature or fix, and before a release. For example, review the Reactor commits since the current pin, change the `rev` values in the application and Windows Reactor probe manifests, update their lockfiles, and rerun the application checks and the probe in one dependency change.
 - Default to no comments or private docstrings. Explain only constraints the code cannot express, such as an OS race or an ABI requirement; keep public documentation to the linter's required contract.
 - Avoid abstractions used once and constants that merely rename one literal. Share a constant when multiple callers depend on the same rule, and derive dependent values from existing data.
 
 ## Documentation
 
+- Keep the spec to observable behavior and its guarantees. Describe visuals, their measurements, and the design language in [docs/design](docs/design/README.md); mechanisms and measured results in research; and file names, control types, and crates that the spec does not require in implementation plans. For example, the spec says "a navigation pane lists the settings pages", while the design document gives its width.
 - Amend requirements and their scenarios together when behavior changes. Preserve requirement IDs when their meaning is refined; remove obsolete references when a requirement is retired.
 - Keep unresolved behavior explicit and the spec status accurate. Do not mark a draft approved or start implementation planning without the user's authorization for that step.
 - Put research in `docs/research/` with descriptive filenames without dates, such as `fullscreen-detection.md`. Put dates, questions, observed versions, and recheck conditions in the required YAML frontmatter, and update the research index.

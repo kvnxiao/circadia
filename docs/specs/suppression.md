@@ -29,13 +29,13 @@ For a window created by the supported shared host `ApplicationFrameHost.exe`, id
 
 ### REQ-edit-executable-list — Edit the suppression list
 
-The suppression list starts empty. Settings also provides an exclusion list: two fixed exclusions plus user-added executable file names. The fixed exclusions are `ApplicationFrameHost.exe` and the executable file name of the running Circadia binary, including a renamed binary. They cannot be removed. User exclusions start empty and can be added or removed using the same file-name selection and case-insensitive matching as the suppression list. Valid settings edits update the live draft immediately and persist through Save.
+The suppression list starts empty. Settings also provides an exclusion list: two fixed exclusions plus user-added executable file names. The fixed exclusions are `ApplicationFrameHost.exe` and the executable file name of the running Circadia binary, including a renamed binary. They cannot be removed. User exclusions start empty and can be added or removed using the same file-name selection and case-insensitive matching as the suppression list. List changes are settings edits that apply and persist under [REQ-settings-autosave](application.md#req-settings-autosave--apply-and-persist-settings-edits).
 
 An exclusion overrides inclusion without deleting the inclusion entry. Settings labels an included but excluded entry as inactive. Exclusions affect automatic suppression only; manual one-hour suppression remains available. Exclusion matching uses the resolved application identity, so excluding `ApplicationFrameHost.exe` does not exclude every hosted application.
 
-The user adds applications explicitly, either with a tray toggle or by selecting an executable file in settings. A tray toggle shows its app's inclusion and user-exclusion state in the active configuration. Selecting it sets that app's inclusion to the opposite of the shown state, in the accepted configuration and in an open draft. An app excluded in the active configuration is shown as excluded and cannot be toggled. The app records the selected executable file name and shows that matching name in the list. A tray toggle persists immediately and also updates an open draft; a change made in settings remains part of the live draft until Save. Settings also lets the user remove entries. The MVP does not expose an automatic fullscreen suppression option or fullscreen-specific include and exclude lists.
+The user adds applications explicitly: with a tray toggle, by choosing recent apps in settings, or by selecting an executable file in settings. A tray toggle shows its app's inclusion and user-exclusion state in the accepted configuration. Selecting it sets that app's inclusion to the opposite of the shown state. An app excluded in the accepted configuration is shown as excluded and cannot be toggled. Circadia records the executable file name that matching uses, plus a display name read from that executable file's version information. When the file has no readable description, the file name serves as the display name. Settings and the tray show both, for example "Counter-Strike 2 (cs2.exe)". Settings also lets the user remove entries. The MVP does not expose an automatic fullscreen suppression option or fullscreen-specific include and exclude lists.
 
-The tray menu stores the five most recent distinct executable file names in most-recent-first order so the user can toggle an app after switching away from it. Closed apps remain candidates; the history resets when Circadia exits. Each entry identifies its application. Merely detecting an app does not add it to the suppression list. Circadia's own UI and desktop/taskbar interactions do not replace the application candidate the user switched away from.
+Circadia keeps a history of the five most recent distinct executable file names in most-recent-first order, with each one's display name and the time it last had focus, so the user can add an app after switching away from it. Settings lists all five with the time since each had focus; the tray menu offers the three most recent. Closed apps remain candidates; the history resets when Circadia exits. Merely detecting an app does not add it to the suppression list. Circadia's own UI and desktop/taskbar interactions do not replace the application candidate the user switched away from.
 
 The fixed excluded names cannot be added through a tray toggle or manual selection. If the configuration file lists a fixed excluded name for suppression, the entry remains inactive and cannot trigger suppression; it does not invalidate unrelated settings. User-list overlap follows the same exclusion precedence. A configuration file cannot remove a fixed exclusion.
 
@@ -47,11 +47,12 @@ The fixed excluded names cannot be added through a tray toggle or manual selecti
 - A listed game appears among the recent apps: selecting its entry removes it from the suppression list immediately, and selecting it again restores it.
 - A browser on the user exclusion list appears among the recent apps: its entry shows the exclusion and cannot be toggled.
 - A game appears in the menu; the user closes the menu without selecting it: the suppression list does not change.
-- Recent-app identification fails; the user selects the executable in settings and saves: the entry remains after restarting Circadia.
-- The user removes an entry and saves: current focus is reevaluated, and that executable no longer matches.
-- Six distinct apps receive focus: the history retains the latest five. Refocusing one moves it to the front without creating a duplicate; closing it keeps it available until displaced or Circadia exits.
+- Recent-app identification fails; the user selects the executable in settings: the entry remains after restarting Circadia.
+- The user removes an entry: current focus is reevaluated, and that executable no longer matches.
+- Six distinct apps receive focus: the history retains the latest five, settings lists five, and the tray offers the latest three. Refocusing one moves it to the front without creating a duplicate; closing it keeps it available until displaced or Circadia exits.
+- `cs2.exe` has the version description "Counter-Strike 2": settings and the tray show "Counter-Strike 2 (cs2.exe)". An executable without a readable description shows its file name as its display name.
 - The user selects `ApplicationFrameHost.exe` or Circadia's own executable for inclusion: the UI explains its fixed exclusion. An inclusion of that name in the configuration file remains inactive without rejecting unrelated configuration.
-- `browser.exe` appears in both user lists: it does not suppress automatically. Removing its exclusion and saving makes its retained inclusion effective.
+- `browser.exe` appears in both user lists: it does not suppress automatically. Removing its exclusion makes its retained inclusion effective.
 - Circadia is renamed to `night-colors.exe`: that running executable name is still fixed-excluded, so focusing settings does not start automatic suppression.
 - A browser is excluded from automatic suppression: manual one-hour suppression can still request 6500 K while that browser has focus.
 
@@ -63,13 +64,13 @@ After startup, matching focus starts automatic suppression after the focus delay
 
 When startup prerequisites first pass, and when time-zone evaluation recovers without a last scheduled temperature, automatic suppression is initialized directly from current focus without the focus delay. The two sources combine with logical OR: either source requests 6500 K. Adding or ending one source while the other remains active does not request a redundant temperature change. Ending the last source selects the target temperature without suppression; it does not restore a temperature captured before suppression. Starting or ending the override uses an ordinary fade.
 
-Preview and suppression never run at the same time:
+Preview takes precedence over suppression:
 
-- Preview cannot start while either source is active, and it does not restart when suppression ends.
-- Starting manual suppression stops Preview.
-- During Preview, focus delays run but automatic suppression does not become active. When Preview ends, automatic suppression becomes active if matching focus has already lasted beyond the focus delay; a delay still pending at that moment continues normally.
+- Either source being active does not prevent Preview from starting.
+- While Preview plays, focus delays run and both sources start and end as usual, but neither changes output.
+- When Preview ends, output follows the sources active at that moment; a focus delay still pending continues normally.
 
-When suppression follows Preview in either way, output fades from the last Preview value toward 6500 K without first writing a schedule temperature. Automatic focus detection and pending focus delays continue throughout manual suppression.
+When suppression is active as Preview ends, output fades from the last Preview value toward 6500 K without first writing a schedule temperature. Automatic focus detection and pending focus delays continue throughout manual suppression. While management is off, neither source affects output; focus tracking continues for the recent-app history.
 
 The focus delay filters brief foreground changes. It does not add hysteresis or temperature bands to the scheduled curve. The user configures one global focus delay, initially 250 ms, within the inclusive range 0–5000 ms. A zero delay changes suppression immediately.
 
@@ -84,10 +85,10 @@ The focus delay filters brief foreground changes. It does not add hysteresis or 
 - A game remains focused from evening into the hour before Bedtime: after reaching 6500 K, the controller does not run underlying temperature updates at each scheduled step.
 - A retained Sunset target is 3400 K and occurs at least 60 minutes before Bedtime; Sleep is 2200 K and the scheduled duration is 60 minutes. Suppression ends 30 minutes before Bedtime: the schedule evaluates to 2800 K at that instant and continues toward 2200 K. Night Light remains enabled throughout.
 - A game closes or focus moves to an unlisted application after several scheduled transitions have passed: once the focus delay expires, the controller evaluates the current instant without replaying those transitions.
-- A delay of 0 or 5000 ms is accepted; a negative value or a value above 5000 ms blocks Save and preserves the accepted configuration.
+- A delay of 0 or 5000 ms is accepted; a negative value or a value above 5000 ms is rejected at the field, and the accepted delay remains.
 - Startup prerequisites pass with a listed game focused and a 5000 ms focus delay: automatic suppression becomes active immediately. Subsequent foreground changes use the configured delay.
 - A read error is pending and focus switches between two unlisted applications: the current foreground identity updates, while automatic recovery retains its existing deadline.
-- Settings gains focus while automatic suppression is active: Preview remains disabled until the focus delay for nonmatching focus expires and the source ends, even though Circadia itself is excluded.
+- Automatic suppression is active and the user switches to settings and starts Preview at once: playback starts without waiting for the source to end. The source ends after the nonmatching focus delay, so output returns to the schedule when playback ends.
 - During Preview, the user switches to a listed game and stays beyond the focus delay: playback continues to its deadline, then output fades from the last Preview value to 6500 K without first applying a schedule temperature.
 - During Preview, the user switches to an unlisted browser: playback continues, and no suppression starts.
 
@@ -99,11 +100,11 @@ The tray menu and settings each provide a manual suppression command. While manu
 
 Sleep and hibernation count toward the hour. Clock, time-zone, and automatic daylight-saving setting changes do not change the deadline. The controller checks expiry before selecting the target on resume. A late timer callback does not grant another hour or replay missed transitions. The timer does not wake the computer solely to expire suppression.
 
-Manual suppression starts off in each process run and is not saved. Quit clears it. Native access errors and scheduling errors do not extend or restart an active interval. Starting it requires startup prerequisites to have passed. If time-zone evaluation fails without a last scheduled temperature, a new interval cannot start; an existing interval can still be canceled or expire without requesting prohibited writes.
+Manual suppression starts off in each process run and is not saved. Quit clears it, and turning management off ends it. Native access errors and scheduling errors do not extend or restart an active interval. Starting it requires management on and startup prerequisites to have passed. If time-zone evaluation fails without a last scheduled temperature, a new interval cannot start; an existing interval can still be canceled or expire without requesting prohibited writes.
 
-Manual start and user cancellation are explicit retry actions. Automatic expiry updates the target without bypassing a pending native recovery delay. Starting manual suppression cancels Preview; Preview stays unavailable with an explanation until the interval ends. Ending the manual source removes only that source: another active source keeps the 6500 K override.
+Manual start and user cancellation are explicit retry actions. Automatic expiry updates the target without bypassing a pending native recovery delay. Starting manual suppression during Preview does not stop playback: the interval and its deadline start immediately, and its 6500 K applies when playback ends. Ending the manual source removes only that source: another active source keeps the 6500 K override.
 
-The tray command indicates whether manual suppression is active, without a live countdown. Visible settings shows the remaining time and any control error; the countdown does not cause recurring UI work while settings is closed. Settings status distinguishes the suppression request from whether native output is available.
+The tray command indicates whether manual suppression is active, without a countdown. Settings shows the local clock time at which the interval ends, and any control error. A clock or time-zone change updates that displayed time without changing the elapsed deadline. Settings status distinguishes the suppression request from whether native output is available.
 
 **Scenarios:**
 
@@ -115,5 +116,6 @@ The tray command indicates whether manual suppression is active, without a live 
 - The clock moves forward two hours, backward two hours, or across a daylight-saving transition while the timer runs: the interval still lasts 60 elapsed minutes.
 - A write error begins halfway through the interval: the deadline is unchanged. Expiry updates the recovery target without extending the interval or bypassing fresh reads and the recovery delay.
 - Startup finds a configuration error, or time-zone evaluation fails without a last scheduled temperature: the start command is disabled in the tray menu and settings, the tray tooltip reports the control status, and settings explains the cause. An interval already active when control stops can still expire without requesting prohibited writes.
-- Preview is running when manual suppression starts: playback stops and suppression requests 6500 K. Preview is unavailable until manual suppression ends.
+- Preview is playing at 3000 K when manual suppression starts at 22:00: playback continues to its deadline, then output fades from the last Preview value toward 6500 K. The interval still ends at 23:00, and settings shows that end time.
+- Management is off: the start command is disabled in the tray menu and settings. Turning management off during an active interval ends it.
 - Circadia exits with 30 minutes remaining and starts again: manual suppression starts off. Current focus can independently initialize automatic suppression.
