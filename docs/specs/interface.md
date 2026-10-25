@@ -11,9 +11,9 @@ Read [SPEC.md](SPEC.md), [configuration, Preview, and launch](application.md) wi
 
 ### REQ-on-demand-settings — Open settings in the running process
 
-An initial explicit or sign-in launch with an accepted configuration follows Start minimized, which defaults on. When enabled, startup shows only the tray icon; when disabled, it opens settings. A new install opens settings under REQ-default-configuration. A silent backup restore follows Start minimized like any launch; a configuration error shows only the tray icon. A change to Start minimized applies to future launches. A second invocation opens or activates settings in the existing process.
+An initial explicit or sign-in launch with an accepted configuration follows Start minimized, which defaults on. When enabled, startup shows only the tray icon; when disabled, it opens settings. A new install opens settings under REQ-default-configuration. A backup restore or paused saving follows Start minimized like any launch; a configuration error shows only the tray icon. A change to Start minimized applies to future launches. A second invocation opens or activates settings in the existing process.
 
-The tray opens one settings window in the same Reactor process. Closing it keeps the controller running and writes any pending settings change without a prompt.
+The tray opens one settings window in the same Reactor process. Closing it keeps the controller running and writes any pending settings change without a prompt, except while saving is paused under [REQ-paused-saving](application.md#req-paused-saving--pause-saving-until-marked-values-are-fixed).
 
 A title bar shows Circadia's icon and name. A navigation pane, always expanded, shows the current phase art (the status illustration of REQ-status-display), the name Circadia, and one status line, and lists four pages: Schedule, shown first, App suppression, Transitions, and General.
 
@@ -36,12 +36,12 @@ The distributed executable and bundled runtime support direct launch and a user-
 
 ### REQ-settings-appearance — Follow Windows themes
 
-Settings uses native controls and follows the system light, dark, and contrast themes. Settings SHOULD follow Microsoft's design guidance for Windows 11 apps; the design documents record how Circadia applies it. In contrast themes, everything Circadia draws in settings, such as the schedule graph, the phase art, and indicators, uses only the theme's system colors. Settings then does not show temperatures as colors; the schedule graph's curve and the kelvin numbers still show each temperature.
+Settings uses native controls and follows the system light, dark, and contrast themes. Settings SHOULD follow Microsoft's design guidance for Windows 11 apps; the design documents record how Circadia applies it. In contrast themes, everything Circadia draws in settings, such as the schedule graph, the phase art, and indicators, uses only the theme's system colors. Settings then does not show temperatures as colors; the schedule graph's curve and the kelvin numbers still show each temperature. Application icons, including Windows' generic application icon, keep their own colors.
 
 **Scenarios:**
 
 - Settings opens in light, dark, and a contrast theme: it follows each system theme with native controls and remains readable.
-- Settings opens in the Night sky contrast theme: every graph, phase-art, and indicator drawing uses the theme's system colors, no temperature color appears, and each temperature level and the current temperature remain readable as numbers.
+- Settings opens in the Night sky contrast theme: every graph, phase-art, and indicator drawing uses the theme's system colors, no temperature color appears, and each temperature level and the current temperature remain readable as numbers. A listed app's icon keeps its own colors.
 
 ### REQ-settings-pages — Organize settings into four pages
 
@@ -56,9 +56,9 @@ The Schedule page has, in order:
 The App suppression page has:
 
 - An explanation of automatic suppression, and the manual suppression command with the interval's end time while it is active.
-- Recently focused: the recent-app history, each entry with its display name, executable file name, time since it had focus, and either an Add command or an indication that it is on the list with a Remove command. An excluded entry shows that it is excluded.
-- The suppression list with its count, each entry with its display name, executable file name, and a Remove command, and an Add app command. Add app opens a dialog that lists the recent apps not already on the list as checkboxes and offers Browse, which selects an executable file. Its Add command names the number of chosen apps and is unavailable while none is chosen. An entry that an exclusion makes inactive is marked inactive.
-- Never suppress: the fixed exclusions, which cannot be removed, the user exclusions with Remove commands, and an Add exclusion command.
+- Recently focused: the recent-app history, each entry with its icon, display name, executable file name, time since it had focus, and either an Add command or, when the app has a suppression entry, an indication that it is on the list with a Remove command. An app with an exclusion without a title condition shows that it is excluded.
+- The suppression list with its count, each entry with its icon, its display name or title text, its executable file name, a command that edits its title condition, and a Remove command, and an Add app command. Add app opens a dialog that lists, as checkboxes with their icons, the recent apps that have no suppression entry, and offers Browse, which selects an executable file. Its Add command names the number of chosen apps and is unavailable while none is chosen. An entry that an exclusion makes inactive is marked inactive.
+- Never suppress: the fixed exclusions, which cannot be removed, and the user exclusions with commands that edit their title conditions and Remove commands, each with its icon, and an Add exclusion command. Add exclusion opens the same dialog for the exclusion list, listing the recent apps that have no exclusion. In either dialog, browsing to an executable that already has an entry on that list adds nothing and shows the message of REQ-edit-executable-list.
 - Switch delay: the focus delay in milliseconds.
 
 The Transitions page has the scheduled transition duration, labeled Transition length, with a slider and number field and a worked example of a transition that reaches the evening temperature at sunset; Fade duration, the ordinary fade; Preview length; and Maximum update rate, the output-rate ceiling.
@@ -70,8 +70,10 @@ The General page has the interface language of REQ-interface-language; Start at 
 - Solar timing is disabled: Morning and evening is marked as not used and remains editable.
 - Daytime is 5000 K and the user chooses Restore recommended colors: Daytime, Morning and evening, and Bedtime become 6500 K, 3400 K, and 2400 K in one edit.
 - Two recent apps are chosen in the Add app dialog: its command reads "Add 2 apps"; with none chosen, the command is unavailable.
-- A listed app appears in Recently focused: it shows that it is on the list and offers Remove.
+- An app with a suppression entry appears in Recently focused: it shows that it is on the list and offers Remove.
 - `browser.exe` is on both the suppression and exclusion lists: its suppression entry is marked inactive.
+- The recent apps include `game.exe`, which is on the suppression list, and `browser.exe`, which is excluded: Add exclusion lists `game.exe` and not `browser.exe`, its command is unavailable until the user chooses an app, and choosing `game.exe` adds it to the exclusion list.
+- `javaw.exe` has the suppression entry "Minecraft (javaw.exe)" and is a recent app: Add app does not list it, and browsing to `javaw.exe` adds nothing and says that it is already on the list.
 
 ### REQ-status-display — Show control status and phase
 
@@ -93,7 +95,9 @@ The phase art has light, dark, and contrast-theme variants and follows theme cha
 | Time-zone evaluation fails without a last scheduled temperature | Control is unavailable; starting suppression is disabled. |
 | A native read or write failure prevents output | Output is unavailable; active suppression is shown as requested, not applied. |
 | Time-zone evaluation fails with a last scheduled temperature | The schedule is unavailable and its last scheduled temperature is used. |
+| Saving is paused under REQ-paused-saving | Some settings are invalid; changes are not saved until they are fixed. |
 | A configuration write failed | Changes are running but not saved. |
+| The configuration file was restored from its backup, and its banner is not dismissed | Settings were restored from a backup. |
 | Observation fails while output succeeds | Control continues without change observation. |
 | None of the above | Managing, with the current temperature, identifying Preview, suppression, or solar fallback when they apply. |
 
@@ -113,11 +117,11 @@ The tray icon does not animate. The tray menu and tooltip do not show a countdow
 
 Settings shows each problem next to its source:
 
-- Invalid input: the field shows that its value is invalid, why, and that the change is not applied. An ordering or equality error appears on the field the user just edited and names both values, for example "Morning and evening (1900 K) can't be lower than Bedtime (2400 K)." While a field with invalid input is on another page, the current page shows a banner naming the problem with a command that opens that page, and the navigation pane marks that page.
+- Invalid input: the field shows that its value is invalid, why, and that the change is not applied or saved until corrected. A field marked under [REQ-recover-invalid-fields](application.md#req-recover-invalid-fields--recover-invalid-configuration-values-field-by-field) shows the value in use, and its error quotes the file's text and names the value in use. A missing key is noted at its field without an error mark. An ordering or equality error appears on the field the user just edited and names both values, for example "Morning and evening (1900 K) can't be lower than Bedtime (2400 K)." While a field with invalid input is on another page, the current page shows a banner naming the problem with a command that opens that page, and the navigation pane marks that page.
 - Feature problems: a solar calculation failure or timing conflict, a location failure, and a sign-in registration mismatch or failure appear beside the related setting.
-- App-wide problems: a configuration error, unavailable control or output, failed observation, failed configuration or backup writes, a failed cleanup when management turned off, and the crash notice of REQ-crash-notice appear as banners at the top of every page, with their commands beside them, such as Retry, Reset to default settings, Open folder, and Report a problem.
+- App-wide problems: a configuration error, paused saving and unknown configuration keys, a configuration file restored from its backup, unavailable control or output, failed observation, failed configuration or backup writes, a failed cleanup when management turned off, and the crash notice of REQ-crash-notice appear as banners at the top of every page, with their commands beside them, such as Retry, Reset to default settings, Open folder, and Report a problem.
 
-A banner or field error disappears when its condition ends, except the crash notice, which stays until the user dismisses it. Circadia does not show error popups or notifications, and it does not open settings because of an error. Errors do not disable unrelated editing, except during a configuration error. A screen reader announces a new or changed error.
+A banner or field error disappears when its condition ends, except the crash notice and the restored-backup banner, which stay until the user dismisses them. Circadia does not show error popups or notifications, and it does not open settings because of an error. Errors do not disable unrelated editing, except during a configuration error and for tray toggles while saving is paused. A screen reader announces a new or changed error.
 
 **Scenarios:**
 
@@ -197,7 +201,7 @@ Circadia shows one static tray icon. Its tooltip follows REQ-status-display. Its
 
 1. Open Circadia settings.
 2. Suppress for 1 hour while manual suppression is inactive, or Stop suppressing while it is active. Starting is unavailable while management is off or starting suppression is disabled.
-3. A caption, Suppress while focused, that cannot be selected, followed by up to three of the most recent apps from the recent-app history as tray toggles. Each toggle shows its display name and executable file name, for example "Counter-Strike 2 (cs2.exe)", and a check mark while the app is on the suppression list. An excluded app is unavailable and labeled as excluded. The toggles are unavailable during a configuration error.
+3. A caption, Suppress while focused, that cannot be selected, followed by up to three of the most recent apps from the recent-app history as tray toggles. Each toggle shows its display name and executable file name, for example "Counter-Strike 2 (cs2.exe)", and a check mark while the app has a suppression entry. A toggle whose entry has a title condition shows the entry's title text in place of the display name and is unavailable. An app with an exclusion without a title condition is unavailable and labeled as excluded. The toggles are unavailable during a configuration error and while saving is paused, and the caption then states the reason.
 4. Quit Circadia.
 
 Menu labels change only when the state they show changes. Explorer recreation restores exactly one working icon in the existing process and requests the application refresh defined by REQ-target-recompute.
@@ -205,8 +209,9 @@ Menu labels change only when the state they show changes. Explorer recreation re
 **Scenarios:**
 
 - Manual suppression is inactive: the menu offers Suppress for 1 hour; after the user selects it, the menu offers Stop suppressing.
-- A listed app is among the three most recent: its toggle has a check mark, and selecting it removes the app from the list.
-- An unlisted app is among them: its toggle has no check mark, and selecting it adds the app.
+- An app with a suppression entry without a title condition is among the three most recent: its toggle has a check mark, and selecting it removes that entry.
+- An app without a suppression entry is among them: its toggle has no check mark, and selecting it adds an entry without a title condition.
+- `javaw.exe` has the entry "Minecraft (javaw.exe)" with a title condition: its toggle reads "✓ Minecraft (javaw.exe)" and is unavailable.
 - Only one app has had focus since Circadia started: the caption is followed by one toggle.
 - Management is off: Suppress for 1 hour is unavailable, and the toggles still work.
 - Explorer restarts: one restored icon opens its context menu, and the controller requests the current native output without restarting the process.
@@ -220,4 +225,11 @@ Menu labels change only when the state they show changes. Explorer recreation re
 - **One banner listing every problem:** It puts errors far from the settings that fix them. Errors appear at their source, and a banner appears only for an invalid field on another page and for app-wide problems.
 - **Reversing a management change in progress:** Turning management back on during the turn-off fade, or off during the startup fade, would stop the controller partway through cleanup or startup and add partial states. The management setting is unavailable until the change finishes instead.
 - **Temperature colors in contrast themes:** Custom colors in a contrast theme override the colors the user chose for readability. Settings shows temperatures through the curve and numbers instead.
-- **Opening settings after a restored backup:** A working setup would show a window at sign-in. The restore is silent.
+- **Opening settings after a restored backup:** A working setup would show a window at sign-in. Settings shows a dismissible banner the next time it opens, and the tray tooltip reports the restore.
+- **Taking over Night Light on first launch:** A new install would disable the Windows Night Light schedule without the user's agreement. Management starts off and requires consent.
+
+## Supporting evidence
+
+| Design decision or requirement | Evidence |
+| :-- | :-- |
+| Settings window structure, graph drawing, time entry, and tray menu under Reactor's limits | [Settings design support](../research/settings-design-support.md) and its [rendering probe](../../probes/windows-reactor/settings-design/README.md); the probe covered forced dark and light window themes at 100% scaling; following the Windows theme, contrast themes, other scaling, and screen-reader use remain unverified. |

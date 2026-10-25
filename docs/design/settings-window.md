@@ -86,7 +86,7 @@ A disabled setting shows its controls' disabled state, and its description says 
 | Slider | 220 epx wide. |
 | Time picker | 224 by 32 epx. See [Time picker](#time-picker). |
 | Phase pill | 22 epx tall, fully rounded, 8 epx horizontal padding, Caption text in the primary text color on a subtle neutral fill. |
-| App tile | 32 epx square with 6 epx corners (28 epx in the Add app dialog). See [Open design points](#open-design-points). |
+| App icon | The app's own icon at 32 epx (28 epx in the Add app dialog), drawn without a plate or border. See [App icons](#app-icons). |
 
 ## Schedule page
 
@@ -253,13 +253,13 @@ The App suppression page has, in order:
 1. **An explanation card and a manual suppression card,** as one group without a header.
    - Explanation: a monitor glyph, the title "Suppress while listed apps are focused", and the description "Circadia fades to 6500 K while a listed app is in the foreground, in any window mode, and returns to your schedule after you switch away." It has no control.
    - Manual suppression: a sun glyph, the title "Suppress for 1 hour", and a button that reads "Suppress for 1 hour" or "Stop suppressing". The description is "Request 6500 K for the next hour, whichever app is focused." when inactive, and the end time, such as "Suppressed until 10:42 PM.", when active. Settings shows the end time, not a countdown. The button is disabled while Circadia is not managing Night Light.
-2. **Recently focused:** one card with up to five rows separated by dividers. Each row is at least 60 epx tall with 10 epx vertical and 16 epx horizontal padding: an app tile, the display name in Body, and below it the executable name and the time since focus in Caption and secondary text, such as "firefox.exe · 4 min ago". The time updates while the window is visible. An app not on the list shows an "Add" button with a plus glyph. An app on the list shows a check glyph in the success color with "On your list" in Caption, then a "Remove" button. The buttons' accessible names include the app, such as "Add Firefox to the suppression list". A note follows the card, 8 epx below it, in Caption and secondary text: "The last 5 apps you switched to. Circadia itself is never listed."
-3. **Suppression list (n):** the section header shows the number of listed apps, with an accent "Add app" button (plus glyph) aligned right on the header's line. It opens the [Add app dialog](#add-app-dialog). Each listed app is its own card, at least 64 epx tall: an app tile, the display name, the executable name below it, and a subtle remove button with a trash glyph and the accessible name "Remove <name>". When the list is empty, one card reads "No apps yet" with the description "Add a game, video player or photo editor to keep its colors accurate."
-4. **Never suppress:** an expandable card with a prohibited-sign glyph, the title "Excluded apps", the description "Exclusions win over the suppression list. They don't affect Suppress for 1 hour.", an "Add exclusion" button, and the expand button. The nested rows list the fixed exclusions first, each with a 16 epx lock glyph in tertiary text color in place of a remove button and the accessible name "Locked":
+2. **Recently focused:** one card with up to five rows separated by dividers. Each row is at least 60 epx tall with 10 epx vertical and 16 epx horizontal padding: the app icon, the display name in Body, and below it the executable name and the time since focus in Caption and secondary text, such as "firefox.exe · 4 min ago". The time updates while the window is visible. An app not on the list shows an "Add" button with a plus glyph. An app on the list shows a check glyph in the success color with "On your list" in Caption, then a "Remove" button. The buttons' accessible names include the app, such as "Add Firefox to the suppression list". A note follows the card, 8 epx below it, in Caption and secondary text: "The last 5 apps you switched to. Circadia itself is never listed."
+3. **Suppression list (n):** the section header shows the number of listed apps, with an accent "Add app" button (plus glyph) aligned right on the header's line. It opens the [Add app dialog](#add-app-dialog). Each listed app is its own card, at least 64 epx tall: the app icon, the display name, the executable name below it, a subtle icon button with a filter glyph and the accessible name "Window title condition for <name>", and a subtle remove button with a trash glyph and the accessible name "Remove <name>", where `<name>` is the text the card shows as its title. The filter button opens the [window title dialog](#window-title-dialog). An entry with a title condition shows its title text in place of the display name, and the line below reads "javaw.exe · Title contains", or "javaw.exe · Title matches" when the regular-expression option is on. When the list is empty, one card reads "No apps yet" with the description "Add a game, video player or photo editor to keep its colors accurate."
+4. **Never suppress:** an expandable card with a prohibited-sign glyph, the title "Excluded apps", the description "Exclusions win over the suppression list. They don't affect Suppress for 1 hour.", an "Add exclusion" button, and the expand button. "Add exclusion" opens the [Add exclusion dialog](#add-exclusion-dialog). Each nested row starts with the app icon. The nested rows list the fixed exclusions first, each with a 16 epx lock glyph in tertiary text color in place of a remove button and the accessible name "Locked":
    - The running Circadia executable's name, such as "Circadia.exe": "This app. Built in, can't be removed."
    - "ApplicationFrameHost.exe": "Windows app host. Hosted apps are matched by their own executable instead. Built in."
 
-   User exclusions follow, each with a remove button. With no user exclusions, a final row reads "No exclusions added yet." in Caption and secondary text.
+   User exclusions follow, each with the same title-condition button and a remove button. With no user exclusions, a final row reads "No exclusions added yet." in Caption and secondary text.
 5. **Timing:** a Switch delay card with a timer glyph, the description "How long an app must stay focused before suppression starts or ends. Stops flicker when you alt-tab.", a number field, and "ms".
 
 ## Transitions page
@@ -347,16 +347,18 @@ The window never opens a dialog to report an error. Microsoft recommends showing
 ### Invalid input at the field
 
 - The field's bottom border becomes a 2 epx line in the critical color, including while it has focus.
-- A message appears below the control, aligned right, in Caption and the critical color, at most 360 epx wide. It names the field the user just edited, states the problem, and says the change is not applied yet. Examples:
-  - "Daytime must be a whole number from 1,200 to 6,500 K. This change isn't applied yet."
+- A message appears below the control, aligned right, in Caption and the critical color, at most 360 epx wide. It names the field the user just edited, states the problem, and says the change is not applied yet. Number fields limit typed values to their range when they commit, so range messages do not occur. Examples:
+  - "Wake time and Bedtime can't be the same. This change isn't applied yet."
   - "Morning and evening (1900 K) can't be lower than Bedtime (2400 K). This change isn't applied yet." An ordering error appears on the field the user just edited, not on the other field.
 - The field keeps the text the user typed so it can be corrected.
+- A field with an invalid value from the settings file shows the value in use, with the same border and a message that quotes the file's text and names the value in use, for example: 'Bedtime "25:00" in the settings file is invalid. Using 23:00 from your last saved settings.' The mark has no command; it clears when the user commits a value in the field. A group member that was valid in the file names the conflict instead, for example "Bedtime 3600 K in the settings file is higher than Morning and evening. Using 2400 K from your last saved settings." A list entry with an invalid file name or regular expression, or a duplicate executable, has the critical-color border on its card and a message below its executable name, for example "Invalid window title pattern. This entry matches nothing until you fix it." or "javaw.exe is on this list twice. Remove one entry."
+- A key missing from the settings file shows a note below its field instead of an error: an informational glyph and Caption text in secondary color, for example "Not in the settings file. Using 300 ms from your last saved settings." The note does not mark the navigation item and ends after the next save.
 - The field reports itself as invalid to assistive technology, and the message is its accessible description. Screen readers announce the message when it appears.
 - The page's navigation item shows the [error marker](#navigation-pane).
 
 ### Banner for invalid fields on other pages
 
-While at least one invalid field is on a page other than the visible one, an error banner appears below the page title and stays at the top of the visible content while the page scrolls. Invalid fields on the visible page appear only at the fields.
+While at least one invalid field is on a page other than the visible one, an error banner appears below the page title and stays at the top of the visible content while the page scrolls. Invalid fields on the visible page appear only at the fields. Marks for invalid values in the settings file do not add to this banner; the paused-saving banner and the navigation markers show them.
 
 | Part | Appearance |
 | :-- | :-- |
@@ -364,7 +366,7 @@ While at least one invalid field is on a page other than the visible one, an err
 | Glyph | A 16 epx error glyph (a critical-color circle with a cross), aligned with the first line. |
 | Title | BodyStrong: "This change isn't applied yet" for one problem, "These changes aren't applied yet" for several. |
 | Problems | One line per problem: the field's message, then a link-style "Go to <page>" button in the accent text color that opens that page. |
-| Note | Caption and secondary text, 6 epx below the problems: "Circadia keeps using your last valid settings until this is fixed. Everything else is saved automatically." |
+| Note | Caption and secondary text, 6 epx below the problems: "Circadia keeps using your last valid settings until this is fixed.", followed by "Everything else is saved automatically." unless saving is paused. |
 
 ### App-wide banners
 
@@ -374,11 +376,14 @@ App-wide problems appear as banners at the top of every page:
 - Night Light control or output is unavailable.
 - Circadia can no longer [observe Night Light](../specs/native-access.md#req-night-light-observation--reconcile-observed-night-light-changes) for changes made outside it.
 - Settings could not be saved.
+- Some values in the settings file are invalid, so changes are not saved: the title "Changes aren't being saved" and the message "Some settings in config.toml are invalid. Change each marked setting to save again. Your changes apply now but are lost when Circadia quits."
+- The settings file was replaced by its backup: the title "Settings were restored from a backup" and a message that names the kind of problem without the parser's own text, such as "config.toml has a syntax error on line 12, so Circadia restored your last saved settings.", with a close button.
+- The settings file has keys Circadia does not recognize: the title "Some settings were ignored" and the message "config.toml has settings Circadia doesn't recognize: theme. They're removed the next time settings are saved." It closes after that save.
 - Circadia closed unexpectedly during an earlier run (the crash notice).
 
-Each banner follows the standard Windows information bar: a severity glyph and color, a title that names the problem in plain words, a message that explains it and ends with the technical code (for example `0x80070005`), and its actions as buttons beside it. Examples of actions: "Retry" when settings could not be saved; "Reset to default settings" and "Open folder" when settings could not be read; "Open folder" and "Report a problem" for the crash notice. The spec defines each problem's actions and when its banner closes. Banners do not show raw library messages.
+Each banner follows the standard Windows information bar: a severity glyph and color, a title that names the problem in plain words, a message that explains it and, for a failed operation, ends with the technical code (for example `0x80070005`), and its actions as buttons beside it. Examples of actions: "Retry" when settings could not be saved; "Reset to default settings" and "Open folder" when settings could not be read; "Open folder" and "Report a problem" for the crash notice. The spec defines each problem's actions and when its banner closes. Banners do not show raw library messages.
 
-Use the Error severity for a current failure. The crash notice reports an earlier event and uses the Informational severity. While settings cannot be read, every settings control shows its disabled state until the user resets the settings. Source: [InfoBar](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/infobar).
+Use the Error severity for a current failure, including invalid values in the settings file. The restored-backup and unrecognized-settings banners use the Warning severity. The crash notice reports an earlier event and uses the Informational severity. While settings cannot be read, every settings control shows its disabled state until the user resets the settings. Source: [InfoBar](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/infobar).
 
 ### Feature messages in their cards
 
@@ -421,10 +426,22 @@ A standard content dialog over a dimmed window, 500 epx wide in the mockups, wit
 A standard content dialog, 520 epx wide in the mockups, with 24 epx padding at the top and sides and 20 epx at the bottom of its content.
 
 - **Title** in Subtitle: "Add apps to suppress". A description follows 4 epx below in secondary text: "Pick from apps you used recently, or browse for any .exe file.", with 16 epx below it.
-- **Recently focused:** a "Recently focused" label in BodyStrong (the mockups used 12 epx semibold, below the 14 epx minimum for semibold text), 6 epx above the list. Each recent app not already on the list is a full-width selectable row, at least 48 epx tall with 4 epx corners, 2 epx apart, with 6 epx vertical and 10 epx horizontal padding: a checkbox, a 28 epx app tile, and the display name with the executable name below it in Caption and secondary text, 14 epx apart. Selecting anywhere on the row toggles its checkbox. When every recent app is already listed, the list is replaced by "Every recent app is already on your list." in Caption and secondary text.
+- **Recently focused:** a "Recently focused" label in BodyStrong (the mockups used 12 epx semibold, below the 14 epx minimum for semibold text), 6 epx above the list. Each recent app not already on the list is a full-width selectable row, at least 48 epx tall with 4 epx corners, 2 epx apart, with 6 epx vertical and 10 epx horizontal padding: a checkbox, the 28 epx app icon, and the display name with the executable name below it in Caption and secondary text, 14 epx apart. Selecting anywhere on the row toggles its checkbox. When every recent app is already listed, the list is replaced by "Every recent app is already on your list." in Caption and secondary text.
 - **Divider,** 1 epx with 16 epx above and below.
-- **Choose an app file:** the title "Choose an app file", the description "Matched by file name, such as game.exe, in any folder.", and a "Browse" button with a folder glyph that opens a file picker limited to executable files.
+- **Choose an app file:** the title "Choose an app file", the description "Matched by file name, such as game.exe, in any folder.", and a "Browse" button with a folder glyph that opens a file picker limited to executable files. When the chosen file is already on the list, a Caption line in secondary text below the button reads "javaw.exe is already on your list. To match several window titles, use a regular expression such as minecraft|terraria in its window title condition.", and nothing is added.
 - **Footer,** laid out like the consent dialog's: the accent primary button reads "Add" for one selected app and "Add N apps" for several, and is disabled when nothing is selected; "Cancel" closes the dialog.
+
+## Add exclusion dialog
+
+The Add app dialog with exclusion wording: the title "Exclude apps from suppression" and the description "Pick from apps you used recently, or browse for any .exe file. Excluded apps never start suppression on their own." The list shows the recent apps that can be excluded, and the primary button reads "Exclude" for one selected app and "Exclude N apps" for several. The layout, Browse row, and footer match the Add app dialog.
+
+## Window title dialog
+
+A standard content dialog, laid out like the Add app dialog, with the title "Match window titles" and the description "Limit this entry to windows whose title contains this text. Leave it empty to match every window of javaw.exe.", naming the entry's executable; while the checkbox is on, the first sentence reads "Limit this entry to windows whose title matches this pattern." Below it: a text field labeled "Window title contains", or "Window title matches" while the checkbox is on, a "Use regular expression" checkbox under the field, and, while the executable is in the recent-app history, a Caption line in secondary text, "Last seen: Minecraft 1.21.4", with a link-style "Use this title" button that copies the title into the field. While the checkbox is on, the copied title has its regular-expression special characters escaped, so it matches that title as written. An invalid expression shows a field error below the field and disables the primary button. The footer has "Save" (accent, default) and "Cancel".
+
+## App icons
+
+Each app row in settings, in the Recently focused card, the suppression list, the excluded apps, and the Add app and Add exclusion dialogs, shows the app's own icon, taken from its executable file, before its name. The icon is drawn as the app ships it, without a background tile, border, or recoloring, in every theme, including contrast themes. Until an icon is available, and for an executable without one, the row shows Windows' generic application icon at the row's icon size. Circadia's own entry in the fixed exclusions shows the Circadia app icon.
 
 ## Tray menu
 
@@ -437,8 +454,11 @@ The tray menu opens from Circadia's notification area icon in the Windows 11 men
 5. "Suppress while focused", disabled, as a caption for the items below it
 6. Up to three recent apps, each as "Name (exe)":
    - On the suppression list: "✓ Counter-Strike 2 (cs2.exe)"
+   - On the list with a window title condition: disabled, "✓ Minecraft (javaw.exe)"
    - Not on the list: "Counter-Strike 2 (cs2.exe)"
    - Excluded: disabled, "Counter-Strike 2 (cs2.exe) (excluded)"
+
+   While settings could not be read, every app item is disabled and the caption reads "Suppress while focused (settings couldn't be read)". While invalid values in the settings file pause saving, every app item is disabled and the caption reads "Suppress while focused (fix settings first)".
 7. Separator
 8. "Quit Circadia"
 
@@ -457,6 +477,4 @@ The notification area icon's tooltip shows a short status, like the navigation p
 
 ## Open design points
 
-- **App tiles.** The mockups show a rounded tile with the app's initial letter on an arbitrary color as a stand-in for an app's identity. Whether rows show the executable's own icon, a letter tile, or no tile is not settled.
-- **Add exclusion.** The flow that "Add exclusion" opens has no design yet.
 - **Contrast themes on screen.** The contrast-theme drawings for the graph, the phase art overlays, and the event chips described here have not been checked on screen in a contrast theme.
