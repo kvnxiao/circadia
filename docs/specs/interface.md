@@ -15,7 +15,7 @@ An initial explicit or sign-in launch with an accepted configuration follows Sta
 
 The tray opens one settings window in the same Reactor process. Closing it keeps the controller running and writes any pending settings change without a prompt.
 
-Settings looks like a native Windows 11 app. It uses native controls, follows the system light, dark, and contrast themes, uses a Mica backdrop, and groups related settings into cards in the style of the Windows Settings app. A title bar shows Circadia's icon and name. A navigation pane, always expanded, shows the current phase art (the status illustration of REQ-status-display), the name Circadia, and one status line, and lists four pages: Schedule, shown first, App suppression, Transitions, and General.
+A title bar shows Circadia's icon and name. A navigation pane, always expanded, shows the current phase art (the status illustration of REQ-status-display), the name Circadia, and one status line, and lists four pages: Schedule, shown first, App suppression, Transitions, and General.
 
 Settings controls and tray commands are keyboard reachable with visible focus and accessible names. A screen reader identifies roles, values, validation, and disabled reasons, and announces status and error changes. At 100%, 150%, and 200% scaling, including moving settings between displays, controls remain readable and operable without clipping labels or action targets.
 
@@ -31,16 +31,24 @@ The distributed executable and bundled runtime support direct launch and a user-
 - A new install starts with Start minimized on: settings opens on the Schedule page.
 - Startup restores the configuration backup with Start minimized on: only the tray icon appears.
 - The user changes Bedtime and closes settings at once: the window closes without a prompt, and the change is in the configuration file.
-- Settings opens in light, dark, and a contrast theme: it follows each system theme with native controls and remains readable.
 - A keyboard-only user changes Wake, starts and stops Preview, and starts manual suppression: each action is reachable and announced with its state.
 - Settings moves between 100% and 200% displays and is also tested at 150%: controls remain readable and usable.
+
+### REQ-settings-appearance — Follow Windows themes
+
+Settings uses native controls and follows the system light, dark, and contrast themes. Settings SHOULD follow Microsoft's design guidance for Windows 11 apps; the design documents record how Circadia applies it. In contrast themes, everything Circadia draws in settings, such as the schedule graph, the phase art, and indicators, uses only the theme's system colors. Settings then does not show temperatures as colors; the schedule graph's curve and the kelvin numbers still show each temperature.
+
+**Scenarios:**
+
+- Settings opens in light, dark, and a contrast theme: it follows each system theme with native controls and remains readable.
+- Settings opens in the Night sky contrast theme: every graph, phase-art, and indicator drawing uses the theme's system colors, no temperature color appears, and each temperature level and the current temperature remain readable as numbers.
 
 ### REQ-settings-pages — Organize settings into four pages
 
 The Schedule page has, in order:
 
 - The management setting, with a description of what management does.
-- A status card: the phase art, the current temperature, the phase name, a sentence about the next scheduled change, and the manual suppression command; the schedule graph of REQ-display-generated-curve; a summary of Wake, Sunrise, Sunset, and Bedtime, each with its time today and the temperature it reaches, where a disabled or absent solar event shows that it is off; and Preview with its Preview or Stop command and its state.
+- A status section: the phase art, the current temperature, the phase name, a sentence about the next scheduled change, and the manual suppression command; the schedule graph of REQ-display-generated-curve; a summary of Wake, Sunrise, Sunset, and Bedtime, each with its time today and the temperature it reaches, where a disabled or absent solar event shows that it is off; and Preview with its Preview or Stop command and its state.
 - Wake time and Bedtime, entered under REQ-time-entry.
 - Solar timing: the solar timing switch, the Sunrise and Sunset inputs with today's time for each, Use my Windows location, and latitude and longitude.
 - Color temperatures: Daytime, Morning and evening, and Bedtime (the Sleep level), each with a slider from 1200 K to 6500 K in 10 K steps, and a number field in kelvin. Morning and evening is marked as not used while solar timing is disabled. Restore recommended colors sets the three temperatures to their defaults as one settings edit.
@@ -67,7 +75,7 @@ The General page has the interface language of REQ-interface-language; Start at 
 
 ### REQ-status-display — Show control status and phase
 
-The status card shows a phase name and phase art for the first of these states that applies:
+The status section shows a phase name and phase art for the first of these states that applies:
 
 - Circadia is not managing Night Light: Not managing, with the not-managing art.
 - Preview is playing: Preview, with the art for the playback instant. Suppression does not change the name or art while Preview plays.
@@ -106,7 +114,7 @@ The tray icon does not animate. The tray menu and tooltip do not show a countdow
 Settings shows each problem next to its source:
 
 - Invalid input: the field shows that its value is invalid, why, and that the change is not applied. An ordering or equality error appears on the field the user just edited and names both values, for example "Morning and evening (1900 K) can't be lower than Bedtime (2400 K)." While a field with invalid input is on another page, the current page shows a banner naming the problem with a command that opens that page, and the navigation pane marks that page.
-- Feature problems: a solar calculation failure or timing conflict, a location failure, and a sign-in registration mismatch or failure appear in the card of the related setting.
+- Feature problems: a solar calculation failure or timing conflict, a location failure, and a sign-in registration mismatch or failure appear beside the related setting.
 - App-wide problems: a configuration error, unavailable control or output, failed observation, failed configuration or backup writes, a failed cleanup when management turned off, and the crash notice of REQ-crash-notice appear as banners at the top of every page, with their commands beside them, such as Retry, Reset to default settings, Open folder, and Report a problem.
 
 A banner or field error disappears when its condition ends, except the crash notice, which stays until the user dismisses it. Circadia does not show error popups or notifications, and it does not open settings because of an error. Errors do not disable unrelated editing, except during a configuration error. A screen reader announces a new or changed error.
@@ -115,7 +123,7 @@ A banner or field error disappears when its condition ends, except the crash not
 
 - Wake has invalid input and the user is on the Transitions page: the page shows a banner with a command that opens the Schedule page, and the navigation pane marks Schedule.
 - The user is on the Schedule page with the same invalid Wake: only the field shows the error.
-- Solar calculation fails: the error appears in the solar timing card, and the graph shows the fallback.
+- Solar calculation fails: the error appears beside the solar timing setting, and the graph shows the fallback.
 - A native write fails: every page shows the output banner with Retry, and Retry is an explicit retry action.
 - The failure recovers: the banner disappears without user action.
 - Sign-in registration fails: the error and a retry appear at the Start at sign-in switch.
@@ -146,7 +154,7 @@ On the declared reference machine, a valid schedule-setting edit updates the gra
 
 ### REQ-time-entry — Enter clock times with a segmented control
 
-Wake and Bedtime each use one control that shows the time as separate hour and minute segments, plus an AM/PM segment when the regional format uses a 12-hour clock. Activating the control opens a selection with one list per segment, each positioned at the current value, and Accept and Cancel commands. Accept applies the selected time as a settings edit. Cancel, Escape, or dismissing the selection does not change the time. Minutes can be any whole minute from 00 through 59. The control and its lists are keyboard operable, and a screen reader announces the control's name and time.
+Wake and Bedtime each use one control that shows the time as separate hour and minute segments, plus an AM/PM segment when the regional format uses a 12-hour clock. Activating the control opens a selection with one list per segment, each positioned at the current value, and Accept and Cancel commands. Accept applies the selected time as a settings edit and closes the selection. Cancel, Escape, or dismissing the selection closes it without changing the time. Minutes can be any whole minute from 00 through 59. The control and its lists are keyboard operable, and a screen reader announces the control's name and time.
 
 **Scenarios:**
 
@@ -166,6 +174,20 @@ Turning the management setting on opens a consent prompt titled "Let Circadia ma
 - The user chooses Cancel: the setting stays off, and Circadia does not access Night Light.
 - The user chooses Turn on: the setting turns on, and control starts.
 - The user turns management off and on again later: the prompt appears again.
+
+### REQ-management-change-lock — Lock the management setting during a change
+
+While management turns on or off, the management setting is unavailable in settings, and settings shows which change is in progress. Turning on lasts from accepting the consent prompt, or from a launch with management on, until startup completes under [REQ-startup-temperature](control.md#req-startup-temperature--apply-the-current-temperature-at-startup), or until control instead waits under native recovery or [REQ-schedule-evaluation-failure](control.md#req-schedule-evaluation-failure--retain-the-active-schedules-output-or-stop-control). Turning off lasts until the preview-cleanup and off attempts of [REQ-manage-night-light](control.md#req-manage-night-light--opt-in-to-managing-night-light) finish, whether they succeed or fail; when Night Light access has not begun, turning off finishes at once.
+
+**Intent:** Finish each management change before the user can request the opposite one, so the controller never reverses a change partway.
+
+**Scenarios:**
+
+- The fade duration is 5 seconds and the user turns management off: settings shows that management is turning off, and the setting cannot be changed until the off attempt finishes; then the user can turn it on again.
+- The user accepts the consent prompt: the setting cannot be changed until startup completes.
+- Circadia launches with management on and a 5-second fade duration, and the user opens settings during the startup fade: the setting cannot be changed until startup completes.
+- The first Night Light read fails after the user accepts the consent prompt: the setting becomes available again, management stays on, and native recovery continues.
+- Time-zone evaluation fails before Night Light access begins, and the user turns management off: the setting becomes available at once.
 
 ## Tray
 
@@ -190,14 +212,12 @@ Menu labels change only when the state they show changes. Explorer recreation re
 - Explorer restarts: one restored icon opens its context menu, and the controller requests the current native output without restarting the process.
 - A keyboard user opens the menu: each item is reachable, and a screen reader reads its label and whether it is available.
 
-## Open questions
-
-- **Closing the time selection on Accept or Cancel:** At the reference Reactor commit, a flyout attached to a button has no programmatic close, so whether Accept and Cancel can close the selection of REQ-time-entry is unverified. The settings-design probe answers it before approval; if closing is impossible, REQ-time-entry needs a different interaction.
-
 ## Explored alternatives
 
 - **A checked tray item with a live countdown:** The reference Reactor menu API lacks checked items and dismisses an open menu when its text changes. Menu labels change only when state changes, and settings shows when manual suppression ends.
 - **Native time picker:** At the reference Reactor commit it cannot show a saved time. The segmented control of REQ-time-entry keeps the native picker's segmented appearance.
 - **Free-text clock fields:** They need a parser for every regional time format and do not match the segmented appearance of Windows time entry.
 - **One banner listing every problem:** It puts errors far from the settings that fix them. Errors appear at their source, and a banner appears only for an invalid field on another page and for app-wide problems.
+- **Reversing a management change in progress:** Turning management back on during the turn-off fade, or off during the startup fade, would stop the controller partway through cleanup or startup and add partial states. The management setting is unavailable until the change finishes instead.
+- **Temperature colors in contrast themes:** Custom colors in a contrast theme override the colors the user chose for readability. Settings shows temperatures through the curve and numbers instead.
 - **Opening settings after a restored backup:** A working setup would show a window at sign-in. The restore is silent.

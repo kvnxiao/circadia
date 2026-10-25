@@ -46,11 +46,12 @@ Starting Circadia with `--verbose` or `-V` raises that process's log detail. It 
 
 ### REQ-crash-records — Record crashes
 
-Circadia records abnormal termination in the log:
+A run is one process that became the session's Circadia instance under REQ-single-instance; a second invocation that hands off to it is not a run. A run exits normally when it finishes exit under REQ-exit-night-light-off after Quit or confirmed session end. Circadia records abnormal termination in the log:
 
 - An unrecoverable internal error (a Rust panic) on any thread appends a record before the process ends: the thread, the message, the source location, and a stack trace whose frames identify their module and offset.
 - A native crash that Windows lets Circadia observe appends a record with the exception code, the faulting module, and the offset.
-- A crash that ends the process before Circadia can record it, such as a fail-fast termination, is detected at the next launch from the crash events that Windows Error Reporting writes to the Application event log, and that launch appends its record.
+- A crash that ends the process before Circadia can record it, such as a fail-fast termination, is detected at the next launch from the crash event that Windows Error Reporting writes to the Application event log for that run's process, and that launch appends its record.
+- When the previous run did not exit normally and has neither a crash record nor a crash event for its process, the next launch records an unexplained end. Examples are power loss, forced termination, and a shutdown that ended the process before exit finished.
 
 Recording a crash does not extend the cleanup limit of [REQ-panic-cleanup](control.md#req-panic-cleanup--turn-night-light-off-after-an-internal-error).
 
@@ -60,20 +61,28 @@ Recording a crash does not extend the cleanup limit of [REQ-panic-cleanup](contr
 - An access violation occurs in a native UI module: the log has the exception code, module, and offset.
 - A fail-fast termination ends the process: the next launch appends a record that identifies the earlier crash.
 - The user quits normally: the next launch records no crash.
+- Power is lost while Circadia runs: the next launch records an unexplained end and no crash.
 
 ### REQ-crash-notice — Offer to report a crash
 
-When Circadia detects that its previous run ended abnormally, it starts under the usual startup rules. The next time the user opens settings, a banner states that Circadia closed unexpectedly and offers Open folder for the log and Report a problem. Report a problem opens the new-issue page of Circadia's GitHub repository in the default browser, with the title and body prefilled with Circadia's version, the Windows build, and a summary of the crash, and asks the user to attach the log. It does not attach or upload the log. The banner stays until the user dismisses it. Circadia does not show a popup or open settings because of a crash.
+When the previous run crashed, as shown by its crash record or a crash event for its process under REQ-crash-records, Circadia starts under the usual startup rules. The next time the user opens settings, a banner states that Circadia closed unexpectedly and offers Open folder for the log and Report a problem. Report a problem opens the new-issue page of Circadia's GitHub repository in the default browser, with the title and body prefilled with Circadia's version, the Windows build, and a summary of the crash, and asks the user to attach the log. It does not attach or upload the log. The banner stays across launches until the user dismisses it, and a later crash replaces it with a banner for that crash. An unexplained end does not create a banner or remove an undismissed one. Circadia stores the pending notice apart from the configuration, so Reset to default settings does not clear it. If the notice cannot be stored, the banner shows for the current run only, and the log records the failed write. Circadia does not show a popup or open settings because of a crash.
 
 **Scenarios:**
 
 - The previous run crashed and the next launch is minimized: no window opens, and the banner appears the next time the user opens settings.
 - The user chooses Report a problem: the browser opens the prefilled new-issue page, and Circadia sends nothing.
 - The user dismisses the banner: it does not return for that crash.
+- The user quits without dismissing the banner and starts Circadia again: settings still shows the banner.
+- Two crashes occur before the user opens settings: one banner appears, for the later crash.
+- Power loss ended the previous run: settings does not show the banner.
+- A crash banner is undismissed and the next run ends by power loss: settings still shows the banner for the crash.
+- A crash banner is undismissed during a configuration error, and the user chooses Reset to default settings: the banner remains until the user dismisses it.
+- The pending notice cannot be stored when a launch detects a crash: settings shows the banner during that run, and the next launch does not show it again.
 
 ## Explored alternatives
 
 - **Removing personal data from logs:** Redaction loses context that crash investigation needs. The log stays local, and the user decides what to share.
 - **A separate crash-reporting process:** The non-goals exclude helper processes. A crash that ends the process before it can record itself is detected at the next launch instead.
 - **A settings switch for detailed logging:** A command-line flag serves the users who file detailed reports without adding a setting that can be left on.
+- **A notice for every unexplained end:** Power loss, forced termination, and a shutdown that ends the process before exit finishes leave no crash data to report, so the log records them without a notice.
 - **Opening settings after a crash:** A sign-in launch would show a window. The notice waits until the user opens settings.

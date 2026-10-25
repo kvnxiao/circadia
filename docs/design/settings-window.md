@@ -98,7 +98,7 @@ The Schedule page has, in order:
 
 ### Management card
 
-A shield-with-check glyph, the title "Let Circadia manage Night Light", the description "While on, Circadia fully controls Windows Night Light and reverts changes made in Windows Settings or Quick Settings.", and a toggle switch. Turning the switch on opens the [takeover consent dialog](#takeover-consent-dialog); the switch shows On only after the user selects Turn on.
+A shield-with-check glyph, the title "Let Circadia manage Night Light", the description "While on, Circadia fully controls Windows Night Light and reverts changes made in Windows Settings or Quick Settings.", and a toggle switch. Turning the switch on opens the [takeover consent dialog](#takeover-consent-dialog); the switch shows On only after the user selects Turn on. While management is turning on or off, the switch is disabled, and a line in Caption and secondary text below the description reads "Turning on…" or "Turning off…" until the change finishes.
 
 ### Status and graph card
 
@@ -374,7 +374,7 @@ App-wide problems appear as banners at the top of every page:
 - Night Light control or output is unavailable.
 - Circadia can no longer [observe Night Light](../specs/native-access.md#req-night-light-observation--reconcile-observed-night-light-changes) for changes made outside it.
 - Settings could not be saved.
-- Circadia stopped unexpectedly during an earlier run (the crash notice).
+- Circadia closed unexpectedly during an earlier run (the crash notice).
 
 Each banner follows the standard Windows information bar: a severity glyph and color, a title that names the problem in plain words, a message that explains it and ends with the technical code (for example `0x80070005`), and its actions as buttons beside it. Examples of actions: "Retry" when settings could not be saved; "Reset to default settings" and "Open folder" when settings could not be read; "Open folder" and "Report a problem" for the crash notice. The spec defines each problem's actions and when its banner closes. Banners do not show raw library messages.
 
@@ -401,7 +401,7 @@ Wake time and Bedtime use a segmented button that opens a picker flyout, matchin
 
 - **Button.** 224 by 32 epx, styled like a standard button, divided into equal segments by 1 epx lines in the control outline color. The segments are hour, minute, and AM/PM. The AM/PM segment appears only when the user's region uses a 12-hour clock. Segment order and the day-period text follow the regional time format. Text is centered with tabular numerals.
 - **Flyout.** Selecting the button opens a flyout over it with 8 epx corners: one scrolling list per segment, with the selected value in a highlighted band across the middle, and Accept (check mark) and Cancel (X) buttons across the bottom.
-- **Applying.** The new time applies when the user selects Accept. Cancel or dismissing the flyout keeps the previous time.
+- **Applying.** Accept applies the new time and closes the flyout. Cancel, Escape, or dismissing the flyout closes it and keeps the previous time.
 - **Accessibility.** The button's accessible name includes the field and its value, such as "Wake time, 7:00 AM".
 - **Errors.** A field error, such as Wake and Bedtime being equal, appears below the button.
 

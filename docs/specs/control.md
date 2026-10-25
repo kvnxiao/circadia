@@ -288,11 +288,13 @@ Resume requires an application refresh even when the intended and stored tempera
 
 ### REQ-exit-night-light-off — Clear native preview and turn Night Light off on graceful exit
 
-Once Night Light access has begun, Quit fades toward 6500 K with an ordinary fade, then initiates best-effort native-preview cleanup followed by an independent off attempt. Confirmed Windows session end initiates the same cleanup and off attempt immediately, without a fade. Confirmed session end includes sign-out, shutdown, restart, and closure for servicing. Closing settings keeps control running. Suspension and session lock do not initiate exit cleanup. With management off, exit does not access Night Light.
+Once Night Light access has begun, Quit fades toward 6500 K with an ordinary fade, then initiates best-effort native-preview cleanup followed by an independent off attempt. Confirmed Windows session end initiates the same cleanup and off attempt immediately, without a fade. Confirmed session end includes sign-out, shutdown, restart, and closure for servicing. Closing settings keeps control running. Suspension and session lock do not initiate exit cleanup. Once management is off and its turn-off sequence has finished, exit does not access Night Light.
 
 Exit writes any pending configuration change, discards input that is still invalid, and cancels future control, focus delays, manual suppression, Preview, and recovery. An executing synchronous library call finishes before the exit fade or cleanup begins. Its completion does not authorize another queued output step. The exit fade starts from the last written temperature, including a Preview value. When a fade step fails, or native access has a pending failure, exit skips the rest of the fade and proceeds to cleanup.
 
 The cleanup attempt uses a fresh settings-record read to end native preview. Whether it succeeds or fails, the off attempt uses its own fresh state-record read and requests off if needed. Neither depends on both records being readable. Exit does not restore the native schedule. Each public cleanup/off call is attempted once; failure is recorded and exit continues without an added retry loop or grace period. If Night Light access never began, exit skips the fade and both attempts.
+
+Quit while management is turning off joins that sequence instead of starting another: its fade keeps its original deadline, the cleanup and off attempts each run at most once across the sequence and exit, and the process then exits. Confirmed session end during the sequence skips the rest of its fade and makes whichever of the cleanup and off attempts have not yet started.
 
 Windows' initial session-end query returns without waiting for native work, cleanup, or user input. Cleanup starts only on confirmed session end and runs before that handler returns, subject to Windows allowing execution to finish. Canceling session end leaves control running. A crash, forced termination, power loss, or termination during cleanup can leave prior native settings; REQ-panic-cleanup covers an internal error. Failed preview cleanup can leave visible tint even when the independent off write succeeds.
 
@@ -309,11 +311,13 @@ Windows' initial session-end query returns without waiting for native work, clea
 - Night Light is already off: the off operation does not need another state write, but preview cleanup is still attempted.
 - Night Light access began but normal reads always failed: exit skips the fade, and both independently guarded exit attempts still run.
 - Windows queries session end and then cancels it: cleanup has not started and control continues.
-- A configuration error prevented Night Light access, or management is off: Quit does not access Night Light.
+- A configuration error prevented Night Light access, or management is off and its turn-off sequence has finished: Quit does not access Night Light.
+- Quit occurs 2 seconds into a 5-second fade of turning management off: output reaches 6500 K at the fade's original 5-second deadline, preview cleanup and the off request each run once, and the process exits.
+- Confirmed shutdown occurs during the fade of turning management off: the fade stops, and preview cleanup and the off request each run once.
 
 ### REQ-panic-cleanup — Turn Night Light off after an internal error
 
-When an unrecoverable internal error (a Rust panic) outside the controller is about to end Circadia while management is on and after Night Light access has begun, the controller makes the cleanup and off attempts of REQ-exit-night-light-off without a fade, and the process waits at most 2 seconds for them before it ends. [REQ-crash-records](diagnostics.md#req-crash-records--record-crashes) records the error.
+When an unrecoverable internal error (a Rust panic) outside the controller is about to end Circadia while management is on or its turn-off sequence is running, and after Night Light access has begun, the controller makes the cleanup and off attempts of REQ-exit-night-light-off without a fade, and the process waits at most 2 seconds for them before it ends. [REQ-crash-records](diagnostics.md#req-crash-records--record-crashes) records the error.
 
 **Intent:** Leave the screen untinted when an internal failure ends the process.
 
@@ -323,7 +327,8 @@ When an unrecoverable internal error (a Rust panic) outside the controller is ab
 
 - An internal error in the settings window ends the process while Night Light is at 2400 K: preview cleanup and the off request complete before the process ends.
 - The controller is executing a 120 ms library call when the error occurs: cleanup runs after the call returns, within the 2-second limit.
-- Management is off when the error occurs: Circadia does not access Night Light.
+- An internal error occurs during the fade of turning management off: preview cleanup and the off request complete within the 2-second limit before the process ends.
+- Management is off and its turn-off sequence has finished when the error occurs: Circadia does not access Night Light.
 - The error occurs in the controller: the process ends without waiting for cleanup, and Night Light can remain at its last temperature.
 
 ## Explored alternatives

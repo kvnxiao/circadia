@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 areas: [schedule.md, suppression.md, native-access.md, control.md, application.md, localization.md, interface.md, diagnostics.md]
 ---
 
@@ -47,7 +47,7 @@ Circadia does not write GPU gamma ramps or monitor calibration profiles. Success
 - Prefer direct code and existing library capabilities. Introduce additional components or general abstractions only for a demonstrated requirement or measured limitation.
 - Executable size is not a resource target; memory use and CPU time while running are.
 
-**Dependencies:** Circadia uses `win-nightlight-lib` and `win-nightlight-watch` 0.5.0, plus `windows-reactor`, `windows-window`, and `windows-reactor-setup` from the `windows-rs` repository. While Reactor is in preview, these three follow the repository's `master` branch through one reference commit that the application manifest records for all three. Circadia moves that commit to the latest `master` at the start of Reactor UI work, when it needs a newer feature or fix, and before a release, and adopts a new commit only after the application's automated checks and the Windows Reactor UI probe pass on it. Supporting evidence links the capability assessments, API contracts, and deployment research.
+**Dependencies:** Circadia uses `win-nightlight-lib` and `win-nightlight-watch` 0.5.0, plus `windows-reactor`, `windows-window`, and `windows-reactor-setup` from the `windows-rs` repository. While Reactor is in preview, these three follow the repository's `master` branch through one reference commit that the application manifest records for all three. Circadia adopts a new commit only after the application's automated checks and the Windows Reactor UI probe pass on it. Supporting evidence links the capability assessments, API contracts, and deployment research.
 
 ## Background and terms
 
@@ -79,7 +79,7 @@ The suppression list stores executable file names explicitly added by the user. 
 | Saved configuration | The configuration file on disk. It differs from the accepted configuration while a write is pending or after a failed write. |
 | Configuration error | Startup found neither a usable configuration file nor a usable backup, but at least one of them exists. It lasts until the user resets to defaults. |
 | Tray toggle | A recent-app entry in the tray menu that shows whether its app is on the suppression list; selecting it adds or removes that app. |
-| Usable configuration | Configuration with valid clocks, ordered temperatures, durations, preferences, and coordinates when solar timing is enabled. Its runtime calculations can still fail. |
+| Usable configuration | Configuration in the current format version with valid clocks, ordered temperatures, durations, preferences, and coordinates when solar timing is enabled. Its runtime calculations can still fail. |
 | Preview | A user-started traversal of the accepted schedule from the current instant through the same local clock on the next date, uniformly compressed into a configurable 1–60 seconds, initially ten. |
 | Native preview flag | A Night Light setting that the library turns on to make Windows apply the stored temperature, distinct from Circadia's Preview playback. A brief preview turns it on and off within one library call; a held preview keeps it on across several temperature writes. Preview cleanup turns the flag off. |
 | Last scheduled temperature | The last value that the accepted schedule or its Wake/Bedtime-only fallback stored successfully, kept under REQ-schedule-evaluation-failure. |
@@ -101,7 +101,7 @@ The suppression list stores executable file names explicitly added by the user. 
 | Clock gap / repeated interval | Local clock times skipped by a forward offset change / displayed twice by a backward offset change. |
 | Confirmed session end | Windows' notification that sign-out, shutdown, restart, or closure for servicing (closing apps to update their files) will proceed, distinct from its earlier query about whether the session can end. |
 
-Configuration and its backup persist across restarts. Focus history, pending delays, manual suppression and its deadline, active fades, and the last written and last scheduled temperatures are runtime state. Startup reconstructs control state from configuration, current focus, the clock, and fresh Night Light reads rather than resuming a persisted fade or timer.
+Configuration and its backup, the local log, and a crash notice that the user has not dismissed persist across restarts. Focus history, pending delays, manual suppression and its deadline, active fades, and the last written and last scheduled temperatures are runtime state. Startup reconstructs control state from configuration, current focus, the clock, and fresh Night Light reads rather than resuming a persisted fade or timer.
 
 ## Architecture overview
 
@@ -228,7 +228,7 @@ Circadia runs with the user's standard rights and does not request elevation to 
 | [Temperature control and lifecycle](control.md) | Management, startup, fades, schedule failures, recomputation, suspend/resume, and exit. Read after schedule, suppression, and native access. |
 | [Configuration, Preview, and launch](application.md) | Settings edits and persistence, defaults and startup recovery, Preview, sign-in startup, and resource use. Read after control and its dependencies. |
 | [Localization](localization.md) | Translatable text, interface language selection, regional formats, and translated layout. Read after the root. |
-| [Settings window and tray](interface.md) | Window and page structure, status and error presentation, the schedule graph, time entry, consent, and the tray menu. Read after configuration and localization. |
+| [Settings window and tray](interface.md) | Window and page structure, themes, status and error presentation, the schedule graph, time entry, consent and the management setting during a change, and the tray menu. Read after configuration and localization. |
 | [Log and crash records](diagnostics.md) | The local log, verbose logging, crash records, and the crash notice. Read after control and the settings window. |
 
 The [design documents](../design/README.md) describe the intended visual design and design language. They are informative and do not bind conformance.
@@ -287,7 +287,7 @@ Verify graph latency, due output deadlines, configured rate limits, serialized w
 
 **Note:** The Windows Reactor UI probe uses predefined target times; it does not verify the complete application.
 
-**Before release:** Verify clean-machine deployment on the minimum and a current serviced Windows 11 build, resource use, display scaling, accessibility, the settings window's native controls, theme following, Mica backdrop, card grouping, and translated layout under [interface.md](interface.md) and [localization.md](localization.md) in light, dark, and contrast themes, and foreground matching across representative applications, window modes, and elevation levels.
+**Before release:** Verify clean-machine deployment on the minimum and a current serviced Windows 11 build, resource use, display scaling, accessibility, the settings window's native controls, theme following, and translated layout under [interface.md](interface.md) and [localization.md](localization.md) in light, dark, and contrast themes, and foreground matching across representative applications, window modes, and elevation levels.
 
 Include these Windows checks:
 
@@ -296,7 +296,7 @@ Include these Windows checks:
 - Exercise Quit after failed native-preview cleanup, including independent settings and state read failures. Verify that cleanup and off are both attempted and report remaining display uncertainty when either fails.
 - Exercise schedule Preview and ordinary fades at configured rates on representative displays. Record visible warming and cooling, cancellation, and missing or erratic response. Successful native operations do not prove visible smoothness. The upstream 0.5.0 probe reports gradual held-preview transitions at 30–480 writes per second on its recorded host; rates below 30 writes per second were not tested.
 - After accumulated timestamp leads and long runs, quit Circadia and verify on each tested Windows build that the Windows Settings strength, schedule, and on/off controls still change the stored Night Light records and visible output.
-- Restart Explorer repeatedly while the tray tooltip changes, and record whether Circadia survives; an abnormal end must leave a crash record.
+- Restart Explorer repeatedly while the tray tooltip changes, and record whether Circadia survives; a crash must leave a crash record or crash event, and any other abnormal end an unexplained-end record.
 
 ## Supporting evidence
 
@@ -305,8 +305,8 @@ The [research index](../research/README.md) records feasibility findings, versio
 | Design decision or requirement | Evidence |
 | :-- | :-- |
 | Windows Reactor for the generated graph, settings, and tray, and the reference-commit policy | [UI capabilities and native integration](../research/windows-reactor-ui.md) |
-| Settings window structure, graph drawing, time entry, and tray menu under Reactor's limits | [Settings design support](../research/settings-design-support.md); rendering in every theme and scale remains unverified until its probe runs. |
-| Localizable text, language selection, and regional formats | [Localization](../research/localization.md); WinUI control text language needs a probe in the self-contained build. |
+| Settings window structure, graph drawing, time entry, and tray menu under Reactor's limits | [Settings design support](../research/settings-design-support.md) and its [rendering probe](../../probes/windows-reactor/settings-design/README.md); the probe covered forced dark and light window themes at 100% scaling; following the Windows theme, contrast themes, other scaling, and screen-reader use remain unverified. |
+| Localizable text, language selection, and regional formats | [Localization](../research/localization.md); WinUI control text loaded from MUI resources, such as `ToggleSwitch` labels, followed the preferred UI language in the framework-dependent build; MRT-loaded control text and the self-contained build remain unverified. |
 | Local log, crash records, and abort cleanup | [Crash logging](../research/crash-logging.md); cleanup within the application after an actual abort in the settings window remains an implementation check. |
 | Native Night Light ownership, observation, output precision, short and gradual transitions, cleanup, and timestamps | [0.5.0 transition, ownership, and watcher contracts](../research/nightlight-transition-control.md); optical guarantees and complete controller integration remain unverified. |
 | Suspend/resume timing and native refresh | [Windows suspend and resume](../research/suspend-resume.md); notification ordering and visible restoration remain implementation and release checks. |
