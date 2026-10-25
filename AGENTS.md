@@ -18,6 +18,7 @@
 - Track windows-rs `master` for `windows-reactor`, `windows-window`, and `windows-reactor-setup` while Reactor is in preview. Build against one reference commit, set through each manifest's `rev` field, and bump it to the latest `master` commit at the start of Reactor UI work, when Circadia needs a newer feature or fix, and before a release. For example, review the Reactor commits since the current pin, change the `rev` values in the application and Windows Reactor probe manifests, update their lockfiles, and rerun the application checks and the probe in one dependency change.
 - Default to no comments or private docstrings. Explain only constraints the code cannot express, such as an OS race or an ABI requirement; keep public documentation to the linter's required contract.
 - Avoid abstractions used once and constants that merely rename one literal. Share a constant when multiple callers depend on the same rule, and derive dependent values from existing data.
+- Derive dependent state from a few source values with pure functions instead of setting or checking it in conditionals spread across event handlers. Let handlers update only the source values; for example, compute whether saving is paused from the configuration load report instead of storing a flag that handlers set and clear.
 
 ## Documentation
 
