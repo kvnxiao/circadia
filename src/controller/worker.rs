@@ -57,13 +57,17 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use std::time::Instant;
-use std::time::SystemTime;
 
 #[cfg(test)]
 mod tests;
 
 thread_local! {
     static CONTROLLER_THREAD: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn mark_controller_thread() {
+    CONTROLLER_THREAD.set(true);
 }
 
 /// Identify a Windows or user event requiring fresh scheduling inputs.
@@ -587,9 +591,11 @@ impl ControllerWorker {
         let client = ControllerClient(Arc::clone(&shared));
         #[cfg(feature = "output-measurement")]
         crate::measurement::bind_origin(shared.origin);
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
         let thread = std::thread::Builder::new()
             .name("circadia-controller".into())
             .spawn(move || {
+                let _log = tracing::dispatcher::set_default(&dispatch);
                 CONTROLLER_THREAD.set(true);
                 let _admission = StopAdmission(Arc::clone(&shared));
                 let mut worker = Worker::new(
@@ -608,11 +614,9 @@ impl ControllerWorker {
                     .flat_map(|exit| [&exit.preview, &exit.off])
                     .filter_map(|result| result.as_ref().err())
                 {
-                    worker.log.failure(
-                        failure.operation(),
-                        failure.diagnostic(),
-                        SystemTime::now(),
-                    );
+                    worker
+                        .log
+                        .failure(failure.operation(), failure.diagnostic());
                 }
                 let published = worker.publish();
                 (exit, result.and(published))
@@ -723,24 +727,21 @@ impl<F: FnMut() -> Foreground> Worker<F> {
     ) -> Self {
         let store = ConfigStore::new(directory);
         let startup = Arc::new(store.load());
-        let mut log = DiagnosticLog::new(directory);
+        crate::log::record_start(&startup);
+        let mut log = DiagnosticLog::default();
         let operation = if startup.accepted.is_some() && startup.restore.is_none() {
             DiagnosticOperation::BackupWrite
         } else {
             DiagnosticOperation::ConfigurationRead
         };
         for error in &startup.problems {
-            log.failure(operation, error.diagnostic(), SystemTime::now());
+            log.failure(operation, error.diagnostic());
         }
         if let Some(notice) = &startup.restore {
             if let Some(error) = &notice.write_error {
-                log.failure(
-                    DiagnosticOperation::ConfigurationWrite,
-                    error.diagnostic(),
-                    SystemTime::now(),
-                );
+                log.failure(DiagnosticOperation::ConfigurationWrite, error.diagnostic());
             } else {
-                log.recovered(DiagnosticOperation::ConfigurationRead, SystemTime::now());
+                log.recovered(DiagnosticOperation::ConfigurationRead);
             }
         }
         Self {
@@ -899,13 +900,11 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         self.control_error = None;
         match &result.result {
             Ok(schedule) => {
-                self.log
-                    .recovered(DiagnosticOperation::ScheduleCalculation, SystemTime::now());
+                self.log.recovered(DiagnosticOperation::ScheduleCalculation);
                 if schedule.solar_error.is_some() {
                     self.calculation_failed(DiagnosticOperation::SolarCalculation);
                 } else {
-                    self.log
-                        .recovered(DiagnosticOperation::SolarCalculation, SystemTime::now());
+                    self.log.recovered(DiagnosticOperation::SolarCalculation);
                 }
             }
             Err(_error) => self.calculation_failed(DiagnosticOperation::ScheduleCalculation),
@@ -979,15 +978,14 @@ impl<F: FnMut() -> Foreground> Worker<F> {
     }
 
     fn failed(&mut self, error: NativeFailure) {
-        self.log
-            .failure(error.operation(), error.diagnostic(), SystemTime::now());
+        self.log.failure(error.operation(), error.diagnostic());
         self.native_errors
             .insert(error.operation(), Arc::new(error));
     }
 
     fn recovered(&mut self, operation: DiagnosticOperation) {
         self.native_errors.remove(&operation);
-        self.log.recovered(operation, SystemTime::now());
+        self.log.recovered(operation);
     }
 
     fn publish(&self) -> io::Result<()> {
@@ -1013,12 +1011,30 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             control_error: self.control_error.clone(),
             stopped: self.shared.stopping.load(Ordering::Acquire),
         };
-        *self
+        let active = |snapshot: &ControllerSnapshot| {
+            [
+                snapshot.suppression.automatic,
+                snapshot.suppression.manual,
+                snapshot.preview_active,
+            ]
+        };
+        let current = active(&snapshot);
+        let previous = self
             .shared
             .latest
             .lock()
-            .map_err(|_error| io::Error::other("controller snapshot lock failed"))? =
-            Some(Arc::new(snapshot));
+            .map_err(|_error| io::Error::other("controller snapshot lock failed"))?
+            .replace(Arc::new(snapshot));
+        let previous = previous.as_deref().map_or([false; 3], active);
+        for ((name, was), is) in ["automatic suppression", "manual suppression", "preview"]
+            .into_iter()
+            .zip(previous)
+            .zip(current)
+        {
+            if was != is {
+                tracing::info!("{name} {}", if is { "started" } else { "ended" });
+            }
+        }
         (self.shared.notify)()
     }
 
@@ -1027,12 +1043,10 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         let mut outcome = CommandOutcome::Applied;
         let mut expedite = false;
         match envelope.command {
-            ControllerCommand::Diagnostic { operation, result } => {
-                match result {
-                    Ok(()) => self.log.recovered(operation, SystemTime::now()),
-                    Err(failure) => self.log.failure(operation, failure, SystemTime::now()),
-                };
-            }
+            ControllerCommand::Diagnostic { operation, result } => match result {
+                Ok(()) => self.log.recovered(operation),
+                Err(failure) => self.log.failure(operation, failure),
+            },
             ControllerCommand::Manual(command) => {
                 let result = self
                     .driver
@@ -1225,11 +1239,8 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             }
             Err(error) => {
                 if let SessionError::Persistence(error) = &error {
-                    self.log.failure(
-                        DiagnosticOperation::ConfigurationWrite,
-                        error.diagnostic(),
-                        SystemTime::now(),
-                    );
+                    self.log
+                        .failure(DiagnosticOperation::ConfigurationWrite, error.diagnostic());
                 }
                 CommandOutcome::Failed(Arc::new(error))
             }
@@ -1238,11 +1249,8 @@ impl<F: FnMut() -> Foreground> Worker<F> {
 
     fn persisted(&mut self, result: PersistResult) {
         if let Some(error) = result.backup_error {
-            self.log.failure(
-                DiagnosticOperation::BackupWrite,
-                error.diagnostic(),
-                SystemTime::now(),
-            );
+            self.log
+                .failure(DiagnosticOperation::BackupWrite, error.diagnostic());
             self.storage_error = Some((DiagnosticOperation::BackupWrite, Arc::new(error)));
         } else {
             self.recovered(DiagnosticOperation::BackupWrite);
@@ -1270,11 +1278,8 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             Ok(_) => StorageError::missing_configuration(),
             Err(error) => error,
         };
-        self.log.failure(
-            DiagnosticOperation::ConfigurationRead,
-            error.diagnostic(),
-            SystemTime::now(),
-        );
+        self.log
+            .failure(DiagnosticOperation::ConfigurationRead, error.diagnostic());
         self.storage_error = Some((DiagnosticOperation::ConfigurationRead, Arc::new(error)));
         None
     }
@@ -1286,7 +1291,6 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 category: DiagnosticCategory::Calculation,
                 code: None,
             },
-            SystemTime::now(),
         );
     }
 

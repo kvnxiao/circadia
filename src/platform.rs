@@ -1,5 +1,6 @@
 pub(crate) mod clock;
 pub(crate) mod config_notifications;
+pub(crate) mod event_log;
 pub(crate) mod events;
 pub(crate) mod foreground;
 pub(crate) mod instance;

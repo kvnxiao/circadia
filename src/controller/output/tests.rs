@@ -637,3 +637,37 @@ fn one_hour_transition_has_410_changes_and_refreshes_only_replace_due_steps() {
         OutputDeadlines::default()
     );
 }
+
+#[test]
+fn temperature_operation_records_its_duration_at_debug_level() {
+    let records = crate::log::capture(tracing::Level::DEBUG, || {
+        let mut output = initialized(3400);
+        output
+            .update(
+                OutputTarget::Retained(temperature(2400)),
+                OutputUpdate::Apply,
+                moment(100),
+            )
+            .expect("target");
+        let request = output
+            .prepare(fresh(3400, false), moment(100), Duration::from_millis(500))
+            .expect("selection")
+            .expect("application");
+        apply(&mut output, request, Duration::from_millis(112));
+    });
+    assert_eq!(
+        records,
+        [
+            "DEBUG circadia::controller::output: temperature operation kelvin=3400 mode=Apply duration=0ns outcome=completed",
+            "DEBUG circadia::controller::output: temperature operation kelvin=2400 mode=Apply duration=12ms outcome=completed",
+        ]
+    );
+}
+
+#[test]
+fn temperature_operations_are_not_recorded_at_the_default_level() {
+    let records = crate::log::capture(tracing::Level::INFO, || {
+        initialized(3400);
+    });
+    assert_eq!(records, [""; 0]);
+}

@@ -1,6 +1,8 @@
 use crate::automation::Automation;
 use crate::automation::wait;
+use crate::lifecycle::error_records;
 use crate::lifecycle::native_message;
+use crate::lifecycle::read_log;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
 use crate::lifecycle::wait_temperature;
@@ -102,14 +104,14 @@ fn run_application(directory: &Path) -> io::Result<()> {
         !native.read_state().map_err(io::Error::other)?.is_active(),
         "exit left Night Light on",
     )?;
-    let diagnostics = match fs_err::read_to_string(directory.join("diagnostics.log")) {
-        Ok(value) => value,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(error),
-    };
+    let log = read_log(directory)?;
+    let errors = error_records(&log);
     require(
-        diagnostics.is_empty(),
-        &format!("output run recorded application errors: {diagnostics}"),
+        errors.is_empty(),
+        &format!(
+            "output run recorded application errors: {}",
+            errors.join("\n")
+        ),
     )?;
     require(passed, "output timing or endpoint acceptance failed")?;
     report(

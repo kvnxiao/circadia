@@ -106,7 +106,7 @@ impl GraphMeasurement {
         let result = ACTIVE
             .set(self.clone())
             .map_err(|_error| io::Error::other("measurement already started"))
-            .and_then(|()| super::run_with_native(Some(directory), native));
+            .and_then(|()| super::run_with_native(Some(directory), false, native));
         self.0
             .lifecycle
             .lock()

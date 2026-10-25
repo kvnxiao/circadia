@@ -535,6 +535,20 @@ pub(super) fn require(condition: bool, error: &str) -> io::Result<()> {
     }
 }
 
+pub(super) fn read_log(directory: &Path) -> io::Result<String> {
+    match fs_err::read_to_string(directory.join("logs").join("circadia.log")) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) fn error_records(log: &str) -> Vec<&str> {
+    log.lines()
+        .filter(|line| matches!(line.split_whitespace().nth(1), Some("WARN" | "ERROR")))
+        .collect()
+}
+
 #[expect(
     unsafe_code,
     reason = "send pointer-free lifecycle messages only to the owned child"
@@ -652,5 +666,23 @@ mod tests {
         let result = super::window(std::process::id(), "Circadia.Absent.Title.24a7", false);
         assert!(matches!(result, Ok(None)), "window lookup: {result:?}");
         drop(empty);
+    }
+
+    #[test]
+    fn error_records_select_warning_and_error_levels() {
+        let log = [
+            "2026-10-25T08:00:00.000001Z  INFO circadia::log: start version=0.1.0",
+            "2026-10-25T08:00:01.000001Z  WARN circadia::diagnostics: failure operation=location category=access_denied code=5",
+            "2026-10-25T08:00:02.000001Z  INFO circadia::diagnostics: recovered operation=location",
+            "2026-10-25T08:00:03.000001Z ERROR circadia::ui: panic",
+        ]
+        .join("\n");
+        assert_eq!(
+            super::error_records(&log),
+            [
+                "2026-10-25T08:00:01.000001Z  WARN circadia::diagnostics: failure operation=location category=access_denied code=5",
+                "2026-10-25T08:00:03.000001Z ERROR circadia::ui: panic",
+            ]
+        );
     }
 }

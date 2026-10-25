@@ -42,6 +42,8 @@ pub use worker::ControllerExit;
 pub use worker::ControllerSnapshot;
 pub use worker::ControllerWorker;
 pub use worker::Recompute;
+#[cfg(test)]
+pub(crate) use worker::mark_controller_thread;
 
 /// Report an unrepresentable deadline or unavailable fade destination.
 #[derive(Debug, thiserror::Error)]

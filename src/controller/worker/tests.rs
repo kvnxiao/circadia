@@ -186,6 +186,13 @@ fn acknowledged(snapshot: &ControllerSnapshot, receipt: &CommandReceipt) -> bool
         .is_some_and(|(processed, _outcome)| *processed >= receipt.id)
 }
 
+fn failure_records(log: &[String]) -> Vec<&str> {
+    log.iter()
+        .map(String::as_str)
+        .filter(|record| record.contains(" circadia::diagnostics: "))
+        .collect()
+}
+
 #[test]
 fn shutdown_notifies_after_disconnecting_queued_actions() {
     let directory = tempfile::tempdir().expect("directory");
@@ -321,47 +328,54 @@ fn configuration_recomputation_refreshes_previously_unknown_foreground() {
 }
 
 #[test]
-fn startup_diagnostics_record_failure_and_save_recovery_without_private_input() {
+fn startup_records_the_configuration_error_and_save_recovery() {
     let directory = tempfile::tempdir().expect("directory");
-    fs_err::write(
-        directory.path().join("config.toml"),
-        "wake = 'private-clock-input'",
-    )
-    .expect("invalid configuration");
-    let records = Arc::new(Mutex::new(Records::default()));
-    let (worker, notified) = start(&directory, &records);
-    let client = worker.client();
-    wait_for(&client, &notified, |snapshot| {
-        snapshot.scheduling == SchedulingState::Waiting
+    fs_err::write(directory.path().join("config.toml"), "wake = 'not-a-clock'")
+        .expect("invalid configuration");
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let records = Arc::new(Mutex::new(Records::default()));
+        let (worker, notified) = start(&directory, &records);
+        let client = worker.client();
+        wait_for(&client, &notified, |snapshot| {
+            snapshot.scheduling == SchedulingState::Waiting
+        });
+        client
+            .submit(ControllerCommand::BeginEdit)
+            .expect("begin edit");
+        client
+            .submit(ControllerCommand::Edit(Box::new(input(3400))))
+            .expect("edit");
+        let saved = client.submit(ControllerCommand::Save).expect("save");
+        wait_for(&client, &notified, |snapshot| {
+            acknowledged(snapshot, &saved) && snapshot.accepted.is_some()
+        });
+        let exit = worker.shutdown();
+        assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+        assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
     });
-    client
-        .submit(ControllerCommand::BeginEdit)
-        .expect("begin edit");
-    client
-        .submit(ControllerCommand::Edit(Box::new(input(3400))))
-        .expect("edit");
-    let saved = client.submit(ControllerCommand::Save).expect("save");
-    wait_for(&client, &notified, |snapshot| {
-        acknowledged(snapshot, &saved) && snapshot.accepted.is_some()
-    });
-    let exit = worker.shutdown();
-    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
-    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
-    let log =
-        fs_err::read_to_string(directory.path().join("diagnostics.log")).expect("diagnostic log");
-    let entries: Vec<_> = log
-        .lines()
-        .map(|line| line.split_once('\t').expect("timestamp field").1)
-        .collect();
+    let start = log.first().expect("start record");
+    assert!(
+        start.starts_with(&format!(
+            "INFO circadia::log: start version={} windows_build=10.0.",
+            env!("CARGO_PKG_VERSION")
+        )),
+        "{start}"
+    );
+    assert!(
+        start.contains(&format!(" process_id={} ", std::process::id())),
+        "{start}"
+    );
+    assert!(
+        start.ends_with(" configuration=error problems=1"),
+        "{start}"
+    );
     assert_eq!(
-        entries,
+        failure_records(&log),
         [
-            "configuration_read\tfailure\tinvalid_data\t-",
-            "configuration_read\trecovered\t-\t-"
+            "WARN circadia::diagnostics: failure operation=configuration_read category=invalid_data",
+            "INFO circadia::diagnostics: recovered operation=configuration_read",
         ]
     );
-    assert!(!log.contains("private-clock-input"));
-    assert!(!log.contains(directory.path().to_str().expect("fixture path")));
 }
 
 #[test]
@@ -370,36 +384,32 @@ fn ui_diagnostics_record_failure_once_and_recovery_without_changing_configuratio
     let store = ConfigStore::new(directory.path());
     let initial = input(3400).validate().expect("valid configuration");
     store.save(&initial).expect("save fixture");
-    let records = Arc::new(Mutex::new(Records::default()));
-    let (worker, notified) = start(&directory, &records);
-    let client = worker.client();
-    let failure = DiagnosticFailure {
-        category: DiagnosticCategory::AccessDenied,
-        code: Some(5),
-    };
-    for result in [Err(failure), Err(failure), Ok(())] {
-        let receipt = client
-            .submit(ControllerCommand::Diagnostic {
-                operation: DiagnosticOperation::Location,
-                result,
-            })
-            .expect("report UI result");
-        wait_for(&client, &notified, |snapshot| {
-            acknowledged(snapshot, &receipt)
-        });
-    }
-    assert!(worker.shutdown().worker.is_ok());
-    let log =
-        fs_err::read_to_string(directory.path().join("diagnostics.log")).expect("diagnostic log");
-    let entries: Vec<_> = log
-        .lines()
-        .map(|line| line.split_once('\t').expect("timestamp field").1)
-        .collect();
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let records = Arc::new(Mutex::new(Records::default()));
+        let (worker, notified) = start(&directory, &records);
+        let client = worker.client();
+        let failure = DiagnosticFailure {
+            category: DiagnosticCategory::AccessDenied,
+            code: Some(5),
+        };
+        for result in [Err(failure), Err(failure), Ok(())] {
+            let receipt = client
+                .submit(ControllerCommand::Diagnostic {
+                    operation: DiagnosticOperation::Location,
+                    result,
+                })
+                .expect("report UI result");
+            wait_for(&client, &notified, |snapshot| {
+                acknowledged(snapshot, &receipt)
+            });
+        }
+        assert!(worker.shutdown().worker.is_ok());
+    });
     assert_eq!(
-        entries,
+        failure_records(&log),
         [
-            "location\tfailure\taccess_denied\t5",
-            "location\trecovered\t-\t-"
+            "WARN circadia::diagnostics: failure operation=location category=access_denied code=5",
+            "INFO circadia::diagnostics: recovered operation=location",
         ]
     );
     assert_eq!(
@@ -463,32 +473,38 @@ fn unchanged_reload_preserves_backup_warning_until_a_successful_write() {
 fn first_launch_reloads_keep_unsaved_defaults_without_a_storage_error() {
     let directory = tempfile::tempdir().expect("directory");
     let store = ConfigStore::new(directory.path());
-    let records = Arc::new(Mutex::new(Records::default()));
-    let (worker, notified) = start(&directory, &records);
-    let client = worker.client();
-    for _ in 0..2 {
-        let reloaded = client
-            .submit(ControllerCommand::Reload)
-            .expect("initial or unrelated directory notification");
-        let snapshot = wait_for(&client, &notified, |snapshot| {
-            acknowledged(snapshot, &reloaded)
-        });
-        assert!(snapshot.storage_error.is_none());
-        assert_eq!(
-            snapshot
-                .accepted
-                .as_ref()
-                .expect("accepted defaults")
-                .config(),
-            &Config::default()
-        );
-    }
-    assert!(!store.primary_path().exists());
-    assert!(!store.backup_path().exists());
-    assert!(!directory.path().join("diagnostics.log").exists());
-    let exit = worker.shutdown();
-    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
-    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let records = Arc::new(Mutex::new(Records::default()));
+        let (worker, notified) = start(&directory, &records);
+        let client = worker.client();
+        for _ in 0..2 {
+            let reloaded = client
+                .submit(ControllerCommand::Reload)
+                .expect("initial or unrelated directory notification");
+            let snapshot = wait_for(&client, &notified, |snapshot| {
+                acknowledged(snapshot, &reloaded)
+            });
+            assert!(snapshot.storage_error.is_none());
+            assert_eq!(
+                snapshot
+                    .accepted
+                    .as_ref()
+                    .expect("accepted defaults")
+                    .config(),
+                &Config::default()
+            );
+        }
+        assert!(!store.primary_path().exists());
+        assert!(!store.backup_path().exists());
+        let exit = worker.shutdown();
+        assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+        assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+    });
+    assert_eq!(log.len(), 1, "{log:?}");
+    assert!(
+        log[0].ends_with(" configuration=defaults problems=0"),
+        "{log:?}"
+    );
 }
 
 #[test_case(false; "backup succeeds")]
@@ -867,67 +883,63 @@ fn external_configuration_reload_starts_native_access_after_startup_error() {
     let directory = tempfile::tempdir().expect("directory");
     let path = directory.path().join("config.toml");
     fs_err::write(&path, "wake = [").expect("invalid configuration");
-    let records = Arc::new(Mutex::new(Records::default()));
-    let (worker, notified) = start(&directory, &records);
-    let client = worker.client();
-    let waiting = wait_for(&client, &notified, |snapshot| {
-        snapshot.scheduling == SchedulingState::Waiting
-    });
-    assert!(waiting.accepted.is_none());
-    assert_eq!(records.lock().expect("native records").calls, []);
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let records = Arc::new(Mutex::new(Records::default()));
+        let (worker, notified) = start(&directory, &records);
+        let client = worker.client();
+        let waiting = wait_for(&client, &notified, |snapshot| {
+            snapshot.scheduling == SchedulingState::Waiting
+        });
+        assert!(waiting.accepted.is_none());
+        assert_eq!(records.lock().expect("native records").calls, []);
 
-    fs_err::write(
-        &path,
-        toml::to_string(&input(3000)).expect("valid replacement"),
-    )
-    .expect("external configuration correction");
-    let reload = client
-        .submit(ControllerCommand::Reload)
-        .expect("deliver the external file notification");
-    let recovered = wait_for(&client, &notified, |snapshot| {
-        acknowledged(snapshot, &reload)
-            && snapshot
+        fs_err::write(
+            &path,
+            toml::to_string(&input(3000)).expect("valid replacement"),
+        )
+        .expect("external configuration correction");
+        let reload = client
+            .submit(ControllerCommand::Reload)
+            .expect("deliver the external file notification");
+        let recovered = wait_for(&client, &notified, |snapshot| {
+            acknowledged(snapshot, &reload)
+                && snapshot
+                    .accepted
+                    .as_ref()
+                    .is_some_and(|layer| layer.last_scheduled() == Some(3000))
+        });
+        assert_eq!(recovered.scheduling, SchedulingState::Available);
+        assert!(recovered.storage_error.is_none());
+        assert_eq!(
+            recovered
                 .accepted
                 .as_ref()
-                .is_some_and(|layer| layer.last_scheduled() == Some(3000))
-    });
-    assert_eq!(recovered.scheduling, SchedulingState::Available);
-    assert!(recovered.storage_error.is_none());
-    assert_eq!(
-        recovered
-            .accepted
-            .as_ref()
-            .expect("accepted correction")
-            .config()
-            .input(),
-        &input(3000)
-    );
-    {
-        let native = records.lock().expect("native records");
-        assert!(
-            native
-                .calls
-                .starts_with(&[Call::Register, Call::Settings, Call::State])
+                .expect("accepted correction")
+                .config()
+                .input(),
+            &input(3000)
         );
-        assert_eq!(native.settings.temperature, Some(3000));
-        assert!(native.active);
-        assert!(!native.calls.contains(&Call::Activate(false)));
-    }
-    let exit = worker.shutdown();
-    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
-    assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
-    assert!(exit.native.is_some());
-    let log = fs_err::read_to_string(directory.path().join("diagnostics.log"))
-        .expect("configuration diagnostics");
-    let entries: Vec<_> = log
-        .lines()
-        .map(|line| line.split_once('\t').expect("timestamp field").1)
-        .collect();
+        {
+            let native = records.lock().expect("native records");
+            assert!(
+                native
+                    .calls
+                    .starts_with(&[Call::Register, Call::Settings, Call::State])
+            );
+            assert_eq!(native.settings.temperature, Some(3000));
+            assert!(native.active);
+            assert!(!native.calls.contains(&Call::Activate(false)));
+        }
+        let exit = worker.shutdown();
+        assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+        assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+        assert!(exit.native.is_some());
+    });
     assert_eq!(
-        entries,
+        failure_records(&log),
         [
-            "configuration_read\tfailure\tinvalid_data\t-",
-            "configuration_read\trecovered\t-\t-"
+            "WARN circadia::diagnostics: failure operation=configuration_read category=invalid_data",
+            "INFO circadia::diagnostics: recovered operation=configuration_read",
         ]
     );
 }
@@ -1583,4 +1595,66 @@ fn panic_cleanup_on_the_controller_thread_returns_without_requesting_exit() {
     assert!(waited < Duration::from_secs(1), "{waited:?}");
     let exit = worker.shutdown();
     assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+}
+
+#[test]
+fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
+    let directory = tempfile::tempdir().expect("directory");
+    let mut config = input(3400);
+    config.suppression = vec!["game.exe".into()];
+    config.focus_delay_ms = 0;
+    ConfigStore::new(directory.path())
+        .save(&config.clone().validate().expect("config"))
+        .expect("saved config");
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let records = Arc::new(Mutex::new(Records::default()));
+        let (worker, notified) = start(&directory, &records);
+        let client = worker.client();
+        wait_for(&client, &notified, |snapshot| {
+            snapshot
+                .accepted
+                .as_ref()
+                .is_some_and(|layer| layer.last_scheduled() == Some(3400))
+        });
+        let submit = |command| {
+            let receipt = client.submit(command).expect("command");
+            wait_for(&client, &notified, |snapshot| {
+                acknowledged(snapshot, &receipt)
+            })
+        };
+        for executable in ["editor.exe", "browser.exe", "game.exe", "editor.exe"] {
+            submit(ControllerCommand::Foreground(Foreground::Application(
+                executable.into(),
+            )));
+            let snapshot = wait_for(&client, &notified, |snapshot| {
+                snapshot.suppression.automatic == (executable == "game.exe")
+            });
+            assert!(!snapshot.suppression.manual);
+        }
+        submit(ControllerCommand::Manual(ManualCommand::Start));
+        submit(ControllerCommand::Manual(ManualCommand::Stop));
+        submit(ControllerCommand::BeginEdit);
+        submit(ControllerCommand::Preview(Box::new(
+            config.clone().validate().expect("preview config"),
+        )));
+        wait_for(&client, &notified, |snapshot| snapshot.preview_active);
+        submit(ControllerCommand::StopPreview);
+        wait_for(&client, &notified, |snapshot| !snapshot.preview_active);
+        assert!(worker.shutdown().worker.is_ok());
+    });
+    let transitions: Vec<_> = log
+        .iter()
+        .filter(|record| record.contains(" circadia::controller::worker: "))
+        .collect();
+    assert_eq!(
+        transitions,
+        [
+            "INFO circadia::controller::worker: automatic suppression started",
+            "INFO circadia::controller::worker: automatic suppression ended",
+            "INFO circadia::controller::worker: manual suppression started",
+            "INFO circadia::controller::worker: manual suppression ended",
+            "INFO circadia::controller::worker: preview started",
+            "INFO circadia::controller::worker: preview ended",
+        ]
+    );
 }

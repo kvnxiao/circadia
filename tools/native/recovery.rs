@@ -1,5 +1,6 @@
 use crate::automation::Automation;
 use crate::automation::wait as wait_automation;
+use crate::lifecycle::read_log;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
 use crate::lifecycle::wait;
@@ -393,19 +394,41 @@ fn written(
 }
 
 fn diagnostics(directory: &Path, operation: &str, expected: &[&str]) -> io::Result<()> {
-    let text = fs_err::read_to_string(directory.join("diagnostics.log"))?;
-    let actual: Vec<_> = text
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split('\t');
-            fields.next()?;
-            (fields.next()? == operation)
-                .then(|| fields.next())
-                .flatten()
-        })
-        .collect();
+    let log = read_log(directory)?;
+    let actual = transitions(&log, operation);
     require(
         actual == expected,
         &format!("{operation} diagnostic transitions: expected {expected:?}, observed {actual:?}"),
     )
+}
+
+fn transitions<'a>(log: &'a str, operation: &str) -> Vec<&'a str> {
+    let operation = format!("operation={operation}");
+    log.lines()
+        .filter_map(|line| {
+            let (_, record) = line.split_once(" circadia::diagnostics: ")?;
+            let mut fields = record.split(' ');
+            let status = fields.next()?;
+            fields.any(|field| field == operation).then_some(status)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn transitions_list_one_operation_in_log_order() {
+        let log = [
+            "2026-10-25T08:00:00.000001Z  INFO circadia::log: start version=0.1.0 configuration=file problems=0",
+            "2026-10-25T08:00:01.000001Z  WARN circadia::diagnostics: failure operation=observation category=windows code=5",
+            "2026-10-25T08:00:02.000001Z  WARN circadia::diagnostics: failure operation=temperature_write category=windows",
+            "2026-10-25T08:00:03.000001Z  INFO circadia::diagnostics: recovered operation=observation",
+        ]
+        .join("\n");
+        assert_eq!(
+            super::transitions(&log, "observation"),
+            ["failure", "recovered"]
+        );
+        assert_eq!(super::transitions(&log, "native_settings_read"), [""; 0]);
+    }
 }

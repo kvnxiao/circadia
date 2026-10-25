@@ -22,7 +22,17 @@ just build-self-contained
 ./target/debug/circadia.exe
 ```
 
-Launching Circadia starts management of live Night Light. Start minimized defaults on; open settings from the tray or launch the executable again. Closing settings keeps control running. Quit clears native preview and requests Night Light off. If an internal error in the settings window or tray ends Circadia after it has begun accessing Night Light, it makes the same two requests without a fade and waits at most 2 seconds for them before the process ends.
+Launching Circadia starts management of live Night Light. Start minimized defaults on; open settings from the tray or launch the executable again. Closing settings keeps control running. Quit clears native preview and requests Night Light off. Every internal error (a Rust panic) writes a crash record to the log and then ends the process. If Circadia has begun accessing Night Light, it first clears native preview and requests Night Light off without changing the temperature gradually, and waits at most 2 seconds for both requests. An error on the thread that writes Night Light skips these two requests.
+
+The command line is `circadia [--data-dir DIRECTORY] [--verbose | -V]`. `--verbose` or `-V` adds `DEBUG` records to the log for that process:
+
+- Each Night Light temperature write, with its Kelvin value, duration, and outcome.
+- Each change of the foreground app, with its executable name and whether Circadia suppresses the schedule for it.
+- Each configuration file write.
+
+A launch while Circadia is already running opens settings in the running process and does not change its log detail.
+
+Release builds keep line tables (`debug = "line-tables-only"` in `[profile.release]`), so the release `circadia.pdb` can resolve the `module+0xoffset` frames in crash records to functions and lines. Archive the PDB of each distributed build and do not ship it; a rebuilt executable gets a new PDB that cannot resolve another build's offsets.
 
 ## Resource baseline
 
@@ -96,22 +106,37 @@ Registration stores the current executable and data directory paths. After movin
 
 ## Local data
 
-The application uses `%LOCALAPPDATA%/Circadia/`. The `--data-dir DIRECTORY` argument selects another directory for configuration and diagnostics. It does not isolate Windows Night Light settings; the native lifecycle harness changes those settings even with temporary configuration.
+The application uses `%LOCALAPPDATA%/Circadia/`. The `--data-dir DIRECTORY` argument selects another directory for configuration and the log. It does not isolate Windows Night Light settings; the native lifecycle harness changes those settings even with temporary configuration.
 
 | File | Purpose |
 | :-- | :-- |
 | `config.toml` | Saved configuration, replaced atomically after validation |
 | `config.backup.toml` | Most recently written or accepted valid configuration |
 | `config.invalid-*.toml` | Invalid startup configuration preserved before restoring a valid backup |
-| `diagnostics.log` | Operation failures, changed errors, and recovery |
+| `logs/circadia.log` | Current log of starts, lifecycle events, operation failures and recovery, and crash records |
+| `logs/circadia.1.log` | Older log, replaced when `circadia.log` rotates |
+| `logs/run.marker` | Process ID and start time of the running instance, deleted after exit finishes |
 
 Startup accepts defaults only when both configuration files are missing. A valid primary file takes precedence over the backup. If the primary file is missing, invalid, or unreadable, a valid backup becomes the accepted configuration even if restoring it to disk fails. If either file exists but neither is valid, the library reports a configuration error and does not supply an active configuration. A backup write failure does not undo a successful primary write.
 
 After restoring a backup, settings reports the cause until a successful Save. A successful tray configuration change clears a resolved write error from restoring the backup while retaining that notice.
 
-Diagnostics use tab-separated Unix milliseconds, operation, status, error category, and an optional technical error code. Categories are fixed names such as `access_denied` and `invalid_data`. Repeated identical failures are recorded once per operation until its error changes or it recovers. Records exclude coordinates, executable names, window titles, personal paths, and raw dependency error text. Logging failure does not prevent editing, control, or exit.
+Each log record has a UTC timestamp, a level (`INFO`, `WARN`, `ERROR`, or `DEBUG` with `--verbose`), the Rust module that wrote it, a message, and `key=value` fields:
 
-Choose **Open diagnostics folder** in settings to open the data directory in Windows Explorer.
+- At each launch, a `start` record has the Circadia version, the Windows build, the commit of the windows-rs UI library that the build uses, the process ID, and whether startup used the configuration file, its backup, or the defaults, or reported a configuration error.
+- A `WARN` failure record names the operation, such as `temperature_write` or `configuration_read`, an error category such as `access_denied` or `invalid_data`, and an optional Windows error code. Circadia records a repeated identical failure of an operation once, and records it again only after the error changes or the operation recovers. An `INFO` record marks the recovery.
+- `INFO` lifecycle records cover settings opening and closing, suspend and resume, automatic and manual suppression starting and ending, Preview starting and ending, a Windows sign-out or shutdown, and exit.
+
+Crash records use the `ERROR` level:
+
+- A panic record has the process ID, thread name, source location, message, and return addresses as `module+0xoffset` frames.
+- An unhandled native exception, such as an access violation, records its exception code, faulting module, and offset before Windows Error Reporting handles the crash.
+
+At the next launch, a leftover `run.marker` shows that the previous run did not exit cleanly. Circadia looks for that run's crash record in the log. If the log has none, it looks in the Windows Application event log for a crash event that Windows Error Reporting wrote for that process: event 1000, with the fast-fail code from event 1001. A found event produces a `WARN` record, `previous run crashed`. Otherwise, Circadia writes an `INFO` record, `previous run ended unexpectedly`, for example after power loss or forced termination.
+
+Before a write would make `circadia.log` larger than 1 MiB minus 16 KiB, Circadia renames it to `circadia.1.log`, replacing the older file. The 16 KiB leaves room for one crash record, which is cut to 16 KiB and written without rotation, so the two files together stay within 2 MiB. The log stays on the computer and can contain personal data, such as coordinates, executable names, file paths, and window titles. Logging failure does not prevent editing, control, or exit. The repository's [bug report template](.github/ISSUE_TEMPLATE/bug_report.md) asks reporters to attach the log and to remove anything they do not want to share.
+
+Choose **Open diagnostics folder** in settings to open the data directory in Windows Explorer. The log is in its `logs` folder.
 
 ## Schedule calculation
 

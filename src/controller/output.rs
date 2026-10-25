@@ -236,6 +236,7 @@ enum Startup {
 #[derive(Clone, Copy, Debug)]
 struct Issued {
     request: NativeRequest,
+    prepared: Duration,
     scheduled: bool,
     final_step: bool,
     completing_fade: bool,
@@ -558,8 +559,7 @@ impl TemperatureOutput {
         if self.pending == Pending::Apply {
             self.refresh = true;
         }
-        let live_edit = self.pending == Pending::Set;
-        self.pending = Pending::None;
+        let live_edit = std::mem::replace(&mut self.pending, Pending::None) == Pending::Set;
         let changing_fade = self.fade.is_some_and(|fade| now.elapsed < fade.end());
         let temperature = if let Some(fade) = self.fade.filter(|_fade| changing_fade) {
             fade.rounded(now.elapsed)?
@@ -609,6 +609,7 @@ impl TemperatureOutput {
         self.intended = Some(temperature);
         self.issued = Some(Issued {
             request,
+            prepared: now.elapsed,
             scheduled: target.is_scheduled() && !changing_fade,
             final_step: !changing_fade,
             completing_fade: self.fade.is_some_and(|fade| now.elapsed >= fade.end()),
@@ -624,6 +625,22 @@ impl TemperatureOutput {
             self.last_written = Some(stored);
         }
         let issued = self.issued.take();
+        if let Some(step) = &issued {
+            let outcome = if report.error.is_some() {
+                "failed"
+            } else if report.cancelled {
+                "cancelled"
+            } else {
+                "completed"
+            };
+            tracing::debug!(
+                kelvin = step.request.temperature.kelvin(),
+                mode = ?step.request.mode,
+                duration = ?now.saturating_sub(step.prepared),
+                outcome = %outcome,
+                "temperature operation"
+            );
+        }
         let scheduled = issued
             .filter(|step| {
                 step.scheduled

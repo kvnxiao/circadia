@@ -27,6 +27,8 @@ solar-positioning = { version = "0.7.1", default-features = false, features = ["
 tempfile = "3"
 thiserror = "2.0"
 toml = "1.1"
+tracing = { version = "0.1.44", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "registry"] }
 
 [target.'cfg(windows)'.dependencies]
 win-nightlight-lib = "0.5.0"
@@ -36,7 +38,7 @@ windows = { version = "0.62", features = ["Devices_Geolocation", "Foundation"] }
 windows-future = "0.3"
 windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac" }
 windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac" }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_Threading", "Win32_System_Time", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_Debug", "Win32_System_EventLog", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
 
 [build-dependencies]
@@ -50,6 +52,9 @@ test-case = "3"
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-core = "0.62"
+
+[profile.release]
+debug = "line-tables-only"
 
 [lints.rust]
 unsafe_code = "deny"

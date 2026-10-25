@@ -355,11 +355,13 @@ impl ControlRuntime {
     ) -> Result<(), ControlError> {
         self.foreground.observe(foreground);
         let Some(config) = &self.config else {
+            record_foreground(foreground, None);
             return Ok(());
         };
+        let focus = self.focus(config);
+        record_foreground(foreground, Some(focus));
         let before = self.suppression.state().active();
-        self.suppression
-            .observe_focus(self.focus(config), now.uptime, config)?;
+        self.suppression.observe_focus(focus, now.uptime, config)?;
         if before != self.suppression.state().active() {
             self.select(OutputUpdate::Fade, now)?;
         }
@@ -483,6 +485,9 @@ impl ControlRuntime {
     /// Cancel obsolete playback and output without requesting a restoration
     /// write.
     pub fn suspend(&mut self, now: RuntimeTime) {
+        if self.lifecycle != Lifecycle::Suspended {
+            tracing::info!("suspended");
+        }
         self.lifecycle = Lifecycle::Suspended;
         self.preview = None;
         self.preview_entry = None;
@@ -505,6 +510,7 @@ impl ControlRuntime {
             return Ok(None);
         }
         self.resume_epoch = Some(epoch);
+        tracing::info!("resumed");
         self.lifecycle = Lifecycle::Running;
         self.preview = None;
         self.preview_entry = None;
@@ -513,10 +519,12 @@ impl ControlRuntime {
         self.output.request_refresh();
         self.foreground.observe(foreground);
         let Some(config) = &self.config else {
+            record_foreground(foreground, None);
             return Ok(None);
         };
-        self.suppression
-            .resume_focus(self.focus(config), now.uptime, config)?;
+        let focus = self.focus(config);
+        record_foreground(foreground, Some(focus));
+        self.suppression.resume_focus(focus, now.uptime, config)?;
         if self.state == SchedulingState::Stopped && self.last_scheduled.is_none() {
             self.focus_initialized = false;
         }
@@ -657,4 +665,21 @@ impl ControlRuntime {
             .chain(self.preview_deadline()?)
             .min())
     }
+}
+
+fn record_foreground(foreground: &Foreground, focus: Option<Focus>) {
+    let executable = match foreground {
+        Foreground::Unknown => "unknown",
+        Foreground::Shell => "shell",
+        Foreground::Application(name) => name,
+    };
+    let decision = focus.map(|focus| match focus {
+        Focus::Matching => "suppress",
+        Focus::Nonmatching => "none",
+    });
+    tracing::debug!(
+        executable = %executable,
+        decision = decision.map(tracing::field::display),
+        "foreground"
+    );
 }

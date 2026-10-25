@@ -6,6 +6,7 @@ mod config;
 #[cfg(windows)]
 mod controller;
 mod diagnostics;
+mod log;
 #[cfg(all(windows, feature = "output-measurement"))]
 mod measurement;
 #[cfg(windows)]
@@ -100,7 +101,6 @@ pub use diagnostics::DiagnosticCategory;
 pub use diagnostics::DiagnosticFailure;
 pub use diagnostics::DiagnosticLog;
 pub use diagnostics::DiagnosticOperation;
-pub use diagnostics::DiagnosticWrite;
 #[cfg(all(windows, feature = "output-measurement"))]
 pub use measurement::OutputMeasurement;
 #[cfg(windows)]

@@ -792,3 +792,53 @@ fn superseded_calculation_does_not_replace_current_configuration() {
             .expect("current result")
     );
 }
+
+#[test]
+fn foreground_changes_record_the_executable_and_decision_at_debug_level() {
+    let config = ConfigInput {
+        suppression: vec!["javaw.exe".into()],
+        ..ConfigInput::default()
+    }
+    .validate()
+    .expect("config");
+    let session = ConfigSession::new(Some(config));
+    let records = crate::log::capture(tracing::Level::DEBUG, || {
+        let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
+        runtime
+            .foreground(&Foreground::Application("javaw.exe".into()), time(100))
+            .expect("matching focus");
+        runtime
+            .foreground(&Foreground::Shell, time(200))
+            .expect("shell focus");
+    });
+    assert_eq!(
+        records,
+        [
+            "DEBUG circadia::controller::runtime: foreground executable=unknown",
+            "DEBUG circadia::controller::runtime: foreground executable=javaw.exe decision=suppress",
+            "DEBUG circadia::controller::runtime: foreground executable=shell decision=none",
+        ]
+    );
+}
+
+#[test]
+fn suspend_and_a_new_resume_each_record_once_at_the_default_level() {
+    let session = ConfigSession::new(Some(Config::default()));
+    let records = crate::log::capture(tracing::Level::INFO, || {
+        let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
+        runtime.suspend(time(100));
+        runtime
+            .resume(1, &Foreground::Unknown, time(200))
+            .expect("resume");
+        runtime
+            .resume(1, &Foreground::Unknown, time(300))
+            .expect("duplicate resume");
+    });
+    assert_eq!(
+        records,
+        [
+            "INFO circadia::controller::runtime: suspended",
+            "INFO circadia::controller::runtime: resumed",
+        ]
+    );
+}

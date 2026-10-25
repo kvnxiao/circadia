@@ -38,7 +38,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
-use std::time::Instant;
 use windows_reactor::App;
 use windows_reactor::Application;
 use windows_reactor::ApplicationContext;
@@ -52,18 +51,23 @@ use windows_reactor::NotifyIcon;
 
 /// Run the native tray application after claiming the current user session.
 ///
-/// - An explicit directory isolates configuration, backup, and diagnostic
-///   files.
-/// - A second invocation only activates settings in the existing process.
+/// - An explicit directory isolates configuration, backup, and log files.
+/// - `verbose` records debug detail for this process only.
+/// - A second invocation only activates settings in the existing process and
+///   does not log.
 /// - Normal startup can change live Night Light; graceful exit requests off.
 ///
 /// # Errors
 /// Report argument, startup, message-loop, worker, or exit-cleanup failures.
-pub fn run_desktop(directory: Option<PathBuf>) -> io::Result<()> {
-    run_with_native(directory, crate::Native::new())
+pub fn run_desktop(directory: Option<PathBuf>, verbose: bool) -> io::Result<()> {
+    run_with_native(directory, verbose, crate::Native::new())
 }
 
-fn run_with_native(directory: Option<PathBuf>, native: crate::Native) -> io::Result<()> {
+fn run_with_native(
+    directory: Option<PathBuf>,
+    verbose: bool,
+    native: crate::Native,
+) -> io::Result<()> {
     let primary = match InstanceClaim::acquire()? {
         InstanceClaim::Existing(existing) => return existing.activate(),
         InstanceClaim::Primary(primary) => Rc::new(primary),
@@ -75,6 +79,7 @@ fn run_with_native(directory: Option<PathBuf>, native: crate::Native) -> io::Res
         })?)
         .join("Circadia"),
     };
+    let panic_controller = start_log(&directory, verbose)?;
     let executable = std::env::current_exe()?;
     let running_executable = executable
         .file_name()
@@ -86,6 +91,7 @@ fn run_with_native(directory: Option<PathBuf>, native: crate::Native) -> io::Res
             )
         })?
         .to_owned();
+    let previous_run = crate::log::run::begin(&directory, &running_executable);
     let result = Rc::new(RefCell::new(None));
     let application = App::run_application::<Desktop>(Input {
         startup: RefCell::new(Some(Startup {
@@ -93,23 +99,40 @@ fn run_with_native(directory: Option<PathBuf>, native: crate::Native) -> io::Res
             running_executable: running_executable.clone(),
             primary: Rc::clone(&primary),
             result: Rc::clone(&result),
+            panic_controller,
         })),
         directory,
         running_executable,
         icon: executable.with_file_name("circadia.ico"),
         executable,
+        previous_run,
     })
     .map_err(io::Error::other);
     let shutdown = result.borrow_mut().take().map_or(Ok(()), Err);
     application.and(shutdown)
 }
 
-// The standard library reports this message when a panic reaches a frame that
-// cannot unwind, such as a WinUI callback, and aborts the process after the
-// hook returns. Other panics unwind and can be caught, so they must not stop
-// the controller.
-fn aborts_process(info: &std::panic::PanicHookInfo<'_>) -> bool {
-    info.payload_as_str() == Some("panic in a function that cannot unwind")
+fn start_log(directory: &Path, verbose: bool) -> io::Result<Arc<OnceLock<ControllerClient>>> {
+    let writer = crate::log::LogWriter::new(directory);
+    let level = if verbose {
+        tracing::Level::DEBUG
+    } else {
+        tracing::Level::INFO
+    };
+    tracing::dispatcher::set_global_default(crate::log::subscriber(writer.clone(), level))
+        .map_err(io::Error::other)?;
+    let controller = Arc::new(OnceLock::<ControllerClient>::new());
+    let hooked = Arc::clone(&controller);
+    let deadline = OnceLock::new();
+    std::panic::set_hook(Box::new(move |info| {
+        writer.append_record(crate::log::panic_record(info).as_bytes());
+        if let Some(client) = hooked.get() {
+            client.finish_after_panic(&deadline, Duration::from_secs(2));
+        }
+        std::process::abort();
+    }));
+    crate::log::install_exception_filter(directory);
+    Ok(controller)
 }
 
 struct Input {
@@ -118,6 +141,11 @@ struct Input {
     running_executable: String,
     icon: PathBuf,
     executable: PathBuf,
+    #[expect(
+        dead_code,
+        reason = "the crash notice does not read the previous run yet"
+    )]
+    previous_run: crate::log::run::PreviousRun,
 }
 
 struct Startup {
@@ -125,6 +153,7 @@ struct Startup {
     running_executable: String,
     primary: Rc<PrimaryInstance>,
     result: Rc<RefCell<Option<io::Error>>>,
+    panic_controller: Arc<OnceLock<ControllerClient>>,
 }
 
 #[derive(Clone)]
@@ -144,6 +173,7 @@ enum Message {
 struct Runtime {
     controller: ControllerWorker,
     files: Option<FileChanges>,
+    directory: PathBuf,
 }
 
 impl Runtime {
@@ -154,11 +184,18 @@ impl Runtime {
         let native = controller.native.map_or(Ok(()), |exit| {
             exit.preview.and(exit.off).map_err(io::Error::other)
         });
-        requested
+        let result = requested
             .and(files)
             .and(controller.worker)
             .and(controller.calculation)
-            .and(native)
+            .and(native);
+        tracing::info!(
+            succeeded = result.is_ok(),
+            error = result.as_ref().err().map(tracing::field::display),
+            "exit"
+        );
+        crate::log::run::finish(&self.directory);
+        result
     }
 }
 
@@ -184,7 +221,7 @@ impl Session {
             move |event| {
                 let _delivered = sender.send(Message::Native(event));
             },
-            move || finish_runtime(&ending, &exit_result),
+            move || end_session(&ending, &exit_result),
         )?;
         let focus_pending = Rc::new(Cell::new(false));
         let focused = Rc::clone(&focus_pending);
@@ -207,20 +244,13 @@ impl Session {
             read_foreground,
         )?;
         let client = controller.client();
-        let hooked = client.clone();
-        let deadline = OnceLock::<Instant>::new();
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            if aborts_process(info) {
-                hooked.finish_after_panic(&deadline, Duration::from_secs(2));
-            }
-            previous(info);
-        }));
+        startup.panic_controller.get_or_init(|| client.clone());
         #[cfg(feature = "graph-measurement")]
         crate::activity::bind(&client);
         *runtime.borrow_mut() = Some(Runtime {
             controller,
             files: watched.ok(),
+            directory: directory.to_owned(),
         });
         startup.primary.publish_ready()?;
         #[cfg(feature = "graph-measurement")]
@@ -245,6 +275,11 @@ impl Drop for Session {
     fn drop(&mut self) {
         finish_runtime(&self.runtime, &self.result);
     }
+}
+
+fn end_session(runtime: &RefCell<Option<Runtime>>, result: &RefCell<Option<io::Error>>) {
+    tracing::info!("session end confirmed");
+    finish_runtime(runtime, result);
 }
 
 fn finish_runtime(runtime: &RefCell<Option<Runtime>>, result: &RefCell<Option<io::Error>>) {
@@ -383,13 +418,13 @@ impl Application for Desktop {
             Message::Start => self.start(context),
             Message::Open => self.open_settings(context),
             Message::Opened => {
-                self.settings_open = true;
+                self.set_settings_open(true);
                 if !self.exiting {
                     self.queue(ControllerCommand::BeginEdit);
                 }
             }
             Message::Closed => {
-                self.settings_open = false;
+                self.set_settings_open(false);
                 if self.exiting {
                     context.exit();
                 } else {
@@ -460,6 +495,13 @@ impl Application for Desktop {
 }
 
 impl Desktop {
+    fn set_settings_open(&mut self, open: bool) {
+        if self.settings_open != open {
+            tracing::info!("settings {}", if open { "opened" } else { "closed" });
+        }
+        self.settings_open = open;
+    }
+
     fn start(&mut self, context: &ApplicationContext<Self>) {
         let Some(startup) = self.startup.take() else {
             return;
@@ -806,43 +848,399 @@ impl ResumeEpoch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NativeNotifications;
+    use crate::NativeSettings;
+    use crate::ObservationMode;
+    use crate::TemperatureMode;
+    use crate::native::NativeBackend;
+    use std::os::windows::io::BorrowedHandle;
+    use std::time::Instant;
+    use win_nightlight_lib::ColorTemperature;
 
-    const ABORTING_PANIC_CHILD: &str = "CIRCADIA_ABORTING_PANIC_CHILD";
+    const PANIC_CHILD_DIRECTORY: &str = "CIRCADIA_PANIC_CHILD_DIRECTORY";
+    const ABORT_STATUS: i32 = 0xC000_0409_u32.cast_signed();
+
+    struct ChildRun {
+        process_id: u32,
+        status: std::process::ExitStatus,
+        output: String,
+        log: String,
+        native_calls: String,
+    }
+
+    fn run_child(test: &str) -> ChildRun {
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        let child = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args(["--exact", test, "--nocapture"])
+            .env(PANIC_CHILD_DIRECTORY, directory.path())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("child test started");
+        let process_id = child.id();
+        let output = child.wait_with_output().expect("child test ended");
+        let read = |path: PathBuf| fs_err::read_to_string(path).unwrap_or_default();
+        ChildRun {
+            process_id,
+            status: output.status,
+            output: format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ),
+            log: read(directory.path().join("logs").join("circadia.log")),
+            native_calls: read(directory.path().join("native-calls.txt")),
+        }
+    }
+
+    fn child_directory() -> Option<PathBuf> {
+        let directory = std::env::var_os(PANIC_CHILD_DIRECTORY).map(PathBuf::from)?;
+        suppress_crash_reporting();
+        Some(directory)
+    }
+
+    #[expect(
+        unsafe_code,
+        reason = "keep the intentional child abort out of Windows Error Reporting"
+    )]
+    fn suppress_crash_reporting() {
+        use windows_sys::Win32::System::Diagnostics::Debug::SEM_FAILCRITICALERRORS;
+        use windows_sys::Win32::System::Diagnostics::Debug::SEM_NOGPFAULTERRORBOX;
+        use windows_sys::Win32::System::Diagnostics::Debug::SetErrorMode;
+        // SAFETY: SetErrorMode changes only this child process's error mode
+        // and takes no pointers.
+        unsafe { SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX) };
+    }
+
+    fn crash_record(run: &ChildRun) -> &str {
+        run.log
+            .lines()
+            .find(|line| line.contains(" ERROR circadia::log: panic "))
+            .unwrap_or_else(|| panic!("no crash record in {:?}\n{}", run.log, run.output))
+    }
+
+    fn test_executable() -> String {
+        std::env::current_exe()
+            .expect("test executable")
+            .file_name()
+            .expect("test executable name")
+            .to_string_lossy()
+            .into_owned()
+    }
 
     #[test]
-    fn a_panic_leaving_a_callback_that_cannot_unwind_is_recognized_as_aborting() {
-        if std::env::var_os(ABORTING_PANIC_CHILD).is_some() {
-            std::panic::set_hook(Box::new(exit_when_aborting));
-            callback_that_cannot_unwind();
+    fn a_worker_thread_panic_records_a_crash_and_ends_the_process() {
+        if let Some(directory) = child_directory() {
+            start_log(&directory, false).expect("child log");
+            let worker = std::thread::Builder::new()
+                .name("circadia-test-worker".into())
+                .spawn(|| panic!("worker failed"))
+                .expect("worker thread");
+            drop(worker.join());
+            return;
         }
-        let child = std::process::Command::new(std::env::current_exe().expect("test executable"))
-            .args([
-                "--exact",
-                "ui::tests::a_panic_leaving_a_callback_that_cannot_unwind_is_recognized_as_aborting",
-            ])
-            .env(ABORTING_PANIC_CHILD, "1")
-            .output()
-            .expect("child test ran");
+        let run =
+            run_child("ui::tests::a_worker_thread_panic_records_a_crash_and_ends_the_process");
+        assert_eq!(run.status.code(), Some(ABORT_STATUS), "{}", run.output);
+        let record = crash_record(&run);
+        let (timestamp, _) = record.split_once(' ').expect("timestamp separator");
         assert_eq!(
-            child.status.code(),
-            Some(85),
+            timestamp.len(),
+            "2026-10-25T08:00:00.123456Z".len(),
+            "{record}"
+        );
+        assert!(timestamp.parse::<jiff::Timestamp>().is_ok(), "{record}");
+        assert!(
+            record.contains(&format!(
+                " ERROR circadia::log: panic process_id={} thread=\"circadia-test-worker\" location=\"src\\\\ui.rs:",
+                run.process_id
+            )),
+            "{record}"
+        );
+        assert!(
+            record.contains(" message=\"worker failed\" frames="),
+            "{record}"
+        );
+        assert!(
+            record.contains(&format!("{}+0x", test_executable())),
+            "{record}"
+        );
+    }
+
+    #[test]
+    fn a_panic_before_the_session_starts_leaves_a_crash_record() {
+        if let Some(directory) = child_directory() {
+            start_log(&directory, false).expect("child log");
+            panic!("startup failed");
+        }
+        let run = run_child("ui::tests::a_panic_before_the_session_starts_leaves_a_crash_record");
+        assert_eq!(run.status.code(), Some(ABORT_STATUS), "{}", run.output);
+        assert!(
+            crash_record(&run).contains(" message=\"startup failed\" frames="),
             "{}",
-            String::from_utf8_lossy(&child.stdout)
+            run.log
+        );
+    }
+
+    #[test]
+    fn a_panic_outside_the_controller_requests_cleanup_before_ending() {
+        if let Some(directory) = child_directory() {
+            panic_with_controller(&directory, false);
+            return;
+        }
+        let run =
+            run_child("ui::tests::a_panic_outside_the_controller_requests_cleanup_before_ending");
+        assert_eq!(run.status.code(), Some(ABORT_STATUS), "{}", run.output);
+        assert!(crash_record(&run).contains(" message=\"settings failed\" "));
+        assert!(
+            run.native_calls
+                .ends_with("end_preview\nset_active false\n"),
+            "{}",
+            run.native_calls
+        );
+    }
+
+    #[test]
+    fn a_controller_thread_panic_ends_without_a_cleanup_request() {
+        if let Some(directory) = child_directory() {
+            panic_with_controller(&directory, true);
+            return;
+        }
+        let run = run_child("ui::tests::a_controller_thread_panic_ends_without_a_cleanup_request");
+        assert_eq!(run.status.code(), Some(ABORT_STATUS), "{}", run.output);
+        assert!(crash_record(&run).contains(" message=\"settings failed\" "));
+        assert!(
+            run.native_calls.contains("temperature"),
+            "{}",
+            run.native_calls
+        );
+        assert!(
+            !run.native_calls.contains("end_preview"),
+            "{}",
+            run.native_calls
+        );
+        assert!(
+            !run.native_calls.contains("set_active false"),
+            "{}",
+            run.native_calls
+        );
+    }
+
+    #[test]
+    fn an_unhandled_native_exception_records_its_code_and_module() {
+        if let Some(directory) = child_directory() {
+            start_log(&directory, false).expect("child log");
+            raise_native_exception();
+            return;
+        }
+        let run = run_child("ui::tests::an_unhandled_native_exception_records_its_code_and_module");
+        assert_eq!(
+            run.status.code(),
+            Some(0xE000_0001_u32.cast_signed()),
+            "{}",
+            run.output
+        );
+        let record = run
+            .log
+            .lines()
+            .find(|line| line.contains(" ERROR circadia::log: exception "))
+            .unwrap_or_else(|| panic!("no exception record in {:?}\n{}", run.log, run.output));
+        assert!(
+            record.contains(&format!(" exception process_id={} thread=", run.process_id)),
+            "{record}"
+        );
+        assert!(
+            record.contains(" code=0xe0000001 module=KERNELBASE.dll offset=0x"),
+            "{record}"
         );
     }
 
     #[expect(
-        clippy::exit,
-        reason = "exit before the non-unwinding panic aborts the child test process"
+        unsafe_code,
+        reason = "raise a native exception that no handler catches"
     )]
-    fn exit_when_aborting(info: &std::panic::PanicHookInfo<'_>) {
-        if aborts_process(info) {
-            std::process::exit(85);
+    fn raise_native_exception() {
+        // SAFETY: The exception has no arguments, so the argument pointer may
+        // be null; the call does not return because no handler
+        // continues it.
+        unsafe {
+            windows_sys::Win32::System::Diagnostics::Debug::RaiseException(
+                0xE000_0001,
+                0,
+                0,
+                std::ptr::null(),
+            );
+        };
+    }
+
+    #[test]
+    fn a_session_end_records_the_end_and_exit_and_deletes_the_run_marker_before_returning() {
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        crate::log::run::begin(directory.path(), "circadia.exe");
+        let marker = directory.path().join("logs").join("run.marker");
+        assert!(marker.exists());
+        let result = RefCell::new(None);
+        let log = crate::log::capture(tracing::Level::INFO, || {
+            let controller = ControllerWorker::with_native(
+                directory.path().to_owned(),
+                "circadia.exe".into(),
+                || Ok(()),
+                crate::Native::with_backend(RecordingBackend(
+                    directory.path().join("native-calls.txt"),
+                )),
+                || crate::Foreground::Unknown,
+            )
+            .expect("controller");
+            let runtime = RefCell::new(Some(Runtime {
+                controller,
+                files: None,
+                directory: directory.path().to_owned(),
+            }));
+            end_session(&runtime, &result);
+            assert!(!marker.exists());
+        });
+        assert!(result.into_inner().is_none());
+        let lifecycle: Vec<_> = log
+            .iter()
+            .filter(|record| record.contains(" circadia::ui: "))
+            .collect();
+        assert_eq!(
+            lifecycle,
+            [
+                "INFO circadia::ui: session end confirmed",
+                "INFO circadia::ui: exit succeeded=true",
+            ]
+        );
+    }
+
+    #[test]
+    fn opening_and_closing_settings_each_record_once() {
+        let mut desktop = Desktop {
+            session: None,
+            startup: None,
+            snapshot: None,
+            calculation: None,
+            pending: VecDeque::new(),
+            receipts: Vec::new(),
+            first_snapshot: true,
+            settings_activation: 0,
+            preview_epoch: 0,
+            error: None,
+            file_error: None,
+            fatal: None,
+            exiting: false,
+            settings_open: false,
+            directory: PathBuf::new(),
+            zone: None,
+            resume: ResumeEpoch::default(),
+            taskbar: None,
+            taskbar_epoch: 0,
+        };
+        let records = crate::log::capture(tracing::Level::INFO, || {
+            desktop.set_settings_open(true);
+            desktop.set_settings_open(true);
+            desktop.set_settings_open(false);
+        });
+        assert_eq!(
+            records,
+            [
+                "INFO circadia::ui: settings opened",
+                "INFO circadia::ui: settings closed",
+            ]
+        );
+    }
+
+    fn panic_with_controller(directory: &Path, controller_thread: bool) {
+        let panic_controller = start_log(directory, false).expect("child log");
+        let calls = directory.join("native-calls.txt");
+        let controller = ControllerWorker::with_native(
+            directory.to_owned(),
+            "circadia.exe".into(),
+            || Ok(()),
+            crate::Native::with_backend(RecordingBackend(calls.clone())),
+            || crate::Foreground::Unknown,
+        )
+        .expect("controller");
+        panic_controller.get_or_init(|| controller.client());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !fs_err::read_to_string(&calls)
+            .unwrap_or_default()
+            .contains("temperature")
+        {
+            assert!(Instant::now() < deadline, "controller did not start output");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let failing = std::thread::spawn(move || {
+            if controller_thread {
+                crate::controller::mark_controller_thread();
+            }
+            panic!("settings failed");
+        });
+        drop(failing.join());
+        drop(controller);
+    }
+
+    struct RecordingBackend(PathBuf);
+
+    impl RecordingBackend {
+        fn record(&self, call: &str) {
+            let mut file = fs_err::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.0)
+                .expect("native call record");
+            std::io::Write::write_all(&mut file, format!("{call}\n").as_bytes())
+                .expect("native call written");
         }
     }
 
-    extern "C" fn callback_that_cannot_unwind() {
-        panic!("callback failed");
+    impl NativeBackend for RecordingBackend {
+        fn restore_watchers(&mut self) -> Vec<crate::NativeFailure> {
+            Vec::new()
+        }
+
+        fn notifications(&mut self, _mode: ObservationMode) -> NativeNotifications {
+            NativeNotifications::default()
+        }
+
+        fn handles(&self) -> Vec<BorrowedHandle<'_>> {
+            Vec::new()
+        }
+
+        fn settings(&mut self) -> Result<NativeSettings, crate::NativeFailure> {
+            Ok(NativeSettings {
+                schedule_enabled: false,
+                temperature: Some(3400),
+                previewing: false,
+            })
+        }
+
+        fn active(&mut self) -> Result<bool, crate::NativeFailure> {
+            Ok(true)
+        }
+
+        fn disable_schedule(&mut self) -> Result<(), crate::NativeFailure> {
+            Ok(())
+        }
+
+        fn temperature(
+            &mut self,
+            value: ColorTemperature,
+            _mode: TemperatureMode,
+        ) -> Result<(), crate::NativeFailure> {
+            self.record(&format!("temperature {}", value.kelvin()));
+            Ok(())
+        }
+
+        fn end_preview(&mut self) -> Result<(), crate::NativeFailure> {
+            self.record("end_preview");
+            Ok(())
+        }
+
+        fn set_active(&mut self, active: bool) -> Result<(), crate::NativeFailure> {
+            self.record(&format!("set_active {active}"));
+            Ok(())
+        }
     }
 
     #[test]
