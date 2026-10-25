@@ -1,0 +1,46 @@
+set shell := ["bash", "-uc"]
+set windows-shell := ["bash", "-uc"]
+
+fmt:
+    cargo +nightly fmt --all
+
+lint:
+    cargo +nightly fmt --all --check
+    cargo +stable clippy --all-targets --all-features --locked -- -D warnings
+
+fix:
+    cargo +stable clippy --fix --all-targets --all-features --locked --allow-dirty --allow-no-vcs
+    just fmt
+    just lint
+
+test:
+    cargo +stable test --all-targets --all-features --locked
+
+doc:
+    RUSTDOCFLAGS="-D warnings" cargo +stable doc --all-features --no-deps --locked
+
+dependencies:
+    cargo +stable audit
+    cargo +stable machete
+
+build:
+    cargo +stable build --locked
+
+build-self-contained:
+    cargo +stable build --features self-contained --locked
+
+run:
+    cargo +stable run --locked
+
+run-self-contained:
+    cargo +stable run --features self-contained --locked
+
+check: lint test doc dependencies
+
+[positional-arguments]
+check-msrv manifest="Cargo.toml":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    metadata=$(cargo +stable metadata --manifest-path "$1" --no-deps --format-version 1 --locked)
+    msrv=$(jq -er '.packages[0].rust_version // error("package must declare rust-version")' <<< "$metadata")
+    cargo +"$msrv" check --manifest-path "$1" --all-targets --all-features --locked
