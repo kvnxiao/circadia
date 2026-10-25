@@ -213,9 +213,13 @@ impl CalculationWorker {
     ) -> io::Result<Self> {
         let shared = Arc::new(Shared::default());
         let worker = Arc::clone(&shared);
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
         let thread = std::thread::Builder::new()
             .name("circadia-calculation".into())
-            .spawn(move || run_calculations(&worker, &calculate, &notify))?;
+            .spawn(move || {
+                let _log = tracing::dispatcher::set_default(&dispatch);
+                run_calculations(&worker, &calculate, &notify)
+            })?;
         Ok(Self {
             client: CalculationClient(shared),
             thread: Some(thread),

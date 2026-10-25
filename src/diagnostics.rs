@@ -1,9 +1,5 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
-use std::time::SystemTime;
 
 /// Identify an operation without including user input or native error text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -101,101 +97,33 @@ pub struct DiagnosticFailure {
     pub code: Option<i32>,
 }
 
-/// Report log availability without propagating logging failure into control.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DiagnosticWrite {
-    /// A transition was appended.
-    Recorded,
-    /// The operation's status did not change.
-    Unchanged,
-    /// Appending failed; control can continue.
-    Unavailable,
-}
-
-/// Record operation failures, category changes, and recovery in a local
-/// append-only log.
-#[derive(Debug)]
+/// Record operation failures, category or code changes, and recovery in the
+/// local log.
+///
+/// - A failure identical to the operation's current failure does not append a
+///   record.
+#[derive(Debug, Default)]
 pub struct DiagnosticLog {
-    path: PathBuf,
     failures: BTreeMap<DiagnosticOperation, DiagnosticFailure>,
 }
 
 impl DiagnosticLog {
-    /// Store diagnostics.log in the supplied per-user directory.
-    pub fn new(directory: &Path) -> Self {
-        Self {
-            path: directory.join("diagnostics.log"),
-            failures: BTreeMap::new(),
+    /// Record a failure that differs from the operation's current failure.
+    pub fn failure(&mut self, operation: DiagnosticOperation, failure: DiagnosticFailure) {
+        if self.failures.insert(operation, failure) != Some(failure) {
+            tracing::warn!(
+                %operation,
+                category = %failure.category,
+                code = failure.code,
+                "failure"
+            );
         }
-    }
-
-    /// Return the path for the settings diagnostics action.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// Record a changed failure without accepting personal data or recursively
-    /// logging I/O errors.
-    pub fn failure(
-        &mut self,
-        operation: DiagnosticOperation,
-        failure: DiagnosticFailure,
-        timestamp: SystemTime,
-    ) -> DiagnosticWrite {
-        if self.failures.get(&operation) == Some(&failure) {
-            return DiagnosticWrite::Unchanged;
-        }
-        self.failures.insert(operation, failure);
-        self.append(operation, Some(failure), timestamp)
     }
 
     /// Record recovery once after an operation had a failure.
-    pub fn recovered(
-        &mut self,
-        operation: DiagnosticOperation,
-        timestamp: SystemTime,
-    ) -> DiagnosticWrite {
-        if self.failures.remove(&operation).is_none() {
-            return DiagnosticWrite::Unchanged;
-        }
-        self.append(operation, None, timestamp)
-    }
-
-    fn append(
-        &self,
-        operation: DiagnosticOperation,
-        failure: Option<DiagnosticFailure>,
-        timestamp: SystemTime,
-    ) -> DiagnosticWrite {
-        let milliseconds = match timestamp.duration_since(SystemTime::UNIX_EPOCH) {
-            Ok(duration) => duration.as_millis().to_string(),
-            Err(error) => format!("-{}", error.duration().as_millis()),
-        };
-        let record = match failure {
-            Some(failure) => format!(
-                "{milliseconds}\t{operation}\tfailure\t{}\t{}\n",
-                failure.category,
-                failure
-                    .code
-                    .map_or_else(|| "-".into(), |code| code.to_string())
-            ),
-            None => format!("{milliseconds}\t{operation}\trecovered\t-\t-\n"),
-        };
-        let Some(directory) = self.path.parent() else {
-            return DiagnosticWrite::Unavailable;
-        };
-        let result = fs_err::create_dir_all(directory)
-            .and_then(|()| {
-                fs_err::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&self.path)
-            })
-            .and_then(|mut file| file.write_all(record.as_bytes()));
-        if result.is_ok() {
-            DiagnosticWrite::Recorded
-        } else {
-            DiagnosticWrite::Unavailable
+    pub fn recovered(&mut self, operation: DiagnosticOperation) {
+        if self.failures.remove(&operation).is_some() {
+            tracing::info!(%operation, "recovered");
         }
     }
 }
@@ -205,143 +133,118 @@ mod tests {
     use super::*;
     use crate::Config;
     use crate::ConfigStore;
-    use std::time::Duration;
+    use crate::log::LogWriter;
+    use crate::log::capture;
+    use crate::log::subscriber;
+    use tracing::Level;
+
+    const DENIED: DiagnosticFailure = DiagnosticFailure {
+        category: DiagnosticCategory::AccessDenied,
+        code: Some(5),
+    };
 
     #[test]
     fn repeated_failure_is_recorded_once_per_operation() {
-        let directory = tempfile::tempdir().expect("temporary diagnostics directory");
-        let mut log = DiagnosticLog::new(directory.path());
         let failure = DiagnosticFailure {
             category: DiagnosticCategory::InvalidData,
             code: None,
         };
-        let timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(42);
+        let records = capture(Level::INFO, || {
+            let mut log = DiagnosticLog::default();
+            log.failure(DiagnosticOperation::ConfigurationRead, failure);
+            log.failure(DiagnosticOperation::ConfigurationRead, failure);
+        });
         assert_eq!(
-            log.failure(DiagnosticOperation::ConfigurationRead, failure, timestamp),
-            DiagnosticWrite::Recorded
+            records,
+            [
+                "WARN circadia::diagnostics: failure operation=configuration_read category=invalid_data"
+            ]
         );
+    }
+
+    #[test]
+    fn recovery_after_two_identical_failures_produces_two_records() {
+        let records = capture(Level::INFO, || {
+            let mut log = DiagnosticLog::default();
+            log.failure(DiagnosticOperation::Location, DENIED);
+            log.failure(DiagnosticOperation::Location, DENIED);
+            log.recovered(DiagnosticOperation::Location);
+        });
         assert_eq!(
-            log.failure(DiagnosticOperation::ConfigurationRead, failure, timestamp),
-            DiagnosticWrite::Unchanged
-        );
-        assert_eq!(
-            fs_err::read_to_string(log.path()).expect("log"),
-            "42000\tconfiguration_read\tfailure\tinvalid_data\t-\n"
+            records,
+            [
+                "WARN circadia::diagnostics: failure operation=location category=access_denied code=5",
+                "INFO circadia::diagnostics: recovered operation=location",
+            ]
         );
     }
 
     #[test]
     fn changed_category_recovery_and_recurrence_append_transitions() {
-        let directory = tempfile::tempdir().expect("temporary diagnostics directory");
-        let mut log = DiagnosticLog::new(directory.path());
-        let denied = DiagnosticFailure {
-            category: DiagnosticCategory::AccessDenied,
-            code: Some(5),
-        };
         let missing = DiagnosticFailure {
             category: DiagnosticCategory::Missing,
             code: Some(2),
         };
-        let timestamp = SystemTime::UNIX_EPOCH;
+        let records = capture(Level::INFO, || {
+            let mut log = DiagnosticLog::default();
+            log.failure(DiagnosticOperation::ConfigurationRead, DENIED);
+            log.failure(DiagnosticOperation::ConfigurationRead, missing);
+            log.recovered(DiagnosticOperation::ConfigurationRead);
+            log.recovered(DiagnosticOperation::ConfigurationRead);
+            log.failure(DiagnosticOperation::ConfigurationRead, DENIED);
+        });
         assert_eq!(
-            log.failure(DiagnosticOperation::ConfigurationRead, denied, timestamp),
-            DiagnosticWrite::Recorded
+            records,
+            [
+                "WARN circadia::diagnostics: failure operation=configuration_read category=access_denied code=5",
+                "WARN circadia::diagnostics: failure operation=configuration_read category=missing code=2",
+                "INFO circadia::diagnostics: recovered operation=configuration_read",
+                "WARN circadia::diagnostics: failure operation=configuration_read category=access_denied code=5",
+            ]
         );
-        assert_eq!(
-            log.failure(DiagnosticOperation::ConfigurationRead, missing, timestamp),
-            DiagnosticWrite::Recorded
-        );
-        assert_eq!(
-            log.recovered(DiagnosticOperation::ConfigurationRead, timestamp),
-            DiagnosticWrite::Recorded
-        );
-        assert_eq!(
-            log.recovered(DiagnosticOperation::ConfigurationRead, timestamp),
-            DiagnosticWrite::Unchanged
-        );
-        assert_eq!(
-            log.failure(DiagnosticOperation::ConfigurationRead, denied, timestamp),
-            DiagnosticWrite::Recorded
-        );
-        let text = fs_err::read_to_string(log.path()).expect("log");
-        assert_eq!(text.lines().count(), 4);
-        assert!(text.contains("recovered\t-\t-"));
     }
 
     #[test]
     fn interleaved_operations_do_not_repeat_identical_failures() {
-        let directory = tempfile::tempdir().expect("temporary diagnostics directory");
-        let mut log = DiagnosticLog::new(directory.path());
         let failure = DiagnosticFailure {
             category: DiagnosticCategory::Io,
             code: None,
         };
-        let timestamp = SystemTime::UNIX_EPOCH;
-        log.failure(DiagnosticOperation::ConfigurationWrite, failure, timestamp);
-        log.failure(DiagnosticOperation::BackupWrite, failure, timestamp);
+        let records = capture(Level::INFO, || {
+            let mut log = DiagnosticLog::default();
+            log.failure(DiagnosticOperation::ConfigurationWrite, failure);
+            log.failure(DiagnosticOperation::BackupWrite, failure);
+            log.failure(DiagnosticOperation::ConfigurationWrite, failure);
+        });
         assert_eq!(
-            log.failure(DiagnosticOperation::ConfigurationWrite, failure, timestamp),
-            DiagnosticWrite::Unchanged
-        );
-        assert_eq!(
-            fs_err::read_to_string(log.path())
-                .expect("log")
-                .lines()
-                .count(),
-            2
+            records,
+            [
+                "WARN circadia::diagnostics: failure operation=configuration_write category=io",
+                "WARN circadia::diagnostics: failure operation=backup_write category=io",
+            ]
         );
     }
 
     #[test]
     fn unavailable_log_does_not_prevent_configuration_persistence() {
-        let directory = tempfile::tempdir().expect("temporary diagnostics directory");
-        let blocked = directory.path().join("blocked");
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        let blocked = directory.path().join("logs");
         fs_err::write(&blocked, "file instead of directory").expect("blocked log fixture");
-        let mut log = DiagnosticLog::new(&blocked);
         let failure = DiagnosticFailure {
             category: DiagnosticCategory::Io,
             code: None,
         };
-        assert_eq!(
-            log.failure(
-                DiagnosticOperation::ConfigurationWrite,
-                failure,
-                SystemTime::UNIX_EPOCH
-            ),
-            DiagnosticWrite::Unavailable
+        tracing::dispatcher::with_default(
+            &subscriber(LogWriter::new(directory.path()), Level::INFO),
+            || {
+                DiagnosticLog::default().failure(DiagnosticOperation::ConfigurationWrite, failure);
+            },
         );
         let store = ConfigStore::new(directory.path());
         assert!(store.save(&Config::default()).is_ok());
         assert_eq!(
             fs_err::read_to_string(blocked).expect("blocked fixture"),
             "file instead of directory"
-        );
-    }
-
-    #[test]
-    fn storage_diagnostics_exclude_paths_and_input_content() {
-        let directory = tempfile::tempdir().expect("temporary diagnostics directory");
-        let private = directory.path().join("personal-file-path");
-        fs_err::create_dir(&private).expect("private directory");
-        let store = ConfigStore::new(&private);
-        fs_err::write(
-            store.primary_path(),
-            "'secret-game.exe' = [40.7128, -74.0060, 'personal window title'",
-        )
-        .expect("malformed private input");
-        let error = store.read_external(None).expect_err("malformed input");
-        let mut log = DiagnosticLog::new(directory.path());
-        assert_eq!(
-            log.failure(
-                DiagnosticOperation::ConfigurationRead,
-                error.diagnostic(),
-                SystemTime::UNIX_EPOCH
-            ),
-            DiagnosticWrite::Recorded
-        );
-        assert_eq!(
-            fs_err::read_to_string(log.path()).expect("log"),
-            "0\tconfiguration_read\tfailure\tinvalid_data\t-\n"
         );
     }
 }

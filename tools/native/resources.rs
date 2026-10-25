@@ -4,7 +4,9 @@ mod counters;
 use crate::automation::Automation;
 use crate::automation::wait;
 use crate::lifecycle::Process;
+use crate::lifecycle::error_records;
 use crate::lifecycle::native_message;
+use crate::lifecycle::read_log;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
 use crate::lifecycle::wait_temperature;
@@ -118,14 +120,14 @@ fn exercise(executable: &Path, directory: &Path, quick: bool) -> io::Result<()> 
     preview(executable, directory, &automation, &native, quick)?;
     scheduled(executable, directory, &native, quick)?;
     fades(executable, directory, &automation, &native, quick)?;
-    let diagnostics = match fs_err::read_to_string(directory.join("diagnostics.log")) {
-        Ok(value) => value,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(error),
-    };
+    let log = read_log(directory)?;
+    let errors = error_records(&log);
     require(
-        diagnostics.is_empty(),
-        &format!("resource run recorded application errors: {diagnostics}"),
+        errors.is_empty(),
+        &format!(
+            "resource run recorded application errors: {}",
+            errors.join("\n")
+        ),
     )?;
     report("Resource scenarios completed without recorded application errors; Night Light is off.");
     Ok(())

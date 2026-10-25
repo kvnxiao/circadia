@@ -168,7 +168,7 @@ The recipe runs the complete release application with its bundled runtime, isola
 
 Observation registration subscribes to changes in Windows Night Light settings and state. The checks verify:
 
-- Failed observation registration still permits live edits and output. Retry restores observation, and repeated failures produce one diagnostic entry before recovery.
+- Failed observation registration still permits live edits and output. Retry restores observation, and repeated failures produce one failure record before the recovery record in the `logs/circadia.log` of the run's temporary data directory.
 - Failed settings reads prevent temperature, schedule, and on/off writes while Preview advances on the graph. Recovery applies the current 6500 K position instead of earlier playback steps.
 - Stop and natural Preview completion restore editing while access still fails. Automatic recovery selects the current live draft without replaying obsolete temperatures.
 - A temperature operation reports failure after storing 2300 K, and its subsequent preview cleanup also fails. The stored temperature and enabled state are preserved, and settings shows both errors.
@@ -187,7 +187,7 @@ Close any running Circadia instance, then run:
 just measure-output
 ```
 
-The recipe builds the complete release application with its bundled runtime and the `output-measurement` feature. A driver thread edits the real settings controls through UI Automation. The run takes roughly three minutes and exercises:
+The recipe builds the complete release application with its bundled runtime and the `output-measurement` feature. A driver thread edits the real settings controls through UI Automation. The run fails if the `logs/circadia.log` in the run's temporary data directory has a failure or crash record, which use the `WARN` and `ERROR` levels. The run takes roughly three minutes and exercises:
 
 - Ten-second fades into and out of manual suppression at 1, 60, and 240 Hz, between 2400 K and 6500 K.
 - Half-second fades in both directions at 60 and 240 Hz to exercise the rate ceiling during faster changes.
@@ -247,7 +247,7 @@ The recipe builds the ordinary release application with its bundled runtime. A s
 
 All scenarios use the default ceiling of 60 changing Night Light output steps or automatic correction attempts per second. The three idle observations each start after a five-second settling period. Preview and the first manual fade also start after settings has settled for five seconds. Preview and scheduled transitions use clocks chosen relative to the run's start; the harness prints the complete configuration. Each active scenario checks that sampling finishes while the operation remains active. Preview and the scheduled-transition check also require native temperature to change during sampling.
 
-The tool prints raw samples and summary rows with CPU seconds, CPU percentage, working set, private bytes, and sampled context-switch counts. Each sample also reads native temperature; the summary counts changes between observations. A run fails if the application records an error in its isolated diagnostics log. CPU percentage divides process CPU time by elapsed wall time and logical processor count: 100% represents all logical processors busy. Memory summaries give the median and peak of the observed values; they do not capture peaks between samples. CPU accounting resolution can produce zero CPU time for a short observation.
+The tool prints raw samples and summary rows with CPU seconds, CPU percentage, working set, private bytes, and sampled context-switch counts. Each sample also reads native temperature; the summary counts changes between observations. A run fails if the `logs/circadia.log` in the run's temporary data directory has a failure or crash record, which use the `WARN` and `ERROR` levels. CPU percentage divides process CPU time by elapsed wall time and logical processor count: 100% represents all logical processors busy. Memory summaries give the median and peak of the observed values; they do not capture peaks between samples. CPU accounting resolution can produce zero CPU time for a short observation.
 
 Context-switch deltas come from thread snapshots matched by thread ID and creation time. If a thread exits between samples, its activity after the last observation is omitted. These counts are a sampled lower bound, not an exact total across the process lifetime. The [counter method and compatibility limits](../docs/research/resource-measurement.md) describe the Windows APIs.
 

@@ -293,6 +293,17 @@ fn read_config(path: &Path) -> Result<Option<(Config, String)>, StorageError> {
 }
 
 fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), StorageError> {
+    let result = replace_file(path, contents);
+    tracing::debug!(
+        path = %path.display(),
+        succeeded = result.is_ok(),
+        error = result.as_ref().err().map(tracing::field::display),
+        "configuration write"
+    );
+    result
+}
+
+fn replace_file(path: &Path, contents: &[u8]) -> Result<(), StorageError> {
     let parent = path.parent().ok_or_else(|| {
         io_error(
             "locating configuration directory",
@@ -319,6 +330,28 @@ mod tests {
     use crate::ConfigInput;
     #[cfg(windows)]
     use std::os::windows::fs::OpenOptionsExt;
+
+    #[test]
+    fn configuration_writes_are_recorded_at_debug_level() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let store = ConfigStore::new(directory.path());
+        let records = crate::log::capture(tracing::Level::DEBUG, || {
+            store.save(&Config::default()).expect("saved configuration");
+        });
+        assert_eq!(
+            records,
+            [
+                format!(
+                    "DEBUG circadia::storage: configuration write path={} succeeded=true",
+                    directory.path().join("config.toml").display()
+                ),
+                format!(
+                    "DEBUG circadia::storage: configuration write path={} succeeded=true",
+                    directory.path().join("config.backup.toml").display()
+                ),
+            ]
+        );
+    }
 
     #[test]
     fn invalid_existing_configuration_does_not_enable_defaults() {
