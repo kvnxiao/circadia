@@ -428,7 +428,7 @@ A standard content dialog, 520 epx wide in the mockups, with 24 epx padding at t
 
 ## Tray menu
 
-The tray menu is the native Windows 11 context menu that opens from Circadia's notification area icon. Windows draws it; every item is a single line of text, with no icons, bold items, or second lines.
+The tray menu opens from Circadia's notification area icon in the Windows 11 menu style. Every item is a single line of text, with no icons, bold items, or second lines.
 
 1. "Open Circadia settings"
 2. Separator

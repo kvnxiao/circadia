@@ -47,7 +47,7 @@ Each script terminates its own probe process in `finally` if necessary, closing 
 
 ## Results and limits
 
-On 2026-10-24 at the current pin, `0496ec1`, and on 2026-10-23 at the previous pin, `ebc5a99`, the 18 unit tests, formatting, Clippy, rustdoc, dependency checks, Rust 1.95 compilation, and both builds passed. Desktop-script results at both commits are pending. The remaining results in this section were observed at the earlier pin, `722f202100c3bd428627941d3834d87ad6679d1c`.
+On 2026-10-24 at the current pin, `0496ec1`, and on 2026-10-23 at the previous pin, `ebc5a99`, the 18 unit tests, formatting, Clippy, rustdoc, dependency checks, Rust 1.95 compilation, and both builds passed. At `0496ec1`, on 2026-10-24, `verify-lifecycle.ps1` and `verify-native.ps1` passed. `verify-ui.ps1` and `verify-pointer.ps1` passed every check but failed on their first runs at their final step, closing the graph window, with "Unsupported Pattern" from UI Automation; two reruns of each passed. Desktop scripts have not run at `ebc5a99`. The remaining results in this section were observed at the earlier pin, `722f202100c3bd428627941d3834d87ad6679d1c`.
 
 On 2026-10-16, revision `722f202` passed 18 unit tests and native checks at 100% scaling on the recorded desktop. Those checks covered graph interaction, settings close/reopen, preserved application state, access to the settings window's native handle inside Reactor's scoped window callback, executable selection/cancellation, and foreground lookup. A copied self-contained deployment also ran on that developer machine. The detailed [recorded results](../../docs/research/windows-reactor-ui.md#combined-pinned-revision-validation) include the retired location check.
 
