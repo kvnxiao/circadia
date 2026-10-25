@@ -30,7 +30,7 @@ Settings, its dialogs, and the tray menu show translated text without clipping o
 
 **Scenarios:**
 
-- Pseudo-localized text at 200% scaling: the navigation pane labels, settings card titles, and the Wake, Sunrise, Sunset, and Bedtime summary show their complete text.
+- Pseudo-localized text at 200% scaling: the navigation pane labels, settings group titles, and the Wake, Sunrise, Sunset, and Bedtime summary show their complete text.
 - Every tooltip text in every shipped language, with its longest values filled in, is shorter than 128 UTF-16 code units.
 
 ## Language

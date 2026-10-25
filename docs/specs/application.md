@@ -53,7 +53,7 @@ When neither the configuration file nor its backup exists, Circadia accepts its 
 
 The defaults are Daytime 6500 K, Morning/Evening 3400 K, Sleep 2400 K, Wake 07:00, Bedtime 23:00, the solar timing switch off with Sunrise and Sunset selected, Use my Windows location off, and empty user suppression and exclusion lists. Fixed exclusions remain active. Scheduled transitions last 60 minutes, the fade duration is 250 ms, focus delay is 250 ms, output rate is 60 Hz, and Preview lasts 10 seconds. Start at sign-in is off, Start minimized is on, management is off, and the interface language follows Windows. Coordinates are unnecessary with solar timing off.
 
-A configuration file written before a setting existed loads with that setting's default, with two exceptions that keep an existing setup working: management loads as on, and the solar timing switch loads as on when either solar input was on.
+A configuration file or backup records its format version. A file with any version other than the current one is invalid.
 
 An existing invalid or unreadable configuration file at startup does not fall back to the bundled defaults. If the backup is valid, Circadia writes the backup over the configuration file, accepts it, and starts normally. When the configuration file is missing but the backup is valid, Circadia restores the backup the same way. Either restore is silent: Circadia does not open settings, show a notice, or change the tray tooltip because of it, and the log records it under [REQ-local-log](diagnostics.md#req-local-log--keep-a-local-rotating-log). If writing the restored file fails, Circadia accepts the backup in memory, starts control, and settings reports that changes are not saved until a write succeeds.
 
@@ -68,7 +68,7 @@ When neither a usable configuration file nor a usable backup exists, but at leas
 - The configuration file is invalid, the backup is valid, and the folder is read-only: control starts from the backup in memory, and settings reports that changes are not saved.
 - The configuration file and its backup are both unreadable: neither file changes, Night Light is not accessed, the tray tooltip reports the problem, and no window opens. Opening settings offers Reset to default settings and Open folder.
 - The user chooses Reset to default settings during a configuration error: both files have the defaults, management is off, and the other settings become available.
-- A configuration file from before the management setting existed has the sunset input on: it loads with management on and the solar timing switch on.
+- The configuration file and its backup have an earlier or a later format version: a configuration error applies, and Reset to default settings writes both files in the current format with management off.
 - Bundled inputs are valid but Windows time-zone evaluation fails: control waits for calculation recovery; settings remains available.
 - Solar timing is enabled without coordinates in settings: the coordinate fields report the error and the preceding valid configuration continues.
 
@@ -149,6 +149,7 @@ Working set, private bytes, CPU time, and context switches are measurement-only 
 ## Explored alternatives
 
 - **Falling back to bundled defaults for an invalid configuration file:** This silently replaces the user's schedule. Circadia silently restores the backup of the last valid configuration instead, and waits for an explicit reset only when the backup is unusable too.
+- **Loading configuration files from other format versions:** Circadia has no released configuration format to stay compatible with, so it does not carry migration rules for files from development builds.
 - **Asking before restoring the backup:** A prompt would block a working setup at startup. The restore is silent because the backup has the user's last valid settings; the log records it.
 - **Save, Discard, and a close prompt:** Explicit saving made users manage an unsaved draft and answer a prompt on close. Applying and saving each valid edit, with errors shown at the field, keeps the last valid settings running without a separate save step.
 - **Watching the configuration file for outside edits:** Users do not edit the file by hand, and reading it only at startup removes conflicts between open settings and outside changes. An outside change takes effect at the next launch unless a settings edit overwrites it first.
