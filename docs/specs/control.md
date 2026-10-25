@@ -99,7 +99,7 @@ A final matching successful output does not require duplicate temperature storag
 - Suppression starts at night: output progresses toward 6500 K over the configured duration.
 - Suppression ends halfway through that fade: the replacement starts from the last stored step and converges on the active schedule at completion.
 - A settings edit changes the current scheduled temperature: output changes immediately without a fade.
-- Duration is 100 or 10,000 ms: it is valid. Values outside the range or fractional milliseconds are rejected.
+- Duration is 100 or 10,000 ms: it is valid. Typing 50 gives 100 ms, 10,001 gives 10,000 ms, and 250.4 rounds to 250 ms when the field commits.
 - External interference occurs during a constant segment: correction fades from its fresh origin; further interference does not restart the deadline.
 - Preview ends while suppression is inactive: output returns immediately to the current schedule.
 - Quit at 2400 K with the default duration: output fades to 6500 K over 250 ms before Night Light turns off.
@@ -119,7 +119,7 @@ On the declared reference machine, 95% of operation starts occur within 20 ms af
 
 **Scenarios:**
 
-- Rates of 1 and 240 Hz are accepted. Zero, 241, negative values, and fractional rates are rejected at the field with an error and block Preview while they remain.
+- Rates of 1 and 240 Hz are accepted. Typing 0 or a negative rate gives 1 Hz, 241 gives 240 Hz, and 59.5 rounds to 60 Hz when the field commits.
 - Two displays have different refresh rates: changing their arrangement does not change the configured 60 Hz ceiling or cause refresh-rate queries.
 - A 500 ms fade spans 6500 K to 2400 K at 60 Hz: it skips intermediate 10 K values and retains its logical endpoint.
 - A native call takes 120 ms: evaluation after it returns uses the current instant and does not replay missed samples.

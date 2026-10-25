@@ -26,7 +26,7 @@ For Wake 07:00 and Bedtime 01:00, Bedtime belongs to the next calendar date. Cha
 
 Settings exposes Daytime, Morning/Evening, and Sleep temperatures. Morning and evening use the same middle temperature. Accepted values satisfy Daytime >= Morning/Evening >= Sleep. Equal values are allowed. An edit that violates this order shows an error at the edited field and does not change the accepted configuration; it does not change another temperature to accommodate the edit.
 
-Each temperature is a whole number from 1200 K through 6500 K. Accepted input rounds to the nearest 10 K, with ties toward higher kelvin. Range validation occurs before rounding; order validation uses the rounded values. Fractional kelvin input is rejected. After a valid edit, the field shows the accepted rounded value.
+Each temperature is a whole number from 1200 K through 6500 K. Typed input outside that range becomes the nearest bound when the field commits, under REQ-settings-autosave. Input then rounds to the nearest 10 K, with ties toward higher kelvin; order validation uses the rounded values. After a valid edit, the field shows the accepted rounded value.
 
 Users configure these temperatures and timing settings. They do not add, remove, or drag individual curve points, supply offsets, or draw transition curves.
 
@@ -37,7 +37,7 @@ When solar timing is disabled, Morning/Evening remains editable and is labeled u
 - Daytime 6500 K, Morning/Evening 3400 K, and Sleep 2200 K are valid.
 - Morning/Evening and Sleep are both 2200 K: that evening-to-sleep interval is constant.
 - Sleep is changed to 4000 K while Morning/Evening is 3400 K: the Sleep field reports the ordering error, the accepted Sleep is unchanged, and the other fields retain their values.
-- The user enters 3855 K: it becomes 3860 K if the resulting order is valid. Entering 6501 K or fractional kelvin is rejected.
+- The user enters 3855 K: it becomes 3860 K if the resulting order is valid. Entering 6501 K gives 6500 K, and 3855.4 K gives 3860 K.
 - Solar timing is disabled: Morning/Evening remains editable but does not affect the curve. Wake reaches Daytime directly.
 - Solar timing is disabled and Sleep changes to 3600 K while Morning/Evening is 3400 K: the Sleep field reports the ordering error. Raising Morning/Evening to 3700 K applies that value and then the 3600 K still entered in the Sleep field, which is now in order.
 
@@ -51,7 +51,7 @@ This duration is separate from the ordinary fade for suppression changes, recomp
 
 - The duration is 60 minutes and targets are several hours apart: each change takes place during the hour before its target.
 - The duration is 60 minutes and targets are 30 minutes apart: the later transition uses 30 minutes.
-- Durations of 1 and 240 minutes are accepted. Zero, a negative value, 241 minutes, or fractional minutes is rejected at the field with an error and blocks Preview while it remains.
+- Durations of 1 and 240 minutes are accepted. Typing 0 or a negative duration gives 1 minute, 241 gives 240 minutes, and 90.4 rounds to 90 minutes when the field commits.
 
 ## Optional solar timing
 
@@ -71,7 +71,7 @@ If permission is denied, location services are disabled, or a position cannot be
 - Use my Windows location is on and Circadia starts at sign-in with settings closed: Circadia does not request location.
 - Windows denies access: the existing coordinates and accepted schedule remain unchanged, and the location setting shows the failure.
 - A position arrives after settings closes: it does not change the configuration.
-- Latitude 91, longitude -181, or a nonfinite value is entered while solar timing is enabled: the field reports the error and the accepted coordinates remain.
+- Latitude 91 or longitude -181 is entered while solar timing is enabled: the field shows 90 or -180 when it commits. Text that is not a number restores the previous coordinate.
 - The user's regional format uses a comma as decimal separator: settings shows 40,7128 and accepts 40,7128; the configuration file stores 40.7128.
 - The computer travels while saved coordinates remain unchanged: solar timing still uses those coordinates and the current Windows time zone.
 
@@ -186,3 +186,11 @@ Solar events remain their actual instants. Clock changes do not move them or rem
 - **Shifting every remaining target on a clock-change day:** This unnecessarily shifts the evening routine after an overnight change. The next target returns to its configured clock unless doing so would collapse or reverse Wake/Bedtime order.
 - **Using every existing configured clock across daylight-saving changes:** This keeps each occurrence aligned with a wall-clock alarm but shortens or lengthens the interval that spans the change. The selected policy preserves that interval by adjusting the first Wake or Bedtime after the change, then returns later occurrences to their configured clocks. When Bedtime is the adjusted occurrence, the following night is shorter or longer instead.
 - **Requesting location at each launch or daily:** Requests without a foreground settings window are unverified for an unpackaged app and would track travel in the background.
+
+## Supporting evidence
+
+| Design decision or requirement | Evidence |
+| :-- | :-- |
+| Local dates and clock times mapped to actual instants | [Clock conversion fixtures](../research/windows-clock-conversion.md), [host-setting checks](../research/schedule-integration.md#host-setting-exercise), and [elapsed-interval reasoning](../research/clock-change-intervals.md); the target-adjustment policy is not exercised by the existing probe. |
+| Optional solar timing and coordinate acquisition | [Local solar calculation](../research/solar-calculation.md), [location APIs](../research/location-and-solar-times.md); the probes do not verify the generated schedule's event-selection rules. |
+| Local calculation without persistent solar caches | [Measured per-date calculation cost](../research/solar-performance.md); four dates on one desktop do not establish a universal latency bound. |

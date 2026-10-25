@@ -67,7 +67,7 @@ The mockups drew stand-in line icons for these places. Replace each with the clo
 
 ### Color and themes
 
-Circadia follows the user's light or dark theme and contrast theme. Interface colors come from WinUI theme resources, which switch automatically when the theme changes. Custom colors appear only in the app icon, the phase art, the badge, and the [kelvin colors](#color-for-temperatures).
+Circadia follows the user's light or dark theme and contrast theme. Interface colors come from WinUI theme resources, which switch automatically when the theme changes. Custom colors appear only in the app icon, the phase art, the badge, the [kelvin colors](#color-for-temperatures), and other applications' icons, which Circadia shows as they ship.
 
 | Role | WinUI theme resource |
 | :-- | :-- |
@@ -85,7 +85,7 @@ Circadia follows the user's light or dark theme and contrast theme. Interface co
 
 When Windows Reactor, Circadia's UI library, does not expose one of these resources, use the WinUI value for the current light or dark theme, and the matching system color in contrast themes. Source: [XAML theme resources](https://learn.microsoft.com/en-us/windows/apps/develop/platform/xaml/xaml-theme-resources) and the WinUI [common theme resources](https://github.com/microsoft/microsoft-ui-xaml/blob/main/controls/dev/CommonStyles/Common_themeresources_any.xaml).
 
-In contrast themes, every custom drawing switches to system colors. Each system color has a defined partner:
+In contrast themes, every custom drawing switches to system colors. Other applications' icons, including Windows' generic application icon, keep their own colors. Each system color has a defined partner:
 
 | System color | Use | Pair with |
 | :-- | :-- | :-- |
