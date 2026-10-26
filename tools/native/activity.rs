@@ -462,12 +462,6 @@ fn manual(
     wait("settings closed with manual suppression", || {
         Ok(window(process, "Circadia", true)?.is_none().then_some(()))
     })?;
-    wait("closed draft acknowledged", || {
-        Ok(activity
-            .controller()?
-            .snapshot()?
-            .filter(|snapshot| snapshot.draft.is_none()))
-    })?;
     quiet_wait(activity)?;
     let mark = activity.records()?.len();
     let calls = native.native_calls()?.len();
@@ -525,7 +519,13 @@ fn configure(
         result.backup_error.is_none(),
         "activity configuration backup failed",
     )?;
-    command(activity, ControllerCommand::Reload)?;
+    command(
+        activity,
+        ControllerCommand::Configure {
+            config: std::sync::Arc::new(config.clone()),
+            revision: 1,
+        },
+    )?;
     wait("configured schedule calculation applied", || {
         Ok(activity.controller()?.snapshot()?.filter(|snapshot| {
             snapshot

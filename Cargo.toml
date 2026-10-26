@@ -46,7 +46,10 @@ windows-sys = { version = "0.61", features = ["Wdk_System_SystemServices", "Win3
 winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
 
 [build-dependencies]
+embed-resource = "3.0.12"
 fs-err = "3.3"
+ico = "0.6"
+resvg = { version = "0.49", default-features = false }
 
 [target.'cfg(windows)'.build-dependencies]
 windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", optional = true }

@@ -16,7 +16,6 @@ mod native;
 mod platform;
 #[cfg(windows)]
 mod schedule;
-mod session;
 mod storage;
 mod suppression;
 #[cfg(windows)]
@@ -33,9 +32,21 @@ pub use activity::ActivityWait;
 pub use config::Config;
 pub use config::ConfigInput;
 pub use config::Coordinates;
+pub use config::Field;
 pub use config::FieldError;
+pub use config::FieldErrorKind;
+pub use config::FieldInputs;
+pub use config::FieldValue;
+pub use config::LoadReport;
+pub use config::Mark;
+pub use config::NumberRange;
+pub use config::Source;
+pub use config::Unusable;
 pub use config::ValidationError;
+pub use config::apply_inputs;
+pub use config::load;
 pub use config::normalize_executable;
+pub use config::solar_timing_enabled;
 #[cfg(windows)]
 pub use controller::AttemptStatus;
 #[cfg(windows)]
@@ -54,6 +65,8 @@ pub use controller::CalculationWorker;
 pub use controller::CommandOutcome;
 #[cfg(windows)]
 pub use controller::CommandReceipt;
+#[cfg(windows)]
+pub use controller::ConfigLayer;
 #[cfg(windows)]
 pub use controller::ControlError;
 #[cfg(windows)]
@@ -131,8 +144,6 @@ pub use platform::clock::WindowsZone;
 #[cfg(windows)]
 pub use platform::clock::elapsed_since_boot;
 #[cfg(windows)]
-pub use platform::config_notifications::ConfigurationNotifications;
-#[cfg(windows)]
 pub use platform::events::DesktopEvent;
 #[cfg(windows)]
 pub use platform::events::LifecycleWindow;
@@ -186,19 +197,8 @@ pub use schedule::graph_interval;
 pub use schedule::resolve_anchors;
 #[cfg(windows)]
 pub use schedule::select_solar;
-pub use session::ConfigLayer;
-pub use session::ConfigSession;
-pub use session::Draft;
-pub use session::ExecutableList;
-pub use session::ReloadChange;
-pub use session::ReloadResult;
-pub use session::SessionError;
 pub use storage::ConfigStore;
-pub use storage::ExternalConfig;
 pub use storage::PersistResult;
-pub use storage::RestoreCause;
-pub use storage::RestoreNotice;
-pub use storage::StartupConfig;
 pub use storage::StorageError;
 pub use suppression::Focus;
 pub use suppression::Foreground;

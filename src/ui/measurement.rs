@@ -10,7 +10,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
-use windows_reactor::LiveRenderingSubscription;
 
 mod native;
 pub use native::SimulatedNativeCall;
@@ -19,6 +18,10 @@ pub use native::SimulatedNativeFault;
 static ACTIVE: OnceLock<GraphMeasurement> = OnceLock::new();
 
 struct Sample {
+    #[expect(
+        dead_code,
+        reason = "graph measurement matches the rendered graph against this configuration"
+    )]
     config: Config,
     field: String,
     value: String,
@@ -30,7 +33,6 @@ struct Sample {
 #[derive(Default)]
 struct Frames {
     sample: Option<Sample>,
-    staged_position: Option<(f64, f64)>,
     position: Option<(u64, f64, f64)>,
     error: Option<String>,
 }
@@ -308,58 +310,6 @@ pub(super) fn settings(state: SettingsMeasurement) {
         && let Ok(mut settings) = active.0.settings.lock()
     {
         *settings = Some(state);
-    }
-}
-
-pub(super) fn view(config: Option<&Config>, position: Option<(f64, f64)>) {
-    let Some(active) = ACTIVE.get() else { return };
-    let Ok(mut frames) = active.0.frames.lock() else {
-        return;
-    };
-    frames.staged_position = position;
-    if let Some(sample) = &mut frames.sample {
-        sample.staged = sample.entered.is_some()
-            && config.is_some_and(|config| config.same_schedule(&sample.config));
-    }
-}
-
-pub(super) fn subscribe() -> Option<LiveRenderingSubscription> {
-    let active = ACTIVE.get()?;
-    match windows_reactor::subscribe_live_rendering(rendering) {
-        Ok(subscription) => Some(subscription),
-        Err(error) => {
-            if let Ok(mut frames) = active.0.frames.lock() {
-                frames.error = Some(error.to_string());
-                active.0.rendered.notify_all();
-            }
-            None
-        }
-    }
-}
-
-fn rendering() {
-    let Some(active) = ACTIVE.get() else { return };
-    let Ok(mut frames) = active.0.frames.lock() else {
-        return;
-    };
-    if let Some((x, y)) = frames.staged_position {
-        let changed = frames.position.is_none_or(|(_, prior_x, prior_y)| {
-            (x - prior_x).abs() > f64::EPSILON || (y - prior_y).abs() > f64::EPSILON
-        });
-        if changed {
-            let count = frames
-                .position
-                .map_or(1, |(count, _, _)| count.saturating_add(1));
-            frames.position = Some((count, x, y));
-        }
-    }
-    if let Some(sample) = &mut frames.sample
-        && sample.staged
-        && sample.elapsed.is_none()
-        && let Some(entered) = sample.entered
-    {
-        sample.elapsed = Some(entered.elapsed());
-        active.0.rendered.notify_all();
     }
 }
 

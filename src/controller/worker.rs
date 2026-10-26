@@ -2,6 +2,7 @@ use super::CalculationClient;
 use super::CalculationPurpose;
 use super::CalculationRequest;
 use super::CalculationWorker;
+use super::ConfigLayer;
 use super::ControlError;
 use super::ControlRuntime;
 use super::ControlTime;
@@ -12,16 +13,10 @@ use super::RunningPreview;
 use super::RuntimeTime;
 use super::SchedulingState;
 use crate::Config;
-use crate::ConfigInput;
-use crate::ConfigLayer;
-use crate::ConfigSession;
-use crate::ConfigStore;
 use crate::DiagnosticCategory;
 use crate::DiagnosticFailure;
 use crate::DiagnosticLog;
 use crate::DiagnosticOperation;
-use crate::Draft;
-use crate::FieldError;
 use crate::Foreground;
 use crate::ManualCommand;
 use crate::ManualOutcome;
@@ -29,11 +24,7 @@ use crate::Native;
 use crate::NativeExit;
 use crate::NativeFailure;
 use crate::NativeWake;
-use crate::PersistResult;
 use crate::RecentApp;
-use crate::SessionError;
-use crate::StartupConfig;
-use crate::StorageError;
 use crate::SuppressionState;
 use crate::WindowsZone;
 use crate::elapsed_since_boot;
@@ -45,8 +36,6 @@ use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt;
 use std::io;
-use std::path::Path;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
@@ -86,45 +75,19 @@ pub enum Recompute {
 /// Send one ordered state-changing intent to the sole controller worker.
 #[derive(Clone, Debug)]
 pub enum ControllerCommand {
-    /// Open a draft without changing output.
-    BeginEdit,
-    /// Validate scalar fields while preserving ordered executable-list edits.
-    /// Calculate the graph independently of native output.
-    Edit(Box<ConfigInput>),
-    /// Change one executable-list membership in the live draft.
-    EditExecutable {
-        /// List receiving the change.
-        list: crate::ExecutableList,
-        /// Executable filename only.
-        executable: String,
-        /// Requested membership.
-        present: bool,
-    },
-    /// Preserve an unparsed field error without changing live values.
-    InvalidEdit(FieldError),
-    /// Persist and adopt the live draft without restarting its transition.
-    Save,
-    /// Remove the draft and apply the current accepted schedule immediately.
-    Discard,
-    /// Close an unchanged draft without requesting another temperature
-    /// operation.
-    CloseUnchanged,
-    /// Replace a stale draft with the latest accepted configuration.
-    LoadLatest,
-    /// Validate a filesystem change without replacing an open draft.
-    Reload,
-    /// Persist one tray inclusion change through shared configuration
-    /// validation.
-    Inclusion {
-        /// Executable filename only.
-        executable: String,
-        /// Explicit requested membership.
-        included: bool,
+    /// Apply a new accepted configuration without a fade.
+    ///
+    /// - While Preview plays, a changed schedule applies when playback ends.
+    Configure {
+        /// The accepted configuration.
+        config: Arc<Config>,
+        /// The configuration owner's revision, reported once applied.
+        revision: u64,
     },
     /// Start or stop the independent one-hour override.
     Manual(ManualCommand),
-    /// Capture the UI's validated draft and start independent calculation.
-    /// Recheck the draft and availability before native playback.
+    /// Capture the accepted configuration and start independent calculation.
+    /// Recheck it and availability before native playback.
     Preview(Box<Config>),
     /// Stop playback and restore current live control.
     StopPreview,
@@ -154,25 +117,22 @@ pub enum ControllerCommand {
 
 impl ControllerCommand {
     fn interrupts_output(&self) -> bool {
-        match self {
-            Self::Edit(input) => input.as_ref().clone().validate().is_ok(),
-            Self::Discard
-            | Self::LoadLatest
-            | Self::Manual(_)
-            | Self::Preview(_)
-            | Self::StopPreview
-            | Self::Lock
-            | Self::Suspend
-            | Self::Resume { .. }
-            | Self::Recompute(Recompute::Clock) => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            Self::Manual(_)
+                | Self::Preview(_)
+                | Self::StopPreview
+                | Self::Lock
+                | Self::Suspend
+                | Self::Resume { .. }
+                | Self::Recompute(Recompute::Clock)
+        )
     }
 
     pub(crate) fn bytes(&self) -> usize {
         let input = match self {
-            Self::Edit(input) => Some(input.as_ref()),
             Self::Preview(config) => Some(config.input()),
+            Self::Configure { config, .. } => Some(config.input()),
             _ => None,
         };
         let payload = if let Some(input) = input {
@@ -190,9 +150,7 @@ impl ControllerCommand {
                 )
         } else {
             match self {
-                Self::Inclusion { executable, .. }
-                | Self::EditExecutable { executable, .. }
-                | Self::Foreground(Foreground::Application(executable))
+                Self::Foreground(Foreground::Application(executable))
                 | Self::Resume {
                     foreground: Foreground::Application(executable),
                     ..
@@ -211,8 +169,6 @@ pub enum CommandOutcome {
     Applied,
     /// Reject the action under current availability or playback rules.
     Unavailable,
-    /// Preserve the specific configuration or persistence error.
-    Failed(Arc<SessionError>),
 }
 
 /// Retain one command's result independently of later snapshots.
@@ -237,8 +193,6 @@ pub struct CommandReceipt {
 pub struct ControllerSnapshot {
     /// Accepted configuration and its own last scheduled output.
     pub accepted: Option<ConfigLayer>,
-    /// Editable draft and last valid runtime values.
-    pub draft: Option<Draft>,
     /// Active layer's schedule availability.
     pub scheduling: SchedulingState,
     /// Captured playback timeline, independent of native latency.
@@ -253,14 +207,12 @@ pub struct ControllerSnapshot {
     pub uptime: Duration,
     /// Most recent eligible executable identities and membership.
     pub recent: Vec<RecentApp>,
-    /// Initial loading and restoration evidence, cleared by successful Save.
-    pub startup: Option<Arc<StartupConfig>>,
-    /// Latest primary reload or independent backup warning.
-    pub storage_error: Option<Arc<StorageError>>,
     /// Latest command acknowledgement and its outcome.
     pub command: Option<(u64, CommandOutcome)>,
     /// Outstanding native failures with sanitized display and diagnostic data.
     pub native_errors: BTreeMap<DiagnosticOperation, Arc<NativeFailure>>,
+    /// Revision of the last applied `Configure` command, or zero.
+    pub configured_revision: u64,
     /// Output evaluation error discovered outside the calculation worker.
     pub control_error: Option<Arc<ControlError>>,
     /// Whether the native worker has stopped accepting commands.
@@ -270,7 +222,6 @@ pub struct ControllerSnapshot {
 struct Envelope {
     id: u64,
     command: ControllerCommand,
-    interrupts_output: bool,
     calculation: Option<u64>,
     completion: mpsc::SyncSender<CommandOutcome>,
     entered: ControlTime,
@@ -332,7 +283,7 @@ impl ControllerClient {
     /// Enqueue a command without waiting for a native call or disk operation.
     ///
     /// - Success acknowledges admission, not command completion.
-    /// - Edit and Preview graph calculation starts independently of native
+    /// - Configure and Preview graph calculation starts independently of native
     ///   work.
     ///
     /// # Errors
@@ -348,22 +299,6 @@ impl ControllerClient {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "controller stopped",
-            ));
-        }
-        if matches!(
-            command,
-            ControllerCommand::Edit(_)
-                | ControllerCommand::EditExecutable { .. }
-                | ControllerCommand::InvalidEdit(_)
-                | ControllerCommand::Save
-        ) && queued_preview_active(
-            self.snapshot()?
-                .is_some_and(|snapshot| snapshot.preview_active),
-            &queue.commands,
-        ) {
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "Preview disables settings edits and Save",
             ));
         }
         let bytes = queue.bytes.saturating_add(command.bytes());
@@ -386,29 +321,24 @@ impl ControllerClient {
         };
         #[cfg(feature = "graph-measurement")]
         let entered = crate::activity::clock().map_or(entered, |time| time.output);
-        let calculation = match &command {
-            ControllerCommand::Edit(input) => input
-                .as_ref()
-                .clone()
-                .validate()
-                .ok()
-                .map(|config| {
-                    self.0.calculation.submit(CalculationRequest {
-                        config,
-                        at: entered.wall,
-                        purpose: CalculationPurpose::Schedule,
-                    })
-                })
-                .transpose()?,
+        let request = match &command {
             ControllerCommand::Preview(config) => {
-                Some(self.0.calculation.submit(CalculationRequest {
-                    config: config.as_ref().clone(),
-                    at: entered.wall,
-                    purpose: CalculationPurpose::Preview,
-                })?)
+                Some((config.as_ref().clone(), CalculationPurpose::Preview))
+            }
+            ControllerCommand::Configure { config, .. } => {
+                Some((config.as_ref().clone(), CalculationPurpose::Schedule))
             }
             _ => None,
         };
+        let calculation = request
+            .map(|(config, purpose)| {
+                self.0.calculation.submit(CalculationRequest {
+                    config,
+                    at: entered.wall,
+                    purpose,
+                })
+            })
+            .transpose()?;
         let interrupts = match &command {
             ControllerCommand::Resume { epoch, .. } => queue.resume_epoch != Some(*epoch),
             _ => command.interrupts_output(),
@@ -425,7 +355,6 @@ impl ControllerClient {
         queue.commands.push_back(Envelope {
             id,
             command,
-            interrupts_output: interrupts,
             calculation,
             completion,
             entered,
@@ -494,23 +423,6 @@ impl ControllerClient {
     }
 }
 
-fn queued_preview_active(active: bool, commands: &VecDeque<Envelope>) -> bool {
-    commands
-        .iter()
-        .fold(active, |active, envelope| match &envelope.command {
-            ControllerCommand::Preview(_) => true,
-            ControllerCommand::Resume { .. } if envelope.interrupts_output => false,
-            ControllerCommand::StopPreview
-            | ControllerCommand::Discard
-            | ControllerCommand::LoadLatest
-            | ControllerCommand::Lock
-            | ControllerCommand::Suspend
-            | ControllerCommand::Manual(ManualCommand::Start)
-            | ControllerCommand::Recompute(Recompute::Clock) => false,
-            _ => active,
-        })
-}
-
 /// Preserve independent exit and worker outcomes for the application boundary.
 #[derive(Debug)]
 pub struct ControllerExit {
@@ -542,19 +454,21 @@ impl ControllerWorker {
     /// Start the workers after the application establishes single-instance
     /// ownership.
     ///
+    /// - `config` is the startup selection, or none during a configuration
+    ///   error; without it the worker does not access Night Light.
     /// - Keep `notify` nonblocking, thread-safe, and free of panics.
     /// - Normal startup can change live Night Light after prerequisites pass.
     ///
     /// # Errors
     /// Report invalid executable identity or worker creation failure.
     pub fn start(
-        directory: PathBuf,
-        running_executable: String,
+        running_executable: &str,
+        config: Option<Arc<Config>>,
         notify: impl Fn() -> io::Result<()> + Send + Sync + 'static,
     ) -> io::Result<Self> {
         Self::with_native(
-            directory,
             running_executable,
+            config,
             notify,
             Native::new(),
             read_foreground,
@@ -562,13 +476,13 @@ impl ControllerWorker {
     }
 
     pub(crate) fn with_native(
-        directory: PathBuf,
-        running_executable: String,
+        running_executable: &str,
+        config: Option<Arc<Config>>,
         notify: impl Fn() -> io::Result<()> + Send + Sync + 'static,
         native: Native,
         foreground: impl FnMut() -> Foreground + Send + 'static,
     ) -> io::Result<Self> {
-        let runtime = ControlRuntime::new(&running_executable).map_err(io::Error::other)?;
+        let runtime = ControlRuntime::new(running_executable).map_err(io::Error::other)?;
         let wake = Arc::new(NativeWake::new()?);
         let notify: Arc<dyn Fn() -> io::Result<()> + Send + Sync> = Arc::new(notify);
         let calculation_wake = Arc::clone(&wake);
@@ -598,14 +512,7 @@ impl ControllerWorker {
                 let _log = tracing::dispatcher::set_default(&dispatch);
                 CONTROLLER_THREAD.set(true);
                 let _admission = StopAdmission(Arc::clone(&shared));
-                let mut worker = Worker::new(
-                    &directory,
-                    running_executable,
-                    runtime,
-                    shared,
-                    native,
-                    foreground,
-                );
+                let mut worker = Worker::new(config, runtime, shared, native, foreground);
                 let result = worker.run();
                 worker.shared.stopping.store(true, Ordering::Release);
                 let exit = worker.driver.exit(worker.now());
@@ -701,12 +608,9 @@ struct Worker<F> {
     shared: Arc<Shared>,
     origin: Instant,
     driver: NativeDriver,
-    session: ConfigSession,
-    store: ConfigStore,
-    own_executable: String,
-    startup: Option<Arc<StartupConfig>>,
-    storage_error: Option<(DiagnosticOperation, Arc<StorageError>)>,
+    accepted: Option<ConfigLayer>,
     command: Option<(u64, CommandOutcome)>,
+    configured_revision: u64,
     native_errors: BTreeMap<DiagnosticOperation, Arc<NativeFailure>>,
     control_error: Option<Arc<ControlError>>,
     next_date: Option<Timestamp>,
@@ -718,48 +622,25 @@ struct Worker<F> {
 
 impl<F: FnMut() -> Foreground> Worker<F> {
     fn new(
-        directory: &Path,
-        own_executable: String,
+        config: Option<Arc<Config>>,
         runtime: ControlRuntime,
         shared: Arc<Shared>,
         native: Native,
         foreground: F,
     ) -> Self {
-        let store = ConfigStore::new(directory);
-        let startup = Arc::new(store.load());
-        crate::log::record_start(&startup);
-        let mut log = DiagnosticLog::default();
-        let operation = if startup.accepted.is_some() && startup.restore.is_none() {
-            DiagnosticOperation::BackupWrite
-        } else {
-            DiagnosticOperation::ConfigurationRead
-        };
-        for error in &startup.problems {
-            log.failure(operation, error.diagnostic());
-        }
-        if let Some(notice) = &startup.restore {
-            if let Some(error) = &notice.write_error {
-                log.failure(DiagnosticOperation::ConfigurationWrite, error.diagnostic());
-            } else {
-                log.recovered(DiagnosticOperation::ConfigurationRead);
-            }
-        }
         Self {
             origin: shared.origin,
             shared,
             driver: NativeDriver::new(runtime, native),
-            session: ConfigSession::from_startup(&startup),
-            store,
-            own_executable,
-            startup: Some(startup),
-            storage_error: None,
+            accepted: config.map(|config| ConfigLayer::new(Arc::unwrap_or_clone(config))),
             command: None,
+            configured_revision: 0,
             native_errors: BTreeMap::new(),
             control_error: None,
             next_date: None,
             resume_epoch: None,
             taskbar_epoch: None,
-            log,
+            log: DiagnosticLog::default(),
             foreground,
         }
     }
@@ -770,18 +651,36 @@ impl<F: FnMut() -> Foreground> Worker<F> {
 
     fn recalculate(&mut self, update: OutputUpdate, prepared: Option<u64>) -> io::Result<()> {
         let now = self.now();
+        if update != OutputUpdate::Apply
+            && self.driver.runtime().preview_active()
+            && self.accepted_schedule_differs()
+        {
+            return self
+                .driver
+                .runtime_mut()
+                .foreground(&(self.foreground)(), now)
+                .map_err(io::Error::other);
+        }
         let request = self
             .driver
             .runtime_mut()
-            .configure(self.session.active(), update, now)
+            .configure(self.accepted.as_ref(), update, now)
             .map_err(io::Error::other)?;
         self.driver
             .runtime_mut()
             .foreground(&(self.foreground)(), now)
             .map_err(io::Error::other)?;
         if let Some(request) = request {
+            // A Configure prepares a Schedule calculation at submission;
+            // reusing it would replace the Preview request of a
+            // queued or playing Preview.
             let revision = match prepared {
-                Some(revision) if self.shared.calculation.is_current(revision)? => revision,
+                Some(revision)
+                    if request.purpose == CalculationPurpose::Schedule
+                        && self.shared.calculation.is_current(revision)? =>
+                {
+                    revision
+                }
                 Some(_) | None => self.shared.calculation.submit(request)?,
             };
             self.driver.runtime_mut().expect_calculation(revision);
@@ -812,6 +711,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 self.apply(command)?;
             }
             self.apply_calculation()?;
+            self.apply_deferred()?;
             if self
                 .next_date
                 .is_some_and(|date| date <= self.now().output.wall)
@@ -835,6 +735,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 Ok(report) => self.native_result(report)?,
                 Err(error) => self.evaluation_error(error)?,
             }
+            self.apply_deferred()?;
             if self.shared.stopping.load(Ordering::Acquire) {
                 break;
             }
@@ -875,6 +776,21 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             let _ = reason;
         }
         Ok(())
+    }
+
+    fn accepted_schedule_differs(&self) -> bool {
+        self.driver
+            .runtime()
+            .config()
+            .zip(self.accepted.as_ref())
+            .is_some_and(|(current, next)| !current.same_schedule(next.config()))
+    }
+
+    fn apply_deferred(&mut self) -> io::Result<()> {
+        if !self.accepted_schedule_differs() || self.driver.runtime().preview_active() {
+            return Ok(());
+        }
+        self.recalculate(OutputUpdate::Apply, None)
     }
 
     fn evaluation_error(&mut self, error: ControlError) -> io::Result<()> {
@@ -928,10 +844,8 @@ impl<F: FnMut() -> Foreground> Worker<F> {
     }
 
     fn native_result(&mut self, report: NativeCycle) -> io::Result<()> {
-        if let Some(value) = report.scheduled {
-            self.session
-                .record_scheduled(value)
-                .map_err(io::Error::other)?;
+        if let (Some(value), Some(layer)) = (report.scheduled, &mut self.accepted) {
+            layer.last_scheduled = Some(value);
         }
         let healthy = report.attempt.as_ref().is_some_and(|attempt| {
             !attempt.cancelled && attempt.error.is_none() && report.control_error.is_none()
@@ -992,8 +906,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         let now = self.now();
         let runtime = self.driver.runtime();
         let snapshot = ControllerSnapshot {
-            accepted: self.session.accepted().cloned(),
-            draft: self.session.draft().cloned(),
+            accepted: self.accepted.clone(),
             scheduling: runtime.state(),
             preview: runtime.preview().cloned(),
             preview_active: runtime.preview_active(),
@@ -1001,13 +914,9 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             manual_remaining: runtime.manual_remaining(now.uptime),
             uptime: now.uptime,
             recent: runtime.recent(),
-            startup: self.startup.clone(),
-            storage_error: self
-                .storage_error
-                .as_ref()
-                .map(|(_, error)| Arc::clone(error)),
             command: self.command.clone(),
             native_errors: self.native_errors.clone(),
+            configured_revision: self.configured_revision,
             control_error: self.control_error.clone(),
             stopped: self.shared.stopping.load(Ordering::Acquire),
         };
@@ -1059,9 +968,11 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 }
             }
             ControllerCommand::Preview(config) => {
-                if self.session.draft().is_none_or(|draft| {
-                    draft.error().is_some() || draft.live().config() != config.as_ref()
-                }) {
+                if self
+                    .accepted
+                    .as_ref()
+                    .is_none_or(|layer| layer.config() != config.as_ref())
+                {
                     outcome = CommandOutcome::Unavailable;
                 } else if let Some(request) = self
                     .driver
@@ -1112,7 +1023,14 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 expedite = true;
             }
             ControllerCommand::Resume { .. } => {}
-            command => outcome = self.apply_configuration(command, envelope.calculation)?,
+            ControllerCommand::Configure { config, revision } => {
+                self.configured_revision = revision;
+                self.accepted = Some(ConfigLayer::reconfigured(
+                    self.accepted.as_ref(),
+                    Arc::unwrap_or_clone(config),
+                ));
+                self.recalculate(OutputUpdate::LiveEdit, envelope.calculation)?;
+            }
         }
         if expedite {
             self.driver.expedite(self.now().output.elapsed);
@@ -1120,168 +1038,6 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         self.command = Some((envelope.id, outcome.clone()));
         drop(envelope.completion.try_send(outcome));
         Ok(())
-    }
-
-    fn apply_configuration(
-        &mut self,
-        command: ControllerCommand,
-        prepared: Option<u64>,
-    ) -> io::Result<CommandOutcome> {
-        if self.driver.runtime().preview_active()
-            && matches!(
-                command,
-                ControllerCommand::Edit(_)
-                    | ControllerCommand::EditExecutable { .. }
-                    | ControllerCommand::InvalidEdit(_)
-                    | ControllerCommand::Save
-            )
-        {
-            if prepared.is_some() {
-                self.recalculate(OutputUpdate::Adopt, None)?;
-            }
-            return Ok(CommandOutcome::Unavailable);
-        }
-        let mut outcome = CommandOutcome::Applied;
-        let mut update = None;
-        let mut expedite = false;
-        match command {
-            ControllerCommand::BeginEdit => self.session.begin_edit(),
-            ControllerCommand::Edit(mut input) => {
-                if let Some(draft) = self.session.draft() {
-                    input.suppression.clone_from(&draft.input().suppression);
-                    input.exclusions.clone_from(&draft.input().exclusions);
-                }
-                match self.session.edit(*input) {
-                    Ok(()) => update = Some(OutputUpdate::LiveEdit),
-                    Err(error) => outcome = CommandOutcome::Failed(Arc::new(error)),
-                }
-            }
-            ControllerCommand::EditExecutable {
-                list,
-                executable,
-                present,
-            } => {
-                match self
-                    .session
-                    .edit_executable(list, &executable, present, &self.own_executable)
-                {
-                    Ok(()) => update = Some(OutputUpdate::LiveEdit),
-                    Err(error) => outcome = CommandOutcome::Failed(Arc::new(error)),
-                }
-            }
-            ControllerCommand::InvalidEdit(error) => {
-                if let Err(error) = self.session.invalid_edit(error) {
-                    outcome = CommandOutcome::Failed(Arc::new(error));
-                }
-            }
-            ControllerCommand::Save => {
-                let result = self.session.save(&self.store);
-                outcome = self.persist_command(result);
-                if matches!(outcome, CommandOutcome::Applied) {
-                    self.startup = None;
-                    self.recovered(DiagnosticOperation::ConfigurationRead);
-                    update = Some(OutputUpdate::Adopt);
-                    expedite = true;
-                }
-            }
-            ControllerCommand::Discard => {
-                self.session.discard();
-                update = Some(OutputUpdate::Apply);
-            }
-            ControllerCommand::CloseUnchanged => {
-                if self.session.draft().is_some_and(Draft::is_dirty) {
-                    outcome = CommandOutcome::Unavailable;
-                } else {
-                    self.session.discard();
-                    update = Some(OutputUpdate::Adopt);
-                }
-            }
-            ControllerCommand::LoadLatest => {
-                self.session.load_latest();
-                update = Some(OutputUpdate::Apply);
-            }
-            ControllerCommand::Reload => update = self.reload_configuration(),
-            ControllerCommand::Inclusion {
-                executable,
-                included,
-            } => {
-                let result = self.session.set_inclusion(
-                    &self.store,
-                    &executable,
-                    included,
-                    &self.own_executable,
-                );
-                outcome = self.persist_command(result);
-                update = Some(OutputUpdate::Fade);
-            }
-            _ => return Err(io::Error::other("unsupported configuration command")),
-        }
-        if let Some(update) = update {
-            self.recalculate(update, prepared)?;
-        }
-        if expedite {
-            self.driver.expedite(self.now().output.elapsed);
-        }
-        Ok(outcome)
-    }
-
-    fn persist_command(&mut self, result: Result<PersistResult, SessionError>) -> CommandOutcome {
-        match result {
-            Ok(result) => {
-                if let Some(startup) = &mut self.startup
-                    && let Some(restore) = &mut Arc::make_mut(startup).restore
-                {
-                    restore.write_error = None;
-                }
-                self.persisted(result);
-                self.recovered(DiagnosticOperation::ConfigurationWrite);
-                CommandOutcome::Applied
-            }
-            Err(error) => {
-                if let SessionError::Persistence(error) = &error {
-                    self.log
-                        .failure(DiagnosticOperation::ConfigurationWrite, error.diagnostic());
-                }
-                CommandOutcome::Failed(Arc::new(error))
-            }
-        }
-    }
-
-    fn persisted(&mut self, result: PersistResult) {
-        if let Some(error) = result.backup_error {
-            self.log
-                .failure(DiagnosticOperation::BackupWrite, error.diagnostic());
-            self.storage_error = Some((DiagnosticOperation::BackupWrite, Arc::new(error)));
-        } else {
-            self.recovered(DiagnosticOperation::BackupWrite);
-            self.storage_error = None;
-        }
-    }
-
-    fn reload_configuration(&mut self) -> Option<OutputUpdate> {
-        let error = match self.session.reload(&self.store) {
-            Ok(result) if result.change != crate::ReloadChange::Missing => {
-                self.recovered(DiagnosticOperation::ConfigurationRead);
-                if result.change == crate::ReloadChange::Changed {
-                    self.persisted(result.persistence);
-                    return Some(OutputUpdate::Fade);
-                }
-                if matches!(
-                    self.storage_error,
-                    Some((DiagnosticOperation::ConfigurationRead, _))
-                ) {
-                    self.storage_error = None;
-                }
-                return None;
-            }
-            Ok(_) if !self.session.configuration_file_expected() => return None,
-            Ok(_) => StorageError::missing_configuration(),
-            Err(error) => error,
-        };
-        self.log
-            .failure(DiagnosticOperation::ConfigurationRead, error.diagnostic());
-        self.storage_error = Some((DiagnosticOperation::ConfigurationRead, Arc::new(error)));
-        None
     }
 
     fn calculation_failed(&mut self, operation: DiagnosticOperation) {

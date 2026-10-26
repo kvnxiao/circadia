@@ -35,6 +35,7 @@ The application loads its vector artwork from `assets/`. The SVG files are the s
 | `assets/icon/circadia.svg` | The app icon on a 64-unit grid. |
 | `assets/phase/dark/`, `assets/phase/light/`, `assets/phase/hc/` | Phase art for the dark, light, and contrast themes: `morning.svg`, `day.svg`, `evening.svg`, `bedtime.svg`, and `not-managing.svg` in each folder. The `hc` set shows the intended contrast-theme drawing; the application replaces its colors with the system contrast colors at run time. |
 | `assets/badge/timer.svg`, `assets/badge/app-window.svg` | Line glyphs for the badge laid over the phase art during [suppression](../specs/SPEC.md#background-and-terms), the temporary 6500 K override: a timer for manual suppression and an app window for automatic suppression. |
-| `assets/circadia.ico` | The icon file the current build embeds. Implementation replaces it with an ICO generated from `assets/icon/circadia.svg`. |
+
+The build renders `assets/icon/circadia.svg` into the ICO that the executable embeds and the tray loads.
 
 The [design language](design-language.md#direct2d-safe-svg) lists the SVG features these files may use. The exploratory mockups that preceded these documents are not stored in the repository; these documents are the design reference.

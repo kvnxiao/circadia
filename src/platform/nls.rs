@@ -132,16 +132,35 @@ impl RegionalFormat {
     }
 
     pub(crate) fn clock_layout(&self) -> ClockLayout {
-        if self
-            .time
-            .split('\'')
-            .step_by(2)
-            .any(|text| text.contains('h'))
-        {
+        if self.unquoted_time().contains('h') {
             ClockLayout::TwelveHour
         } else {
             ClockLayout::TwentyFourHour
         }
+    }
+
+    pub(crate) fn hour_padded(&self) -> bool {
+        let pattern = self.unquoted_time();
+        pattern.contains("hh") || pattern.contains("HH")
+    }
+
+    pub(crate) fn period_first(&self) -> bool {
+        let pattern = self.unquoted_time();
+        matches!(
+            (
+                pattern.find([SHORT_DESIGNATOR, LONG_DESIGNATOR]),
+                pattern.find(['h', 'H'])
+            ),
+            (Some(period), Some(hour)) if period < hour
+        )
+    }
+
+    pub(crate) fn designators(&self) -> [&str; 2] {
+        [&self.am, &self.pm]
+    }
+
+    fn unquoted_time(&self) -> String {
+        self.time.split('\'').step_by(2).collect()
     }
 
     #[expect(unsafe_code, reason = "format a local SYSTEMTIME with NLS")]
@@ -393,6 +412,27 @@ mod tests {
             ..format("de-DE")
         };
         assert_eq!(format.clock_layout(), expected);
+    }
+
+    #[test_case("h:mm tt", (false, false); "english twelve hour")]
+    #[test_case("HH:mm", (true, false); "german twenty four hour")]
+    #[test_case("tt h:mm", (false, true); "period first")]
+    #[test_case("tt hh:mm", (true, true); "padded period first")]
+    #[test_case("H 'tt hh' mm", (false, false); "quoted letters")]
+    fn hour_padding_and_period_position_follow_the_time_pattern(
+        pattern: &str,
+        expected: (bool, bool),
+    ) {
+        let format = RegionalFormat {
+            time: mark_designators(pattern),
+            ..format("en-US")
+        };
+        assert_eq!((format.hour_padded(), format.period_first()), expected);
+    }
+
+    #[test]
+    fn designators_are_the_captured_morning_and_afternoon_text() {
+        assert_eq!(format("en-US").designators(), ["AM", "PM"]);
     }
 
     #[test_case("h:mm tt", 1350, "10:30 nachm."; "afternoon designator")]

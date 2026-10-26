@@ -1,18 +1,17 @@
-mod files;
+mod configuration;
 #[cfg(feature = "graph-measurement")]
 pub(crate) mod measurement;
 mod settings;
 mod status;
 
-use crate::CalculationResult;
-use crate::CommandOutcome;
-use crate::CommandReceipt;
 use crate::ControllerClient;
 use crate::ControllerCommand;
 use crate::ControllerSnapshot;
 use crate::ControllerWorker;
 use crate::DesktopEvent;
 use crate::ExistingInstance;
+use crate::Field;
+use crate::FieldValue;
 use crate::ForegroundEvents;
 use crate::InstanceClaim;
 use crate::LifecycleWindow;
@@ -30,7 +29,7 @@ use crate::platform::lifecycle_inputs::shell_identity;
 use crate::platform::lifecycle_inputs::sleep_time;
 use crate::platform::nls::RegionalFormat;
 use crate::read_foreground;
-use files::FileChanges;
+use configuration::Configuration;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -40,14 +39,12 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 use windows_reactor::App;
 use windows_reactor::Application;
 use windows_reactor::ApplicationContext;
 use windows_reactor::ApplicationView;
 use windows_reactor::ApplicationViewContext;
-use windows_reactor::Callback;
 use windows_reactor::Key;
 use windows_reactor::LocalSender;
 use windows_reactor::Menu;
@@ -141,23 +138,23 @@ fn run_with_native(
             )
         })?
         .to_owned();
+    let configuration = Rc::new(RefCell::new(Configuration::load(&directory)));
     let previous_run = crate::log::run::begin(&directory, &running_executable);
     let result = Rc::new(RefCell::new(None));
     let application = App::run_application::<Desktop>(Input {
         startup: RefCell::new(Some(Startup {
             native,
-            running_executable: running_executable.clone(),
+            running_executable,
             primary: Rc::clone(&primary),
             result: Rc::clone(&result),
             panic_controller,
         })),
+        configuration,
         directory,
-        running_executable,
         icon: executable.with_file_name("circadia.ico"),
-        executable,
         previous_run,
-        regional_format,
-        text,
+        regional_format: Rc::new(regional_format),
+        text: Rc::new(text),
     })
     .map_err(io::Error::other);
     let shutdown = result.borrow_mut().take().map_or(Ok(()), Err);
@@ -189,21 +186,16 @@ fn start_log(directory: &Path, verbose: bool) -> io::Result<Arc<OnceLock<Control
 
 struct Input {
     startup: RefCell<Option<Startup>>,
+    configuration: Rc<RefCell<Configuration>>,
     directory: PathBuf,
-    running_executable: String,
     icon: PathBuf,
-    executable: PathBuf,
     #[expect(
         dead_code,
         reason = "the crash notice does not read the previous run yet"
     )]
     previous_run: crate::log::run::PreviousRun,
-    #[expect(
-        dead_code,
-        reason = "the redesigned settings window is the first reader of the regional format"
-    )]
-    regional_format: RegionalFormat,
-    text: Text,
+    regional_format: Rc<RegionalFormat>,
+    text: Rc<Text>,
 }
 
 struct Startup {
@@ -220,30 +212,26 @@ enum Message {
     Open,
     Opened,
     Closed,
-    Settings(settings::Submission),
+    Edit(Vec<(Field, FieldValue)>),
+    Write,
+    Command(settings::Command),
     Native(DesktopEvent),
-    Manual(ManualCommand),
-    Retry,
     Menu(Key),
-    Quit,
 }
 
 struct Runtime {
     controller: ControllerWorker,
-    files: Option<FileChanges>,
     directory: PathBuf,
 }
 
 impl Runtime {
     fn shutdown(self) -> io::Result<()> {
         let requested = self.controller.client().request_exit();
-        let files = self.files.map_or(Ok(()), FileChanges::shutdown);
         let controller = self.controller.shutdown();
         let native = controller.native.map_or(Ok(()), |exit| {
             exit.preview.and(exit.off).map_err(io::Error::other)
         });
         let result = requested
-            .and(files)
             .and(controller.worker)
             .and(controller.calculation)
             .and(native);
@@ -262,7 +250,7 @@ struct Session {
     client: ControllerClient,
     focus_pending: Rc<Cell<bool>>,
     _foreground: ForegroundEvents,
-    window: LifecycleWindow,
+    _window: LifecycleWindow,
     result: Rc<RefCell<Option<io::Error>>>,
 }
 
@@ -270,16 +258,18 @@ impl Session {
     fn start(
         startup: Startup,
         directory: &Path,
+        configuration: &Rc<RefCell<Configuration>>,
         sender: LocalSender<Message>,
-    ) -> io::Result<(Self, Option<String>)> {
+    ) -> io::Result<Self> {
         let runtime = Rc::new(RefCell::new(None::<Runtime>));
         let ending = Rc::clone(&runtime);
+        let ending_configuration = Rc::clone(configuration);
         let exit_result = Rc::clone(&startup.result);
         let window = LifecycleWindow::new(
             move |event| {
                 let _delivered = sender.send(Message::Native(event));
             },
-            move || end_session(&ending, &exit_result),
+            move || end_session(&ending, &ending_configuration, &exit_result),
         )?;
         let focus_pending = Rc::new(Cell::new(false));
         let focused = Rc::clone(&focus_pending);
@@ -288,15 +278,11 @@ impl Session {
             focused.set(true);
             let _notified = focus_wake.notify();
         })?;
-        let watched = FileChanges::start(directory, window.wake());
-        let file_error = watched
-            .as_ref()
-            .err()
-            .map(|error| status::error_text(error));
         let wake = window.wake();
+        let config = configuration.borrow().accepted().cloned();
         let controller = ControllerWorker::with_native(
-            directory.to_owned(),
-            startup.running_executable,
+            &startup.running_executable,
+            config,
             move || wake.notify(),
             startup.native,
             read_foreground,
@@ -307,7 +293,6 @@ impl Session {
         crate::activity::bind(&client);
         *runtime.borrow_mut() = Some(Runtime {
             controller,
-            files: watched.ok(),
             directory: directory.to_owned(),
         });
         startup.primary.publish_ready()?;
@@ -315,17 +300,14 @@ impl Session {
         measurement::desktop_ready();
         #[cfg(feature = "output-measurement")]
         crate::measurement::desktop_ready();
-        Ok((
-            Self {
-                runtime,
-                client,
-                focus_pending,
-                _foreground: foreground,
-                window,
-                result: startup.result,
-            },
-            file_error,
-        ))
+        Ok(Self {
+            runtime,
+            client,
+            focus_pending,
+            _foreground: foreground,
+            _window: window,
+            result: startup.result,
+        })
     }
 }
 
@@ -335,8 +317,17 @@ impl Drop for Session {
     }
 }
 
-fn end_session(runtime: &RefCell<Option<Runtime>>, result: &RefCell<Option<io::Error>>) {
+// Windows can end the process soon after WM_ENDSESSION returns, before
+// Reactor handles the session-end message, so the pending write happens here.
+fn end_session(
+    runtime: &RefCell<Option<Runtime>>,
+    configuration: &RefCell<Configuration>,
+    result: &RefCell<Option<io::Error>>,
+) {
     tracing::info!("session end confirmed");
+    if let Ok(mut configuration) = configuration.try_borrow_mut() {
+        configuration.exit();
+    }
     finish_runtime(runtime, result);
 }
 
@@ -354,16 +345,11 @@ fn finish_runtime(runtime: &RefCell<Option<Runtime>>, result: &RefCell<Option<io
 
 struct Desktop {
     session: Option<Session>,
+    configuration: Rc<RefCell<Configuration>>,
     startup: Option<Startup>,
     snapshot: Option<Arc<ControllerSnapshot>>,
-    calculation: Option<Arc<CalculationResult>>,
-    pending: VecDeque<PendingCommand>,
-    receipts: Vec<(CommandReceipt, Option<Callback<settings::Completion>>)>,
-    first_snapshot: bool,
+    pending: VecDeque<ControllerCommand>,
     settings_activation: u64,
-    preview_epoch: u64,
-    error: Option<String>,
-    file_error: Option<String>,
     fatal: Option<io::Error>,
     exiting: bool,
     settings_open: bool,
@@ -372,61 +358,6 @@ struct Desktop {
     resume: ResumeEpoch,
     taskbar: Option<ShellIdentity>,
     taskbar_epoch: u64,
-}
-
-struct PendingCommand {
-    command: ControllerCommand,
-    admitted: Option<Callback<settings::Admission>>,
-    completed: Option<Callback<settings::Completion>>,
-}
-
-fn retain_receipt(
-    receipt: &CommandReceipt,
-    completed: Option<&Callback<settings::Completion>>,
-    snapshot: Option<&Arc<ControllerSnapshot>>,
-    finished: bool,
-    error: &mut Option<String>,
-) -> bool {
-    if let Some(completed) = completed
-        && snapshot.is_none_or(|snapshot| {
-            snapshot
-                .command
-                .as_ref()
-                .is_none_or(|(id, _)| *id < receipt.id)
-        })
-    {
-        if !finished {
-            return true;
-        }
-        completed.call(settings::Completion {
-            result: Err("The controller stopped before confirming an action.".into()),
-            snapshot: snapshot.cloned(),
-        });
-        return false;
-    }
-    let outcome = receipt.completion.try_recv();
-    if matches!(outcome, Err(TryRecvError::Empty)) {
-        return true;
-    }
-    if let Some(completed) = completed {
-        completed.call(settings::Completion {
-            result: outcome.map_err(|_disconnected| {
-                "The controller stopped before confirming an action.".into()
-            }),
-            snapshot: snapshot.cloned(),
-        });
-        return false;
-    }
-    match outcome {
-        Ok(CommandOutcome::Applied) => {}
-        Ok(CommandOutcome::Unavailable) => {
-            *error =
-                Some("The requested action is unavailable in the current control state.".into());
-        }
-        Ok(CommandOutcome::Failed(failure)) => *error = Some(status::error_text(failure.as_ref())),
-        Err(_) => *error = Some("The controller stopped before confirming an action.".into()),
-    }
-    false
 }
 
 impl Application for Desktop {
@@ -445,27 +376,11 @@ impl Application for Desktop {
             }
             context.exit();
         }
-        Self {
-            session: None,
+        Self::new(
+            Rc::clone(&input.configuration),
             startup,
-            snapshot: None,
-            calculation: None,
-            pending: VecDeque::new(),
-            receipts: Vec::new(),
-            first_snapshot: true,
-            settings_activation: 0,
-            preview_epoch: 0,
-            error: None,
-            file_error: None,
-            fatal: None,
-            exiting: false,
-            settings_open: false,
-            directory: input.directory.clone(),
-            zone: ZoneIdentity::current().ok(),
-            resume: ResumeEpoch::default(),
-            taskbar: None,
-            taskbar_epoch: 0,
-        }
+            input.directory.clone(),
+        )
     }
 
     fn update(&mut self, message: Message, context: &ApplicationContext<Self>) {
@@ -475,32 +390,18 @@ impl Application for Desktop {
         match message {
             Message::Start => self.start(context),
             Message::Open => self.open_settings(context),
-            Message::Opened => {
-                self.set_settings_open(true);
-                if !self.exiting {
-                    self.queue(ControllerCommand::BeginEdit);
-                }
-            }
+            Message::Opened => self.set_settings_open(true),
             Message::Closed => {
-                self.set_settings_open(false);
+                self.settings_closed();
                 if self.exiting {
                     context.exit();
-                } else {
-                    self.queue(ControllerCommand::CloseUnchanged);
                 }
             }
-            Message::Settings(submission) => {
-                self.enqueue(
-                    submission.command,
-                    Some(submission.admitted),
-                    Some(submission.completed),
-                );
-            }
+            Message::Edit(edits) => self.edit(edits),
+            Message::Write => self.configuration.borrow_mut().write(),
+            Message::Command(command) => self.command(command),
             Message::Native(event) => self.native_event(event, context),
-            Message::Manual(command) => self.queue(ControllerCommand::Manual(command)),
-            Message::Retry => self.retry(),
             Message::Menu(key) => self.menu(&key, context),
-            Message::Quit => self.quit(context),
         }
         if let Some(error) = self.fatal.take() {
             if let Some(session) = &self.session {
@@ -514,32 +415,35 @@ impl Application for Desktop {
     }
 
     fn view(&self, input: &Input, context: &ApplicationViewContext<Self>) -> ApplicationView {
-        let lines = status::lines(&input.text, self.snapshot.as_deref());
+        let configuration = self.configuration.borrow();
+        let lines = status::lines(
+            &input.text,
+            self.snapshot.as_deref(),
+            status::Saving::new(&configuration),
+        );
         let manual = self.manual_command();
-        let manual_label = status::manual_label(&input.text, manual);
-        let items = status::menu_items(&input.text, self.snapshot.as_deref(), manual);
+        let items = status::menu_items(
+            &input.text,
+            self.snapshot.as_deref(),
+            manual,
+            configuration.toggles_available(),
+        );
+        let model =
+            settings::Model::new(&configuration, lines.first().cloned().unwrap_or_default());
         ApplicationView::new()
             .window::<settings::Settings>(
                 "settings",
                 settings::Input {
-                    running_executable: input.running_executable.clone(),
-                    executable: input.executable.clone(),
-                    directory: input.directory.clone(),
+                    text: Rc::clone(&input.text),
+                    region: Rc::clone(&input.regional_format),
+                    model: Rc::new(model),
                     activation: self.settings_activation,
-                    snapshot: self.snapshot.clone(),
-                    calculation: self.calculation.clone(),
-                    preview_epoch: self.preview_epoch,
                     exiting: self.exiting,
-                    status: lines.join("\n"),
-                    detail: self.details(),
-                    manual_label,
-                    manual_available: status::manual_available(self.snapshot.as_deref()),
                     opened: context.message(Message::Opened),
                     closed: context.message(Message::Closed),
-                    manual: context.message(Message::Manual(manual)),
-                    retry: context.message(Message::Retry),
-                    quit: context.message(Message::Quit),
-                    submit: context.callback(Message::Settings),
+                    edit: context.callback(Message::Edit),
+                    write: context.message(Message::Write),
+                    command: context.callback(Message::Command),
                 },
             )
             .notify_icon(
@@ -553,6 +457,36 @@ impl Application for Desktop {
 }
 
 impl Desktop {
+    fn new(
+        configuration: Rc<RefCell<Configuration>>,
+        startup: Option<Startup>,
+        directory: PathBuf,
+    ) -> Self {
+        Self {
+            session: None,
+            configuration,
+            startup,
+            snapshot: None,
+            pending: VecDeque::new(),
+            settings_activation: 0,
+            fatal: None,
+            exiting: false,
+            settings_open: false,
+            directory,
+            zone: ZoneIdentity::current().ok(),
+            resume: ResumeEpoch::default(),
+            taskbar: None,
+            taskbar_epoch: 0,
+        }
+    }
+
+    fn settings_closed(&mut self) {
+        self.set_settings_open(false);
+        if !self.exiting {
+            self.configuration.borrow_mut().write();
+        }
+    }
+
     fn set_settings_open(&mut self, open: bool) {
         if self.settings_open != open {
             tracing::info!("settings {}", if open { "opened" } else { "closed" });
@@ -565,10 +499,17 @@ impl Desktop {
             return;
         };
         let result = Rc::clone(&startup.result);
-        match Session::start(startup, &self.directory, context.sender()) {
-            Ok((session, file_error)) => {
+        match Session::start(
+            startup,
+            &self.directory,
+            &self.configuration,
+            context.sender(),
+        ) {
+            Ok(session) => {
                 self.session = Some(session);
-                self.file_error = file_error;
+                if self.configuration.borrow().opens_settings_at_launch() {
+                    context.show_window("settings");
+                }
             }
             Err(error) => {
                 result.borrow_mut().get_or_insert(error);
@@ -594,40 +535,58 @@ impl Desktop {
         }
     }
 
-    fn queue(&mut self, command: ControllerCommand) {
-        if matches!(
-            command,
-            ControllerCommand::Manual(ManualCommand::Start)
-                | ControllerCommand::Lock
-                | ControllerCommand::Suspend
-                | ControllerCommand::Resume { .. }
-                | ControllerCommand::Recompute(Recompute::Clock)
-        ) {
-            self.preview_epoch = self.preview_epoch.wrapping_add(1);
+    fn command(&mut self, command: settings::Command) {
+        match command {
+            settings::Command::Reset => {
+                let config = self.configuration.borrow_mut().reset();
+                self.configure(Some(config));
+            }
+            settings::Command::Retry => self.configuration.borrow_mut().retry(),
+            settings::Command::OpenFolder => {
+                if let Err(error) = crate::platform::settings_window::open_folder(
+                    self.configuration.borrow().directory(),
+                ) {
+                    tracing::warn!(%error, "opening the data folder failed");
+                }
+            }
+            settings::Command::DismissRestore => self.configuration.borrow_mut().dismiss_restore(),
         }
-        self.enqueue(command, None, None);
     }
 
-    fn enqueue(
-        &mut self,
-        command: ControllerCommand,
-        admitted: Option<Callback<settings::Admission>>,
-        completed: Option<Callback<settings::Completion>>,
-    ) {
+    fn edit(&mut self, edits: Vec<(Field, FieldValue)>) {
+        let changed = self.configuration.borrow_mut().edit(edits);
+        self.configure(changed);
+    }
+
+    fn configure(&mut self, changed: Option<Arc<crate::Config>>) {
+        if let Some(config) = changed {
+            let revision = self.configuration.borrow().revision();
+            self.queue(ControllerCommand::Configure { config, revision });
+        }
+    }
+
+    fn queue(&mut self, command: ControllerCommand) {
         if self.exiting || self.fatal.is_some() {
             return;
+        }
+        // Each Configure has the whole configuration, so a newer one replaces a
+        // directly preceding pending Configure. Otherwise a slider drag while
+        // the controller is blocked exhausts the queue.
+        if matches!(command, ControllerCommand::Configure { .. })
+            && matches!(
+                self.pending.back(),
+                Some(ControllerCommand::Configure { .. })
+            )
+        {
+            self.pending.pop_back();
         }
         let bytes = self
             .pending
             .iter()
-            .map(|pending| pending.command.bytes())
+            .map(ControllerCommand::bytes)
             .fold(command.bytes(), usize::saturating_add);
         if self.pending.len() < COMMAND_QUEUE_CAPACITY && bytes <= COMMAND_QUEUE_BYTES {
-            self.pending.push_back(PendingCommand {
-                command,
-                admitted,
-                completed,
-            });
+            self.pending.push_back(command);
         } else {
             self.fatal = Some(io::Error::new(
                 io::ErrorKind::OutOfMemory,
@@ -640,44 +599,17 @@ impl Desktop {
         let Some(session) = &self.session else {
             return;
         };
-        while self.receipts.len() < COMMAND_QUEUE_CAPACITY {
-            let Some(command) = self.pending.front() else {
-                break;
-            };
-            let receipt = match session.client.submit(command.command.clone()) {
-                Ok(receipt) => receipt,
+        while let Some(command) = self.pending.front() {
+            match session.client.submit(command.clone()) {
+                Ok(_receipt) => {}
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) => {
-                    self.error = Some(status::error_text(&error));
-                    self.reject_pending(&error);
+                    tracing::warn!(%error, "controller command rejected");
+                    self.pending.clear();
                     break;
                 }
-            };
-            if let Some(admitted) = &command.admitted {
-                admitted.call(settings::Admission {
-                    id: receipt.id,
-                    submitted_at: receipt.submitted_at,
-                    calculation: receipt.calculation,
-                });
             }
-            let completed = self
-                .pending
-                .pop_front()
-                .and_then(|pending| pending.completed);
-            self.receipts.push((receipt, completed));
-        }
-    }
-
-    fn reject_pending(&mut self, error: &io::Error) {
-        for completed in self
-            .pending
-            .drain(..)
-            .filter_map(|pending| pending.completed)
-        {
-            completed.call(settings::Completion {
-                result: Err(status::error_text(error)),
-                snapshot: self.snapshot.clone(),
-            });
+            self.pending.pop_front();
         }
     }
 
@@ -689,10 +621,11 @@ impl Desktop {
             Some("manual-stop") => self.queue(ControllerCommand::Manual(ManualCommand::Stop)),
             Some(key) => {
                 if let Some((action, executable)) = key.split_once(':') {
-                    self.queue(ControllerCommand::Inclusion {
-                        executable: executable.to_owned(),
-                        included: action == "add",
-                    });
+                    let changed = self
+                        .configuration
+                        .borrow_mut()
+                        .toggle(executable, action == "add");
+                    self.configure(changed);
                 }
             }
             None => {}
@@ -702,7 +635,7 @@ impl Desktop {
     fn native_event(&mut self, event: DesktopEvent, context: &ApplicationContext<Self>) {
         match event {
             DesktopEvent::Activate => self.open_settings(context),
-            DesktopEvent::WorkerChanged => self.refresh(context),
+            DesktopEvent::WorkerChanged => self.refresh(),
             DesktopEvent::ClockChanged => {
                 self.zone = ZoneIdentity::current().ok();
                 self.queue(ControllerCommand::Recompute(Recompute::Clock));
@@ -724,7 +657,7 @@ impl Desktop {
             }
             DesktopEvent::AutomaticResume | DesktopEvent::UserResume => {
                 let stamp = last_wake_time()
-                    .inspect_err(|error| self.error = Some(status::error_text(error)))
+                    .inspect_err(|error| tracing::warn!(%error, "reading the last wake time"))
                     .ok();
                 if let Some(epoch) = self.resume.observe(stamp, sleep_time()) {
                     self.queue(ControllerCommand::Resume {
@@ -735,7 +668,7 @@ impl Desktop {
             }
             DesktopEvent::TaskbarCreated => {
                 let identity = shell_identity()
-                    .inspect_err(|error| self.error = Some(status::error_text(error)))
+                    .inspect_err(|error| tracing::warn!(%error, "reading the shell identity"))
                     .ok();
                 let Some(identity) = identity else {
                     return;
@@ -756,79 +689,22 @@ impl Desktop {
         }
     }
 
-    fn refresh(&mut self, context: &ApplicationContext<Self>) {
+    fn refresh(&mut self) {
         let Some(session) = &self.session else {
             return;
         };
-        let finished = session.client.is_finished();
         match session.client.snapshot() {
             Ok(snapshot) => self.snapshot = snapshot,
-            Err(error) => self.error = Some(status::error_text(&error)),
+            Err(error) => tracing::warn!(%error, "reading the controller snapshot"),
         }
-        match session.client.calculations().latest() {
-            Ok(result) => self.calculation = result,
-            Err(error) => self.error = Some(status::error_text(&error)),
-        }
-        self.receipts.retain(|(receipt, completed)| {
-            retain_receipt(
-                receipt,
-                completed.as_ref(),
-                self.snapshot.as_ref(),
-                finished,
-                &mut self.error,
-            )
-        });
-        let capacity = COMMAND_QUEUE_CAPACITY - self.pending.len();
-        let focused = capacity > 0 && session.focus_pending.replace(false);
-        let reload = capacity > usize::from(focused)
-            && session
-                .runtime
-                .borrow()
-                .as_ref()
-                .and_then(|runtime| runtime.files.as_ref())
-                .is_some_and(FileChanges::take_pending);
-        if let Some(files) = session
-            .runtime
-            .borrow()
-            .as_ref()
-            .and_then(|runtime| runtime.files.as_ref())
-        {
-            match files.failure() {
-                Ok(Some(error)) => self.file_error = Some(status::error_text(error.as_ref())),
-                Err(error) => self.file_error = Some(status::error_text(&error)),
-                Ok(None) => {}
-            }
-        }
-        if focused {
+        if self.pending.len() < COMMAND_QUEUE_CAPACITY && session.focus_pending.replace(false) {
             self.queue(ControllerCommand::Foreground(read_foreground()));
         }
-        if reload {
-            self.queue(ControllerCommand::Reload);
-        }
-        if self.first_snapshot
-            && let Some(snapshot) = &self.snapshot
-        {
-            self.first_snapshot = false;
-            if status::open_on_start(snapshot) {
-                context.show_window("settings");
-            }
-        }
     }
 
-    fn retry(&mut self) {
-        self.error = None;
-        if self.file_error.is_some() {
-            self.restart_file_observer();
-        }
-        self.queue(ControllerCommand::Reload);
-        self.queue(ControllerCommand::Recompute(Recompute::Retry));
-    }
-
-    fn quit(&mut self, context: &ApplicationContext<Self>) {
-        if let Err(error) = crate::platform::picker::cancel()
-            && let Some(session) = &self.session
-        {
-            session.result.borrow_mut().get_or_insert(error);
+    fn begin_exit(&mut self) {
+        if !self.exiting {
+            self.configuration.borrow_mut().exit();
         }
         self.exiting = true;
         self.pending.clear();
@@ -837,35 +713,18 @@ impl Desktop {
         {
             session.result.borrow_mut().get_or_insert(error);
         }
+    }
+
+    fn quit(&mut self, context: &ApplicationContext<Self>) {
+        if let Err(error) = crate::platform::picker::cancel()
+            && let Some(session) = &self.session
+        {
+            session.result.borrow_mut().get_or_insert(error);
+        }
+        self.begin_exit();
         // An open dialog must close before its native scheduler is dropped.
         if !self.settings_open {
             context.exit();
-        }
-    }
-
-    fn details(&self) -> String {
-        let mut details: Vec<_> = self.error.iter().chain(&self.file_error).cloned().collect();
-        details.extend(status::details(self.snapshot.as_deref()));
-        details.join("\n")
-    }
-
-    fn restart_file_observer(&mut self) {
-        let Some(session) = &self.session else {
-            return;
-        };
-        let mut runtime = session.runtime.borrow_mut();
-        let Some(runtime) = runtime.as_mut() else {
-            return;
-        };
-        if let Err(error) = runtime.files.take().map_or(Ok(()), FileChanges::shutdown) {
-            self.error = Some(status::error_text(&error));
-        }
-        match FileChanges::start(&self.directory, session.window.wake()) {
-            Ok(files) => {
-                runtime.files = Some(files);
-                self.file_error = None;
-            }
-            Err(error) => self.file_error = Some(status::error_text(&error)),
         }
     }
 }
@@ -1138,10 +997,11 @@ mod tests {
         let marker = directory.path().join("logs").join("run.marker");
         assert!(marker.exists());
         let result = RefCell::new(None);
+        let configuration = RefCell::new(configuration::Configuration::load(directory.path()));
         let log = crate::log::capture(tracing::Level::INFO, || {
             let controller = ControllerWorker::with_native(
-                directory.path().to_owned(),
-                "circadia.exe".into(),
+                "circadia.exe",
+                Some(Arc::new(crate::Config::default())),
                 || Ok(()),
                 crate::Native::with_backend(RecordingBackend(
                     directory.path().join("native-calls.txt"),
@@ -1151,10 +1011,9 @@ mod tests {
             .expect("controller");
             let runtime = RefCell::new(Some(Runtime {
                 controller,
-                files: None,
                 directory: directory.path().to_owned(),
             }));
-            end_session(&runtime, &result);
+            end_session(&runtime, &configuration, &result);
             assert!(!marker.exists());
         });
         assert!(result.into_inner().is_none());
@@ -1225,27 +1084,14 @@ mod tests {
 
     #[test]
     fn opening_and_closing_settings_each_record_once() {
-        let mut desktop = Desktop {
-            session: None,
-            startup: None,
-            snapshot: None,
-            calculation: None,
-            pending: VecDeque::new(),
-            receipts: Vec::new(),
-            first_snapshot: true,
-            settings_activation: 0,
-            preview_epoch: 0,
-            error: None,
-            file_error: None,
-            fatal: None,
-            exiting: false,
-            settings_open: false,
-            directory: PathBuf::new(),
-            zone: None,
-            resume: ResumeEpoch::default(),
-            taskbar: None,
-            taskbar_epoch: 0,
-        };
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        let mut desktop = Desktop::new(
+            Rc::new(RefCell::new(configuration::Configuration::load(
+                directory.path(),
+            ))),
+            None,
+            PathBuf::new(),
+        );
         let records = crate::log::capture(tracing::Level::INFO, || {
             desktop.set_settings_open(true);
             desktop.set_settings_open(true);
@@ -1260,12 +1106,140 @@ mod tests {
         );
     }
 
+    fn end_session_with(file: &str, edit: (Field, FieldValue)) -> String {
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        let path = directory.path().join("config.toml");
+        fs_err::write(&path, file).expect("configuration fixture");
+        let configuration = RefCell::new(configuration::Configuration::load(directory.path()));
+        configuration.borrow_mut().edit(vec![edit]);
+        let controller = ControllerWorker::with_native(
+            "circadia.exe",
+            configuration.borrow().accepted().cloned(),
+            || Ok(()),
+            crate::Native::with_backend(RecordingBackend(
+                directory.path().join("native-calls.txt"),
+            )),
+            || crate::Foreground::Unknown,
+        )
+        .expect("controller");
+        let runtime = RefCell::new(Some(Runtime {
+            controller,
+            directory: directory.path().to_owned(),
+        }));
+        let result = RefCell::new(None);
+        end_session(&runtime, &configuration, &result);
+        assert!(result.into_inner().is_none());
+        fs_err::read_to_string(path).expect("configuration file")
+    }
+
+    fn configuration_file(bedtime: &str) -> String {
+        let mut text = toml::to_string(crate::Config::default().input()).expect("defaults");
+        text = text.replace("bedtime = \"23:00\"", &format!("bedtime = \"{bedtime}\""));
+        text
+    }
+
+    #[test]
+    fn the_session_end_closure_writes_a_pending_change_before_the_controller_exits() {
+        let saved = end_session_with(
+            &configuration_file("23:00"),
+            (Field::SleepKelvin, FieldValue::Number(2200)),
+        );
+        assert!(saved.contains("sleep_kelvin = 2200"), "{saved}");
+    }
+
+    #[test]
+    fn the_session_end_closure_writes_nothing_while_saving_is_paused() {
+        let file = configuration_file("25:00");
+        let saved = end_session_with(&file, (Field::SleepKelvin, FieldValue::Number(2200)));
+        assert_eq!(saved, file);
+    }
+
+    fn desktop_with(file: Option<&str>) -> (tempfile::TempDir, Desktop) {
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        if let Some(file) = file {
+            fs_err::write(directory.path().join("config.toml"), file).expect("fixture");
+        }
+        let configuration = configuration::Configuration::load(directory.path());
+        let desktop = Desktop::new(
+            Rc::new(RefCell::new(configuration)),
+            None,
+            directory.path().to_owned(),
+        );
+        (directory, desktop)
+    }
+
+    fn saved(directory: &tempfile::TempDir) -> Option<String> {
+        fs_err::read_to_string(directory.path().join("config.toml")).ok()
+    }
+
+    #[test]
+    fn closing_settings_writes_a_pending_change_at_once() {
+        let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+        desktop.set_settings_open(true);
+        desktop
+            .configuration
+            .borrow_mut()
+            .edit(vec![(Field::Bedtime, FieldValue::Clock(22 * 60))]);
+        desktop.settings_closed();
+        let saved = saved(&directory).expect("written file");
+        assert!(saved.contains("bedtime = \"22:00\""), "{saved}");
+    }
+
+    #[test]
+    fn opening_and_closing_settings_without_an_edit_writes_nothing() {
+        let (directory, mut desktop) = desktop_with(None);
+        desktop.set_settings_open(true);
+        desktop.settings_closed();
+        assert_eq!(saved(&directory), None);
+    }
+
+    #[test]
+    fn consecutive_configure_commands_wait_as_the_newest_one() {
+        let (_directory, mut desktop) = desktop_with(None);
+        let config = Arc::new(crate::Config::default());
+        let configure = |revision| ControllerCommand::Configure {
+            config: Arc::clone(&config),
+            revision,
+        };
+        for revision in 1..=COMMAND_QUEUE_CAPACITY as u64 * 2 {
+            desktop.queue(configure(revision));
+        }
+        desktop.queue(ControllerCommand::StopPreview);
+        desktop.queue(configure(1000));
+        assert!(desktop.fatal.is_none());
+        let revisions: Vec<Option<u64>> = desktop
+            .pending
+            .iter()
+            .map(|command| match command {
+                ControllerCommand::Configure { revision, .. } => Some(*revision),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            revisions,
+            [Some(COMMAND_QUEUE_CAPACITY as u64 * 2), None, Some(1000)]
+        );
+    }
+
+    #[test]
+    fn quit_writes_a_pending_change_before_exit() {
+        let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+        desktop
+            .configuration
+            .borrow_mut()
+            .edit(vec![(Field::Wake, FieldValue::Clock(6 * 60))]);
+        desktop.begin_exit();
+        assert!(desktop.exiting);
+        let saved = saved(&directory).expect("written file");
+        assert!(saved.contains("wake = \"06:00\""), "{saved}");
+    }
+
     fn panic_with_controller(directory: &Path, controller_thread: bool) {
         let panic_controller = start_log(directory, false).expect("child log");
         let calls = directory.join("native-calls.txt");
         let controller = ControllerWorker::with_native(
-            directory.to_owned(),
-            "circadia.exe".into(),
+            "circadia.exe",
+            Some(Arc::new(crate::Config::default())),
             || Ok(()),
             crate::Native::with_backend(RecordingBackend(calls.clone())),
             || crate::Foreground::Unknown,
@@ -1351,65 +1325,6 @@ mod tests {
             self.record(&format!("set_active {active}"));
             Ok(())
         }
-    }
-
-    #[test]
-    fn an_applied_action_waits_for_its_published_settings_state() {
-        let (send, completion) = std::sync::mpsc::sync_channel(1);
-        send.send(CommandOutcome::Applied)
-            .expect("operation completed");
-        let receipt = CommandReceipt {
-            id: 1,
-            submitted_at: std::time::Instant::now(),
-            calculation: None,
-            completion,
-        };
-        let completed =
-            Callback::new(|_completion: settings::Completion| panic!("snapshot is not available"));
-        assert!(retain_receipt(
-            &receipt,
-            Some(&completed),
-            None,
-            false,
-            &mut None
-        ));
-        assert!(matches!(
-            receipt.completion.try_recv(),
-            Ok(CommandOutcome::Applied)
-        ));
-    }
-
-    #[test]
-    fn an_unconfirmed_action_reports_failure_after_worker_exit() {
-        let (send, completion) = std::sync::mpsc::sync_channel(1);
-        drop(send);
-        let receipt = CommandReceipt {
-            id: 1,
-            submitted_at: std::time::Instant::now(),
-            calculation: None,
-            completion,
-        };
-        let result = Rc::new(RefCell::new(None));
-        let received = Rc::clone(&result);
-        let completed = Callback::new(move |completion: settings::Completion| {
-            *received.borrow_mut() = Some(completion.result);
-        });
-        assert!(!retain_receipt(
-            &receipt,
-            Some(&completed),
-            None,
-            true,
-            &mut None
-        ));
-        assert_eq!(
-            result
-                .borrow()
-                .as_ref()
-                .expect("completion delivered")
-                .as_ref()
-                .expect_err("unconfirmed action fails"),
-            "The controller stopped before confirming an action."
-        );
     }
 
     #[test]
