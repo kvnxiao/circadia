@@ -55,7 +55,7 @@ impl InstanceClaim {
     }
 
     #[expect(unsafe_code, reason = "create and own a named Windows mutex")]
-    fn acquire_named(name: &str) -> io::Result<Self> {
+    pub(crate) fn acquire_named(name: &str) -> io::Result<Self> {
         let wide: Vec<_> = name.encode_utf16().chain(Some(0)).collect();
         // SAFETY: The terminated name remains live, and null security
         // attributes select a noninheritable handle with the caller's

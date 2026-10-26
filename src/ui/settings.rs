@@ -57,7 +57,7 @@ pub(super) struct Input {
     pub(super) exiting: bool,
     pub(super) status: String,
     pub(super) detail: String,
-    pub(super) manual_label: &'static str,
+    pub(super) manual_label: String,
     pub(super) manual_available: bool,
     pub(super) opened: Callback<()>,
     pub(super) closed: Callback<()>,
@@ -624,7 +624,7 @@ impl Settings {
                         .vertical_alignment(VerticalAlignment::Center),
                     Button::new()
                         .grid_column(1)
-                        .content(input.manual_label)
+                        .content(input.manual_label.as_str())
                         .min_height(40.0)
                         .is_enabled(input.manual_available)
                         .automation_id("manual-suppression")

@@ -24,13 +24,17 @@ just build-self-contained
 
 Launching Circadia starts management of live Night Light. Start minimized defaults on; open settings from the tray or launch the executable again. Closing settings keeps control running. Quit clears native preview and requests Night Light off. Every internal error (a Rust panic) writes a crash record to the log and then ends the process. If Circadia has begun accessing Night Light, it first clears native preview and requests Night Light off without changing the temperature gradually, and waits at most 2 seconds for both requests. An error on the thread that writes Night Light skips these two requests.
 
-The command line is `circadia [--data-dir DIRECTORY] [--verbose | -V]`. `--verbose` or `-V` adds `DEBUG` records to the log for that process:
+The command line is `circadia [--data-dir DIRECTORY] [--verbose | -V] [--language TAG]`. `--verbose` or `-V` adds `DEBUG` records to the log for that process:
 
 - Each Night Light temperature write, with its Kelvin value, duration, and outcome.
 - Each change of the foreground app, with its executable name and whether Circadia suppresses the schedule for it.
 - Each configuration file write.
 
-A launch while Circadia is already running opens settings in the running process and does not change its log detail.
+A launch while Circadia is already running opens settings in the running process and does not change its log detail or language.
+
+Interface text, including the tray menu and tooltip, comes from Project Fluent message files (`.ftl`), one folder per language under `i18n/`. Circadia uses the first language in the user's ordered list of Windows display languages that has a folder, and English when none has one or Windows cannot return the list; English is the only language so far. Clock times and numbers follow the Windows regional format (**Settings > Time & language > Language & region**), including its Short time format and AM/PM symbols. Circadia reads that format once at startup, so a change takes effect at the next launch.
+
+`--language TAG` is a developer option that the usage error message does not list. TAG is a language tag such as `en-US`. The option forces the interface language for that process without saving it. `--language qps-Ploc` selects the Windows pseudo-locale tag, for which Circadia accents each message, brackets it, and pads it to at least 40% more characters, so hard-coded English text and clipped layouts stand out. A launch that starts Circadia stops with a usage error when TAG has no folder and is not `qps-Ploc`.
 
 Release builds keep line tables (`debug = "line-tables-only"` in `[profile.release]`), so the release `circadia.pdb` can resolve the `module+0xoffset` frames in crash records to functions and lines. Archive the PDB of each distributed build and do not ship it; a rebuilt executable gets a new PDB that cannot resolve another build's offsets.
 
@@ -123,6 +127,7 @@ After restoring a backup, settings reports the cause until a successful Save. A 
 
 Each log record has a UTC timestamp, a level (`INFO`, `WARN`, `ERROR`, or `DEBUG` with `--verbose`), the Rust module that wrote it, a message, and `key=value` fields:
 
+- At each launch, an `interface language` record names the language in use. A `WARN` record precedes it when Windows cannot return the user's display languages. Another `WARN` record follows it when Windows rejects the request to show the built-in text of standard controls, such as their accessibility labels, in that language.
 - At each launch, a `start` record has the Circadia version, the Windows build, the commit of the windows-rs UI library that the build uses, the process ID, and whether startup used the configuration file, its backup, or the defaults, or reported a configuration error.
 - A `WARN` failure record names the operation, such as `temperature_write` or `configuration_read`, an error category such as `access_denied` or `invalid_data`, and an optional Windows error code. Circadia records a repeated identical failure of an operation once, and records it again only after the error changes or the operation recovers. An `INFO` record marks the recovery.
 - `INFO` lifecycle records cover settings opening and closing, suspend and resume, automatic and manual suppression starting and ending, Preview starting and ending, a Windows sign-out or shutdown, and exit.

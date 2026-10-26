@@ -6,6 +6,7 @@ mod config;
 #[cfg(windows)]
 mod controller;
 mod diagnostics;
+mod l10n;
 mod log;
 #[cfg(all(windows, feature = "output-measurement"))]
 mod measurement;

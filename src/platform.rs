@@ -6,6 +6,7 @@ pub(crate) mod foreground;
 pub(crate) mod instance;
 pub(crate) mod lifecycle_inputs;
 pub(crate) mod location;
+pub(crate) mod nls;
 pub(crate) mod picker;
 pub(crate) mod settings_window;
 pub(crate) mod startup;
