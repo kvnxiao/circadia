@@ -10,12 +10,15 @@ use super::configuration::Configuration;
 use super::configuration::ConfigurationError;
 use super::configuration::FileProblem;
 use crate::Config;
+use crate::ControllerSnapshot;
 use crate::DiagnosticFailure;
+use crate::DiagnosticOperation;
 use crate::Field;
 use crate::FieldErrorKind;
 use crate::FieldInputs;
 use crate::FieldValue;
 use crate::LoadReport;
+use crate::ManagementState;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
@@ -33,6 +36,8 @@ use windows_reactor::Callback;
 use windows_reactor::Component;
 use windows_reactor::ComponentContext;
 use windows_reactor::ComponentTimer;
+use windows_reactor::ContentDialogExt;
+use windows_reactor::ContentDialogResult;
 use windows_reactor::EncodedImage;
 use windows_reactor::Grid;
 use windows_reactor::GridLength;
@@ -115,10 +120,22 @@ pub(super) struct Model {
     backup_error: Option<DiagnosticFailure>,
     launch_language: String,
     status: String,
+    management: ManagementState,
+    applied: Option<bool>,
+    native_errors: Vec<(DiagnosticOperation, DiagnosticFailure)>,
+    retrying: bool,
 }
 
 impl Model {
-    pub(super) fn new(configuration: &Configuration, status: String) -> Self {
+    pub(super) fn new(
+        configuration: &Configuration,
+        snapshot: Option<&ControllerSnapshot>,
+        retrying: bool,
+        status: String,
+    ) -> Self {
+        let managing = configuration
+            .accepted()
+            .is_some_and(|config| config.input().manage_night_light);
         Self {
             accepted: configuration.accepted().cloned(),
             inputs: configuration.inputs().clone(),
@@ -130,11 +147,46 @@ impl Model {
             backup_error: configuration.backup_error().map(|error| error.diagnostic()),
             launch_language: configuration.launch_language().to_owned(),
             status,
+            management: snapshot.map_or(
+                if managing {
+                    ManagementState::TurningOn
+                } else {
+                    ManagementState::Off
+                },
+                |snapshot| snapshot.management,
+            ),
+            applied: snapshot
+                .and_then(|snapshot| snapshot.accepted.as_ref())
+                .map(|layer| layer.config().input().manage_night_light),
+            native_errors: snapshot.map_or_else(Vec::new, |snapshot| {
+                snapshot
+                    .native_errors
+                    .iter()
+                    .map(|(operation, failure)| (*operation, failure.diagnostic()))
+                    .collect()
+            }),
+            retrying,
         }
     }
 
     fn editable(&self) -> bool {
         self.accepted.is_some()
+    }
+
+    fn managing(&self) -> bool {
+        self.config().input().manage_night_light
+    }
+
+    fn management_change(&self) -> Option<ManagementState> {
+        match self.management {
+            ManagementState::TurningOn | ManagementState::TurningOff => Some(self.management),
+            _ if self.applied.is_some_and(|on| on != self.managing()) => Some(if self.managing() {
+                ManagementState::TurningOn
+            } else {
+                ManagementState::TurningOff
+            }),
+            _ => None,
+        }
     }
 
     fn config(&self) -> Arc<Config> {
@@ -204,6 +256,7 @@ pub(super) enum Folder {
 pub(super) enum Command {
     Reset,
     Retry,
+    RetryNative,
     OpenFolder(Folder),
     DismissRestore,
     Quit,
@@ -244,6 +297,8 @@ pub(super) enum Message {
     Edit(Vec<(Field, FieldValue)>),
     Number(Field, Option<f64>),
     Language(Option<usize>),
+    Manage(bool),
+    Consent(ContentDialogResult),
     WriteDue(u64),
     Action(Action),
     Command(Command),
@@ -255,6 +310,7 @@ pub(super) struct Settings {
     placed: bool,
     write: PendingWrite,
     timer: Option<ComponentTimer>,
+    consent: bool,
 }
 
 impl Settings {
@@ -278,6 +334,11 @@ impl Settings {
         self.input.edit.call(edits);
         let token = self.write.edited();
         self.timer = Some(context.set_local_timeout(WRITE_DELAY, move || Message::WriteDue(token)));
+    }
+
+    fn edit_now(&mut self, edits: Vec<(Field, FieldValue)>) {
+        self.input.edit.call(edits);
+        self.input.write.call(());
     }
 
     fn write_due(&mut self, token: u64) {
@@ -364,21 +425,25 @@ impl Settings {
                 let id = match action {
                     Action::Reset => "banner-reset".to_owned(),
                     Action::OpenFolder => "banner-open-folder".to_owned(),
-                    Action::Retry => format!("{}-retry", banner.id),
+                    Action::Retry | Action::RetryNative => format!("{}-retry", banner.id),
                     Action::GoTo(page) => format!("banner-go-to-{}", page.tag()),
                 };
                 let message = context.message(Message::Action(action));
                 match action {
                     Action::GoTo(_) => HyperlinkButton::new()
                         .automation_id(id)
+                        .is_enabled(banner.enabled)
                         .on_click(message)
                         .content(label)
                         .into(),
-                    Action::Reset | Action::OpenFolder | Action::Retry => Button::new()
-                        .automation_id(id)
-                        .on_click(message)
-                        .content(label)
-                        .into(),
+                    Action::Reset | Action::OpenFolder | Action::Retry | Action::RetryNative => {
+                        Button::new()
+                            .automation_id(id)
+                            .is_enabled(banner.enabled)
+                            .on_click(message)
+                            .content(label)
+                            .into()
+                    }
                 }
             })
             .collect();
@@ -521,6 +586,7 @@ impl Component for Settings {
             placed: false,
             write: PendingWrite::default(),
             timer: None,
+            consent: false,
         }
     }
 
@@ -562,10 +628,21 @@ impl Component for Settings {
                     self.edit(edits, context);
                 }
             }
+            Message::Manage(true) => self.consent = true,
+            Message::Manage(false) => {
+                self.edit_now(vec![(Field::ManageNightLight, FieldValue::Switch(false))]);
+            }
+            Message::Consent(result) => {
+                self.consent = false;
+                if result == ContentDialogResult::Primary {
+                    self.edit_now(vec![(Field::ManageNightLight, FieldValue::Switch(true))]);
+                }
+            }
             Message::WriteDue(token) => self.write_due(token),
             Message::Action(Action::GoTo(page)) => self.page = page,
             Message::Action(Action::Reset) => self.input.command.call(Command::Reset),
             Message::Action(Action::Retry) => self.input.command.call(Command::Retry),
+            Message::Action(Action::RetryNative) => self.input.command.call(Command::RetryNative),
             Message::Action(Action::OpenFolder) => {
                 self.input.command.call(Command::OpenFolder(Folder::Data));
             }
@@ -630,7 +707,7 @@ impl Component for Settings {
         Grid::new()
             .rows([GridLength::Auto, GridLength::STAR])
             .children((Self::title_bar(&text), navigation))
-            .into()
+            .content_dialog(schedule::consent_dialog(&text, self.consent, context))
     }
 }
 

@@ -17,6 +17,7 @@ enum Call {
     Cleanup,
     Active(bool),
     Notifications(ObservationMode),
+    Release,
 }
 
 #[derive(Debug)]
@@ -67,6 +68,10 @@ impl NativeBackend for Scripted {
             .err()
             .into_iter()
             .collect()
+    }
+
+    fn release_watchers(&mut self) {
+        self.call(Call::Release);
     }
 
     fn notifications(&mut self, mode: ObservationMode) -> NativeNotifications {
@@ -795,4 +800,40 @@ fn cancellation_before_access_does_not_register_or_read() {
         );
         assert!(native.exit().is_none());
     });
+}
+
+#[test]
+fn release_ends_access_once_and_a_later_attempt_registers_observation_again() {
+    exercise(
+        vec![
+            (Call::Register, Reply::Ok),
+            (Call::Settings, settings(Some(3400), true)),
+            (Call::State, Reply::Active(true)),
+            (
+                Call::Cleanup,
+                failure(DiagnosticOperation::PreviewCleanup, false),
+            ),
+            (Call::Active(false), Reply::Ok),
+            (Call::Release, Reply::Ok),
+            (Call::Register, Reply::Ok),
+            (Call::Settings, settings(Some(3400), false)),
+            (Call::State, Reply::Active(false)),
+            (Call::Cleanup, Reply::Ok),
+            (Call::Active(false), Reply::Ok),
+        ],
+        |native| {
+            assert!(native.control(|_fresh| None).error.is_none());
+            assert!(native.cleanup_pending());
+            let release = native.release().expect("access began");
+            assert!(release.preview.is_err());
+            assert!(release.off.is_ok());
+            assert!(!native.access_begun());
+            assert!(!native.cleanup_pending());
+            assert!(native.release().is_none());
+            assert!(native.restore_observation().is_empty());
+            assert!(native.control(|_fresh| None).error.is_none());
+            assert!(native.access_begun());
+            assert!(native.exit().is_some());
+        },
+    );
 }

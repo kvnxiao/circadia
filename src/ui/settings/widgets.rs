@@ -143,6 +143,7 @@ pub(super) struct Row {
     icon: Option<View>,
     title: String,
     description: String,
+    detail: Option<View>,
     controls: Vec<View>,
 }
 
@@ -157,8 +158,14 @@ impl Row {
             icon: None,
             title: title.into(),
             description: description.into(),
+            detail: None,
             controls: Vec::new(),
         }
+    }
+
+    pub(super) fn detail(mut self, detail: Option<View>) -> Self {
+        self.detail = detail;
+        self
     }
 
     pub(super) fn controls(mut self, controls: Vec<View>) -> Self {
@@ -197,7 +204,12 @@ impl Row {
                             .spacing(2.0)
                             .vertical_alignment(alignment)
                             .margin(Thickness::new(0.0, offset, 0.0, 0.0))
-                            .children((body(self.title), caption(self.description))),
+                            .children(
+                                [body(self.title).into(), caption(self.description).into()]
+                                    .into_iter()
+                                    .chain(self.detail)
+                                    .collect::<Vec<View>>(),
+                            ),
                         StackPanel::new()
                             .grid_column(2)
                             .vertical_alignment(alignment)

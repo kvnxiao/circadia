@@ -5,6 +5,7 @@ use super::Message;
 use super::Model;
 use super::Settings;
 use super::problems;
+use super::schedule;
 use super::widgets;
 use super::widgets::Row;
 use crate::DiagnosticCategory;
@@ -305,6 +306,19 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 .view(),
             ),
         ]),
+        widgets::section(text!(text, "section-night-light"), false),
+        widgets::card(
+            Row::new(
+                "\u{EA18}",
+                text!(text, "night-light-title"),
+                text!(text, "night-light-description"),
+            )
+            .controls(vec![widgets::pill(management_label(
+                &settings.input.model,
+                text,
+            ))])
+            .view(),
+        ),
         widgets::section(text!(text, "section-troubleshooting"), false),
         widgets::group(vec![
             folder_card(
@@ -329,6 +343,16 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         widgets::section(text!(text, "section-about"), false),
         about_card(text, context),
     ]
+}
+
+pub(super) fn management_label(model: &Model, text: &Text) -> String {
+    schedule::change_line(model, text).unwrap_or_else(|| {
+        if model.managing() {
+            text!(text, "night-light-managing")
+        } else {
+            text!(text, "night-light-not-managing")
+        }
+    })
 }
 
 pub(super) fn version_text(text: &Text) -> String {

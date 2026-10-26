@@ -35,7 +35,7 @@ fn committed(field: Field, value: f64, expected: i64) -> i64 {
     );
     let edits = number_edits(field, Some(value)).expect("a committed value");
     assert!(configuration.edit(edits).is_some());
-    Model::new(&configuration, String::new()).number(field)
+    Model::new(&configuration, None, false, String::new()).number(field)
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn changing_the_transition_length_to_30_moves_the_example_start_to_19_00() {
             )])
             .is_some()
     );
-    let model = Model::new(&configuration, String::new());
+    let model = Model::new(&configuration, None, false, String::new());
     let example = example(
         &english(),
         &twenty_four_hour(),

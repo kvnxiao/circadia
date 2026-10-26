@@ -37,7 +37,10 @@ fn selecting_a_language_sends_one_configure_and_asks_for_a_restart_in_the_curren
     );
     let text = english();
     let prompt = |configuration: &Configuration| {
-        restart_prompt(&Model::new(configuration, String::new()), &text)
+        restart_prompt(
+            &Model::new(configuration, None, false, String::new()),
+            &text,
+        )
     };
     assert_eq!(prompt(&configuration.borrow()), None);
     desktop.edit(language_edits(Some(1)).expect("an option"));
@@ -384,4 +387,29 @@ fn startup_state_read_failures_log_once_and_recover_once_under_their_own_operati
         diagnostics(&recovered),
         ["INFO circadia::diagnostics: recovered operation=startup_status_read"]
     );
+}
+
+#[test]
+fn the_night_light_card_shows_the_current_management_state() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = Rc::new(RefCell::new(Configuration::load(directory.path())));
+    let mut desktop = Desktop::new(
+        Rc::clone(&configuration),
+        None,
+        directory.path().to_owned(),
+        Box::new(FakeRegistration::default()),
+    );
+    let text = english();
+    let label = |management| {
+        let mut model = Model::new(&configuration.borrow(), None, false, String::new());
+        model.management = management;
+        management_label(&model, &text)
+    };
+    assert_eq!(label(crate::ManagementState::Off), "Not managing");
+    desktop.edit(vec![(Field::ManageNightLight, FieldValue::Switch(true))]);
+    assert_eq!(label(crate::ManagementState::TurningOn), "Turning on…");
+    assert_eq!(label(crate::ManagementState::On), "Managing");
+    desktop.edit(vec![(Field::ManageNightLight, FieldValue::Switch(false))]);
+    assert_eq!(label(crate::ManagementState::TurningOff), "Turning off…");
+    assert_eq!(label(crate::ManagementState::Off), "Not managing");
 }

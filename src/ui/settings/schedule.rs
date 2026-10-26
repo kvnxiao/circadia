@@ -1,4 +1,5 @@
 use super::Message;
+use super::Model;
 use super::NumberControls;
 use super::Settings;
 use super::time_picker::PickerInput;
@@ -8,18 +9,23 @@ use super::widgets::Row;
 use crate::Config;
 use crate::Field;
 use crate::FieldValue;
+use crate::ManagementState;
+use crate::l10n::Text;
 use crate::l10n::text;
 use crate::solar_timing_enabled;
 use std::rc::Rc;
 use windows_reactor::Border;
 use windows_reactor::Button;
 use windows_reactor::ButtonStyle;
+use windows_reactor::ContentDialog;
+use windows_reactor::ContentDialogButton;
 use windows_reactor::Grid;
 use windows_reactor::GridLength;
 use windows_reactor::HorizontalAlignment;
 use windows_reactor::Orientation;
 use windows_reactor::StackPanel;
 use windows_reactor::Thickness;
+use windows_reactor::ToggleSwitch;
 use windows_reactor::View;
 use windows_reactor::ViewContext;
 
@@ -38,7 +44,8 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         text!(text, "wake-description")
     };
     vec![
-        widgets::section(text!(text, "section-times"), true),
+        management_card(settings, context),
+        widgets::section(text!(text, "section-times"), false),
         widgets::group(vec![
             widgets::card(
                 Row::new("\u{E823}", text!(text, "wake-title"), wake_description)
@@ -80,6 +87,92 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             .content(text!(text, "restore-colors"))
             .into(),
     ]
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct ManagementView {
+    pub(super) on: bool,
+    pub(super) enabled: bool,
+    pub(super) change: Option<String>,
+}
+
+pub(super) fn change_line(model: &Model, text: &Text) -> Option<String> {
+    model.management_change().map(|change| {
+        if change == ManagementState::TurningOn {
+            text!(text, "manage-turning-on")
+        } else {
+            text!(text, "manage-turning-off")
+        }
+    })
+}
+
+pub(super) fn management_view(model: &Model, text: &Text) -> ManagementView {
+    let change = change_line(model, text);
+    ManagementView {
+        on: model.managing(),
+        enabled: model.editable() && change.is_none(),
+        change,
+    }
+}
+
+fn management_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
+    let text = &settings.input.text;
+    let title = text!(text, "manage-title");
+    let view = management_view(&settings.input.model, text);
+    widgets::card(
+        Row::new("\u{EA18}", title.clone(), text!(text, "manage-description"))
+            .detail(view.change.map(|line| {
+                widgets::caption(line)
+                    .automation_id("manage-change")
+                    .automation_live_setting(windows_reactor::AutomationLiveSetting::Polite)
+                    .into()
+            }))
+            .controls(
+                settings.with_feedback(
+                    Field::ManageNightLight,
+                    ToggleSwitch::new()
+                        .is_on(view.on)
+                        .is_enabled(view.enabled)
+                        .automation_id("manage")
+                        .automation_name(title)
+                        .on_toggled(context.callback(Message::Manage))
+                        .into(),
+                ),
+            )
+            .view(),
+    )
+}
+
+pub(super) fn consent_dialog(
+    text: &Text,
+    open: bool,
+    context: &ViewContext<'_, Settings>,
+) -> ContentDialog {
+    let bullets: Vec<View> = [
+        text!(text, "consent-schedule"),
+        text!(text, "consent-native"),
+        text!(text, "consent-undo"),
+    ]
+    .into_iter()
+    .map(|line| widgets::body(format!("\u{2022} {line}")).into())
+    .collect();
+    ContentDialog::new()
+        .title(text!(text, "consent-title"))
+        .content(
+            StackPanel::new().spacing(12.0).max_width(452.0).children((
+                widgets::body(text!(text, "consent-body")),
+                StackPanel::new()
+                    .spacing(4.0)
+                    .margin(Thickness::new(20.0, 0.0, 0.0, 0.0))
+                    .children(bullets),
+                widgets::body(text!(text, "consent-closing")),
+            )),
+        )
+        .primary_button_text(text!(text, "consent-turn-on"))
+        .close_button_text(text!(text, "consent-cancel"))
+        .default_button(ContentDialogButton::Primary)
+        .is_open(open)
+        .on_closed(context.callback(Message::Consent))
 }
 
 fn recommended_colors() -> Vec<(Field, FieldValue)> {

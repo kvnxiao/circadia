@@ -129,6 +129,11 @@ impl DiagnosticLog {
             tracing::info!(%operation, "recovered");
         }
     }
+
+    /// Drop an operation's current failure without appending a record.
+    pub fn forget(&mut self, operation: DiagnosticOperation) {
+        self.failures.remove(&operation);
+    }
 }
 
 #[cfg(test)]

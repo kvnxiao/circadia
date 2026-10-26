@@ -21,7 +21,7 @@ pub struct Coordinates {
 #[serde(deny_unknown_fields)]
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "the file format has four independent user switches"
+    reason = "the file format has five independent user switches"
 )]
 pub struct ConfigInput {
     /// Configuration file format version; validation sets the current one.
@@ -60,6 +60,9 @@ pub struct ConfigInput {
     pub start_at_sign_in: bool,
     /// Whether future launches initially show only the tray icon.
     pub start_minimized: bool,
+    /// Whether Circadia controls Night Light; the user turns it on after
+    /// accepting the consent prompt.
+    pub manage_night_light: bool,
     /// `windows` to follow the Windows display language, or a shipped
     /// language tag.
     pub interface_language: String,
@@ -86,6 +89,7 @@ impl Default for ConfigInput {
             exclusions: Vec::new(),
             start_at_sign_in: false,
             start_minimized: true,
+            manage_night_light: false,
             interface_language: crate::l10n::WINDOWS.into(),
         }
     }
@@ -146,6 +150,8 @@ pub enum Field {
     StartAtSignIn,
     /// Start minimized.
     StartMinimized,
+    /// Night Light management.
+    ManageNightLight,
     /// The interface language.
     InterfaceLanguage,
 }
@@ -163,7 +169,7 @@ pub struct NumberRange {
 
 impl Field {
     /// Every field in file order.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Wake,
         Self::Bedtime,
         Self::DaytimeKelvin,
@@ -181,6 +187,7 @@ impl Field {
         Self::Exclusions,
         Self::StartAtSignIn,
         Self::StartMinimized,
+        Self::ManageNightLight,
         Self::InterfaceLanguage,
     ];
 
@@ -204,6 +211,7 @@ impl Field {
             Self::Exclusions => "exclusions",
             Self::StartAtSignIn => "start_at_sign_in",
             Self::StartMinimized => "start_minimized",
+            Self::ManageNightLight => "manage_night_light",
             Self::InterfaceLanguage => "interface_language",
         }
     }
@@ -497,6 +505,9 @@ impl ConfigInput {
             (Field::Sunset, FieldValue::Switch(value)) => self.sunset = value,
             (Field::StartAtSignIn, FieldValue::Switch(value)) => self.start_at_sign_in = value,
             (Field::StartMinimized, FieldValue::Switch(value)) => self.start_minimized = value,
+            (Field::ManageNightLight, FieldValue::Switch(value)) => {
+                self.manage_night_light = value;
+            }
             (Field::Coordinates, FieldValue::Coordinates(value)) => self.coordinates = value,
             (Field::Suppression, FieldValue::Executables(names)) => self.suppression = names,
             (Field::Exclusions, FieldValue::Executables(names)) => self.exclusions = names,
@@ -545,6 +556,7 @@ impl ConfigInput {
             Field::Sunset => FieldValue::Switch(self.sunset),
             Field::StartAtSignIn => FieldValue::Switch(self.start_at_sign_in),
             Field::StartMinimized => FieldValue::Switch(self.start_minimized),
+            Field::ManageNightLight => FieldValue::Switch(self.manage_night_light),
             Field::Coordinates => FieldValue::Coordinates(self.coordinates),
             Field::Suppression => FieldValue::Executables(self.suppression.clone()),
             Field::Exclusions => FieldValue::Executables(self.exclusions.clone()),
@@ -1060,6 +1072,7 @@ mod tests {
         assert_eq!(input.preview_seconds, 10);
         assert!(!input.sunrise && !input.sunset && !input.start_at_sign_in);
         assert!(input.start_minimized);
+        assert!(!input.manage_night_light);
         assert!(input.coordinates.is_none());
         assert!(input.suppression.is_empty() && input.exclusions.is_empty());
         assert_eq!(input.interface_language, "windows");
@@ -1723,6 +1736,24 @@ mod tests {
         );
         assert!(report.marks.is_empty() && report.missing.is_empty());
         assert_eq!(report.unknown, ["coordinates.elevation"]);
+    }
+
+    #[test]
+    fn a_missing_management_key_loads_off_and_is_reported_missing() {
+        let file = file(|table| {
+            table.remove("manage_night_light");
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert!(!config.input().manage_night_light);
+        assert!(report.marks.is_empty());
+        assert_eq!(
+            report.missing,
+            BTreeMap::from([(Field::ManageNightLight, Source::Default)])
+        );
+        let on = self::file(|table| set(table, "manage_night_light", true));
+        let (config, report) = load(&on, None).expect("usable file");
+        assert!(config.input().manage_night_light);
+        assert!(report.missing.is_empty());
     }
 
     #[test]

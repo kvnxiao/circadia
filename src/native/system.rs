@@ -59,6 +59,11 @@ impl NativeBackend for SystemBackend {
         errors
     }
 
+    fn release_watchers(&mut self) {
+        self.settings = None;
+        self.state = None;
+    }
+
     fn notifications(&mut self, mode: ObservationMode) -> NativeNotifications {
         let mut report = NativeNotifications::default();
         for (slot, operation) in [

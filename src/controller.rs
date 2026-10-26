@@ -27,6 +27,7 @@ pub use output::OutputUpdate;
 pub use output::TemperatureOutput;
 pub use runtime::ConfigLayer;
 pub use runtime::ControlRuntime;
+pub use runtime::ManagementState;
 pub use runtime::RunningPreview;
 pub use runtime::RuntimeTime;
 pub use runtime::SchedulingState;
@@ -93,6 +94,14 @@ impl From<crate::SuppressionError> for ControlError {
 impl From<crate::ValidationError> for ControlError {
     fn from(error: crate::ValidationError) -> Self {
         Self(ErrorKind::Validation(error))
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn managed() -> crate::ConfigInput {
+    crate::ConfigInput {
+        manage_night_light: true,
+        ..crate::ConfigInput::default()
     }
 }
 

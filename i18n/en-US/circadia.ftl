@@ -42,6 +42,19 @@ nav-apps = App suppression
 nav-transitions = Transitions
 nav-general = General
 
+manage-title = Let Circadia manage Night Light
+manage-description = While on, Circadia fully controls Windows Night Light and reverts changes made in Windows Settings or Quick Settings.
+manage-turning-on = Turning on…
+manage-turning-off = Turning off…
+consent-title = Let Circadia manage Night Light?
+consent-body = While Circadia is running, it fully controls Windows Night Light:
+consent-schedule = Night Light stays on and follows Circadia's schedule.
+consent-native = The Windows Night Light schedule is turned off.
+consent-undo = Changes you make in Windows Settings or Quick Settings are undone.
+consent-closing = To give control back, turn this off or quit Circadia from the notification area. Quitting fades out and turns Night Light off.
+consent-turn-on = Turn on
+consent-cancel = Cancel
+
 section-times = Times
 wake-title = Wake time
 wake-description = Your earliest wake time. The screen reaches daytime color by now.
@@ -111,6 +124,11 @@ sign-in-other-location = Windows starts Circadia from a different location or da
 sign-in-still-registered = Circadia is still registered to start when you sign in. Turn the switch off to remove it.
 start-minimized-title = Start minimized
 start-minimized-description = Open to the notification area instead of this window.
+section-night-light = Windows Night Light
+night-light-title = How Circadia uses Night Light
+night-light-description = While managing, Circadia keeps Night Light on, turns the Windows Night Light schedule off, and undoes outside changes. Turning management off or quitting fades to 6500 K, turns Night Light off, and hands control back to Windows.
+night-light-managing = Managing
+night-light-not-managing = Not managing
 section-troubleshooting = Troubleshooting
 settings-file-title = Settings file
 settings-file-description = Changes are saved here as you make them, with a backup of the last good copy.
@@ -139,6 +157,7 @@ field-name =
         [exclusions] Excluded apps
         [start_at_sign_in] Start at sign-in
         [interface_language] Language
+        [manage_night_light] Manage Night Light
        *[start_minimized] Start minimized
     }
 value-number =
@@ -205,6 +224,29 @@ banner-invalid-note =
        *[automatic] Circadia keeps using your last valid settings until this is fixed. Everything else is saved automatically.
     }
 nav-invalid = { $page }, has an invalid value
+banner-native-output-title = Circadia can't control Night Light
+banner-native-observation-title = Circadia can't watch Night Light for changes
+banner-native-off-title = Circadia couldn't finish turning Night Light off
+banner-native-retry-unavailable = Retry is available while Circadia manages Night Light.
+native-failure = { $operation } failed: { $category }
+native-operation =
+    { $operation ->
+        [observation] Watching Night Light for changes
+        [native_settings_read] Reading Night Light settings
+        [native_state_read] Reading whether Night Light is on
+        [native_schedule_write] Turning off the Windows Night Light schedule
+        [native_activation_write] Turning Night Light on or off
+        [temperature_write] Setting the color temperature
+        [preview_cleanup] Clearing the Night Light setting that applies a temperature at once
+       *[other] A Night Light operation
+    }
+native-category =
+    { $category ->
+        [missing] Windows' stored Night Light settings are missing.
+        [access_denied] access was denied.
+        [invalid_data] Windows' stored Night Light settings are invalid.
+       *[other] Windows reported an error.
+    }
 
 action-reset = Reset to default settings
 action-open-folder = Open folder

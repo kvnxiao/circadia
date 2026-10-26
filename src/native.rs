@@ -189,6 +189,7 @@ pub struct NativeExit {
 
 pub(crate) trait NativeBackend: Send {
     fn restore_watchers(&mut self) -> Vec<NativeFailure>;
+    fn release_watchers(&mut self);
     fn notifications(&mut self, mode: ObservationMode) -> NativeNotifications;
     fn handles(&self) -> Vec<BorrowedHandle<'_>>;
     fn settings(&mut self) -> Result<NativeSettings, NativeFailure>;
@@ -455,19 +456,36 @@ impl Native {
         }
     }
 
-    /// End preview and request off independently once after access began.
+    /// End preview and request off independently once, then end Night Light
+    /// access and observation until a later control attempt begins them again.
+    ///
+    /// - Does nothing before access began or after exit.
+    /// - A failed attempt is not retried.
+    pub fn release(&mut self) -> Option<NativeExit> {
+        if self.exited || !self.begun {
+            return None;
+        }
+        let exit = self.end_access();
+        self.backend.release_watchers();
+        Some(exit)
+    }
+
+    /// End preview and request off independently once after access began,
+    /// then stop all later native calls.
     pub fn exit(&mut self) -> Option<NativeExit> {
         if self.exited {
             return None;
         }
         self.exited = true;
-        if !self.begun {
-            return None;
-        }
+        self.begun.then(|| self.end_access())
+    }
+
+    fn end_access(&mut self) -> NativeExit {
+        self.begun = false;
+        self.cleanup_pending = false;
         let preview = self.backend.end_preview();
-        self.cleanup_pending = preview.is_err();
         let off = self.backend.set_active(false);
-        Some(NativeExit { preview, off })
+        NativeExit { preview, off }
     }
 }
 

@@ -110,10 +110,12 @@ pub(super) fn lines(
         return vec![text!(text, "status-starting")];
     };
     let mut lines = Vec::new();
-    let output_failed = snapshot
-        .native_errors
-        .keys()
-        .any(|operation| *operation != DiagnosticOperation::Observation);
+    let managing = snapshot.management.is_on();
+    let output_failed = managing
+        && snapshot
+            .native_errors
+            .keys()
+            .any(|operation| *operation != DiagnosticOperation::Observation);
     let suppressed = snapshot.suppression.manual || snapshot.suppression.automatic;
     if snapshot.accepted.is_none() {
         lines.push(text!(text, "status-configuration-error"));
@@ -260,6 +262,7 @@ mod tests {
         ControllerSnapshot {
             accepted: Some(crate::ConfigLayer::new(config)),
             scheduling: SchedulingState::Available,
+            management: crate::ManagementState::On,
             preview: None,
             preview_active: false,
             suppression: SuppressionState {
@@ -292,6 +295,23 @@ mod tests {
             !lines(&english(), Some(&snapshot), Saving::default())
                 .iter()
                 .any(|line| line == "Control continues without change observation.")
+        );
+    }
+
+    #[test]
+    fn a_failed_off_attempt_after_management_turned_off_does_not_report_unavailable_output() {
+        let mut state = snapshot(ConfigInput::default());
+        state.management = crate::ManagementState::Off;
+        state.native_errors.insert(
+            DiagnosticOperation::NativeActivationWrite,
+            Arc::new(NativeFailure::injected(
+                DiagnosticOperation::NativeActivationWrite,
+            )),
+        );
+        assert!(
+            !lines(&english(), Some(&state), Saving::default())
+                .iter()
+                .any(|line| line == "Night Light output is unavailable.")
         );
     }
 

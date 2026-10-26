@@ -7,6 +7,7 @@ use super::ControlError;
 use super::ControlRuntime;
 use super::ControlTime;
 use super::ExitKind;
+use super::ManagementState;
 use super::NativeCycle;
 use super::NativeDriver;
 use super::OutputUpdate;
@@ -196,6 +197,8 @@ pub struct ControllerSnapshot {
     pub accepted: Option<ConfigLayer>,
     /// Active layer's schedule availability.
     pub scheduling: SchedulingState,
+    /// Whether Circadia manages Night Light or is changing that state.
+    pub management: ManagementState,
     /// Captured playback timeline, independent of native latency.
     pub preview: Option<RunningPreview>,
     /// Whether playback has entered, including pending curve calculation.
@@ -634,6 +637,7 @@ struct Worker<F> {
     origin: Instant,
     driver: NativeDriver,
     accepted: Option<ConfigLayer>,
+    management: ManagementState,
     command: Option<(u64, CommandOutcome)>,
     configured_revision: u64,
     native_errors: BTreeMap<DiagnosticOperation, Arc<NativeFailure>>,
@@ -658,6 +662,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             shared,
             driver: NativeDriver::new(runtime, native),
             accepted: config.map(|config| ConfigLayer::new(Arc::unwrap_or_clone(config))),
+            management: ManagementState::Off,
             command: None,
             configured_revision: 0,
             native_errors: BTreeMap::new(),
@@ -679,6 +684,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         if update != OutputUpdate::Apply
             && self.driver.runtime().preview_active()
             && self.accepted_schedule_differs()
+            && self.accepted_managing()
         {
             return self
                 .driver
@@ -813,7 +819,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         let origin = self.origin;
         let shared = Arc::clone(&self.shared);
         let quitting = || shared.exit_kind() == Some(ExitKind::Quit);
-        while quitting() && self.driver.exit_fading(self.now()) {
+        while quitting() && self.driver.fading_out(self.now()) {
             let now = self.now();
             let deadline = match self.driver.next_deadline(now) {
                 Ok(Some(deadline)) => deadline,
@@ -847,6 +853,12 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             self.native_result(observed)?;
         }
         Ok(())
+    }
+
+    fn accepted_managing(&self) -> bool {
+        self.accepted
+            .as_ref()
+            .is_some_and(|layer| layer.config().input().manage_night_light)
     }
 
     fn accepted_schedule_differs(&self) -> bool {
@@ -942,6 +954,15 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 self.failed(error);
             }
         }
+        if let Some(released) = report.released {
+            self.forget_native_errors();
+            for failure in [released.preview, released.off]
+                .into_iter()
+                .filter_map(Result::err)
+            {
+                self.failed(failure);
+            }
+        }
         if let Some(cleanup) = report.cleanup {
             match cleanup {
                 Ok(()) => self.recovered(DiagnosticOperation::PreviewCleanup),
@@ -973,12 +994,20 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         self.log.recovered(operation);
     }
 
-    fn publish(&self) -> io::Result<()> {
+    fn forget_native_errors(&mut self) {
+        for operation in std::mem::take(&mut self.native_errors).into_keys() {
+            self.log.forget(operation);
+        }
+    }
+
+    fn publish(&mut self) -> io::Result<()> {
+        self.management = self.driver.management(self.management);
         let now = self.now();
         let runtime = self.driver.runtime();
         let snapshot = ControllerSnapshot {
             accepted: self.accepted.clone(),
             scheduling: runtime.state(),
+            management: self.management,
             preview: runtime.preview().cloned(),
             preview_active: runtime.preview_active(),
             suppression: runtime.suppression(),
@@ -993,6 +1022,10 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         };
         let active = |snapshot: &ControllerSnapshot| {
             [
+                snapshot
+                    .accepted
+                    .as_ref()
+                    .is_some_and(|layer| layer.config().input().manage_night_light),
                 snapshot.suppression.automatic,
                 snapshot.suppression.manual,
                 snapshot.preview_active,
@@ -1005,11 +1038,16 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             .lock()
             .map_err(|_error| io::Error::other("controller snapshot lock failed"))?
             .replace(Arc::new(snapshot));
-        let previous = previous.as_deref().map_or([false; 3], active);
-        for ((name, was), is) in ["automatic suppression", "manual suppression", "preview"]
-            .into_iter()
-            .zip(previous)
-            .zip(current)
+        let previous = previous.as_deref().map_or([false; 4], active);
+        for ((name, was), is) in [
+            "management",
+            "automatic suppression",
+            "manual suppression",
+            "preview",
+        ]
+        .into_iter()
+        .zip(previous)
+        .zip(current)
         {
             if was != is {
                 tracing::info!("{name} {}", if is { "started" } else { "ended" });
@@ -1076,6 +1114,9 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                     .foreground(&foreground, now)
                     .map_err(io::Error::other)?;
             }
+            ControllerCommand::Recompute(Recompute::Retry) if !self.driver.runtime().managing() => {
+                outcome = CommandOutcome::Unavailable;
+            }
             ControllerCommand::Recompute(reason) => {
                 self.recompute(reason, now)?;
             }
@@ -1100,6 +1141,10 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                     self.accepted.as_ref(),
                     Arc::unwrap_or_clone(config),
                 ));
+                if self.accepted_managing() && !self.driver.runtime().managing() {
+                    self.forget_native_errors();
+                    expedite = true;
+                }
                 self.recalculate(OutputUpdate::LiveEdit, envelope.calculation)?;
             }
         }
