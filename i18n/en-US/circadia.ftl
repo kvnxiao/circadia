@@ -34,6 +34,7 @@ status-schedule-active =
     }
 status-calculating = Calculating the schedule.
 
+language-name = English
 app-name = Circadia
 
 nav-schedule = Schedule
@@ -89,6 +90,36 @@ update-rate = Maximum update rate
 update-rate-description = How many times per second Circadia may change the color during fades and previews. Lower values can look uneven. { $minimum } to { $maximum } Hz.
 hertz-unit = Hz
 
+section-language = Language
+language-title = Language
+language-description = The language Circadia's windows and menus use.
+language-windows = Use Windows language
+restart-title = Restart Circadia to use the new language.
+restart-description = Quit Circadia, then start it again.
+
+section-startup = Startup
+sign-in-title = Start Circadia when I sign in to Windows
+sign-in-description = Runs in the notification area. No administrator rights needed.
+sign-in-failed = Circadia couldn't change its startup registration. Startup at sign-in is { $state ->
+        [on] on
+       *[off] off
+    }.
+sign-in-read-failed = Circadia couldn't read its Windows startup setting.
+sign-in-disabled-by-windows = Windows has turned off startup for Circadia. To start Circadia when you sign in, turn it on in Windows Settings > Apps > Startup.
+sign-in-not-registered = Circadia isn't registered to start when you sign in. Turn the switch on to register it again.
+sign-in-other-location = Windows starts Circadia from a different location or data folder. Turn the switch on to start this copy instead.
+sign-in-still-registered = Circadia is still registered to start when you sign in. Turn the switch off to remove it.
+start-minimized-title = Start minimized
+start-minimized-description = Open to the notification area instead of this window.
+section-troubleshooting = Troubleshooting
+settings-file-title = Settings file
+settings-file-description = Changes are saved here as you make them, with a backup of the last good copy.
+logs-title = Logs
+logs-description = Log files for troubleshooting. They stay on this PC and are never uploaded automatically.
+open-folder-name = { $name }: Open folder
+section-about = About
+about-version = Version { $version }
+
 field-name =
     { $field ->
         [wake] Wake time
@@ -107,6 +138,7 @@ field-name =
         [suppression] Suppression list
         [exclusions] Excluded apps
         [start_at_sign_in] Start at sign-in
+        [interface_language] Language
        *[start_minimized] Start minimized
     }
 value-number =
@@ -178,6 +210,7 @@ action-reset = Reset to default settings
 action-open-folder = Open folder
 action-retry = Retry
 action-go-to = Go to { $page }
+action-quit = Quit Circadia
 
 status-saving-paused = Some settings are invalid; changes are not saved until they are fixed.
 status-write-failed = Changes are running but not saved.

@@ -60,6 +60,9 @@ pub struct ConfigInput {
     pub start_at_sign_in: bool,
     /// Whether future launches initially show only the tray icon.
     pub start_minimized: bool,
+    /// `windows` to follow the Windows display language, or a shipped
+    /// language tag.
+    pub interface_language: String,
 }
 
 impl Default for ConfigInput {
@@ -83,6 +86,7 @@ impl Default for ConfigInput {
             exclusions: Vec::new(),
             start_at_sign_in: false,
             start_minimized: true,
+            interface_language: crate::l10n::WINDOWS.into(),
         }
     }
 }
@@ -142,6 +146,8 @@ pub enum Field {
     StartAtSignIn,
     /// Start minimized.
     StartMinimized,
+    /// The interface language.
+    InterfaceLanguage,
 }
 
 /// Describe the inclusive range and step of a whole-number field.
@@ -157,7 +163,7 @@ pub struct NumberRange {
 
 impl Field {
     /// Every field in file order.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Wake,
         Self::Bedtime,
         Self::DaytimeKelvin,
@@ -175,6 +181,7 @@ impl Field {
         Self::Exclusions,
         Self::StartAtSignIn,
         Self::StartMinimized,
+        Self::InterfaceLanguage,
     ];
 
     /// Return the field's key in the configuration file.
@@ -197,6 +204,7 @@ impl Field {
             Self::Exclusions => "exclusions",
             Self::StartAtSignIn => "start_at_sign_in",
             Self::StartMinimized => "start_minimized",
+            Self::InterfaceLanguage => "interface_language",
         }
     }
 
@@ -288,6 +296,8 @@ pub enum FieldErrorKind {
     Inconsistent,
     /// A list entry is not a plain executable file name.
     Executable,
+    /// The interface language is neither `windows` nor a shipped language.
+    Language,
 }
 
 /// Identify an invalid setting without including its personal input.
@@ -332,6 +342,8 @@ pub enum FieldValue {
     Coordinates(Option<Coordinates>),
     /// Executable file names of a list.
     Executables(Vec<String>),
+    /// `windows` or a language tag.
+    Language(String),
 }
 
 /// Keep each field's committed input that has not become accepted.
@@ -488,6 +500,7 @@ impl ConfigInput {
             (Field::Coordinates, FieldValue::Coordinates(value)) => self.coordinates = value,
             (Field::Suppression, FieldValue::Executables(names)) => self.suppression = names,
             (Field::Exclusions, FieldValue::Executables(names)) => self.exclusions = names,
+            (Field::InterfaceLanguage, FieldValue::Language(tag)) => self.interface_language = tag,
             (field, FieldValue::Number(value)) => {
                 *self.number_mut(field).ok_or(FieldErrorKind::WrongType)? = value;
             }
@@ -535,6 +548,7 @@ impl ConfigInput {
             Field::Coordinates => FieldValue::Coordinates(self.coordinates),
             Field::Suppression => FieldValue::Executables(self.suppression.clone()),
             Field::Exclusions => FieldValue::Executables(self.exclusions.clone()),
+            Field::InterfaceLanguage => FieldValue::Language(self.interface_language.clone()),
             _ => FieldValue::Number(self.number(field).unwrap_or_default()),
         }
     }
@@ -571,6 +585,8 @@ fn check_alone(field: Field, input: &ConfigInput) -> Result<(), FieldErrorKind> 
         }),
         Field::Suppression => check_names(&input.suppression),
         Field::Exclusions => check_names(&input.exclusions),
+        Field::InterfaceLanguage if crate::l10n::saveable(&input.interface_language) => Ok(()),
+        Field::InterfaceLanguage => Err(FieldErrorKind::Language),
         _ => match (field.range(), input.number(field)) {
             (Some(range), Some(value)) if !(range.minimum..=range.maximum).contains(&value) => {
                 Err(FieldErrorKind::OutOfRange {
@@ -965,6 +981,7 @@ fn decode_value(
         (Field::Wake | Field::Bedtime, toml::Value::String(text)) => {
             FieldValue::Clock(parse_clock(text).ok_or(FieldErrorKind::Clock)?)
         }
+        (Field::InterfaceLanguage, toml::Value::String(text)) => FieldValue::Language(text.clone()),
         (Field::Coordinates, toml::Value::Table(table)) => {
             let coordinate = |key: &str| match table.get(key) {
                 Some(toml::Value::Float(value)) => Some(*value),
@@ -1045,6 +1062,7 @@ mod tests {
         assert!(input.start_minimized);
         assert!(input.coordinates.is_none());
         assert!(input.suppression.is_empty() && input.exclusions.is_empty());
+        assert_eq!(input.interface_language, "windows");
     }
 
     #[test_case(Field::ScheduledTransitionMinutes, 241.0, 240)]
@@ -1705,6 +1723,72 @@ mod tests {
         );
         assert!(report.marks.is_empty() && report.missing.is_empty());
         assert_eq!(report.unknown, ["coordinates.elevation"]);
+    }
+
+    #[test]
+    fn a_missing_interface_language_takes_the_backup_language_or_windows() {
+        let file = file(|table| {
+            table.remove("interface_language");
+        });
+        let backup = self::file(|table| set(table, "interface_language", "en-US"));
+        let (config, report) = load(&file, Some(&backup)).expect("usable file");
+        assert_eq!(config.input().interface_language, "en-US");
+        assert!(report.marks.is_empty());
+        assert_eq!(
+            report.missing,
+            BTreeMap::from([(Field::InterfaceLanguage, Source::Backup)])
+        );
+        let (config, report) = load(&file, None).expect("usable file");
+        assert_eq!(config.input().interface_language, "windows");
+        assert!(report.marks.is_empty());
+        assert_eq!(
+            report.missing,
+            BTreeMap::from([(Field::InterfaceLanguage, Source::Default)])
+        );
+    }
+
+    #[test_case("windows", true; "windows language")]
+    #[test_case("en-US", true; "shipped language")]
+    #[test_case("xx-XX", false; "unshipped language")]
+    #[test_case("qps-Ploc", false; "pseudo-locale")]
+    #[test_case("", false; "empty")]
+    fn the_interface_language_is_windows_or_a_shipped_language(language: &str, valid: bool) {
+        let (config, errors) = apply_inputs(
+            &Config::default(),
+            &inputs(&[(
+                Field::InterfaceLanguage,
+                FieldValue::Language(language.to_owned()),
+            )]),
+        );
+        assert_eq!(
+            errors.get(&Field::InterfaceLanguage),
+            (!valid).then_some(&FieldErrorKind::Language)
+        );
+        assert_eq!(config.input().interface_language == language, valid);
+    }
+
+    #[test]
+    fn an_unshipped_interface_language_in_the_file_is_marked() {
+        let file = file(|table| set(table, "interface_language", "xx-XX"));
+        let backup = self::file(|table| set(table, "interface_language", "en-US"));
+        let (config, report) = load(&file, Some(&backup)).expect("usable file");
+        assert_eq!(config.input().interface_language, "en-US");
+        assert_eq!(
+            report.marks,
+            BTreeMap::from([(
+                Field::InterfaceLanguage,
+                mark("\"xx-XX\"", FieldErrorKind::Language, Source::Backup)
+            )])
+        );
+        let (config, report) = load(&file, None).expect("usable file");
+        assert_eq!(config.input().interface_language, "windows");
+        assert_eq!(
+            report
+                .marks
+                .get(&Field::InterfaceLanguage)
+                .map(|mark| mark.source),
+            Some(Source::Default)
+        );
     }
 
     #[test]

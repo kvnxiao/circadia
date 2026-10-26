@@ -296,7 +296,7 @@ The General page has, in order:
 
 The Language card has a language glyph, the title "Language", the description "The language Circadia's windows and menus use.", and a drop-down. The drop-down lists "Use Windows language" first, which is the default, and then each shipped language under its own name in that language, such as "English" or "Deutsch". A release that ships English only lists "Use Windows language" and "English".
 
-When the selected option differs from the language Circadia is displaying, a nested row appears in the same card: a 16 epx information glyph in the accent color, the text "Restart Circadia to use the new language." in Body, the line "Quit Circadia, then start it again." in Caption and secondary text, and a "Quit Circadia" button on the right. The row stays until Circadia restarts or the selection returns to the displayed language. Screen readers announce the row when it appears.
+When the selected option differs from the option that was selected when Circadia started, a nested row appears in the same card: a 16 epx information glyph in the accent color, the text "Restart Circadia to use the new language." in Body, the line "Quit Circadia, then start it again." in Caption and secondary text, and a "Quit Circadia" button on the right. The row stays until Circadia restarts or the selection returns to that option. Screen readers announce the row when it appears.
 
 ## Phase art in the window
 

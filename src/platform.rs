@@ -13,6 +13,5 @@ pub(crate) mod nls;
 #[expect(dead_code, reason = "the App suppression page browses for executables")]
 pub(crate) mod picker;
 pub(crate) mod settings_window;
-#[expect(dead_code, reason = "the General page registers sign-in startup")]
 pub(crate) mod startup;
 pub(crate) mod wake;

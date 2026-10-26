@@ -53,7 +53,7 @@ pub(super) fn page(field: Field) -> Page {
         | Field::OrdinaryFadeMs
         | Field::OutputRateHz
         | Field::PreviewSeconds => Page::Transitions,
-        Field::StartAtSignIn | Field::StartMinimized => Page::General,
+        Field::StartAtSignIn | Field::StartMinimized | Field::InterfaceLanguage => Page::General,
     }
 }
 
@@ -239,7 +239,7 @@ fn problem(text: &Text, problem: FileProblem) -> String {
     }
 }
 
-fn with_code(text: &Text, message: String, failure: DiagnosticFailure) -> String {
+pub(super) fn with_code(text: &Text, message: String, failure: DiagnosticFailure) -> String {
     match failure.code {
         Some(code) => format!("{message} {}", text!(text, "error-code", code = hex(code))),
         None => message,
@@ -308,6 +308,7 @@ fn value(text: &Text, region: &RegionalFormat, field: Field, value: &FieldValue)
         }
         (_, FieldValue::Coordinates(None)) => text!(text, "value-none"),
         (_, FieldValue::Executables(names)) => text!(text, "value-apps", count = names.len()),
+        (_, FieldValue::Language(language)) => super::general::language_label(text, language),
     }
 }
 
@@ -377,6 +378,7 @@ fn error_message(
         | FieldErrorKind::Clock
         | FieldErrorKind::Coordinates
         | FieldErrorKind::Executable
+        | FieldErrorKind::Language
         | FieldErrorKind::Inconsistent => text!(text, "error-invalid", field = field_name),
     }
 }
@@ -432,7 +434,8 @@ fn mark_message(
         | FieldErrorKind::Clock
         | FieldErrorKind::OutOfRange { .. }
         | FieldErrorKind::Coordinates
-        | FieldErrorKind::Executable => text!(
+        | FieldErrorKind::Executable
+        | FieldErrorKind::Language => text!(
             text,
             "mark-invalid",
             field = field_name,

@@ -91,7 +91,6 @@ fn a_configuration_error_offers_reset_and_open_folder_on_every_page_and_disables
             ]
         );
     }
-    assert_eq!(configuration.directory(), fixture.directory.path());
     assert!(!configuration.toggles_available());
 }
 

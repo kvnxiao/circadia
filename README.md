@@ -1,6 +1,6 @@
 # Circadia
 
-Circadia is a Windows 11 x64 tray application under development that schedules native Windows Night Light. The [specification](docs/specs/SPEC.md) defines the application contract. The executable has a tray menu and a settings window. The tray menu starts and stops manual suppression, a one-hour 6500 K override, and adds a recently focused application's executable to the suppression list or removes it. The settings window has Schedule, App suppression, Transitions, and General pages. So far the Schedule page has Wake, Bedtime, and the three color temperatures. The Transitions page has the transition length with an example plot of one transition, the fade duration, the Preview length, and the maximum update rate. The App suppression and General pages show only their titles. Each valid edit takes effect at once and is saved automatically. The graph, Preview playback, solar and location controls, the executable lists, and the fields of the App suppression and General pages are not in the window yet. Checks that the application meets every requirement of the specification are still in progress.
+Circadia is a Windows 11 x64 tray application under development that schedules native Windows Night Light. The [specification](docs/specs/SPEC.md) defines the application contract. The executable has a tray menu and a settings window. The tray menu starts and stops manual suppression, a one-hour 6500 K override, and adds a recently focused application's executable to the suppression list or removes it. The settings window has Schedule, App suppression, Transitions, and General pages. So far the Schedule page has Wake, Bedtime, and the three color temperatures. The Transitions page has the transition length with an example plot of one transition, the fade duration, the Preview length, and the maximum update rate. The General page has the interface language, Start at sign-in, Start minimized, commands that open the data and log folders, and the version with Quit Circadia. The App suppression page shows only its title. Each valid edit takes effect at once and is saved automatically. The graph, Preview playback, solar and location controls, the executable lists, and the explanation of management are not in the window yet. Checks that the application meets every requirement of the specification are still in progress.
 
 ## Development
 
@@ -32,9 +32,9 @@ The command line is `circadia [--data-dir DIRECTORY] [--verbose | -V] [--languag
 
 A launch while Circadia is already running opens settings in the running process and does not change its log detail or language.
 
-Interface text, including the tray menu and tooltip, comes from Project Fluent message files (`.ftl`), one folder per language under `i18n/`. Circadia uses the first language in the user's ordered list of Windows display languages that has a folder, and English when none has one or Windows cannot return the list; English is the only language so far. Clock times and numbers follow the Windows regional format (**Settings > Time & language > Language & region**), including its Short time format and AM/PM symbols. Circadia reads that format once at startup, so a change takes effect at the next launch.
+Interface text, including the tray menu and tooltip, comes from Project Fluent message files (`.ftl`), one folder per language under `i18n/`. The Language setting on the General page (`interface_language`) is either Use Windows language, the default, or one of the shipped languages, each listed under its own name. Use Windows language selects the first language in the user's ordered list of Windows display languages that has a folder, and English when none has one or Windows cannot return the list; English is the only language so far. A change takes effect at the next launch: settings says that Circadia must restart and offers Quit Circadia. Clock times and numbers follow the Windows regional format (**Settings > Time & language > Language & region**), including its Short time format and AM/PM symbols. Circadia reads that format once at startup, so a change takes effect at the next launch.
 
-`--language TAG` is a developer option that the usage error message does not list. TAG is a language tag such as `en-US`. The option forces the interface language for that process without saving it. `--language qps-Ploc` selects the Windows pseudo-locale tag, for which Circadia accents each message, brackets it, and pads it to at least 40% more characters, so hard-coded English text and clipped layouts stand out. A launch while Circadia is not running stops with a usage error when TAG has no folder and is not `qps-Ploc`.
+`--language TAG` is a developer option that the usage error message does not list. TAG is a language tag such as `en-US`. The option overrides the saved Language setting for that process and does not change it. `--language qps-Ploc` selects the Windows pseudo-locale tag, for which Circadia accents each message, brackets it, and pads it to at least 40% more characters, so hard-coded English text and clipped layouts stand out. A launch while Circadia is not running stops with a usage error when TAG has no folder and is not `qps-Ploc`.
 
 Release builds keep line tables (`debug = "line-tables-only"` in `[profile.release]`), so the release `circadia.pdb` can resolve the `module+0xoffset` frames in crash records to functions and lines. Archive the PDB of each distributed build and do not ship it; a rebuilt executable gets a new PDB that cannot resolve another build's offsets.
 
@@ -87,6 +87,7 @@ The fields configure the specified application behavior:
 | `coordinates.latitude`, `coordinates.longitude` | Omitted | Finite degrees within ±90 and ±180, respectively |
 | `suppression`, `exclusions` | Empty lists | Executable filenames, matched case-insensitively |
 | `start_at_sign_in`, `start_minimized` | false, true | Boolean preferences |
+| `interface_language` | `"windows"` | `"windows"` or a shipped language tag, such as `"en-US"` |
 
 Temperatures round to the nearest 10 K, with ties toward higher kelvin. In the configuration file, Circadia checks the range before rounding and the temperature order afterward, so 2405 loads as 2410 and 1100 is invalid. In settings, a temperature slider moves in 10 K steps. When the user presses Enter in a number field or leaves it, the field limits the value to the setting's range and then rounds it to the setting's step: 10 K for temperatures and 1 for the transition length, fade duration, Preview length, and maximum update rate. For example, 1100 K becomes 1200 K and a transition length of 90.4 becomes 90 minutes. Clearing a number field or typing text that is not a number does not change the setting. The Morning/Evening field (`middle_kelvin`) remains editable and is labeled unused when both solar switches are off.
 
@@ -100,7 +101,13 @@ Circadia's Rust library accepts editable `ConfigInput` values and produces a `Co
 
 ## Start at sign-in
 
-Start at sign-in defaults off. The settings window does not have its switch yet, so Circadia keeps the `start_at_sign_in` value from the configuration file but does not register or remove sign-in startup for the current Windows user. The [startup integration research](docs/research/sign-in-startup.md) describes the registration mechanism and its verification limits.
+Start at sign-in defaults off. Turning its switch on the General page on or off saves the preference and registers or removes startup for the current Windows user at once, even while saving is paused. Startup follows the saved Start minimized preference, which applies only to the next launch.
+
+The switch shows Windows' effective startup state. If Task Manager or Windows Settings disables Circadia, the switch shows that Windows has turned startup off; enable it in **Windows Settings > Apps > Startup**. Circadia does not override that Windows choice. The state is read again each time settings opens.
+
+If registration fails, the switch shows the error and a Retry command. Circadia does not retry by itself, including at launch and when another setting changes.
+
+Registration stores the current executable and data directory paths as `"<executable>" --data-dir "<directory>"`. After moving either directory, run Circadia from the new location and turn the switch on again. Windows limits the complete startup command to 260 characters; Circadia reports an error if these paths exceed that limit. Windows may delay startup after sign-in. The [startup integration research](docs/research/sign-in-startup.md) describes the mechanism and verification limits.
 
 ## Local data
 
@@ -143,7 +150,7 @@ At the next launch, a leftover `run.marker` shows that the previous run did not 
 
 Before a write would make `circadia.log` larger than 1 MiB minus 16 KiB, Circadia renames it to `circadia.1.log`, replacing the older file. The 16 KiB leaves room for one crash record, which is cut to 16 KiB and written without rotation, so the two files together stay within 2 MiB. The log stays on the computer and can contain personal data, such as coordinates, executable names, file paths, and window titles. Logging failure does not prevent editing, control, or exit. The repository's [bug report template](.github/ISSUE_TEMPLATE/bug_report.md) asks reporters to attach the log and to remove anything they do not want to share.
 
-The log is in the data directory's `logs` folder. When Circadia reports a configuration error, **Open folder** in settings opens the data directory in Windows Explorer.
+The log is in the data directory's `logs` folder. On the General page, **Open folder** in the Settings file and Logs cards opens the data directory or its `logs` folder in Windows Explorer. During a configuration error, the banner's **Open folder** opens the data directory.
 
 ## Schedule calculation
 

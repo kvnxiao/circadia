@@ -107,7 +107,12 @@ fn a_number_field_commit_applies_the_limited_whole_number(field: Field, value: f
 fn a_slider_value_sends_one_configure_with_that_value(field: Field, value: f64, expected: i64) {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let configuration = Rc::new(RefCell::new(Configuration::load(directory.path())));
-    let mut desktop = Desktop::new(Rc::clone(&configuration), None, directory.path().to_owned());
+    let mut desktop = Desktop::new(
+        Rc::clone(&configuration),
+        None,
+        directory.path().to_owned(),
+        Box::new(crate::ui::settings::general::FakeRegistration::default()),
+    );
     desktop.edit(number_edits(field, Some(value)).expect("a value"));
     let commands: Vec<_> = desktop.pending.drain(..).collect();
     let [ControllerCommand::Configure { config, .. }] = commands.as_slice() else {

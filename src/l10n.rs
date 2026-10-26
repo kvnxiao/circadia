@@ -5,6 +5,7 @@ use i18n_embed::fluent::FluentLanguageLoader;
 use i18n_embed::unic_langid::LanguageIdentifier;
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
+use std::sync::OnceLock;
 
 #[derive(RustEmbed)]
 #[folder = "i18n"]
@@ -50,8 +51,33 @@ fn english() -> LanguageIdentifier {
 #[error("unknown interface language {0:?}")]
 pub(crate) struct UnknownLanguage(String);
 
+pub(crate) const WINDOWS: &str = "windows";
+
 pub(crate) fn shipped() -> Vec<LanguageTag> {
     languages(&Catalogs)
+}
+
+pub(crate) fn saveable(language: &str) -> bool {
+    language == WINDOWS || shipped().iter().any(|tag| tag.to_string() == language)
+}
+
+pub(crate) fn language_name(language: &str) -> String {
+    // Settings renders often, so each catalog is parsed once for its name.
+    static NAMES: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            shipped()
+                .iter()
+                .map(|tag| {
+                    let name = Text::load(tag)
+                        .map_or_else(|_| tag.to_string(), |text| text!(text, "language-name"));
+                    (tag.to_string(), name)
+                })
+                .collect()
+        })
+        .iter()
+        .find(|(tag, _)| tag == language)
+        .map_or_else(|| language.to_owned(), |(_, name)| name.clone())
 }
 
 fn languages(assets: &dyn I18nAssets) -> Vec<LanguageTag> {
@@ -378,6 +404,11 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
     fn shipped_languages_are_the_real_catalogs() {
         let shipped: Vec<_> = shipped().iter().map(ToString::to_string).collect();
         assert_eq!(shipped, ["en-US"]);
+    }
+
+    #[test]
+    fn each_shipped_language_has_its_own_name() {
+        assert_eq!(language_name("en-US"), "English");
     }
 
     #[test]
