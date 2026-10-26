@@ -7,6 +7,7 @@ use crate::ObservationMode;
 use crate::Recompute;
 use crate::SchedulingState;
 use crate::TemperatureMode;
+use crate::controller::managed;
 use crate::native::NativeBackend;
 use std::os::windows::io::BorrowedHandle;
 use std::sync::mpsc;
@@ -23,6 +24,7 @@ enum Call {
     Temperature(u16, TemperatureMode),
     Cleanup,
     Activate(bool),
+    Release,
 }
 
 struct Records {
@@ -30,6 +32,7 @@ struct Records {
     active: bool,
     calls: Vec<Call>,
     blocked: Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>,
+    off_fails: bool,
 }
 
 impl Default for Records {
@@ -43,6 +46,7 @@ impl Default for Records {
             active: true,
             calls: Vec::new(),
             blocked: None,
+            off_fails: false,
         }
     }
 }
@@ -59,6 +63,10 @@ impl NativeBackend for Backend {
     fn restore_watchers(&mut self) -> Vec<NativeFailure> {
         self.records().calls.push(Call::Register);
         Vec::new()
+    }
+
+    fn release_watchers(&mut self) {
+        self.records().calls.push(Call::Release);
     }
 
     fn notifications(&mut self, _mode: ObservationMode) -> NativeNotifications {
@@ -122,6 +130,11 @@ impl NativeBackend for Backend {
     fn set_active(&mut self, active: bool) -> Result<(), NativeFailure> {
         let mut state = self.records();
         state.calls.push(Call::Activate(active));
+        if !active && state.off_fails {
+            return Err(NativeFailure::injected(
+                DiagnosticOperation::NativeActivationWrite,
+            ));
+        }
         state.active = active;
         Ok(())
     }
@@ -132,7 +145,7 @@ fn input(kelvin: i64) -> ConfigInput {
         daytime_kelvin: kelvin,
         middle_kelvin: kelvin,
         sleep_kelvin: kelvin,
-        ..ConfigInput::default()
+        ..managed()
     }
 }
 
@@ -141,7 +154,9 @@ fn startup(directory: &TempDir) -> Option<Arc<Config>> {
         Ok(text) => crate::load(&text, None)
             .ok()
             .map(|(config, _)| Arc::new(config)),
-        Err(_) => Some(Arc::new(Config::default())),
+        Err(_) => Some(Arc::new(
+            managed().validate().expect("managed configuration"),
+        )),
     }
 }
 
@@ -775,6 +790,7 @@ fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
     assert_eq!(
         transitions,
         [
+            "INFO circadia::controller::worker: management started",
             "INFO circadia::controller::worker: automatic suppression started",
             "INFO circadia::controller::worker: automatic suppression ended",
             "INFO circadia::controller::worker: manual suppression started",
@@ -820,7 +836,7 @@ fn configure_applies_a_lower_sleep_temperature_without_a_fade_and_reports_its_re
         wake: clock(240),
         bedtime: clock(-240),
         scheduled_transition_minutes: 1,
-        ..ConfigInput::default()
+        ..managed()
     };
     ConfigStore::new(directory.path())
         .save(&sleeping.clone().validate().expect("config"))
@@ -1136,4 +1152,361 @@ fn quit_after_a_confirmed_session_end_does_not_start_a_fade() {
         records.lock().expect("records").calls.get(before..),
         Some([Call::Cleanup, Call::Activate(false)].as_slice())
     );
+}
+
+fn unmanaged(kelvin: i64) -> ConfigInput {
+    ConfigInput {
+        manage_night_light: false,
+        ..input(kelvin)
+    }
+}
+
+fn start_unmanaged(
+    directory: &TempDir,
+    records: &Arc<Mutex<Records>>,
+) -> (ControllerWorker, mpsc::Receiver<()>) {
+    ConfigStore::new(directory.path())
+        .save(&unmanaged(3400).validate().expect("config"))
+        .expect("saved config");
+    start(directory, records)
+}
+
+fn configure(
+    client: &ControllerClient,
+    notified: &mpsc::Receiver<()>,
+    config: ConfigInput,
+    revision: u64,
+    until: impl Fn(&ControllerSnapshot) -> bool,
+) -> Arc<ControllerSnapshot> {
+    client
+        .submit(ControllerCommand::Configure {
+            config: Arc::new(config.validate().expect("config")),
+            revision,
+        })
+        .expect("configure");
+    wait_for(client, notified, |snapshot| {
+        snapshot.configured_revision == revision && until(snapshot)
+    })
+}
+
+#[test]
+fn management_off_rejects_preview_manual_suppression_and_retry_without_native_calls() {
+    let directory = tempfile::tempdir().expect("directory");
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start_unmanaged(&directory, &records);
+    let client = worker.client();
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        snapshot.scheduling == SchedulingState::Available
+    });
+    assert_eq!(snapshot.management, ManagementState::Off);
+    for command in [
+        ControllerCommand::Preview(Box::new(unmanaged(3400).validate().expect("config"))),
+        ControllerCommand::Manual(ManualCommand::Start),
+        ControllerCommand::Recompute(Recompute::Retry),
+    ] {
+        let receipt = client.submit(command).expect("command");
+        let snapshot = wait_for(&client, &notified, |snapshot| {
+            acknowledged(snapshot, &receipt)
+        });
+        assert!(
+            matches!(snapshot.command, Some((_, CommandOutcome::Unavailable))),
+            "{:?}",
+            snapshot.command
+        );
+        assert!(!snapshot.preview_active && !snapshot.suppression.manual);
+    }
+    let exit = worker.shutdown();
+    assert!(exit.native.is_none());
+    assert_eq!(records.lock().expect("records").calls, []);
+}
+
+#[test]
+fn turning_management_on_and_off_records_each_change_once_and_hands_night_light_back() {
+    let directory = tempfile::tempdir().expect("directory");
+    let records = Arc::new(Mutex::new(Records::default()));
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let (worker, notified) = start_unmanaged(&directory, &records);
+        let client = worker.client();
+        wait_for(&client, &notified, |snapshot| {
+            snapshot.scheduling == SchedulingState::Available
+        });
+        assert_eq!(records.lock().expect("records").calls, []);
+        configure(&client, &notified, input(3400), 1, |snapshot| {
+            snapshot.management == ManagementState::On && last_scheduled(snapshot, 3400)
+        });
+        assert_eq!(
+            records.lock().expect("records").calls.first(),
+            Some(&Call::Register)
+        );
+        configure(&client, &notified, unmanaged(3400), 2, |snapshot| {
+            snapshot.management == ManagementState::Off
+        });
+        assert!(
+            records.lock().expect("records").calls.ends_with(&[
+                Call::Cleanup,
+                Call::Activate(false),
+                Call::Release
+            ]),
+            "{:?}",
+            records.lock().expect("records").calls
+        );
+        let before = records.lock().expect("records").calls.len();
+        let exit = worker.shutdown();
+        assert!(exit.native.is_none());
+        assert_eq!(records.lock().expect("records").calls.len(), before);
+    });
+    let management: Vec<_> = log
+        .iter()
+        .filter(|record| record.contains(": management "))
+        .collect();
+    assert_eq!(
+        management,
+        [
+            "INFO circadia::controller::worker: management started",
+            "INFO circadia::controller::worker: management ended",
+        ]
+    );
+}
+
+fn calls_since(records: &Arc<Mutex<Records>>, before: usize) -> Vec<Call> {
+    records.lock().expect("records").calls[before..].to_vec()
+}
+
+#[test]
+fn panic_cleanup_while_managing_at_2400_k_turns_night_light_off_without_a_fade_within_2_seconds() {
+    let directory = tempfile::tempdir().expect("directory");
+    let Started {
+        worker,
+        records,
+        before,
+        _notified,
+    } = start_at_kelvin(&directory, 250);
+    let client = worker.client();
+    let started = Instant::now();
+    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2));
+    assert!(client.is_finished());
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert_eq!(
+        calls_since(&records, before),
+        [Call::Cleanup, Call::Activate(false)]
+    );
+    assert!(worker.shutdown().worker.is_ok());
+}
+
+#[test]
+fn panic_cleanup_waits_for_a_120_ms_library_call_and_then_turns_night_light_off() {
+    let directory = tempfile::tempdir().expect("directory");
+    saved(&directory);
+    let (entered, blocked) = mpsc::sync_channel(1);
+    let (release, finish) = mpsc::sync_channel(1);
+    let records = Arc::new(Mutex::new(Records {
+        blocked: Some((entered, finish)),
+        ..Records::default()
+    }));
+    let (worker, _notified) = start(&directory, &records);
+    let client = worker.client();
+    blocked
+        .recv_timeout(Duration::from_secs(10))
+        .expect("native operation blocked");
+    let call = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(120));
+        release.send(()).expect("finish native call");
+    });
+    let started = Instant::now();
+    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2));
+    let waited = started.elapsed();
+    call.join().expect("library call thread");
+    assert!(client.is_finished());
+    assert!(waited >= Duration::from_millis(100), "{waited:?}");
+    assert!(waited < Duration::from_secs(2), "{waited:?}");
+    let calls = records.lock().expect("records").calls.clone();
+    assert!(
+        matches!(
+            calls.as_slice(),
+            [
+                ..,
+                Call::Temperature(..),
+                Call::Cleanup,
+                Call::Activate(false)
+            ]
+        ),
+        "{calls:?}"
+    );
+    assert!(worker.shutdown().worker.is_ok());
+}
+
+#[test]
+fn panic_cleanup_during_the_turn_off_fade_skips_the_rest_of_the_fade_and_makes_each_attempt_once() {
+    let directory = tempfile::tempdir().expect("directory");
+    let Started {
+        worker,
+        records,
+        before,
+        _notified,
+    } = start_at_kelvin(&directory, 10_000);
+    let client = worker.client();
+    client
+        .submit(ControllerCommand::Configure {
+            config: Arc::new(
+                ConfigInput {
+                    ordinary_fade_ms: 10_000,
+                    ..unmanaged(2400)
+                }
+                .validate()
+                .expect("config"),
+            ),
+            revision: 1,
+        })
+        .expect("configure");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !calls_since(&records, before)
+        .iter()
+        .any(|call| matches!(call, Call::Temperature(_, TemperatureMode::Hold)))
+    {
+        assert!(Instant::now() < deadline, "turn-off fade did not start");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        client
+            .snapshot()
+            .expect("snapshot")
+            .expect("published")
+            .management,
+        ManagementState::TurningOff
+    );
+    let started = Instant::now();
+    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2));
+    assert!(client.is_finished());
+    assert!(started.elapsed() < Duration::from_secs(2));
+    let calls = calls_since(&records, before);
+    assert!(
+        kelvins(&calls).iter().all(|kelvin| *kelvin < 6500),
+        "{calls:?}"
+    );
+    assert!(
+        calls.ends_with(&[Call::Cleanup, Call::Activate(false)]),
+        "{calls:?}"
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| matches!(call, Call::Activate(false) | Call::Release))
+            .count(),
+        1,
+        "{calls:?}"
+    );
+    assert!(worker.shutdown().worker.is_ok());
+}
+
+#[test]
+fn panic_cleanup_after_turning_management_off_finished_makes_no_native_call() {
+    let directory = tempfile::tempdir().expect("directory");
+    let Started {
+        worker,
+        records,
+        _notified: notified,
+        ..
+    } = start_at_kelvin(&directory, 250);
+    let client = worker.client();
+    configure(&client, &notified, unmanaged(2400), 1, |snapshot| {
+        snapshot.management == ManagementState::Off
+    });
+    let before = records.lock().expect("records").calls.len();
+    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2));
+    assert!(client.is_finished());
+    let exit = worker.shutdown();
+    assert!(exit.native.is_none());
+    assert_eq!(calls_since(&records, before), []);
+}
+
+#[test]
+fn the_same_off_failure_after_management_turns_on_again_is_recorded_again() {
+    let directory = tempfile::tempdir().expect("directory");
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let Started {
+            worker,
+            records,
+            _notified: notified,
+            ..
+        } = start_at_kelvin(&directory, 250);
+        records.lock().expect("records").off_fails = true;
+        let client = worker.client();
+        let off_failed = |snapshot: &ControllerSnapshot| {
+            snapshot.management == ManagementState::Off && !snapshot.native_errors.is_empty()
+        };
+        configure(&client, &notified, unmanaged(2400), 1, off_failed);
+        configure(&client, &notified, input(2400), 2, |snapshot| {
+            snapshot.management == ManagementState::On && snapshot.native_errors.is_empty()
+        });
+        configure(&client, &notified, unmanaged(2400), 3, off_failed);
+        assert!(worker.shutdown().worker.is_ok());
+    });
+    let failures: Vec<_> = failure_records(&log)
+        .into_iter()
+        .filter(|record| record.contains("failure operation=native_activation_write"))
+        .collect();
+    assert_eq!(failures.len(), 2, "{log:?}");
+}
+
+#[test]
+fn a_failed_off_attempt_while_turning_off_is_reported_once_and_not_retried() {
+    let directory = tempfile::tempdir().expect("directory");
+    let Started {
+        worker,
+        records,
+        _notified: notified,
+        ..
+    } = start_at_kelvin(&directory, 250);
+    records.lock().expect("records").off_fails = true;
+    let client = worker.client();
+    let snapshot = configure(&client, &notified, unmanaged(2400), 1, |snapshot| {
+        snapshot.management == ManagementState::Off
+    });
+    assert_eq!(
+        snapshot.native_errors.keys().copied().collect::<Vec<_>>(),
+        [DiagnosticOperation::NativeActivationWrite]
+    );
+    assert!(
+        !snapshot
+            .accepted
+            .as_ref()
+            .expect("accepted")
+            .config()
+            .input()
+            .manage_night_light
+    );
+    let attempts = || {
+        records
+            .lock()
+            .expect("records")
+            .calls
+            .iter()
+            .filter(|call| **call == Call::Activate(false))
+            .count()
+    };
+    assert_eq!(attempts(), 1);
+    let retry = client
+        .submit(ControllerCommand::Recompute(Recompute::Retry))
+        .expect("retry");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &retry)
+    });
+    assert!(matches!(
+        snapshot.command,
+        Some((_, CommandOutcome::Unavailable))
+    ));
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(attempts(), 1);
+    assert_eq!(
+        client
+            .snapshot()
+            .expect("snapshot")
+            .expect("published")
+            .native_errors
+            .len(),
+        1
+    );
+    let exit = worker.shutdown();
+    assert!(exit.native.is_none());
+    assert_eq!(attempts(), 1);
 }

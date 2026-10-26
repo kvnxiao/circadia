@@ -1,6 +1,7 @@
 use super::Model;
 use super::Page;
 use crate::DiagnosticFailure;
+use crate::DiagnosticOperation;
 use crate::Field;
 use crate::FieldErrorKind;
 use crate::FieldValue;
@@ -19,6 +20,7 @@ pub(in crate::ui) enum Action {
     Reset,
     OpenFolder,
     Retry,
+    RetryNative,
     GoTo(Page),
 }
 
@@ -30,6 +32,7 @@ pub(super) struct Banner {
     pub(super) message: String,
     pub(super) actions: Vec<(Action, String)>,
     pub(super) closable: bool,
+    pub(super) enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,7 +50,8 @@ pub(super) fn page(field: Field) -> Page {
         | Field::SleepKelvin
         | Field::Sunrise
         | Field::Sunset
-        | Field::Coordinates => Page::Schedule,
+        | Field::Coordinates
+        | Field::ManageNightLight => Page::Schedule,
         Field::Suppression | Field::Exclusions | Field::FocusDelayMs => Page::Apps,
         Field::ScheduledTransitionMinutes
         | Field::OrdinaryFadeMs
@@ -113,7 +117,12 @@ pub(super) fn banners(
                 (Action::OpenFolder, text!(text, "action-open-folder")),
             ],
             closable: false,
+            enabled: true,
         });
+    }
+    let mut native = native(model, text);
+    if model.management.is_on() && output_failed(model) {
+        banners.extend(native.take());
     }
     if !model.report.marks.is_empty() {
         banners.push(Banner {
@@ -123,6 +132,7 @@ pub(super) fn banners(
             message: text!(text, "banner-paused-message"),
             actions: Vec::new(),
             closable: false,
+            enabled: true,
         });
     }
     if let Some(failure) = model.write_error {
@@ -133,6 +143,7 @@ pub(super) fn banners(
             message: with_code(text, text!(text, "banner-write-message"), failure),
             actions: vec![(Action::Retry, text!(text, "action-retry"))],
             closable: false,
+            enabled: true,
         });
     }
     if let Some(problem_kind) = model.restore {
@@ -147,8 +158,10 @@ pub(super) fn banners(
             ),
             actions: Vec::new(),
             closable: true,
+            enabled: true,
         });
     }
+    banners.extend(native);
     if !model.report.unknown.is_empty() {
         banners.push(Banner {
             id: "banner-unknown-keys",
@@ -161,6 +174,7 @@ pub(super) fn banners(
             ),
             actions: Vec::new(),
             closable: false,
+            enabled: true,
         });
     }
     if let Some(failure) = model.backup_error {
@@ -171,10 +185,63 @@ pub(super) fn banners(
             message: with_code(text, text!(text, "banner-backup-message"), failure),
             actions: vec![(Action::Retry, text!(text, "action-retry"))],
             closable: false,
+            enabled: true,
         });
     }
     banners.extend(other_pages(model, text, region, page));
     banners
+}
+
+fn output_failed(model: &Model) -> bool {
+    model
+        .native_errors
+        .iter()
+        .any(|(operation, _)| *operation != DiagnosticOperation::Observation)
+}
+
+fn native(model: &Model, text: &Text) -> Option<Banner> {
+    if model.native_errors.is_empty() {
+        return None;
+    }
+    let managing = model.management.is_on();
+    let output = output_failed(model);
+    let title = match (managing, output) {
+        (false, _) => text!(text, "banner-native-off-title"),
+        (true, true) => text!(text, "banner-native-output-title"),
+        (true, false) => text!(text, "banner-native-observation-title"),
+    };
+    let mut lines: Vec<String> = model
+        .native_errors
+        .iter()
+        .map(|(operation, failure)| {
+            with_code(
+                text,
+                text!(
+                    text,
+                    "native-failure",
+                    operation = text!(text, "native-operation", operation = operation.to_string()),
+                    category = text!(
+                        text,
+                        "native-category",
+                        category = failure.category.to_string()
+                    )
+                ),
+                *failure,
+            )
+        })
+        .collect();
+    if !managing {
+        lines.push(text!(text, "banner-native-retry-unavailable"));
+    }
+    Some(Banner {
+        id: "banner-native",
+        severity: InfoBarSeverity::Error,
+        title,
+        message: lines.join("\n"),
+        actions: vec![(Action::RetryNative, text!(text, "action-retry"))],
+        closable: false,
+        enabled: managing && !model.retrying,
+    })
 }
 
 fn other_pages(
@@ -221,6 +288,7 @@ fn other_pages(
             })
             .collect(),
         closable: false,
+        enabled: true,
     })
 }
 

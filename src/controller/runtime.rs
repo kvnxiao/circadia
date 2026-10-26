@@ -99,6 +99,29 @@ pub struct RunningPreview {
     pub end: Duration,
 }
 
+/// Report whether Circadia manages Night Light or is changing that state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ManagementState {
+    /// Management is off and Night Light access has ended or never began.
+    #[default]
+    Off,
+    /// Management is on and startup has not yet completed or waited.
+    TurningOn,
+    /// Management is on; startup completed or control waits for recovery.
+    On,
+    /// Management is off and the fade, cleanup, and off attempts are pending.
+    TurningOff,
+    /// Exit has started.
+    Exiting,
+}
+
+impl ManagementState {
+    /// Return whether management is on, whether or not startup has completed.
+    pub fn is_on(self) -> bool {
+        matches!(self, Self::TurningOn | Self::On)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Lifecycle {
     Running,
@@ -173,6 +196,9 @@ impl ControlRuntime {
             self.output.stop();
             return Ok(None);
         };
+        let managing = layer.config().input().manage_night_light;
+        let handing_back = self.managing() && !managing;
+        let fade_out = self.can_fade_out();
         let changed = self
             .config
             .as_ref()
@@ -190,16 +216,22 @@ impl ControlRuntime {
         self.state = SchedulingState::Evaluating;
         if changed {
             self.calculation = None;
-            if update != OutputUpdate::Adopt && !self.suppression.state().active() {
+            if managing && update != OutputUpdate::Adopt && !self.suppression.state().active() {
                 self.output.stop();
             }
         }
         if update == OutputUpdate::Apply {
             self.cancel_preview(now);
         }
+        if handing_back {
+            self.focus_initialized = false;
+            self.stop_control(fade_out, now)?;
+        }
         let config = layer.config();
-        self.suppression
-            .observe_focus(self.focus(config), now.uptime, config)?;
+        if managing {
+            self.suppression
+                .observe_focus(self.focus(config), now.uptime, config)?;
+        }
         Ok(Some(self.request(config, now)))
     }
 
@@ -267,6 +299,9 @@ impl ControlRuntime {
             } else {
                 SchedulingState::Stopped
             };
+            if !self.managing() {
+                return Ok(true);
+            }
             if !self.available() {
                 self.output.stop();
                 return Ok(true);
@@ -292,7 +327,8 @@ impl ControlRuntime {
         } else {
             SchedulingState::Available
         };
-        if was_unavailable {
+        let restarted = was_unavailable && self.managing();
+        if restarted {
             self.suppression
                 .initialize_focus(self.focus(&config), now.uptime);
             self.focus_initialized = true;
@@ -322,6 +358,8 @@ impl ControlRuntime {
         self.select(
             if had_preview {
                 OutputUpdate::Adopt
+            } else if restarted {
+                OutputUpdate::Fade
             } else {
                 self.calculation_update
             },
@@ -335,6 +373,9 @@ impl ControlRuntime {
     }
 
     fn select(&mut self, update: OutputUpdate, now: RuntimeTime) -> Result<(), ControlError> {
+        if !self.managing() {
+            return Ok(());
+        }
         if self.lifecycle != Lifecycle::Running || !self.available() {
             self.output.stop();
             return Ok(());
@@ -394,6 +435,10 @@ impl ControlRuntime {
             record_foreground(foreground, None);
             return Ok(());
         };
+        if !self.managing() {
+            record_foreground(foreground, None);
+            return Ok(());
+        }
         let focus = self.focus(config);
         record_foreground(foreground, Some(focus));
         let before = self.suppression.state().active();
@@ -439,6 +484,7 @@ impl ControlRuntime {
             SchedulingState::Available | SchedulingState::SolarFallback
         ) || (self.state == SchedulingState::Evaluating && self.focus_initialized);
         if !ready
+            || !self.managing()
             || self.lifecycle != Lifecycle::Running
             || self.preview_active()
             || self.suppression.state().active()
@@ -558,9 +604,13 @@ impl ControlRuntime {
             record_foreground(foreground, None);
             return Ok(None);
         };
-        let focus = self.focus(config);
-        record_foreground(foreground, Some(focus));
-        self.suppression.resume_focus(focus, now.uptime, config)?;
+        if self.managing() {
+            let focus = self.focus(config);
+            record_foreground(foreground, Some(focus));
+            self.suppression.resume_focus(focus, now.uptime, config)?;
+        } else {
+            record_foreground(foreground, None);
+        }
         if self.state == SchedulingState::Stopped && self.last_scheduled.is_none() {
             self.focus_initialized = false;
         }
@@ -575,22 +625,39 @@ impl ControlRuntime {
     ///   writes and that has written a temperature starts an ordinary fade from
     ///   that temperature toward 6500 K; other kinds and later calls stop
     ///   output.
+    /// - `Quit` while management is turning off keeps that fade and its
+    ///   deadline.
     ///
     /// # Errors
     /// Report invalid fade timing; output is then stopped.
     pub fn exit(&mut self, kind: ExitKind, now: RuntimeTime) -> Result<(), ControlError> {
+        let quitting = kind == ExitKind::Quit;
+        let joining = quitting
+            && self.lifecycle == Lifecycle::Running
+            && !self.managing()
+            && self.output.has_target();
+        let fade = quitting && self.can_fade_out();
+        self.lifecycle = Lifecycle::Exited;
+        self.expected_calculation = None;
+        if joining {
+            return Ok(());
+        }
+        self.stop_control(fade, now)
+    }
+
+    fn can_fade_out(&self) -> bool {
         let writable = self.available()
             || (self.state == SchedulingState::Evaluating && self.focus_initialized);
         let at_maximum = self.output.last_written() == Some(ColorTemperature::MAX)
             && self.output.fade_deadline().is_none();
-        let fade = kind == ExitKind::Quit
-            && self.lifecycle == Lifecycle::Running
+        self.lifecycle == Lifecycle::Running
             && writable
             && self.output.last_written().is_some()
-            && !at_maximum;
-        self.lifecycle = Lifecycle::Exited;
+            && !at_maximum
+    }
+
+    fn stop_control(&mut self, fade: bool, now: RuntimeTime) -> Result<(), ControlError> {
         self.cancel_preview(now);
-        self.expected_calculation = None;
         self.suppression = Suppression::default();
         self.output.stop();
         if fade {
@@ -605,13 +672,26 @@ impl ControlRuntime {
         self.lifecycle == Lifecycle::Exited
     }
 
-    /// Return whether the exit fade has a remaining step or preview cleanup.
-    pub fn exit_fading(&self, now: ControlTime) -> bool {
-        self.lifecycle == Lifecycle::Exited
+    /// Return whether the saved management setting is on.
+    pub fn managing(&self) -> bool {
+        self.config
+            .as_ref()
+            .is_some_and(|config| config.input().manage_night_light)
+    }
+
+    /// Return whether the fade toward 6500 K of exit or of turning management
+    /// off has a remaining step or preview cleanup.
+    pub fn fading_out(&self, now: ControlTime) -> bool {
+        (self.exiting() || !self.managing())
             && self
                 .output
                 .deadlines(now)
                 .is_ok_and(|deadlines| deadlines.change.is_some() || deadlines.cleanup.is_some())
+    }
+
+    /// Report successful completion of initial target application.
+    pub fn startup_complete(&self) -> bool {
+        self.output.startup_complete()
     }
 
     /// Record stored output and return the active layer's scheduled update.
@@ -637,7 +717,7 @@ impl ControlRuntime {
 
     /// Return whether scheduling permits normal native operations.
     pub fn available(&self) -> bool {
-        self.config.is_some()
+        self.managing()
             && matches!(
                 self.state,
                 SchedulingState::Available
@@ -649,6 +729,7 @@ impl ControlRuntime {
     /// Return whether the runtime currently permits output attempts.
     pub fn controlling(&self) -> bool {
         match self.lifecycle {
+            Lifecycle::Running if !self.managing() => self.output.has_target(),
             Lifecycle::Running => self.available() && self.preview_entry.is_none(),
             Lifecycle::Suspended => false,
             Lifecycle::Exited => self.output.has_target(),

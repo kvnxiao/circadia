@@ -9,6 +9,7 @@ use crate::TemperatureMode;
 use crate::TimeInterval;
 use crate::WindowsZone;
 use crate::controller::Layers;
+use crate::controller::managed;
 use jiff::Timestamp;
 use test_case::test_case;
 
@@ -112,12 +113,12 @@ fn initialize(session: &Layers, foreground: &Foreground, kelvin: u16) -> Control
 
 #[test]
 fn manual_start_survives_a_valid_edit_waiting_for_calculation() {
-    let mut session = Layers::new(Some(Config::default()));
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     session.configure(
         ConfigInput {
             sleep_kelvin: 2200,
-            ..ConfigInput::default()
+            ..managed()
         }
         .validate()
         .expect("valid edit"),
@@ -148,7 +149,7 @@ fn manual_start_survives_a_valid_edit_waiting_for_calculation() {
 fn preview_entry_defers_automatic_suppression_while_calculation_is_pending() {
     let config = ConfigInput {
         suppression: vec!["game.exe".into()],
-        ..ConfigInput::default()
+        ..managed()
     }
     .validate()
     .expect("config");
@@ -185,7 +186,7 @@ fn preview_entry_defers_automatic_suppression_while_calculation_is_pending() {
 fn pending_preview_expires_on_its_original_deadline_and_rejects_late_calculation() {
     let config = ConfigInput {
         preview_seconds: 1,
-        ..ConfigInput::default()
+        ..managed()
     }
     .validate()
     .expect("config");
@@ -218,7 +219,7 @@ fn preview_that_expired_before_native_dispatch_does_not_restart() {
     let session = Layers::new(Some(
         ConfigInput {
             preview_seconds: 1,
-            ..ConfigInput::default()
+            ..managed()
         }
         .validate()
         .expect("config"),
@@ -236,7 +237,7 @@ fn preview_that_expired_before_native_dispatch_does_not_restart() {
 
 #[test]
 fn clock_change_cancels_preview_before_evaluating_new_time_outside_cached_curve() {
-    let mut session = Layers::new(Some(Config::default()));
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let request = runtime
@@ -277,7 +278,7 @@ fn solar_fallback_during_preview_preserves_position_and_original_deadline() {
             latitude: 40.0,
             longitude: -74.0,
         }),
-        ..ConfigInput::default()
+        ..managed()
     }
     .validate()
     .expect("solar configuration");
@@ -352,7 +353,7 @@ fn solar_fallback_during_preview_preserves_position_and_original_deadline() {
 
 #[test]
 fn schedule_failure_during_preview_cancels_playback_and_applies_retained_output() {
-    let mut session = Layers::new(Some(Config::default()));
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let request = runtime
@@ -399,7 +400,7 @@ fn schedule_failure_during_preview_cancels_playback_and_applies_retained_output(
 #[test_case(PreviewRecomputeCase::ExpirePending; "expire pending playback")]
 #[test_case(PreviewRecomputeCase::FailAfterStop; "retain after calculation failure")]
 fn ending_preview_preserves_a_pending_recomputation(case: PreviewRecomputeCase) {
-    let mut session = Layers::new(Some(Config::default()));
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let preview = runtime
@@ -515,7 +516,7 @@ fn suppression_only_storage_does_not_allow_control_after_clock_failure() {
     let config = ConfigInput {
         suppression: vec!["game.exe".into()],
         focus_delay_ms: 5000,
-        ..ConfigInput::default()
+        ..managed()
     }
     .validate()
     .expect("config");
@@ -545,7 +546,7 @@ fn suppression_only_storage_does_not_allow_control_after_clock_failure() {
 
 #[test]
 fn retained_scheduled_output_allows_suppression_and_preserves_an_active_suppression_fade() {
-    let mut session = Layers::new(Some(Config::default()));
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     assert_eq!(
@@ -591,7 +592,7 @@ fn retained_scheduled_output_allows_suppression_and_preserves_an_active_suppress
 
 #[test]
 fn manual_start_during_preview_selects_suppression_without_schedule_restoration() {
-    let mut session = Layers::new(Some(Config::default()));
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let request = runtime
@@ -623,7 +624,7 @@ fn manual_start_during_preview_selects_suppression_without_schedule_restoration(
 fn resume_discards_deferred_preview_activation_and_requires_a_fresh_focus_delay() {
     let config = ConfigInput {
         suppression: vec!["game.exe".into()],
-        ..ConfigInput::default()
+        ..managed()
     }
     .validate()
     .expect("config");
@@ -682,7 +683,7 @@ fn resume_discards_deferred_preview_activation_and_requires_a_fresh_focus_delay(
 
 #[test]
 fn resume_without_suspend_expires_manual_time_and_cancels_preview() {
-    let mut session = Layers::new(Some(Config::default()));
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     runtime
@@ -722,7 +723,7 @@ fn resume_without_suspend_expires_manual_time_and_cancels_preview() {
 
 #[test]
 fn superseded_calculation_does_not_replace_current_configuration() {
-    let session = Layers::new(Some(Config::default()));
+    let session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     let request = runtime
         .configure(session.active(), OutputUpdate::Fade, time(100))
@@ -745,7 +746,7 @@ fn superseded_calculation_does_not_replace_current_configuration() {
 fn foreground_changes_record_the_executable_and_decision_at_debug_level() {
     let config = ConfigInput {
         suppression: vec!["javaw.exe".into()],
-        ..ConfigInput::default()
+        ..managed()
     }
     .validate()
     .expect("config");
@@ -771,7 +772,7 @@ fn foreground_changes_record_the_executable_and_decision_at_debug_level() {
 
 #[test]
 fn suspend_and_a_new_resume_each_record_once_at_the_default_level() {
-    let session = Layers::new(Some(Config::default()));
+    let session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let records = crate::log::capture(tracing::Level::INFO, || {
         let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
         runtime.suspend(time(100));
@@ -793,13 +794,13 @@ fn suspend_and_a_new_resume_each_record_once_at_the_default_level() {
 
 #[test]
 fn configure_keeps_the_last_scheduled_temperature_until_the_new_schedule_stores_one() {
-    let mut session = Layers::new(Some(Config::default()));
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let mut runtime = initialize(&session, &Foreground::Unknown, 2400);
     store(&mut runtime, &mut session, 2400, time(0));
     session.configure(
         ConfigInput {
             sleep_kelvin: 2200,
-            ..ConfigInput::default()
+            ..managed()
         }
         .validate()
         .expect("edited configuration"),

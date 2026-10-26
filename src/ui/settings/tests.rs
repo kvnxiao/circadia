@@ -22,7 +22,7 @@ fn accepting_a_wake_time_equal_to_bedtime_keeps_it_in_the_field_with_an_error() 
             other: Field::Bedtime
         })
     );
-    let model = Model::new(&configuration, String::new());
+    let model = Model::new(&configuration, None, false, String::new());
     assert_eq!(model.clock(Field::Wake), 23 * 60);
     assert_eq!(model.config().value(Field::Wake), FieldValue::Clock(7 * 60));
 }

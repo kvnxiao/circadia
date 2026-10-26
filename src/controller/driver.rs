@@ -2,10 +2,13 @@ use super::AttemptStatus;
 use super::ControlError;
 use super::ControlRuntime;
 use super::ExitKind;
+use super::ManagementState;
 use super::NativeRecovery;
 use super::OutputDeadlines;
 use super::OutputRate;
 use super::RuntimeTime;
+use super::SchedulingState;
+use super::TemperatureOutput;
 use crate::DiagnosticOperation;
 use crate::Native;
 use crate::NativeAttempt;
@@ -33,6 +36,9 @@ pub struct NativeCycle {
     pub scheduled: Option<u16>,
     /// Calculation failure discovered after fresh reads or slow cleanup.
     pub control_error: Option<ControlError>,
+    /// Cleanup and off attempts that ended Night Light access after
+    /// management turned off.
+    pub released: Option<NativeExit>,
 }
 
 #[derive(Default)]
@@ -40,6 +46,7 @@ struct Deadlines {
     output: Option<Duration>,
     cleanup: Option<Duration>,
     recovery: Option<Duration>,
+    release: Option<Duration>,
 }
 
 impl Deadlines {
@@ -48,6 +55,7 @@ impl Deadlines {
             .into_iter()
             .chain(self.cleanup)
             .chain(self.recovery)
+            .chain(self.release)
             .min()
     }
 }
@@ -105,6 +113,16 @@ impl NativeDriver {
     }
 
     fn deadlines(&mut self, now: RuntimeTime) -> Result<Deadlines, ControlError> {
+        if !self.runtime.managing()
+            && !self.runtime.exiting()
+            && self.native.access_begun()
+            && !self.fading_out(now)
+        {
+            return Ok(Deadlines {
+                release: Some(now.output.elapsed),
+                ..Deadlines::default()
+            });
+        }
         let mut deadlines = Deadlines::default();
         let controlling = self.runtime.controlling();
         let selected = self.runtime.output().has_target();
@@ -244,7 +262,17 @@ impl NativeDriver {
             || (retry && self.recovery.blocks_output() && self.runtime.controlling());
         let cleanup = due(deadlines.cleanup) || (retry && self.native.cleanup_pending());
         let mut report = NativeCycle::default();
-        if !current() || (!retry && !output && !cleanup) {
+        if !current() {
+            return Ok(report);
+        }
+        if due(deadlines.release) {
+            *self.runtime.output() = TemperatureOutput::default();
+            self.recovery = NativeRecovery::default();
+            self.correction = false;
+            report.released = self.native.release();
+            return Ok(report);
+        }
+        if !retry && !output && !cleanup {
             return Ok(report);
         }
         #[cfg(feature = "graph-measurement")]
@@ -340,8 +368,8 @@ impl NativeDriver {
             if !runtime.controlling() {
                 return None;
             }
-            // The exit fade must not turn Night Light on to fade it out again.
-            if runtime.exiting() && !fresh.active {
+            // Fading out must not turn Night Light on to fade it out again.
+            if (runtime.exiting() || !runtime.managing()) && !fresh.active {
                 runtime.output().stop();
                 return None;
             }
@@ -384,16 +412,43 @@ impl NativeDriver {
         self.runtime.exit(kind, now)
     }
 
-    /// Return whether the exit fade has a remaining step that native access
-    /// permits.
+    /// Return whether the fade toward 6500 K of exit or of turning management
+    /// off has a remaining step that native access permits.
     ///
     /// - A pending output or observation failure, including a failed fade step,
     ///   ends the fade, and so does Night Light access that never began.
-    pub fn exit_fading(&self, now: RuntimeTime) -> bool {
+    pub fn fading_out(&self, now: RuntimeTime) -> bool {
         self.native.access_begun()
             && !self.recovery.blocks_output()
             && !self.recovery.observation_failed()
-            && self.runtime.exit_fading(now.output)
+            && self.runtime.fading_out(now.output)
+    }
+
+    /// Advance the management state from the previously reported state.
+    ///
+    /// - Turning on ends once startup completes or control waits under native
+    ///   recovery or a schedule-evaluation failure; it does not resume after a
+    ///   later recovery restarts startup.
+    /// - Turning off lasts until the cleanup and off attempts end Night Light
+    ///   access.
+    pub fn management(&self, previous: ManagementState) -> ManagementState {
+        if self.runtime.exiting() {
+            ManagementState::Exiting
+        } else if !self.runtime.managing() {
+            if self.native.access_begun() {
+                ManagementState::TurningOff
+            } else {
+                ManagementState::Off
+            }
+        } else if previous == ManagementState::On
+            || self.runtime.startup_complete()
+            || self.recovery.blocks_output()
+            || self.runtime.state() == SchedulingState::Stopped
+        {
+            ManagementState::On
+        } else {
+            ManagementState::TurningOn
+        }
     }
 
     /// Skip any remaining exit fade and independently attempt cleanup and off

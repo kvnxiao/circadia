@@ -1,5 +1,7 @@
 use super::*;
 use crate::ConfigInput;
+use crate::DiagnosticOperation;
+use crate::ManagementState;
 use crate::l10n::LanguageTag;
 use crate::ui::configuration::Configuration;
 
@@ -32,7 +34,7 @@ impl Fixture {
 
     fn banners(&self, configuration: &Configuration, page: Page) -> Vec<Banner> {
         banners(
-            &Model::new(configuration, String::new()),
+            &Model::new(configuration, None, false, String::new()),
             &self.text,
             &self.region,
             page,
@@ -41,7 +43,7 @@ impl Fixture {
 
     fn feedback(&self, configuration: &Configuration, field: Field) -> Option<Feedback> {
         feedback(
-            &Model::new(configuration, String::new()),
+            &Model::new(configuration, None, false, String::new()),
             &self.text,
             &self.region,
             field,
@@ -166,7 +168,7 @@ fn a_field_error_shows_at_its_field_and_as_a_banner_with_go_to_on_other_pages() 
             .message
             .ends_with("Everything else is saved automatically.")
     );
-    let model = Model::new(&configuration, String::new());
+    let model = Model::new(&configuration, None, false, String::new());
     assert_eq!(
         marked_pages(&model).into_iter().collect::<Vec<_>>(),
         [Page::Schedule]
@@ -207,7 +209,7 @@ fn a_loaded_mark_quotes_the_file_and_names_the_value_in_use_without_a_command() 
                 .to_owned()
         ))
     );
-    let model = Model::new(&configuration, String::new());
+    let model = Model::new(&configuration, None, false, String::new());
     assert!(marked_pages(&model).contains(&Page::Schedule));
     assert_eq!(
         ids(&fixture.banners(&configuration, Page::General)),
@@ -252,7 +254,7 @@ fn a_missing_key_shows_a_note_at_its_field() {
             "Not in the settings file. Using the default, \u{2068}11:00 PM\u{2069}.".to_owned()
         ))
     );
-    let model = Model::new(&configuration, String::new());
+    let model = Model::new(&configuration, None, false, String::new());
     assert!(marked_pages(&model).is_empty());
     assert_eq!(fixture.banners(&configuration, Page::Schedule), []);
 }
@@ -296,4 +298,160 @@ fn paused_saving_unknown_keys_and_a_restored_backup_show_on_every_page() {
              removed the next time settings are saved."
         )
     );
+}
+
+fn native_model(
+    fixture: &Fixture,
+    management: ManagementState,
+    failures: &[DiagnosticOperation],
+) -> (Configuration, Model) {
+    let configuration = fixture.load();
+    let mut model = Model::new(&configuration, None, false, String::new());
+    model.management = management;
+    model.native_errors = failures
+        .iter()
+        .map(|operation| {
+            (
+                *operation,
+                DiagnosticFailure {
+                    category: crate::DiagnosticCategory::AccessDenied,
+                    code: Some(5),
+                },
+            )
+        })
+        .collect();
+    (configuration, model)
+}
+
+#[test]
+fn a_missing_management_key_shows_a_note_at_the_switch() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "config.toml",
+        &document(|table| {
+            table.remove("manage_night_light");
+        }),
+    );
+    let configuration = fixture.load();
+    assert!(matches!(
+        fixture.feedback(&configuration, Field::ManageNightLight),
+        Some(Feedback::Note(_))
+    ));
+}
+
+#[test]
+fn the_native_banner_follows_paused_saving_unless_output_failed() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "config.toml",
+        &document(|table| {
+            table.insert("bedtime".to_owned(), "25:00".into());
+        }),
+    );
+    for (failure, expected) in [
+        (
+            DiagnosticOperation::Observation,
+            ["banner-paused", "banner-native"],
+        ),
+        (
+            DiagnosticOperation::TemperatureWrite,
+            ["banner-native", "banner-paused"],
+        ),
+    ] {
+        let (_configuration, model) = native_model(&fixture, ManagementState::On, &[failure]);
+        assert_eq!(
+            ids(&banners(
+                &model,
+                &fixture.text,
+                &fixture.region,
+                Page::General
+            )),
+            expected,
+            "{failure:?}"
+        );
+    }
+}
+
+fn native_banner(fixture: &Fixture, model: &Model) -> Banner {
+    let banners = banners(model, &fixture.text, &fixture.region, Page::Transitions);
+    let [banner] = banners.as_slice() else {
+        panic!("one banner: {banners:?}");
+    };
+    banner.clone()
+}
+
+#[test]
+fn the_native_banner_lists_each_outstanding_failure_once_with_retry() {
+    let fixture = Fixture::new();
+    let (_configuration, model) = native_model(
+        &fixture,
+        ManagementState::On,
+        &[
+            DiagnosticOperation::Observation,
+            DiagnosticOperation::TemperatureWrite,
+        ],
+    );
+    let banner = native_banner(&fixture, &model);
+    assert_eq!(banner.id, "banner-native");
+    assert_eq!(banner.severity, InfoBarSeverity::Error);
+    assert_eq!(banner.title, "Circadia can't control Night Light");
+    assert_eq!(
+        banner.message,
+        "\u{2068}Watching Night Light for changes\u{2069} failed: \u{2068}access was denied.\u{2069} \
+         Error \u{2068}0x00000005\u{2069}\n\
+         \u{2068}Setting the color temperature\u{2069} failed: \u{2068}access was denied.\u{2069} \
+         Error \u{2068}0x00000005\u{2069}"
+    );
+    assert_eq!(banner.actions, [(Action::RetryNative, "Retry".to_owned())]);
+    assert!(!banner.closable);
+    assert!(banner.enabled);
+}
+
+#[test]
+fn only_an_observation_failure_names_observation_in_the_title() {
+    let fixture = Fixture::new();
+    let (_configuration, model) = native_model(
+        &fixture,
+        ManagementState::On,
+        &[DiagnosticOperation::Observation],
+    );
+    assert_eq!(
+        native_banner(&fixture, &model).title,
+        "Circadia can't watch Night Light for changes"
+    );
+}
+
+#[test]
+fn with_management_off_a_turn_off_failure_disables_retry_and_says_why() {
+    let fixture = Fixture::new();
+    let (_configuration, model) = native_model(
+        &fixture,
+        ManagementState::Off,
+        &[DiagnosticOperation::NativeActivationWrite],
+    );
+    let banner = native_banner(&fixture, &model);
+    assert_eq!(
+        banner.title,
+        "Circadia couldn't finish turning Night Light off"
+    );
+    assert!(
+        banner
+            .message
+            .ends_with("\nRetry is available while Circadia manages Night Light."),
+        "{}",
+        banner.message
+    );
+    assert!(!banner.enabled);
+}
+
+#[test]
+fn retry_is_disabled_while_an_earlier_retry_is_unprocessed() {
+    let fixture = Fixture::new();
+    let (_configuration, mut model) = native_model(
+        &fixture,
+        ManagementState::On,
+        &[DiagnosticOperation::NativeSettingsRead],
+    );
+    model.retrying = true;
+    assert!(!native_banner(&fixture, &model).enabled);
 }

@@ -152,6 +152,8 @@ impl NativeBackend for Backend {
         .collect()
     }
 
+    fn release_watchers(&mut self) {}
+
     fn notifications(&mut self, _: ObservationMode) -> NativeNotifications {
         NativeNotifications::default()
     }

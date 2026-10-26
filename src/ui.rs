@@ -374,6 +374,7 @@ struct Desktop {
     startup: Option<Startup>,
     snapshot: Option<Arc<ControllerSnapshot>>,
     pending: VecDeque<ControllerCommand>,
+    retry: Option<u64>,
     settings_activation: u64,
     fatal: Option<io::Error>,
     exiting: bool,
@@ -461,8 +462,12 @@ impl Application for Desktop {
             manual,
             configuration.toggles_available(),
         );
-        let model =
-            settings::Model::new(&configuration, lines.first().cloned().unwrap_or_default());
+        let model = settings::Model::new(
+            &configuration,
+            self.snapshot.as_deref(),
+            self.retrying(),
+            lines.first().cloned().unwrap_or_default(),
+        );
         ApplicationView::new()
             .window::<settings::Settings>(
                 "settings",
@@ -503,6 +508,7 @@ impl Desktop {
             startup,
             snapshot: None,
             pending: VecDeque::new(),
+            retry: None,
             settings_activation: 0,
             fatal: None,
             exiting: false,
@@ -583,6 +589,10 @@ impl Desktop {
                 self.configure(Some(config));
             }
             settings::Command::Retry => self.configuration.borrow_mut().retry(),
+            settings::Command::RetryNative if !self.retrying() => {
+                self.queue(ControllerCommand::Recompute(Recompute::Retry));
+            }
+            settings::Command::RetryNative => {}
             settings::Command::OpenFolder(folder) => {
                 let path = self.folder(folder);
                 if let Err(error) = crate::platform::settings_window::open_folder(&path) {
@@ -673,6 +683,11 @@ impl Desktop {
         };
         while let Some(command) = self.pending.front() {
             match session.client.submit(command.clone()) {
+                Ok(receipt)
+                    if matches!(command, ControllerCommand::Recompute(Recompute::Retry)) =>
+                {
+                    self.retry = Some(receipt.id);
+                }
                 Ok(_receipt) => {}
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) => {
@@ -683,6 +698,19 @@ impl Desktop {
             }
             self.pending.pop_front();
         }
+    }
+
+    fn retrying(&self) -> bool {
+        let queued = self
+            .pending
+            .iter()
+            .any(|command| matches!(command, ControllerCommand::Recompute(Recompute::Retry)));
+        let processed = self
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.command.as_ref())
+            .map_or(0, |(id, _outcome)| *id);
+        queued || self.retry.is_some_and(|id| id > processed)
     }
 
     fn menu(&mut self, key: &Key, context: &ApplicationContext<Self>) {
@@ -1342,6 +1370,52 @@ mod tests {
         );
     }
 
+    fn retries(desktop: &Desktop) -> usize {
+        desktop
+            .pending
+            .iter()
+            .filter(|command| matches!(command, ControllerCommand::Recompute(Recompute::Retry)))
+            .count()
+    }
+
+    #[test]
+    fn retry_pressed_twice_before_the_controller_processes_it_sends_one_command() {
+        let (_directory, mut desktop) = desktop_with(None);
+        desktop.command(settings::Command::RetryNative);
+        desktop.command(settings::Command::RetryNative);
+        assert_eq!(retries(&desktop), 1);
+        desktop.pending.clear();
+        desktop.retry = Some(8);
+        let processed = |id| {
+            Arc::new(ControllerSnapshot {
+                accepted: None,
+                scheduling: crate::SchedulingState::Available,
+                management: crate::ManagementState::On,
+                preview: None,
+                preview_active: false,
+                suppression: crate::SuppressionState {
+                    automatic: false,
+                    manual: false,
+                    preview: false,
+                },
+                manual_remaining: None,
+                uptime: Duration::ZERO,
+                recent: Vec::new(),
+                command: Some((id, crate::CommandOutcome::Applied)),
+                native_errors: std::collections::BTreeMap::new(),
+                configured_revision: 0,
+                control_error: None,
+                stopped: false,
+            })
+        };
+        desktop.snapshot = Some(processed(7));
+        desktop.command(settings::Command::RetryNative);
+        assert_eq!(retries(&desktop), 0);
+        desktop.snapshot = Some(processed(8));
+        desktop.command(settings::Command::RetryNative);
+        assert_eq!(retries(&desktop), 1);
+    }
+
     #[test]
     fn quit_writes_a_pending_change_before_exit() {
         let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
@@ -1370,7 +1444,11 @@ mod tests {
         let calls = directory.join("native-calls.txt");
         let controller = ControllerWorker::with_native(
             "circadia.exe",
-            Some(Arc::new(crate::Config::default())),
+            Some(Arc::new(
+                crate::controller::managed()
+                    .validate()
+                    .expect("managed configuration"),
+            )),
             || Ok(()),
             crate::Native::with_backend(RecordingBackend(calls.clone())),
             || crate::Foreground::Unknown,
@@ -1413,6 +1491,8 @@ mod tests {
         fn restore_watchers(&mut self) -> Vec<crate::NativeFailure> {
             Vec::new()
         }
+
+        fn release_watchers(&mut self) {}
 
         fn notifications(&mut self, _mode: ObservationMode) -> NativeNotifications {
             NativeNotifications::default()

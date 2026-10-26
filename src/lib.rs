@@ -86,6 +86,8 @@ pub use controller::ControllerWorker;
 #[cfg(windows)]
 pub use controller::ExitKind;
 #[cfg(windows)]
+pub use controller::ManagementState;
+#[cfg(windows)]
 pub use controller::NativeCycle;
 #[cfg(windows)]
 pub use controller::NativeDriver;
