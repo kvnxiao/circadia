@@ -1,4 +1,5 @@
 use super::Message;
+use super::NumberControls;
 use super::Settings;
 use super::time_picker::PickerInput;
 use super::time_picker::TimePicker;
@@ -16,12 +17,9 @@ use windows_reactor::ButtonStyle;
 use windows_reactor::Grid;
 use windows_reactor::GridLength;
 use windows_reactor::HorizontalAlignment;
-use windows_reactor::NumberBox;
 use windows_reactor::Orientation;
-use windows_reactor::Slider;
 use windows_reactor::StackPanel;
 use windows_reactor::Thickness;
-use windows_reactor::VerticalAlignment;
 use windows_reactor::View;
 use windows_reactor::ViewContext;
 
@@ -44,11 +42,12 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         widgets::group(vec![
             widgets::card(
                 Row::new("\u{E823}", text!(text, "wake-title"), wake_description)
-                    .controls(with_feedback(
-                        settings,
-                        Field::Wake,
-                        picker(settings, Field::Wake, "wake", context),
-                    ))
+                    .controls(
+                        settings.with_feedback(
+                            Field::Wake,
+                            picker(settings, Field::Wake, "wake", context),
+                        ),
+                    )
                     .view(),
             ),
             widgets::card(
@@ -57,8 +56,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                     text!(text, "bedtime-title"),
                     text!(text, "bedtime-description"),
                 )
-                .controls(with_feedback(
-                    settings,
+                .controls(settings.with_feedback(
                     Field::Bedtime,
                     picker(settings, Field::Bedtime, "bedtime", context),
                 ))
@@ -84,21 +82,11 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
     ]
 }
 
-pub(super) fn kelvin_edits(field: Field, value: Option<f64>) -> Option<Vec<(Field, FieldValue)>> {
-    value.map(|value| vec![(field, FieldValue::Number(field.limit(value)))])
-}
-
 fn recommended_colors() -> Vec<(Field, FieldValue)> {
     let defaults = Config::default();
     LEVELS
         .into_iter()
         .map(|field| (field, defaults.value(field)))
-        .collect()
-}
-
-fn with_feedback(settings: &Settings, field: Field, control: View) -> Vec<View> {
-    std::iter::once(control)
-        .chain(settings.feedback(field))
         .collect()
 }
 
@@ -191,70 +179,24 @@ fn temperature_card(
                                     .children(heading),
                                 widgets::caption(description),
                             )),
-                        StackPanel::new().grid_column(1).children(with_feedback(
-                            settings,
-                            field,
-                            kelvin_controls(settings, field, id, &title, context),
-                        )),
+                        StackPanel::new()
+                            .grid_column(1)
+                            .children(settings.with_feedback(
+                                field,
+                                settings.number_controls(
+                                    NumberControls {
+                                        field,
+                                        id,
+                                        title: &title,
+                                        unit: text!(text, "kelvin-unit"),
+                                        slider: true,
+                                    },
+                                    context,
+                                ),
+                            )),
                     )),
             ),
     )
-}
-
-fn kelvin_controls(
-    settings: &Settings,
-    field: Field,
-    id: &str,
-    title: &str,
-    context: &ViewContext<'_, Settings>,
-) -> View {
-    let range = field.range().unwrap_or(crate::NumberRange {
-        minimum: 0,
-        maximum: 0,
-        step: 1,
-    });
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "temperatures and their bounds are at most 6500"
-    )]
-    let (value, minimum, maximum, step) = (
-        settings.input.model.number(field) as f64,
-        range.minimum as f64,
-        range.maximum as f64,
-        range.step as f64,
-    );
-    let editable = settings.input.model.editable();
-    StackPanel::new()
-        .orientation(Orientation::Horizontal)
-        .spacing(12.0)
-        .children((
-            Slider::new()
-                .width(220.0)
-                .minimum(minimum)
-                .maximum(maximum)
-                .step_frequency(step)
-                .value(value)
-                .is_enabled(editable)
-                .automation_id(format!("{id}-slider"))
-                .automation_name(title)
-                .on_value_changed(
-                    context.callback(move |value| Message::Kelvin(field, Some(value))),
-                ),
-            NumberBox::new()
-                .width(96.0)
-                .minimum(minimum)
-                .maximum(maximum)
-                .small_change(step)
-                .value(Some(value))
-                .is_enabled(editable)
-                .automation_id(format!("{id}-kelvin"))
-                .automation_name(title)
-                .vertical_alignment(VerticalAlignment::Top)
-                .on_value_changed(context.callback(move |value| Message::Kelvin(field, value))),
-            widgets::body(text!(settings.input.text, "kelvin-unit"))
-                .margin(Thickness::new(0.0, 6.0, 0.0, 0.0)),
-        ))
-        .into()
 }
 
 #[cfg(test)]

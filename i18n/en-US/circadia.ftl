@@ -67,6 +67,28 @@ not-used = Not used
 kelvin-unit = K
 restore-colors = Restore recommended colors
 
+section-slow = Slow transitions
+transition-length = Transition length
+transition-length-description = How long the color ramps before each event. The ramp ends at the event time, so it starts earlier.
+minutes-unit = min
+example-daytime = Daytime { $kelvin }
+example-evening = Evening { $kelvin }
+example-starts = Starts { $time }
+example-sunset = Sunset { $time }
+example-caption = Example: with a { $minutes }-minute transition, evening color ({ $kelvin }) is reached exactly at sunset. When two events are closer together than this, the ramp shortens to fit.
+section-fades = Quick fades
+fade-duration = Fade duration
+fade-duration-description = Used when Circadia starts or quits, when management turns on or off, when suppression starts or ends, and when Circadia undoes a change made outside it. { $minimum } to { $maximum } ms.
+milliseconds-unit = ms
+section-preview = Preview
+preview-length = Preview length
+preview-length-description = Preview plays the next 24 hours of your schedule in this many seconds. It takes priority over suppression while it plays.
+seconds-unit = s
+section-output = Output
+update-rate = Maximum update rate
+update-rate-description = How many times per second Circadia may change the color during fades and previews. Lower values can look uneven. { $minimum } to { $maximum } Hz.
+hertz-unit = Hz
+
 field-name =
     { $field ->
         [wake] Wake time
