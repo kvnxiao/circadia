@@ -96,7 +96,7 @@ impl OutputMeasurement {
         let result = ACTIVE
             .set(self.clone())
             .map_err(|_error| io::Error::other("output measurement already started"))
-            .and_then(|()| crate::run_desktop(Some(directory), false));
+            .and_then(|()| crate::run_desktop(Some(directory), false, None));
         self.0
             .lifecycle
             .lock()

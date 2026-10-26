@@ -12,6 +12,7 @@ use crate::ControllerCommand;
 use crate::ControllerSnapshot;
 use crate::ControllerWorker;
 use crate::DesktopEvent;
+use crate::ExistingInstance;
 use crate::ForegroundEvents;
 use crate::InstanceClaim;
 use crate::LifecycleWindow;
@@ -20,11 +21,14 @@ use crate::PrimaryInstance;
 use crate::Recompute;
 use crate::controller::COMMAND_QUEUE_BYTES;
 use crate::controller::COMMAND_QUEUE_CAPACITY;
+use crate::l10n::LanguageTag;
+use crate::l10n::Text;
 use crate::platform::lifecycle_inputs::ShellIdentity;
 use crate::platform::lifecycle_inputs::ZoneIdentity;
 use crate::platform::lifecycle_inputs::last_wake_time;
 use crate::platform::lifecycle_inputs::shell_identity;
 use crate::platform::lifecycle_inputs::sleep_time;
+use crate::platform::nls::RegionalFormat;
 use crate::read_foreground;
 use files::FileChanges;
 use std::cell::Cell;
@@ -53,24 +57,61 @@ use windows_reactor::NotifyIcon;
 ///
 /// - An explicit directory isolates configuration, backup, and log files.
 /// - `verbose` records debug detail for this process only.
+/// - `language` forces an interface language, including `qps-Ploc`, for this
+///   process only.
 /// - A second invocation only activates settings in the existing process and
-///   does not log.
+///   does not log or validate `language`.
 /// - Normal startup can change live Night Light; graceful exit requests off.
 ///
 /// # Errors
 /// Report argument, startup, message-loop, worker, or exit-cleanup failures.
-pub fn run_desktop(directory: Option<PathBuf>, verbose: bool) -> io::Result<()> {
-    run_with_native(directory, verbose, crate::Native::new())
+/// A first invocation reports an unknown `language` as invalid input.
+pub fn run_desktop(
+    directory: Option<PathBuf>,
+    verbose: bool,
+    language: Option<&str>,
+) -> io::Result<()> {
+    run_with_native(directory, verbose, language, crate::Native::new())
+}
+
+enum Launch {
+    Existing(ExistingInstance),
+    Primary(PrimaryInstance, LanguageTag, Option<io::Error>),
+}
+
+fn launch(
+    claim: InstanceClaim,
+    forced: Option<&str>,
+    preferred: impl FnOnce() -> io::Result<Vec<String>>,
+) -> io::Result<Launch> {
+    let primary = match claim {
+        InstanceClaim::Existing(existing) => return Ok(Launch::Existing(existing)),
+        InstanceClaim::Primary(primary) => primary,
+    };
+    let (preferred, preferred_error) = match forced {
+        Some(_) => (Vec::new(), None),
+        None => preferred().map_or_else(|error| (Vec::new(), Some(error)), |list| (list, None)),
+    };
+    let language = crate::l10n::resolve(forced, None, &preferred)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    Ok(Launch::Primary(primary, language, preferred_error))
 }
 
 fn run_with_native(
     directory: Option<PathBuf>,
     verbose: bool,
+    language: Option<&str>,
     native: crate::Native,
 ) -> io::Result<()> {
-    let primary = match InstanceClaim::acquire()? {
-        InstanceClaim::Existing(existing) => return existing.activate(),
-        InstanceClaim::Primary(primary) => Rc::new(primary),
+    let (primary, language, preferred_error) = match launch(
+        InstanceClaim::acquire()?,
+        language,
+        crate::platform::nls::preferred_ui_languages,
+    )? {
+        Launch::Existing(existing) => return existing.activate(),
+        Launch::Primary(primary, language, preferred_error) => {
+            (Rc::new(primary), language, preferred_error)
+        }
     };
     let directory = match directory {
         Some(directory) => directory,
@@ -80,6 +121,15 @@ fn run_with_native(
         .join("Circadia"),
     };
     let panic_controller = start_log(&directory, verbose)?;
+    if let Some(error) = preferred_error {
+        tracing::warn!(%error, "Windows preferred UI languages are unavailable");
+    }
+    tracing::info!(%language, "interface language");
+    if let Err(error) = crate::platform::nls::prefer_ui_language(&language.to_string()) {
+        tracing::warn!(%error, "Windows controls keep the Windows display language");
+    }
+    let text = Text::load(&language).map_err(io::Error::other)?;
+    let regional_format = RegionalFormat::capture_user_default()?;
     let executable = std::env::current_exe()?;
     let running_executable = executable
         .file_name()
@@ -106,6 +156,8 @@ fn run_with_native(
         icon: executable.with_file_name("circadia.ico"),
         executable,
         previous_run,
+        regional_format,
+        text,
     })
     .map_err(io::Error::other);
     let shutdown = result.borrow_mut().take().map_or(Ok(()), Err);
@@ -146,6 +198,12 @@ struct Input {
         reason = "the crash notice does not read the previous run yet"
     )]
     previous_run: crate::log::run::PreviousRun,
+    #[expect(
+        dead_code,
+        reason = "the redesigned settings window is the first reader of the regional format"
+    )]
+    regional_format: RegionalFormat,
+    text: Text,
 }
 
 struct Startup {
@@ -456,10 +514,10 @@ impl Application for Desktop {
     }
 
     fn view(&self, input: &Input, context: &ApplicationViewContext<Self>) -> ApplicationView {
-        let lines = status::lines(self.snapshot.as_deref());
+        let lines = status::lines(&input.text, self.snapshot.as_deref());
         let manual = self.manual_command();
-        let manual_label = status::manual_label(manual);
-        let items = status::menu_items(self.snapshot.as_deref(), manual);
+        let manual_label = status::manual_label(&input.text, manual);
+        let items = status::menu_items(&input.text, self.snapshot.as_deref(), manual);
         ApplicationView::new()
             .window::<settings::Settings>(
                 "settings",
@@ -487,7 +545,7 @@ impl Application for Desktop {
             .notify_icon(
                 "tray",
                 NotifyIcon::new(input.icon.clone())
-                    .tooltip(status::tooltip(&lines))
+                    .tooltip(status::tooltip(&input.text, &lines))
                     .on_activate(context.callback(|_| Message::Open))
                     .menu(Menu::new(items, context.callback(Message::Menu))),
             )
@@ -1111,6 +1169,58 @@ mod tests {
                 "INFO circadia::ui: exit succeeded=true",
             ]
         );
+    }
+
+    #[test]
+    fn an_unknown_forced_language_stops_only_the_first_launch() {
+        let name = format!(
+            "Local\\Circadia.Instance.Test.Language.{}",
+            std::process::id()
+        );
+        let first = InstanceClaim::acquire_named(&name).expect("first claim");
+        let second = InstanceClaim::acquire_named(&name).expect("second claim");
+        assert!(matches!(
+            launch(second, Some("xx-XX"), || panic!(
+                "a second launch reads no languages"
+            )),
+            Ok(Launch::Existing(_))
+        ));
+        let error = launch(first, Some("xx-XX"), || Ok(Vec::new()))
+            .err()
+            .expect("unknown language");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("xx-XX"), "{error}");
+    }
+
+    #[test]
+    fn a_first_launch_resolves_the_forced_language() {
+        let name = format!(
+            "Local\\Circadia.Instance.Test.Forced.{}",
+            std::process::id()
+        );
+        let claim = InstanceClaim::acquire_named(&name).expect("first claim");
+        let Ok(Launch::Primary(_, language, None)) = launch(claim, Some("qps-Ploc"), || {
+            panic!("a forced language reads no Windows languages")
+        }) else {
+            panic!("a first launch starts the application");
+        };
+        assert_eq!(language.to_string(), "qps-Ploc");
+    }
+
+    #[test]
+    fn unreadable_windows_languages_resolve_english() {
+        let name = format!(
+            "Local\\Circadia.Instance.Test.Preferred.{}",
+            std::process::id()
+        );
+        let claim = InstanceClaim::acquire_named(&name).expect("first claim");
+        let Ok(Launch::Primary(_, language, Some(error))) =
+            launch(claim, None, || Err(io::Error::from_raw_os_error(122)))
+        else {
+            panic!("a first launch starts the application and returns the failure");
+        };
+        assert_eq!(language.to_string(), "en-US");
+        assert_eq!(error.raw_os_error(), Some(122));
     }
 
     #[test]

@@ -20,8 +20,12 @@ path = "tools/native_lifecycle.rs"
 required-features = ["native-tests"]
 
 [dependencies]
+fluent-pseudo = "0.3"
 fs-err = "3.3"
+i18n-embed = { version = "0.16", features = ["fluent-system"] }
+i18n-embed-fl = "0.10"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
+rust-embed = { version = "8", features = ["debug-embed"] }
 serde = { version = "1.0", features = ["derive"] }
 solar-positioning = { version = "0.7.1", default-features = false, features = ["std"] }
 tempfile = "3"
@@ -38,7 +42,7 @@ windows = { version = "0.62", features = ["Devices_Geolocation", "Foundation"] }
 windows-future = "0.3"
 windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac" }
 windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac" }
-windows-sys = { version = "0.61", features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_Debug", "Win32_System_EventLog", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_Globalization", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_Debug", "Win32_System_EventLog", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
 
 [build-dependencies]
@@ -48,6 +52,8 @@ fs-err = "3.3"
 windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", optional = true }
 
 [dev-dependencies]
+fluent-bundle = "0.16"
+fluent-syntax = "0.12"
 test-case = "3"
 
 [target.'cfg(windows)'.dev-dependencies]

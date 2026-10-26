@@ -2,6 +2,8 @@ use crate::ControllerSnapshot;
 use crate::DiagnosticOperation;
 use crate::ManualCommand;
 use crate::SchedulingState;
+use crate::l10n::Text;
+use crate::l10n::text;
 use windows_reactor::MenuItem;
 
 pub(super) fn open_on_start(snapshot: &ControllerSnapshot) -> bool {
@@ -15,18 +17,23 @@ pub(super) fn open_on_start(snapshot: &ControllerSnapshot) -> bool {
             .is_some_and(|startup| startup.restore.is_some())
 }
 
-pub(super) fn tooltip(lines: &[String]) -> String {
-    format!("Circadia: {}", lines.first().map_or("", String::as_str))
+pub(super) fn tooltip(text: &Text, lines: &[String]) -> String {
+    text!(
+        text,
+        "tooltip",
+        status = lines.first().map_or("", String::as_str)
+    )
 }
 
-pub(super) fn manual_label(manual: ManualCommand) -> &'static str {
+pub(super) fn manual_label(text: &Text, manual: ManualCommand) -> String {
     match manual {
-        ManualCommand::Start => "Suppress for one hour",
-        ManualCommand::Stop => "Stop manual suppression",
+        ManualCommand::Start => text!(text, "tray-manual-start"),
+        ManualCommand::Stop => text!(text, "tray-manual-stop"),
     }
 }
 
 pub(super) fn menu_items(
+    text: &Text,
     snapshot: Option<&ControllerSnapshot>,
     manual: ManualCommand,
 ) -> Vec<MenuItem> {
@@ -34,18 +41,18 @@ pub(super) fn menu_items(
         ManualCommand::Start => "manual-start",
         ManualCommand::Stop => "manual-stop",
     };
-    let mut items = vec![MenuItem::item("settings", "Settings")];
+    let mut items = vec![MenuItem::item("settings", text!(text, "tray-settings"))];
     items.push(if manual_available(snapshot) {
-        MenuItem::item(manual_key, manual_label(manual))
+        MenuItem::item(manual_key, manual_label(text, manual))
     } else {
-        MenuItem::disabled(manual_key, manual_label(manual))
+        MenuItem::disabled(manual_key, manual_label(text, manual))
     });
-    items.extend(recent_menu_items(snapshot));
-    items.push(MenuItem::item("quit", "Quit"));
+    items.extend(recent_menu_items(text, snapshot));
+    items.push(MenuItem::item("quit", text!(text, "tray-quit")));
     items
 }
 
-fn recent_menu_items(snapshot: Option<&ControllerSnapshot>) -> Vec<MenuItem> {
+fn recent_menu_items(text: &Text, snapshot: Option<&ControllerSnapshot>) -> Vec<MenuItem> {
     let Some(snapshot) = snapshot else {
         return Vec::new();
     };
@@ -53,19 +60,30 @@ fn recent_menu_items(snapshot: Option<&ControllerSnapshot>) -> Vec<MenuItem> {
         .recent
         .iter()
         .map(|recent| {
+            let executable = recent.executable.as_str();
             let action = if recent.included { "remove" } else { "add" };
-            let label = if recent.included {
-                format!("Remove {} from suppression", recent.executable)
-            } else {
-                format!("Suppress for {}", recent.executable)
-            };
-            let key = format!("{action}:{}", recent.executable);
-            if recent.excluded {
-                MenuItem::disabled(key, format!("{label} (excluded)"))
-            } else if snapshot.accepted.is_none() {
-                MenuItem::disabled(key, label)
-            } else {
-                MenuItem::item(key, label)
+            let key = format!("{action}:{executable}");
+            match (recent.included, recent.excluded) {
+                (true, true) => MenuItem::disabled(
+                    key,
+                    text!(text, "tray-recent-remove-excluded", executable = executable),
+                ),
+                (false, true) => MenuItem::disabled(
+                    key,
+                    text!(text, "tray-recent-add-excluded", executable = executable),
+                ),
+                (included, false) => {
+                    let label = if included {
+                        text!(text, "tray-recent-remove", executable = executable)
+                    } else {
+                        text!(text, "tray-recent-add", executable = executable)
+                    };
+                    if snapshot.accepted.is_none() {
+                        MenuItem::disabled(key, label)
+                    } else {
+                        MenuItem::item(key, label)
+                    }
+                }
             }
         })
         .collect()
@@ -118,38 +136,38 @@ pub(super) fn details(snapshot: Option<&ControllerSnapshot>) -> Vec<String> {
     details
 }
 
-pub(super) fn lines(snapshot: Option<&ControllerSnapshot>) -> Vec<String> {
+pub(super) fn lines(text: &Text, snapshot: Option<&ControllerSnapshot>) -> Vec<String> {
     let Some(snapshot) = snapshot else {
-        return vec!["Starting Circadia.".into()];
+        return vec![text!(text, "status-starting")];
     };
     let mut lines = Vec::new();
     let output_failed = snapshot
         .native_errors
         .keys()
         .any(|operation| *operation != DiagnosticOperation::Observation);
+    let suppressed = snapshot.suppression.manual || snapshot.suppression.automatic;
     if snapshot.accepted.is_none() {
-        lines.push("Configuration requires correction; management is stopped.".into());
+        lines.push(text!(text, "status-configuration-error"));
     }
     if snapshot.scheduling == SchedulingState::Stopped {
-        lines.push("Control is unavailable; starting suppression is disabled.".into());
+        lines.push(text!(text, "status-control-unavailable"));
     }
     if output_failed {
-        let text = if snapshot.suppression.manual || snapshot.suppression.automatic {
-            "Output is unavailable; suppression is requested."
+        lines.push(if suppressed {
+            text!(text, "status-output-unavailable-suppressed")
         } else {
-            "Night Light output is unavailable."
-        };
-        lines.push(text.into());
+            text!(text, "status-output-unavailable")
+        });
     }
     if snapshot.scheduling == SchedulingState::Retained {
-        lines.push("The schedule is unavailable; its last temperature is retained.".into());
+        lines.push(text!(text, "status-schedule-retained"));
     }
     if snapshot
         .startup
         .as_ref()
         .is_some_and(|startup| startup.restore.is_some())
     {
-        lines.push("Configuration was restored from its backup.".into());
+        lines.push(text!(text, "status-backup-restored"));
     }
     if !output_failed
         && matches!(
@@ -160,7 +178,7 @@ pub(super) fn lines(snapshot: Option<&ControllerSnapshot>) -> Vec<String> {
             .native_errors
             .contains_key(&DiagnosticOperation::Observation)
     {
-        lines.push("Control continues without change observation.".into());
+        lines.push(text!(text, "status-observation-failed"));
     }
     if !output_failed
         && matches!(
@@ -168,22 +186,21 @@ pub(super) fn lines(snapshot: Option<&ControllerSnapshot>) -> Vec<String> {
             SchedulingState::Available | SchedulingState::SolarFallback
         )
     {
-        let mode = if snapshot.suppression.manual || snapshot.suppression.automatic {
-            "Suppression is active."
+        let solar = if snapshot.scheduling == SchedulingState::SolarFallback {
+            "fallback"
+        } else {
+            "available"
+        };
+        lines.push(if suppressed {
+            text!(text, "status-suppression-active", solar = solar)
         } else if snapshot.preview_active {
-            "Preview is playing."
+            text!(text, "status-preview-playing", solar = solar)
         } else {
-            "Schedule control is active."
-        };
-        let fallback = if snapshot.scheduling == SchedulingState::SolarFallback {
-            " Solar calculation failed; Wake and Bedtime are used."
-        } else {
-            ""
-        };
-        lines.push(format!("{mode}{fallback}"));
+            text!(text, "status-schedule-active", solar = solar)
+        });
     }
     if lines.is_empty() {
-        lines.push("Calculating the schedule.".into());
+        lines.push(text!(text, "status-calculating"));
     }
     lines
 }
@@ -225,11 +242,16 @@ mod tests {
     use crate::RestoreNotice;
     use crate::StartupConfig;
     use crate::SuppressionState;
+    use crate::l10n::LanguageTag;
     use std::collections::BTreeMap;
     use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Duration;
     use test_case::test_case;
+
+    fn english() -> Text {
+        Text::load(&LanguageTag::english()).expect("English catalog loads")
+    }
 
     fn snapshot(input: ConfigInput) -> ControllerSnapshot {
         let config = input.validate().expect("valid settings fixture");
@@ -300,7 +322,7 @@ mod tests {
             Arc::new(NativeFailure::injected(DiagnosticOperation::Observation)),
         );
         assert!(
-            !lines(Some(&snapshot))
+            !lines(&english(), Some(&snapshot))
                 .iter()
                 .any(|line| line == "Control continues without change observation.")
         );
@@ -318,7 +340,7 @@ mod tests {
             )),
         );
         assert_eq!(
-            lines(Some(&state)),
+            lines(&english(), Some(&state)),
             [
                 "Output is unavailable; suppression is requested.",
                 "Configuration was restored from its backup.",
@@ -336,7 +358,7 @@ mod tests {
             Arc::new(NativeFailure::injected(DiagnosticOperation::Observation)),
         );
         assert_eq!(
-            lines(Some(&state)),
+            lines(&english(), Some(&state)),
             [
                 "The schedule is unavailable; its last temperature is retained.",
                 "Control continues without change observation.",
@@ -426,13 +448,59 @@ mod tests {
             }
         });
         assert_eq!(states.len(), 2 * 6 * 4 * 3 * 2 * 2);
-        let tooltips = states
-            .iter()
-            .map(|state| tooltip(&lines(Some(state))))
-            .chain([tooltip(&lines(None))]);
-        for text in tooltips {
-            assert!(text.encode_utf16().count() < 128, "{text}");
-            assert!(!text.contains('\0'), "{text:?}");
+        for language in [LanguageTag::english(), LanguageTag::pseudo()] {
+            let text = Text::load(&language).expect("catalog loads");
+            let tooltips = states
+                .iter()
+                .map(|state| tooltip(&text, &lines(&text, Some(state))))
+                .chain([tooltip(&text, &lines(&text, None))]);
+            for tooltip in tooltips {
+                assert!(
+                    tooltip.encode_utf16().count() < 128,
+                    "{language}: {tooltip}"
+                );
+                assert!(!tooltip.contains('\0'), "{language}: {tooltip:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn pseudo_localized_tray_menu_has_no_english_label() {
+        let text = Text::load(&LanguageTag::pseudo()).expect("pseudo-locale loads");
+        let mut state = snapshot(ConfigInput::default());
+        state.recent = vec![
+            RecentApp {
+                executable: "listed.exe".into(),
+                included: true,
+                excluded: false,
+            },
+            RecentApp {
+                executable: "unlisted.exe".into(),
+                included: false,
+                excluded: false,
+            },
+            RecentApp {
+                executable: "excluded.exe".into(),
+                included: false,
+                excluded: true,
+            },
+            RecentApp {
+                executable: "both.exe".into(),
+                included: true,
+                excluded: true,
+            },
+        ];
+        let items: Vec<_> = [ManualCommand::Start, ManualCommand::Stop]
+            .into_iter()
+            .flat_map(|manual| menu_items(&text, Some(&state), manual))
+            .collect();
+        assert_eq!(items.len(), 14);
+        for item in items {
+            let MenuItem::Item { label, .. } = item else {
+                panic!("the tray menu has only items");
+            };
+            assert!(label.starts_with('['), "{label}");
+            assert!(label.ends_with(']'), "{label}");
         }
     }
 
@@ -460,10 +528,11 @@ mod tests {
         }
         let mut state = snapshot(ConfigInput::default());
         state.recent = apps.recent(&config);
-        let mut menus = vec![(menu_items(None, manual), 3)];
-        menus.push((menu_items(Some(&state), manual), 8));
+        let text = english();
+        let mut menus = vec![(menu_items(&text, None, manual), 3)];
+        menus.push((menu_items(&text, Some(&state), manual), 8));
         state.accepted = None;
-        menus.push((menu_items(Some(&state), manual), 8));
+        menus.push((menu_items(&text, Some(&state), manual), 8));
         for (items, expected) in menus {
             let keys: HashSet<_> = items
                 .iter()
@@ -480,6 +549,7 @@ mod tests {
 
     #[test]
     fn recent_menu_preserves_membership_and_disables_exclusions() {
+        let text = english();
         let mut state = snapshot(ConfigInput::default());
         state.recent = vec![
             RecentApp {
@@ -499,19 +569,37 @@ mod tests {
             },
         ];
         assert_eq!(
-            recent_menu_items(Some(&state)),
+            recent_menu_items(&text, Some(&state)),
             vec![
-                MenuItem::item("remove:listed.exe", "Remove listed.exe from suppression"),
-                MenuItem::item("add:unlisted.exe", "Suppress for unlisted.exe"),
+                MenuItem::item(
+                    "remove:listed.exe",
+                    "Remove \u{2068}listed.exe\u{2069} from suppression"
+                ),
+                MenuItem::item(
+                    "add:unlisted.exe",
+                    "Suppress for \u{2068}unlisted.exe\u{2069}"
+                ),
                 MenuItem::disabled(
                     "remove:excluded.exe",
-                    "Remove excluded.exe from suppression (excluded)"
+                    "Remove \u{2068}excluded.exe\u{2069} from suppression (excluded)"
                 ),
             ]
         );
+        assert_eq!(
+            menu_items(&text, None, ManualCommand::Start),
+            vec![
+                MenuItem::item("settings", "Settings"),
+                MenuItem::disabled("manual-start", "Suppress for one hour"),
+                MenuItem::item("quit", "Quit Circadia"),
+            ]
+        );
+        assert_eq!(
+            manual_label(&text, ManualCommand::Stop),
+            "Stop manual suppression"
+        );
         state.accepted = None;
         assert!(
-            recent_menu_items(Some(&state))
+            recent_menu_items(&text, Some(&state))
                 .iter()
                 .all(|item| matches!(item, MenuItem::Item { enabled: false, .. }))
         );
