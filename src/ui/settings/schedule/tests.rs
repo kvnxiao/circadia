@@ -39,7 +39,12 @@ fn a_kelvin_field_commit_of_1100_applies_1200_k_to_both_controls() {
 fn restore_recommended_colors_sends_one_configure_with_the_default_temperatures() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let configuration = Rc::new(RefCell::new(Configuration::load(directory.path())));
-    let mut desktop = Desktop::new(Rc::clone(&configuration), None, directory.path().to_owned());
+    let mut desktop = Desktop::new(
+        Rc::clone(&configuration),
+        None,
+        directory.path().to_owned(),
+        Box::new(crate::ui::settings::general::FakeRegistration::default()),
+    );
     desktop.edit(vec![(Field::DaytimeKelvin, FieldValue::Number(5000))]);
     desktop.pending.clear();
     desktop.edit(recommended_colors());

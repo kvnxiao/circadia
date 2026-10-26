@@ -57,6 +57,7 @@ pub(crate) struct Configuration {
     startup: Startup,
     accepted: Option<Arc<Config>>,
     error: Option<ConfigurationError>,
+    launch_language: String,
     revision: u64,
     inputs: FieldInputs,
     report: LoadReport,
@@ -123,6 +124,7 @@ impl Configuration {
             startup: Startup::File,
             accepted: None,
             error: None,
+            launch_language: crate::l10n::WINDOWS.to_owned(),
             revision: 0,
             inputs: FieldInputs::default(),
             report: LoadReport::default(),
@@ -171,6 +173,11 @@ impl Configuration {
                     backup: backup_problem(&backup),
                 });
             }
+        }
+        if let Some(config) = &configuration.accepted {
+            configuration
+                .launch_language
+                .clone_from(&config.input().interface_language);
         }
         configuration.log_startup(&file);
         if let (Startup::Restored, Read::Bytes(bytes)) = (configuration.startup, &backup) {
@@ -278,6 +285,10 @@ impl Configuration {
         self.accepted.as_ref()
     }
 
+    pub(crate) fn launch_language(&self) -> &str {
+        &self.launch_language
+    }
+
     pub(crate) fn error(&self) -> Option<ConfigurationError> {
         self.error
     }
@@ -320,10 +331,6 @@ impl Configuration {
 
     pub(crate) fn backup_error(&self) -> Option<&Arc<StorageError>> {
         self.backup_error.as_ref()
-    }
-
-    pub(crate) fn directory(&self) -> &Path {
-        self.store.directory()
     }
 
     pub(crate) fn toggles_available(&self) -> bool {

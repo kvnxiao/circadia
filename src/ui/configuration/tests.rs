@@ -211,6 +211,42 @@ fn an_invalid_value_pauses_saving_until_its_field_is_fixed() {
 }
 
 #[test]
+fn a_missing_interface_language_is_reported_without_pausing_saving() {
+    let folder = Folder::new();
+    folder.write(
+        Some(&document(|table| {
+            table.remove("interface_language");
+        })),
+        Some(&document(|table| set(table, "interface_language", "en-US"))),
+    );
+    let configuration = folder.load();
+    assert!(!configuration.paused());
+    assert_eq!(
+        configuration.report().missing,
+        BTreeMap::from([(Field::InterfaceLanguage, Source::Backup)])
+    );
+    assert_eq!(configuration.launch_language(), "en-US");
+}
+
+#[test]
+fn an_unshipped_interface_language_in_the_file_pauses_saving() {
+    let folder = Folder::new();
+    folder.write(
+        Some(&document(|table| set(table, "interface_language", "xx-XX"))),
+        None,
+    );
+    let configuration = folder.load();
+    assert!(configuration.paused());
+    assert!(
+        configuration
+            .report()
+            .marks
+            .contains_key(&Field::InterfaceLanguage)
+    );
+    assert_eq!(configuration.launch_language(), "windows");
+}
+
+#[test]
 fn exit_during_the_pause_logs_the_unsaved_fields_without_writing() {
     let folder = Folder::new();
     let file = document(|table| set(table, "bedtime", "25:00"));

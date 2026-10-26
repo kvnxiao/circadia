@@ -26,8 +26,12 @@ const CRASH_RECORD_LIMIT: usize = 16 * 1024;
 // early enough for one crash record to fit under FILE_LIMIT.
 const WRITER_LIMIT: usize = FILE_LIMIT - CRASH_RECORD_LIMIT;
 
+pub(crate) fn folder(data_directory: &Path) -> PathBuf {
+    data_directory.join("logs")
+}
+
 fn current_path(data_directory: &Path) -> PathBuf {
-    data_directory.join("logs").join("circadia.log")
+    folder(data_directory).join("circadia.log")
 }
 
 fn open_append(path: &Path) -> io::Result<fs_err::File> {

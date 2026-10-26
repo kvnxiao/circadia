@@ -28,8 +28,11 @@ use crate::platform::lifecycle_inputs::last_wake_time;
 use crate::platform::lifecycle_inputs::shell_identity;
 use crate::platform::lifecycle_inputs::sleep_time;
 use crate::platform::nls::RegionalFormat;
+use crate::platform::startup::Registration;
 use crate::read_foreground;
 use configuration::Configuration;
+use settings::general::Registrar;
+use settings::general::SignIn;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -73,7 +76,7 @@ pub fn run_desktop(
 
 enum Launch {
     Existing(ExistingInstance),
-    Primary(PrimaryInstance, LanguageTag, Option<io::Error>),
+    Primary(PrimaryInstance, Vec<String>, Option<io::Error>),
 }
 
 fn launch(
@@ -89,25 +92,35 @@ fn launch(
         Some(_) => (Vec::new(), None),
         None => preferred().map_or_else(|error| (Vec::new(), Some(error)), |list| (list, None)),
     };
-    let language = crate::l10n::resolve(forced, None, &preferred)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    Ok(Launch::Primary(primary, language, preferred_error))
+    // An unknown forced language stops the launch before the log starts and the
+    // configuration loads, which can restore the backup over the file.
+    interface_language(forced, None, &preferred)?;
+    Ok(Launch::Primary(primary, preferred, preferred_error))
+}
+
+fn interface_language(
+    forced: Option<&str>,
+    saved: Option<&str>,
+    preferred: &[String],
+) -> io::Result<LanguageTag> {
+    crate::l10n::resolve(forced, saved, preferred)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))
 }
 
 fn run_with_native(
     directory: Option<PathBuf>,
     verbose: bool,
-    language: Option<&str>,
+    forced: Option<&str>,
     native: crate::Native,
 ) -> io::Result<()> {
-    let (primary, language, preferred_error) = match launch(
+    let (primary, preferred, preferred_error) = match launch(
         InstanceClaim::acquire()?,
-        language,
+        forced,
         crate::platform::nls::preferred_ui_languages,
     )? {
         Launch::Existing(existing) => return existing.activate(),
-        Launch::Primary(primary, language, preferred_error) => {
-            (Rc::new(primary), language, preferred_error)
+        Launch::Primary(primary, preferred, preferred_error) => {
+            (Rc::new(primary), preferred, preferred_error)
         }
     };
     let directory = match directory {
@@ -121,6 +134,8 @@ fn run_with_native(
     if let Some(error) = preferred_error {
         tracing::warn!(%error, "Windows preferred UI languages are unavailable");
     }
+    let configuration = Configuration::load(&directory);
+    let language = interface_language(forced, Some(configuration.launch_language()), &preferred)?;
     tracing::info!(%language, "interface language");
     if let Err(error) = crate::platform::nls::prefer_ui_language(&language.to_string()) {
         tracing::warn!(%error, "Windows controls keep the Windows display language");
@@ -138,7 +153,7 @@ fn run_with_native(
             )
         })?
         .to_owned();
-    let configuration = Rc::new(RefCell::new(Configuration::load(&directory)));
+    let configuration = Rc::new(RefCell::new(configuration));
     let previous_run = crate::log::run::begin(&directory, &running_executable);
     let result = Rc::new(RefCell::new(None));
     let application = App::run_application::<Desktop>(Input {
@@ -152,6 +167,7 @@ fn run_with_native(
         configuration,
         directory,
         icon: executable.with_file_name("circadia.ico"),
+        executable,
         previous_run,
         regional_format: Rc::new(regional_format),
         text: Rc::new(text),
@@ -189,6 +205,7 @@ struct Input {
     configuration: Rc<RefCell<Configuration>>,
     directory: PathBuf,
     icon: PathBuf,
+    executable: PathBuf,
     #[expect(
         dead_code,
         reason = "the crash notice does not read the previous run yet"
@@ -358,6 +375,8 @@ struct Desktop {
     resume: ResumeEpoch,
     taskbar: Option<ShellIdentity>,
     taskbar_epoch: u64,
+    registration: Box<dyn Registrar>,
+    sign_in: SignIn,
 }
 
 impl Application for Desktop {
@@ -380,6 +399,10 @@ impl Application for Desktop {
             Rc::clone(&input.configuration),
             startup,
             input.directory.clone(),
+            Box::new(Registration::new(
+                input.executable.clone(),
+                input.directory.clone(),
+            )),
         )
     }
 
@@ -399,7 +422,7 @@ impl Application for Desktop {
             }
             Message::Edit(edits) => self.edit(edits),
             Message::Write => self.configuration.borrow_mut().write(),
-            Message::Command(command) => self.command(command),
+            Message::Command(command) => self.command(command, context),
             Message::Native(event) => self.native_event(event, context),
             Message::Menu(key) => self.menu(&key, context),
         }
@@ -437,6 +460,7 @@ impl Application for Desktop {
                     text: Rc::clone(&input.text),
                     region: Rc::clone(&input.regional_format),
                     model: Rc::new(model),
+                    sign_in: self.sign_in.status(),
                     activation: self.settings_activation,
                     exiting: self.exiting,
                     opened: context.message(Message::Opened),
@@ -461,6 +485,7 @@ impl Desktop {
         configuration: Rc<RefCell<Configuration>>,
         startup: Option<Startup>,
         directory: PathBuf,
+        registration: Box<dyn Registrar>,
     ) -> Self {
         Self {
             session: None,
@@ -477,6 +502,8 @@ impl Desktop {
             resume: ResumeEpoch::default(),
             taskbar: None,
             taskbar_epoch: 0,
+            registration,
+            sign_in: SignIn::default(),
         }
     }
 
@@ -490,6 +517,9 @@ impl Desktop {
     fn set_settings_open(&mut self, open: bool) {
         if self.settings_open != open {
             tracing::info!("settings {}", if open { "opened" } else { "closed" });
+            if open {
+                self.sign_in.read(&*self.registration);
+            }
         }
         self.settings_open = open;
     }
@@ -535,27 +565,59 @@ impl Desktop {
         }
     }
 
-    fn command(&mut self, command: settings::Command) {
+    fn command(&mut self, command: settings::Command, context: &ApplicationContext<Self>) {
         match command {
+            settings::Command::Quit => self.quit(context),
             settings::Command::Reset => {
                 let config = self.configuration.borrow_mut().reset();
                 self.configure(Some(config));
             }
             settings::Command::Retry => self.configuration.borrow_mut().retry(),
-            settings::Command::OpenFolder => {
-                if let Err(error) = crate::platform::settings_window::open_folder(
-                    self.configuration.borrow().directory(),
-                ) {
-                    tracing::warn!(%error, "opening the data folder failed");
+            settings::Command::OpenFolder(folder) => {
+                let path = self.folder(folder);
+                if let Err(error) = crate::platform::settings_window::open_folder(&path) {
+                    tracing::warn!(%error, path = %path.display(), "opening a folder failed");
                 }
             }
             settings::Command::DismissRestore => self.configuration.borrow_mut().dismiss_restore(),
+            settings::Command::RetrySignIn => self.retry_sign_in(),
         }
     }
 
     fn edit(&mut self, edits: Vec<(Field, FieldValue)>) {
+        let sign_in = edits
+            .iter()
+            .find_map(|(field, value)| match (field, value) {
+                (Field::StartAtSignIn, FieldValue::Switch(enabled)) => Some(*enabled),
+                _ => None,
+            });
         let changed = self.configuration.borrow_mut().edit(edits);
         self.configure(changed);
+        if let Some(enabled) = sign_in
+            && self.sign_in_preference() == Some(enabled)
+        {
+            self.sign_in.register(&*self.registration, enabled);
+        }
+    }
+
+    fn folder(&self, folder: settings::Folder) -> PathBuf {
+        match folder {
+            settings::Folder::Data => self.directory.clone(),
+            settings::Folder::Logs => crate::log::folder(&self.directory),
+        }
+    }
+
+    fn sign_in_preference(&self) -> Option<bool> {
+        self.configuration
+            .borrow()
+            .accepted()
+            .map(|config| config.input().start_at_sign_in)
+    }
+
+    fn retry_sign_in(&mut self) {
+        if let Some(enabled) = self.sign_in_preference() {
+            self.sign_in.register(&*self.registration, enabled);
+        }
     }
 
     fn configure(&mut self, changed: Option<Arc<crate::Config>>) {
@@ -1052,18 +1114,18 @@ mod tests {
     }
 
     #[test]
-    fn a_first_launch_resolves_the_forced_language() {
+    fn a_first_launch_with_a_forced_language_reads_no_windows_languages() {
         let name = format!(
             "Local\\Circadia.Instance.Test.Forced.{}",
             std::process::id()
         );
         let claim = InstanceClaim::acquire_named(&name).expect("first claim");
-        let Ok(Launch::Primary(_, language, None)) = launch(claim, Some("qps-Ploc"), || {
+        let Ok(Launch::Primary(_, preferred, None)) = launch(claim, Some("qps-Ploc"), || {
             panic!("a forced language reads no Windows languages")
         }) else {
             panic!("a first launch starts the application");
         };
-        assert_eq!(language.to_string(), "qps-Ploc");
+        assert_eq!(preferred, Vec::<String>::new());
     }
 
     #[test]
@@ -1073,13 +1135,42 @@ mod tests {
             std::process::id()
         );
         let claim = InstanceClaim::acquire_named(&name).expect("first claim");
-        let Ok(Launch::Primary(_, language, Some(error))) =
+        let Ok(Launch::Primary(_, preferred, Some(error))) =
             launch(claim, None, || Err(io::Error::from_raw_os_error(122)))
         else {
             panic!("a first launch starts the application and returns the failure");
         };
-        assert_eq!(language.to_string(), "en-US");
         assert_eq!(error.raw_os_error(), Some(122));
+        let language =
+            interface_language(None, Some("windows"), &preferred).expect("shipped language");
+        assert_eq!(language.to_string(), "en-US");
+    }
+
+    #[test]
+    fn a_forced_pseudo_locale_overrides_the_saved_language_without_changing_it() {
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        let path = directory.path().join("config.toml");
+        let file = configuration_file("23:00").replace(
+            "interface_language = \"windows\"",
+            "interface_language = \"en-US\"",
+        );
+        fs_err::write(&path, &file).expect("configuration fixture");
+        let configuration = configuration::Configuration::load(directory.path());
+        assert_eq!(configuration.launch_language(), "en-US");
+        let language = interface_language(
+            Some("qps-Ploc"),
+            Some(configuration.launch_language()),
+            &["en-US".to_owned()],
+        )
+        .expect("forced pseudo-locale");
+        assert_eq!(language.to_string(), "qps-Ploc");
+        assert_eq!(
+            configuration
+                .accepted()
+                .map(|config| config.input().interface_language.as_str()),
+            Some("en-US")
+        );
+        assert_eq!(fs_err::read_to_string(&path).ok(), Some(file));
     }
 
     #[test]
@@ -1091,6 +1182,7 @@ mod tests {
             ))),
             None,
             PathBuf::new(),
+            Box::new(settings::general::FakeRegistration::default()),
         );
         let records = crate::log::capture(tracing::Level::INFO, || {
             desktop.set_settings_open(true);
@@ -1164,8 +1256,19 @@ mod tests {
             Rc::new(RefCell::new(configuration)),
             None,
             directory.path().to_owned(),
+            Box::new(settings::general::FakeRegistration::default()),
         );
         (directory, desktop)
+    }
+
+    #[test]
+    fn open_folder_commands_resolve_the_data_folder_and_its_logs_folder() {
+        let (directory, desktop) = desktop_with(None);
+        assert_eq!(desktop.folder(settings::Folder::Data), directory.path());
+        assert_eq!(
+            desktop.folder(settings::Folder::Logs),
+            directory.path().join("logs")
+        );
     }
 
     fn saved(directory: &tempfile::TempDir) -> Option<String> {

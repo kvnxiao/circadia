@@ -1,5 +1,5 @@
 mod apps;
-mod general;
+pub(super) mod general;
 mod problems;
 mod schedule;
 mod time_picker;
@@ -113,6 +113,7 @@ pub(super) struct Model {
     error: Option<ConfigurationError>,
     write_error: Option<DiagnosticFailure>,
     backup_error: Option<DiagnosticFailure>,
+    launch_language: String,
     status: String,
 }
 
@@ -127,6 +128,7 @@ impl Model {
             error: configuration.error(),
             write_error: configuration.write_error().map(|error| error.diagnostic()),
             backup_error: configuration.backup_error().map(|error| error.diagnostic()),
+            launch_language: configuration.launch_language().to_owned(),
             status,
         }
     }
@@ -166,6 +168,7 @@ pub(super) struct Input {
     pub(super) text: Rc<Text>,
     pub(super) region: Rc<RegionalFormat>,
     pub(super) model: Rc<Model>,
+    pub(super) sign_in: general::SignInStatus,
     pub(super) activation: u64,
     pub(super) exiting: bool,
     pub(super) opened: Callback<()>,
@@ -180,6 +183,7 @@ impl PartialEq for Input {
         Rc::ptr_eq(&self.text, &other.text)
             && Rc::ptr_eq(&self.region, &other.region)
             && self.model == other.model
+            && self.sign_in == other.sign_in
             && self.activation == other.activation
             && self.exiting == other.exiting
             && self.opened == other.opened
@@ -191,11 +195,19 @@ impl PartialEq for Input {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Folder {
+    Data,
+    Logs,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Command {
     Reset,
     Retry,
-    OpenFolder,
+    OpenFolder(Folder),
     DismissRestore,
+    Quit,
+    RetrySignIn,
 }
 
 struct NumberControls<'a> {
@@ -231,9 +243,10 @@ pub(super) enum Message {
     Activated,
     Edit(Vec<(Field, FieldValue)>),
     Number(Field, Option<f64>),
+    Language(Option<usize>),
     WriteDue(u64),
     Action(Action),
-    DismissRestore,
+    Command(Command),
 }
 
 pub(super) struct Settings {
@@ -378,7 +391,7 @@ impl Settings {
             .automation_id(banner.id)
             .automation_live_setting(AutomationLiveSetting::Assertive);
         if banner.closable {
-            info = info.on_closed(context.message(Message::DismissRestore));
+            info = info.on_closed(context.message(Message::Command(Command::DismissRestore)));
         }
         keyed(
             banner.id,
@@ -491,7 +504,7 @@ impl Settings {
             Page::Schedule => schedule::view(self, context),
             Page::Apps => apps::view(),
             Page::Transitions => transitions::view(self, context),
-            Page::General => general::view(),
+            Page::General => general::view(self, context),
         }
     }
 }
@@ -544,12 +557,19 @@ impl Component for Settings {
                     self.edit(edits, context);
                 }
             }
+            Message::Language(index) => {
+                if let Some(edits) = general::language_edits(index) {
+                    self.edit(edits, context);
+                }
+            }
             Message::WriteDue(token) => self.write_due(token),
             Message::Action(Action::GoTo(page)) => self.page = page,
             Message::Action(Action::Reset) => self.input.command.call(Command::Reset),
             Message::Action(Action::Retry) => self.input.command.call(Command::Retry),
-            Message::Action(Action::OpenFolder) => self.input.command.call(Command::OpenFolder),
-            Message::DismissRestore => self.input.command.call(Command::DismissRestore),
+            Message::Action(Action::OpenFolder) => {
+                self.input.command.call(Command::OpenFolder(Folder::Data));
+            }
+            Message::Command(command) => self.input.command.call(command),
         }
     }
 

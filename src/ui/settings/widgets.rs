@@ -103,12 +103,44 @@ pub(super) fn pill(text: impl AsRef<str>) -> View {
         .into()
 }
 
+pub(super) fn nested_row(glyph: FontIcon, text: Vec<View>, action: Option<View>, id: &str) -> View {
+    Border::new()
+        .min_height(56.0)
+        .padding(Thickness::new(52.0, 10.0, 16.0, 10.0))
+        .border_brush(ThemeBrush::CardStroke)
+        .border_thickness(Thickness::new(0.0, 1.0, 0.0, 0.0))
+        .automation_id(id)
+        .automation_live_setting(AutomationLiveSetting::Assertive)
+        .content(
+            Grid::new()
+                .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                .column_spacing(12.0)
+                .children((
+                    glyph
+                        .font_size(16.0)
+                        .vertical_alignment(VerticalAlignment::Top)
+                        .margin(Thickness::new(0.0, 2.0, 0.0, 0.0)),
+                    StackPanel::new()
+                        .grid_column(1)
+                        .spacing(2.0)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .children(text),
+                    StackPanel::new()
+                        .grid_column(2)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .children(action.into_iter().collect::<Vec<_>>()),
+                )),
+        )
+        .into()
+}
+
 pub(super) fn group(cards: Vec<View>) -> View {
     StackPanel::new().spacing(4.0).children(cards).into()
 }
 
 pub(super) struct Row {
     glyph: &'static str,
+    icon: Option<View>,
     title: String,
     description: String,
     controls: Vec<View>,
@@ -122,6 +154,7 @@ impl Row {
     ) -> Self {
         Self {
             glyph,
+            icon: None,
             title: title.into(),
             description: description.into(),
             controls: Vec::new(),
@@ -130,6 +163,11 @@ impl Row {
 
     pub(super) fn controls(mut self, controls: Vec<View>) -> Self {
         self.controls = controls;
+        self
+    }
+
+    pub(super) fn icon(mut self, icon: View) -> Self {
+        self.icon = Some(icon);
         self
     }
 
@@ -151,7 +189,9 @@ impl Row {
                         Border::new()
                             .vertical_alignment(alignment)
                             .margin(Thickness::new(0.0, offset, 16.0, 0.0))
-                            .content(FontIcon::new().glyph(self.glyph).font_size(20.0)),
+                            .content(self.icon.unwrap_or_else(|| {
+                                FontIcon::new().glyph(self.glyph).font_size(20.0).into()
+                            })),
                         StackPanel::new()
                             .grid_column(1)
                             .spacing(2.0)

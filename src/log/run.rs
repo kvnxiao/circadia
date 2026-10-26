@@ -30,7 +30,7 @@ struct CrashEvent {
 }
 
 fn marker_path(data_directory: &Path) -> PathBuf {
-    data_directory.join("logs").join("run.marker")
+    super::folder(data_directory).join("run.marker")
 }
 
 pub(crate) fn begin(data_directory: &Path, executable: &str) -> PreviousRun {
