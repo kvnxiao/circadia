@@ -124,13 +124,14 @@ fn run_with_native(
             (Rc::new(primary), preferred, preferred_error)
         }
     };
-    let directory = match directory {
-        Some(directory) => directory,
-        None => PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is unavailable")
-        })?)
-        .join("Circadia"),
-    };
+    let default_directory =
+        std::env::var_os("LOCALAPPDATA").map(|root| PathBuf::from(root).join("Circadia"));
+    let startup_directory =
+        directory.filter(|directory| Some(directory) != default_directory.as_ref());
+    let directory = startup_directory
+        .clone()
+        .or(default_directory)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is unavailable"))?;
     let panic_controller = start_log(&directory, verbose)?;
     if let Some(error) = preferred_error {
         tracing::warn!(%error, "Windows preferred UI languages are unavailable");
@@ -169,6 +170,7 @@ fn run_with_native(
         directory,
         icon: executable.with_file_name("circadia.ico"),
         executable,
+        startup_directory,
         previous_run,
         regional_format: Rc::new(regional_format),
         text: Rc::new(text),
@@ -207,6 +209,7 @@ struct Input {
     directory: PathBuf,
     icon: PathBuf,
     executable: PathBuf,
+    startup_directory: Option<PathBuf>,
     #[expect(
         dead_code,
         reason = "the crash notice does not read the previous run yet"
@@ -406,7 +409,7 @@ impl Application for Desktop {
             input.directory.clone(),
             Box::new(Registration::new(
                 input.executable.clone(),
-                input.directory.clone(),
+                input.startup_directory.clone(),
             )),
         )
     }

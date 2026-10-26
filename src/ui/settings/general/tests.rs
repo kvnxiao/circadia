@@ -349,3 +349,39 @@ fn the_about_card_shows_the_running_version() {
         format!("Version \u{2068}{}\u{2069}", env!("CARGO_PKG_VERSION"))
     );
 }
+
+#[test]
+fn startup_state_read_failures_log_once_and_recover_once_under_their_own_operation() {
+    let mut fixture = SignInFixture::new(None, Effective::Enabled);
+    fixture.registration.0.borrow_mut().read_failure = Some(DENIED);
+    let failed = crate::log::capture(tracing::Level::INFO, || {
+        fixture.desktop.sign_in.read(&fixture.registration);
+    });
+    let repeated = crate::log::capture(tracing::Level::INFO, || {
+        fixture.desktop.sign_in.read(&fixture.registration);
+    });
+    fixture.registration.0.borrow_mut().read_failure = None;
+    let recovered = crate::log::capture(tracing::Level::INFO, || {
+        fixture.desktop.sign_in.read(&fixture.registration);
+        fixture.desktop.sign_in.read(&fixture.registration);
+    });
+    let diagnostics = |records: &[String]| -> Vec<String> {
+        records
+            .iter()
+            .filter(|record| record.contains("circadia::diagnostics"))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        diagnostics(&failed),
+        [
+            "WARN circadia::diagnostics: failure operation=startup_status_read \
+             category=access_denied code=5"
+        ]
+    );
+    assert_eq!(diagnostics(&repeated), Vec::<String>::new());
+    assert_eq!(
+        diagnostics(&recovered),
+        ["INFO circadia::diagnostics: recovered operation=startup_status_read"]
+    );
+}

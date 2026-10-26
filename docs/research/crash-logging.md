@@ -1,5 +1,5 @@
 ---
-date: 2026-10-23
+date: 2026-10-25
 questions:
   - What does Circadia's diagnostics writer record today, where, in what format, and with which deduplication and failure rules?
   - What can a Rust panic hook record synchronously before an extern "system" abort, and how do MSVC release builds symbolize backtraces, including module-relative addresses symbolized later from the build's PDB?
@@ -7,7 +7,7 @@ questions:
   - Which logging library or writer fits Circadia's constraints on rotation, flushing before an abort, background threads and timers, and binary size?
   - What should a crash-tracing log contain, and how does it stay within the existing diagnostics privacy rules?
   - Where should logs go, how large can they grow, and how does a user find and share them?
-observed-in: [Circadia 64a2c95, windows-rs ebc5a99d08be3f23cef4d428661357fad3d1c0db (windows-reactor), Windows App SDK runtime staged by windows-reactor-setup at ebc5a99 (Microsoft.ui.xaml.dll 3.2.3.2609), Windows 11 Pro 26H2 build 26300.9711 x64, Rust 1.99.0 x86_64-pc-windows-msvc, MSVC 14.44.35207 dumpbin, windows-sys 0.61.2, tracing 0.1.44, tracing-subscriber 0.3.23, tracing-appender 0.2.5, log 0.4.34, flexi_logger 0.31.10, simplelog 0.12.2, crash-handler 0.8.1, minidumper 0.11.0]
+observed-in: [Circadia 64a2c95, Circadia working tree on 81edfd1 (diagnostic operations, 2026-10-25), windows-rs ebc5a99d08be3f23cef4d428661357fad3d1c0db (windows-reactor), Windows App SDK runtime staged by windows-reactor-setup at ebc5a99 (Microsoft.ui.xaml.dll 3.2.3.2609), Windows 11 Pro 26H2 build 26300.9711 x64, Rust 1.99.0 x86_64-pc-windows-msvc, MSVC 14.44.35207 dumpbin, windows-sys 0.61.2, tracing 0.1.44, tracing-subscriber 0.3.23, tracing-appender 0.2.5, log 0.4.34, flexi_logger 0.31.10, simplelog 0.12.2, crash-handler 0.8.1, minidumper 0.11.0]
 recheck-when: Circadia changes its release profile, data directory, or panic policy; windows-rs changes Reactor's failure policy or adds an error hook; the Windows App SDK runtime changes major version; tracing-appender adds size-based rotation; tracing-subscriber changes its writer interface; Cargo stabilizes trim-paths; or Windows changes WER LocalDumps, event 1000, or fail-fast reporting.
 ---
 
@@ -34,6 +34,8 @@ The user requires persistent logging that lets developers trace and debug applic
 - Each append creates the directory, opens the file in append mode, and writes the record with one unbuffered `write_all`. A failed write returns `Unavailable`, does not log itself, and does not block Night Light control, settings edits, or exit.
 - The file has no size limit or rotation. Growth is bounded by the number of recorded changes (first failure, changed category or code, recovery), so a failure that alternates with recovery appends two lines per cycle.
 - Only the controller worker owns a `DiagnosticLog`. The UI thread, the panic path, and process start and exit do not write diagnostics.
+
+**Observed in the Circadia working tree on `81edfd1`, 2026-10-25:** `DiagnosticLog` writes its failure and recovery records through `tracing` to the rotating application log, `logs/circadia.log`, instead of `diagnostics.log`, and keeps the per-operation deduplication. It has 15 operations: the 14 above and `startup_status_read`, which records failures to read Windows' sign-in startup state and their recovery separately from `startup_registration`. The controller worker is no longer the only owner: the settings window's sign-in startup state, on the UI thread, owns its own `DiagnosticLog` for `startup_registration` and `startup_status_read`.
 
 The Settings window's "Open diagnostics folder" button runs `ShellExecute("open")` on the data directory, so it opens the folder that also stores the configuration files with coordinates and executable names. At commit `64a2c95`, the spec's Security section defines diagnostics as local per-user records of operation type, timestamp, and technical error code or sanitized category, and excludes coordinates, executable identities, window titles, and personal file paths, including those embedded in library error messages. The exact format and location are implementation choices, and diagnostics are never uploaded.
 

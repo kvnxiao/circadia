@@ -19,11 +19,11 @@ pub(crate) enum Effective {
 
 pub(crate) struct Registration {
     executable: PathBuf,
-    directory: PathBuf,
+    directory: Option<PathBuf>,
 }
 
 impl Registration {
-    pub(crate) fn new(executable: PathBuf, directory: PathBuf) -> Self {
+    pub(crate) fn new(executable: PathBuf, directory: Option<PathBuf>) -> Self {
         Self {
             executable,
             directory,
@@ -34,7 +34,7 @@ impl Registration {
         let Some(value) = read_value(RUN)? else {
             return Ok(Effective::NotRegistered);
         };
-        if !matches!(value, RegistryValue::Sz(command) if command == self.command()?) {
+        if !self.registers(&value)? {
             return Ok(Effective::DifferentCommand);
         }
         if approved(read_value(APPROVED)?)? {
@@ -75,16 +75,23 @@ impl Registration {
         }
     }
 
+    fn registers(&self, value: &RegistryValue) -> io::Result<bool> {
+        Ok(matches!(value, RegistryValue::Sz(command) if *command == self.command()?))
+    }
+
     fn command(&self) -> io::Result<String> {
-        let command = format!(
-            "{} --data-dir {}",
-            quote_path(&self.executable)?,
-            quote_path(&self.directory)?
-        );
-        if command.encode_utf16().count() > 260 {
+        let executable = quote_path(&self.executable)?;
+        let command = match &self.directory {
+            Some(directory) => format!("{executable} --data-dir {}", quote_path(directory)?),
+            None => executable,
+        };
+        // Microsoft limits Run commands to 260 characters without stating
+        // whether the terminating null counts, so 259 is the longest safe
+        // length.
+        if command.encode_utf16().count() > 259 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "startup command exceeds Windows' 260-character limit; use shorter application and data directory paths",
+                "startup command exceeds 259 characters; use shorter application and data directory paths",
             ));
         }
         Ok(command)
@@ -175,10 +182,22 @@ mod tests {
     }
 
     #[test]
-    fn command_quotes_executable_and_data_directory() {
+    fn command_with_the_default_data_directory_is_the_quoted_executable() {
         let registration = Registration::new(
             PathBuf::from(r"C:\Program Files\Circadia\circadia.exe"),
-            PathBuf::from(r"D:\Circadia data"),
+            None,
+        );
+        assert_eq!(
+            registration.command().expect("startup command"),
+            r#""C:\Program Files\Circadia\circadia.exe""#
+        );
+    }
+
+    #[test]
+    fn command_with_a_custom_data_directory_quotes_both_paths() {
+        let registration = Registration::new(
+            PathBuf::from(r"C:\Program Files\Circadia\circadia.exe"),
+            Some(PathBuf::from(r"D:\Circadia data")),
         );
         assert_eq!(
             registration.command().expect("startup command"),
@@ -191,14 +210,57 @@ mod tests {
     }
 
     #[test]
-    fn command_rejects_paths_beyond_the_windows_limit() {
-        let registration = Registration::new(
-            PathBuf::from(r"C:\Circadia\circadia.exe"),
-            PathBuf::from(format!("C:\\{}", "a".repeat(260))),
+    fn a_registered_executable_only_command_matches_the_default_registration() {
+        let registration = Registration::new(PathBuf::from(r"C:\Circadia\circadia.exe"), None);
+        assert!(
+            registration
+                .registers(&RegistryValue::Sz(
+                    r#""C:\Circadia\circadia.exe""#.to_owned()
+                ))
+                .expect("comparable command")
         );
+        assert!(
+            !registration
+                .registers(&RegistryValue::Sz(
+                    r#""C:\Circadia\circadia.exe" --data-dir "C:\Users\a\AppData\Local\Circadia""#
+                        .to_owned()
+                ))
+                .expect("comparable command")
+        );
+        assert!(
+            !registration
+                .registers(&RegistryValue::ExpandSz(
+                    r#""C:\Circadia\circadia.exe""#.to_owned()
+                ))
+                .expect("comparable command")
+        );
+    }
+
+    #[test_case(None, 259, true; "executable only at the limit")]
+    #[test_case(None, 260, false; "executable only beyond the limit")]
+    #[test_case(Some(r"D:\d"), 259, true; "custom directory at the limit")]
+    #[test_case(Some(r"D:\d"), 260, false; "custom directory beyond the limit")]
+    fn command_length_is_limited_to_259_characters(
+        directory: Option<&str>,
+        length: usize,
+        accepted: bool,
+    ) {
+        let suffix = directory.map_or(String::new(), |directory| {
+            format!(r#" --data-dir "{directory}""#)
+        });
+        let name = "a".repeat(length - suffix.len() - r#""C:\.exe""#.len());
+        let executable = format!(r"C:\{name}.exe");
+        let expected = format!("\"{executable}\"{suffix}");
+        assert_eq!(expected.encode_utf16().count(), length);
+        let command =
+            Registration::new(PathBuf::from(&executable), directory.map(PathBuf::from)).command();
         assert_eq!(
-            registration.command().expect_err("long command").kind(),
-            io::ErrorKind::InvalidInput
+            command.map_err(|error| error.kind()),
+            if accepted {
+                Ok(expected)
+            } else {
+                Err(io::ErrorKind::InvalidInput)
+            }
         );
     }
 }
