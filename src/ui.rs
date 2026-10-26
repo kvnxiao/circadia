@@ -573,7 +573,7 @@ impl Desktop {
         if self
             .snapshot
             .as_ref()
-            .is_some_and(|snapshot| snapshot.suppression.manual)
+            .is_some_and(|snapshot| snapshot.suppression.manual())
         {
             ManualCommand::Stop
         } else {
@@ -601,6 +601,16 @@ impl Desktop {
             }
             settings::Command::DismissRestore => self.configuration.borrow_mut().dismiss_restore(),
             settings::Command::RetrySignIn => self.retry_sign_in(),
+            settings::Command::Preview => {
+                let config = self.configuration.borrow().accepted().cloned();
+                if let Some(config) = config {
+                    self.queue(ControllerCommand::Preview(Box::new(Arc::unwrap_or_clone(
+                        config,
+                    ))));
+                }
+            }
+            settings::Command::StopPreview => self.queue(ControllerCommand::StopPreview),
+            settings::Command::Manual(command) => self.queue(ControllerCommand::Manual(command)),
         }
     }
 
@@ -1392,14 +1402,13 @@ mod tests {
                 scheduling: crate::SchedulingState::Available,
                 management: crate::ManagementState::On,
                 preview: None,
+                origin: std::time::Instant::now(),
+                calculation: None,
                 preview_active: false,
                 suppression: crate::SuppressionState {
                     automatic: false,
-                    manual: false,
-                    preview: false,
+                    manual_deadline: None,
                 },
-                manual_remaining: None,
-                uptime: Duration::ZERO,
                 recent: Vec::new(),
                 command: Some((id, crate::CommandOutcome::Applied)),
                 native_errors: std::collections::BTreeMap::new(),

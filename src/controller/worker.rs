@@ -1,6 +1,7 @@
 use super::CalculationClient;
 use super::CalculationPurpose;
 use super::CalculationRequest;
+use super::CalculationResult;
 use super::CalculationWorker;
 use super::ConfigLayer;
 use super::ControlError;
@@ -201,14 +202,14 @@ pub struct ControllerSnapshot {
     pub management: ManagementState,
     /// Captured playback timeline, independent of native latency.
     pub preview: Option<RunningPreview>,
+    /// Instant from which `preview` start and end times are measured.
+    pub origin: Instant,
+    /// Current calculation, the captured Preview curve while Preview plays.
+    pub calculation: Option<Arc<CalculationResult>>,
     /// Whether playback has entered, including pending curve calculation.
     pub preview_active: bool,
-    /// Current independent suppression sources.
+    /// Current independent suppression sources and the manual deadline.
     pub suppression: SuppressionState,
-    /// Remaining manual duration at `uptime`.
-    pub manual_remaining: Option<Duration>,
-    /// Sleep-inclusive timestamp for rendering the manual countdown.
-    pub uptime: Duration,
     /// Most recent eligible executable identities and membership.
     pub recent: Vec<RecentApp>,
     /// Latest command acknowledgement and its outcome.
@@ -1002,17 +1003,16 @@ impl<F: FnMut() -> Foreground> Worker<F> {
 
     fn publish(&mut self) -> io::Result<()> {
         self.management = self.driver.management(self.management);
-        let now = self.now();
         let runtime = self.driver.runtime();
         let snapshot = ControllerSnapshot {
             accepted: self.accepted.clone(),
             scheduling: runtime.state(),
             management: self.management,
             preview: runtime.preview().cloned(),
+            origin: self.origin,
+            calculation: runtime.calculation().cloned(),
             preview_active: runtime.preview_active(),
             suppression: runtime.suppression(),
-            manual_remaining: runtime.manual_remaining(now.uptime),
-            uptime: now.uptime,
             recent: runtime.recent(),
             command: self.command.clone(),
             native_errors: self.native_errors.clone(),
@@ -1027,7 +1027,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                     .as_ref()
                     .is_some_and(|layer| layer.config().input().manage_night_light),
                 snapshot.suppression.automatic,
-                snapshot.suppression.manual,
+                snapshot.suppression.manual(),
                 snapshot.preview_active,
             ]
         };
@@ -1170,7 +1170,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         let mut update = OutputUpdate::Fade;
         match reason {
             Recompute::Clock => {
-                if self.driver.runtime_mut().stop_preview_for_recompute(now) {
+                if self.driver.runtime_mut().stop_preview_for_recompute() {
                     update = OutputUpdate::Apply;
                 }
             }

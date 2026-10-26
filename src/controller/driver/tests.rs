@@ -491,14 +491,11 @@ fn manual_expiry_preserves_pending_recovery_and_then_fades_to_the_schedule() {
             attempt.error.expect("temperature write failed").operation(),
             DiagnosticOperation::TemperatureWrite
         );
-        assert!(fixture.driver.runtime().suppression().manual);
+        assert!(fixture.driver.runtime().suppression().manual());
     }
     assert_eq!(
-        fixture
-            .driver
-            .runtime()
-            .manual_remaining(at(3_600_000).uptime),
-        Some(Duration::from_millis(100))
+        fixture.driver.runtime().suppression().manual_deadline,
+        Some(Duration::from_millis(3_600_100))
     );
     assert_eq!(
         fixture.driver.recovery().deadline(),
@@ -517,14 +514,8 @@ fn manual_expiry_preserves_pending_recovery_and_then_fades_to_the_schedule() {
         let report = fixture.cycle(waiting_at);
         assert!(report.attempt.is_none());
         assert!(report.cleanup.is_none());
-        assert!(!fixture.driver.runtime().suppression().manual);
-        assert_eq!(
-            fixture
-                .driver
-                .runtime()
-                .manual_remaining(at(waiting_at).uptime),
-            None
-        );
+        assert!(!fixture.driver.runtime().suppression().manual());
+        assert_eq!(fixture.driver.runtime().suppression().manual_deadline, None);
         assert_eq!(
             fixture
                 .driver
@@ -1369,7 +1360,7 @@ fn management_off_rejects_preview_and_starting_manual_suppression() {
             .expect("manual command"),
         ManualOutcome::Unavailable
     );
-    assert!(!runtime.suppression().manual);
+    assert!(!runtime.suppression().manual());
     assert_eq!(fixture.run_until_idle(100), []);
 }
 
@@ -1524,9 +1515,9 @@ fn turning_management_off_ends_manual_suppression_and_turning_it_on_does_not_res
         .manual(ManualCommand::Start, at(100))
         .expect("manual start");
     fixture.run(100, 1000);
-    assert!(fixture.driver.runtime().suppression().manual);
+    assert!(fixture.driver.runtime().suppression().manual());
     let calls = turned_off_from(&mut fixture, 1000);
-    assert!(!fixture.driver.runtime().suppression().manual);
+    assert!(!fixture.driver.runtime().suppression().manual());
     assert_eq!(
         calls,
         [
@@ -1537,11 +1528,8 @@ fn turning_management_off_ends_manual_suppression_and_turning_it_on_does_not_res
     );
     fixture.configure(managed(), 2000);
     fixture.run_until_idle(2000);
-    assert!(!fixture.driver.runtime().suppression().manual);
-    assert_eq!(
-        fixture.driver.runtime().manual_remaining(at(2000).uptime),
-        None
-    );
+    assert!(!fixture.driver.runtime().suppression().manual());
+    assert_eq!(fixture.driver.runtime().suppression().manual_deadline, None);
 }
 
 #[test]

@@ -189,10 +189,8 @@ impl ControlRuntime {
             self.state = SchedulingState::Waiting;
             self.calculation = None;
             self.expected_calculation = None;
-            self.preview_entry = None;
-            self.preview = None;
+            self.cancel_preview();
             self.focus_initialized = false;
-            self.suppression.end_preview(now.uptime);
             self.output.stop();
             return Ok(None);
         };
@@ -221,7 +219,7 @@ impl ControlRuntime {
             }
         }
         if update == OutputUpdate::Apply {
-            self.cancel_preview(now);
+            self.cancel_preview();
         }
         if handing_back {
             self.focus_initialized = false;
@@ -292,8 +290,7 @@ impl ControlRuntime {
         let successful = result.result.is_ok();
         self.calculation = Some(result);
         if !successful {
-            self.preview_entry = None;
-            self.cancel_preview(now);
+            self.cancel_preview();
             self.state = if self.last_scheduled.is_some() {
                 SchedulingState::Retained
             } else {
@@ -342,7 +339,7 @@ impl ControlRuntime {
             let end = start
                 .checked_add(playback.duration())
                 .ok_or_else(ControlError::timing)?;
-            if end > now.output.elapsed && self.suppression.begin_preview(now.uptime) {
+            if end > now.output.elapsed {
                 self.preview = Some(RunningPreview {
                     playback,
                     start,
@@ -351,7 +348,7 @@ impl ControlRuntime {
                 self.select(OutputUpdate::Apply, now)?;
                 return Ok(true);
             }
-            self.cancel_preview(now);
+            self.cancel_preview();
             self.select(OutputUpdate::Apply, now)?;
             return Ok(true);
         }
@@ -380,9 +377,7 @@ impl ControlRuntime {
             self.output.stop();
             return Ok(());
         }
-        let target = if self.suppression.state().active() {
-            OutputTarget::Suppression
-        } else if let Some(preview) = &self.preview {
+        let target = if let Some(preview) = &self.preview {
             let Some(schedule) = self.calculated_schedule() else {
                 return Ok(());
             };
@@ -391,6 +386,8 @@ impl ControlRuntime {
                 playback: Arc::clone(&preview.playback),
                 start: preview.start,
             }
+        } else if self.suppression.state().active() {
+            OutputTarget::Suppression
         } else if let Some(schedule) = self.calculated_schedule() {
             OutputTarget::Schedule {
                 curve: Arc::clone(&schedule.curve),
@@ -402,7 +399,7 @@ impl ControlRuntime {
             self.output.stop();
             return Ok(());
         };
-        let update = if self.suppression.state().active()
+        let update = if matches!(target, OutputTarget::Suppression)
             && matches!(update, OutputUpdate::Apply | OutputUpdate::LiveEdit)
         {
             OutputUpdate::Fade
@@ -463,10 +460,6 @@ impl ControlRuntime {
             || (self.focus_initialized
                 && (self.preview_active() || self.state == SchedulingState::Evaluating));
         let outcome = self.suppression.manual(command, now.uptime, available)?;
-        if outcome == ManualOutcome::Started {
-            self.preview = None;
-            self.preview_entry = None;
-        }
         if before != self.suppression.state().active() {
             self.select(OutputUpdate::Fade, now)?;
         }
@@ -479,15 +472,17 @@ impl ControlRuntime {
         entered: ControlTime,
         now: RuntimeTime,
     ) -> Option<CalculationRequest> {
-        let ready = matches!(
-            self.state,
-            SchedulingState::Available | SchedulingState::SolarFallback
-        ) || (self.state == SchedulingState::Evaluating && self.focus_initialized);
+        let ready = self.focus_initialized
+            && matches!(
+                self.state,
+                SchedulingState::Available
+                    | SchedulingState::SolarFallback
+                    | SchedulingState::Evaluating
+            );
         if !ready
             || !self.managing()
             || self.lifecycle != Lifecycle::Running
             || self.preview_active()
-            || self.suppression.state().active()
         {
             return None;
         }
@@ -496,9 +491,6 @@ impl ControlRuntime {
             config.input().preview_seconds.unsigned_abs(),
         ))?;
         if deadline <= now.output.elapsed {
-            return None;
-        }
-        if !self.suppression.begin_preview(now.uptime) {
             return None;
         }
         self.preview_entry = Some(entered);
@@ -510,16 +502,15 @@ impl ControlRuntime {
         })
     }
 
-    fn cancel_preview(&mut self, now: RuntimeTime) {
+    fn cancel_preview(&mut self) {
         self.preview = None;
         self.preview_entry = None;
-        self.suppression.end_preview(now.uptime);
     }
 
     /// Cancel playback before recomputing changed clock inputs.
-    pub fn stop_preview_for_recompute(&mut self, now: RuntimeTime) -> bool {
+    pub fn stop_preview_for_recompute(&mut self) -> bool {
         let was_preview = self.preview_active();
-        self.cancel_preview(now);
+        self.cancel_preview();
         if was_preview {
             self.expected_calculation = None;
             self.output.stop();
@@ -533,7 +524,7 @@ impl ControlRuntime {
     /// Report an unavailable current target.
     pub fn stop_preview(&mut self, now: RuntimeTime) -> Result<(), ControlError> {
         let was_preview = self.preview.is_some() || self.preview_entry.is_some();
-        self.cancel_preview(now);
+        self.cancel_preview();
         if was_preview {
             if self.state == SchedulingState::Evaluating {
                 self.calculation_update = OutputUpdate::Apply;
@@ -571,8 +562,7 @@ impl ControlRuntime {
             tracing::info!("suspended");
         }
         self.lifecycle = Lifecycle::Suspended;
-        self.preview = None;
-        self.preview_entry = None;
+        self.cancel_preview();
         self.suppression.suspend(now.uptime);
         self.expected_calculation = None;
         self.output.stop();
@@ -594,8 +584,7 @@ impl ControlRuntime {
         self.resume_epoch = Some(epoch);
         tracing::info!("resumed");
         self.lifecycle = Lifecycle::Running;
-        self.preview = None;
-        self.preview_entry = None;
+        self.cancel_preview();
         self.suppression.suspend(now.uptime);
         self.output.stop();
         self.output.request_refresh();
@@ -657,7 +646,7 @@ impl ControlRuntime {
     }
 
     fn stop_control(&mut self, fade: bool, now: RuntimeTime) -> Result<(), ControlError> {
-        self.cancel_preview(now);
+        self.cancel_preview();
         self.suppression = Suppression::default();
         self.output.stop();
         if fade {
@@ -741,7 +730,7 @@ impl ControlRuntime {
         self.state
     }
 
-    /// Return current suppression sources and Preview deferral.
+    /// Return current suppression sources.
     pub fn suppression(&self) -> SuppressionState {
         self.suppression.state()
     }
@@ -780,11 +769,6 @@ impl ControlRuntime {
     /// Return calculation evidence and graph data for status publication.
     pub fn calculation(&self) -> Option<&Arc<CalculationResult>> {
         self.calculation.as_ref()
-    }
-
-    /// Return the remaining manual duration for visible countdown rendering.
-    pub fn manual_remaining(&self, uptime: Duration) -> Option<Duration> {
-        self.suppression.manual_remaining(uptime)
     }
 
     /// Return current recent applications and validated list membership.

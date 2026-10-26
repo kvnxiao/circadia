@@ -1,7 +1,9 @@
 use crate::ControllerSnapshot;
 use crate::DiagnosticOperation;
+use crate::ManagementState;
 use crate::ManualCommand;
 use crate::SchedulingState;
+use crate::SuppressionState;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::ui::configuration::Configuration;
@@ -34,8 +36,8 @@ pub(super) fn tooltip(text: &Text, lines: &[String]) -> String {
 
 pub(super) fn manual_label(text: &Text, manual: ManualCommand) -> String {
     match manual {
-        ManualCommand::Start => text!(text, "tray-manual-start"),
-        ManualCommand::Stop => text!(text, "tray-manual-stop"),
+        ManualCommand::Start => text!(text, "manual-title"),
+        ManualCommand::Stop => text!(text, "manual-stop"),
     }
 }
 
@@ -50,11 +52,19 @@ pub(super) fn menu_items(
         ManualCommand::Stop => "manual-stop",
     };
     let mut items = vec![MenuItem::item("settings", text!(text, "tray-settings"))];
-    items.push(if manual_available(snapshot) {
-        MenuItem::item(manual_key, manual_label(text, manual))
-    } else {
-        MenuItem::disabled(manual_key, manual_label(text, manual))
-    });
+    items.push(
+        if snapshot.is_some_and(|snapshot| {
+            manual_available(
+                snapshot.management,
+                snapshot.scheduling,
+                snapshot.suppression,
+            )
+        }) {
+            MenuItem::item(manual_key, manual_label(text, manual))
+        } else {
+            MenuItem::disabled(manual_key, manual_label(text, manual))
+        },
+    );
     items.extend(recent_menu_items(text, snapshot, toggles));
     items.push(MenuItem::item("quit", text!(text, "tray-quit")));
     items
@@ -116,7 +126,7 @@ pub(super) fn lines(
             .native_errors
             .keys()
             .any(|operation| *operation != DiagnosticOperation::Observation);
-    let suppressed = snapshot.suppression.manual || snapshot.suppression.automatic;
+    let suppressed = snapshot.suppression.manual() || snapshot.suppression.automatic;
     if snapshot.accepted.is_none() {
         lines.push(text!(text, "status-configuration-error"));
     }
@@ -178,16 +188,19 @@ pub(super) fn lines(
     lines
 }
 
-pub(super) fn manual_available(snapshot: Option<&ControllerSnapshot>) -> bool {
-    snapshot.is_some_and(|snapshot| {
-        snapshot.suppression.manual
-            || matches!(
-                snapshot.scheduling,
+pub(super) fn manual_available(
+    management: ManagementState,
+    scheduling: SchedulingState,
+    suppression: SuppressionState,
+) -> bool {
+    suppression.manual()
+        || (management.is_on()
+            && matches!(
+                scheduling,
                 SchedulingState::Available
                     | SchedulingState::SolarFallback
                     | SchedulingState::Retained
-            )
-    })
+            ))
 }
 
 #[cfg(test)]
@@ -198,7 +211,6 @@ mod tests {
     use crate::ForegroundApps;
     use crate::NativeFailure;
     use crate::RecentApp;
-    use crate::SuppressionState;
     use crate::l10n::LanguageTag;
     use std::collections::BTreeMap;
     use std::collections::HashSet;
@@ -264,14 +276,13 @@ mod tests {
             scheduling: SchedulingState::Available,
             management: crate::ManagementState::On,
             preview: None,
+            origin: std::time::Instant::now(),
+            calculation: None,
             preview_active: false,
             suppression: SuppressionState {
                 automatic: false,
-                manual: false,
-                preview: false,
+                manual_deadline: None,
             },
-            manual_remaining: None,
-            uptime: Duration::ZERO,
             recent: Vec::new(),
             command: None,
             native_errors: BTreeMap::new(),
@@ -318,7 +329,7 @@ mod tests {
     #[test]
     fn native_failure_describes_requested_suppression_before_restore_notice() {
         let mut state = snapshot(ConfigInput::default());
-        state.suppression.manual = true;
+        state.suppression.manual_deadline = Some(Duration::from_hours(1));
         state.native_errors.insert(
             DiagnosticOperation::TemperatureWrite,
             Arc::new(NativeFailure::injected(
@@ -332,7 +343,11 @@ mod tests {
                 "Configuration was restored from its backup.",
             ]
         );
-        assert!(manual_available(Some(&state)));
+        assert!(manual_available(
+            state.management,
+            state.scheduling,
+            state.suppression
+        ));
     }
 
     #[test]
@@ -356,9 +371,42 @@ mod tests {
     fn unavailable_schedule_disables_start_but_preserves_manual_stop() {
         let mut state = snapshot(ConfigInput::default());
         state.scheduling = SchedulingState::Stopped;
-        assert!(!manual_available(Some(&state)));
-        state.suppression.manual = true;
-        assert!(manual_available(Some(&state)));
+        assert!(!manual_available(
+            state.management,
+            state.scheduling,
+            state.suppression
+        ));
+        state.suppression.manual_deadline = Some(Duration::from_hours(1));
+        assert!(manual_available(
+            state.management,
+            state.scheduling,
+            state.suppression
+        ));
+    }
+
+    #[test_case(crate::ManagementState::Off, false; "off")]
+    #[test_case(crate::ManagementState::TurningOff, false; "turning off")]
+    #[test_case(crate::ManagementState::Exiting, false; "exiting")]
+    #[test_case(crate::ManagementState::TurningOn, true; "turning on")]
+    #[test_case(crate::ManagementState::On, true; "on")]
+    fn the_tray_manual_start_requires_management(
+        management: crate::ManagementState,
+        available: bool,
+    ) {
+        let mut state = snapshot(ConfigInput::default());
+        state.management = management;
+        let item = menu_items(&english(), Some(&state), ManualCommand::Start, true)
+            .into_iter()
+            .nth(1)
+            .expect("manual item");
+        assert_eq!(
+            item,
+            if available {
+                MenuItem::item("manual-start", "Suppress for 1 hour")
+            } else {
+                MenuItem::disabled("manual-start", "Suppress for 1 hour")
+            }
+        );
     }
 
     fn expand<T: Copy>(
@@ -421,7 +469,7 @@ mod tests {
             &states,
             &[(false, false), (true, false), (false, true)],
             |state, (manual, automatic)| {
-                state.suppression.manual = manual;
+                state.suppression.manual_deadline = manual.then_some(Duration::from_hours(1));
                 state.suppression.automatic = automatic;
             },
         );
@@ -575,14 +623,11 @@ mod tests {
             menu_items(&text, None, ManualCommand::Start, true),
             vec![
                 MenuItem::item("settings", "Settings"),
-                MenuItem::disabled("manual-start", "Suppress for one hour"),
+                MenuItem::disabled("manual-start", "Suppress for 1 hour"),
                 MenuItem::item("quit", "Quit Circadia"),
             ]
         );
-        assert_eq!(
-            manual_label(&text, ManualCommand::Stop),
-            "Stop manual suppression"
-        );
+        assert_eq!(manual_label(&text, ManualCommand::Stop), "Stop suppressing");
         assert!(
             recent_menu_items(&text, Some(&state), false)
                 .iter()
