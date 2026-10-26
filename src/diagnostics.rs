@@ -30,6 +30,8 @@ pub enum DiagnosticOperation {
     PreviewCleanup,
     /// Register or unregister current-user sign-in startup.
     StartupRegistration,
+    /// Read Windows' effective sign-in startup state.
+    StartupStatusRead,
     /// Acquire location after an explicit user action.
     Location,
 }
@@ -50,6 +52,7 @@ impl fmt::Display for DiagnosticOperation {
             Self::TemperatureWrite => "temperature_write",
             Self::PreviewCleanup => "preview_cleanup",
             Self::StartupRegistration => "startup_registration",
+            Self::StartupStatusRead => "startup_status_read",
             Self::Location => "location",
         })
     }

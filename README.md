@@ -111,11 +111,11 @@ Circadia's Rust library accepts editable `ConfigInput` values and produces a `Co
 
 Start at sign-in defaults off. Turning its switch on the General page on or off saves the preference and registers or removes startup for the current Windows user at once, even while saving is paused. Startup follows the saved Start minimized preference, which applies only to the next launch.
 
-The switch shows Windows' effective startup state. If Task Manager or Windows Settings disables Circadia, the switch shows that Windows has turned startup off; enable it in **Windows Settings > Apps > Startup**. Circadia does not override that Windows choice. The state is read again each time settings opens.
+The switch shows Windows' effective startup state. If Task Manager or Windows Settings disables Circadia, the switch shows that Windows has turned startup off; enable it in **Windows Settings > Apps > Startup**. Circadia does not override that Windows choice. The state is read again each time settings opens. A failed read is shown at the switch and recorded in the log.
 
 If registration fails, the switch shows the error and a Retry command. Circadia does not retry by itself, including at launch and when another setting changes.
 
-Registration stores the current executable and data directory paths as `"<executable>" --data-dir "<directory>"`. After moving either directory, run Circadia from the new location and turn the switch on again. Windows limits the complete startup command to 260 characters; Circadia reports an error if these paths exceed that limit. Windows may delay startup after sign-in. The [startup integration research](docs/research/sign-in-startup.md) describes the mechanism and verification limits.
+Registration stores a startup command in the current user's Run registry key: the quoted executable path, `"<executable>"`, followed by `--data-dir "<directory>"` when Circadia runs with a data directory other than `%LOCALAPPDATA%\Circadia`. After moving either directory, run Circadia from the new location and turn the switch on again. Windows limits the complete startup command to 260 characters without stating whether that count includes the terminating null character, so Circadia reports an error if the command exceeds 259 characters. Windows may delay startup after sign-in. The [startup integration research](docs/research/sign-in-startup.md) describes the mechanism and verification limits.
 
 ## Local data
 

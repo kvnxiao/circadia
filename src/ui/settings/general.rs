@@ -67,7 +67,14 @@ impl SignIn {
     }
 
     pub(in crate::ui) fn read(&mut self, registration: &dyn Registrar) {
-        self.status.effective = Some(registration.read().map_err(|error| diagnostic(&error)));
+        let effective = registration.read().map_err(|error| diagnostic(&error));
+        match effective {
+            Ok(_) => self.log.recovered(DiagnosticOperation::StartupStatusRead),
+            Err(failure) => self
+                .log
+                .failure(DiagnosticOperation::StartupStatusRead, failure),
+        }
+        self.status.effective = Some(effective);
     }
 
     pub(in crate::ui) fn register(&mut self, registration: &dyn Registrar, enabled: bool) {
