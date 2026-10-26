@@ -8,7 +8,6 @@ use super::OutputTarget;
 use super::OutputUpdate;
 use super::TemperatureOutput;
 use crate::Config;
-use crate::ConfigLayer;
 use crate::Focus;
 use crate::Foreground;
 use crate::ForegroundApps;
@@ -25,6 +24,42 @@ use win_nightlight_lib::ColorTemperature;
 
 #[cfg(test)]
 mod tests;
+
+/// Keep the accepted configuration with its last stored scheduled temperature.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConfigLayer {
+    pub(crate) config: Config,
+    pub(crate) last_scheduled: Option<u16>,
+}
+
+impl ConfigLayer {
+    /// Start a layer without a scheduled temperature.
+    pub fn new(config: Config) -> Self {
+        Self {
+            config,
+            last_scheduled: None,
+        }
+    }
+
+    /// Start a layer for a newly accepted configuration that keeps the last
+    /// scheduled temperature of `previous` until its own schedule stores one.
+    pub fn reconfigured(previous: Option<&Self>, config: Config) -> Self {
+        Self {
+            config,
+            last_scheduled: previous.and_then(Self::last_scheduled),
+        }
+    }
+
+    /// Return the validated configuration.
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// Return the last scheduled output, excluding Preview and suppression.
+    pub fn last_scheduled(&self) -> Option<u16> {
+        self.last_scheduled
+    }
+}
 
 /// Supply distinct scheduling, output, and sleep-inclusive clocks.
 #[derive(Clone, Copy, Debug)]

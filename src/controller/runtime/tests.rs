@@ -1,6 +1,5 @@
 use super::*;
 use crate::ConfigInput;
-use crate::ConfigSession;
 use crate::Curve;
 use crate::NativeSettings;
 use crate::NativeSnapshot;
@@ -9,6 +8,7 @@ use crate::Target;
 use crate::TemperatureMode;
 use crate::TimeInterval;
 use crate::WindowsZone;
+use crate::controller::Layers;
 use jiff::Timestamp;
 use test_case::test_case;
 
@@ -70,7 +70,7 @@ fn result(revision: u64, request: CalculationRequest, kelvin: u16) -> Arc<Calcul
 
 fn fail(
     runtime: &mut ControlRuntime,
-    session: &ConfigSession,
+    session: &Layers,
     revision: u64,
     update: OutputUpdate,
     now: RuntimeTime,
@@ -94,7 +94,7 @@ fn fail(
     );
 }
 
-fn initialize(session: &ConfigSession, foreground: &Foreground, kelvin: u16) -> ControlRuntime {
+fn initialize(session: &Layers, foreground: &Foreground, kelvin: u16) -> ControlRuntime {
     let mut runtime = ControlRuntime::new("circadia.exe").expect("runtime");
     runtime
         .foreground(foreground, time(0))
@@ -112,15 +112,16 @@ fn initialize(session: &ConfigSession, foreground: &Foreground, kelvin: u16) -> 
 
 #[test]
 fn manual_start_survives_a_valid_edit_waiting_for_calculation() {
-    let mut session = ConfigSession::new(Some(Config::default()));
+    let mut session = Layers::new(Some(Config::default()));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
-    session.begin_edit();
-    session
-        .edit(ConfigInput {
+    session.configure(
+        ConfigInput {
             sleep_kelvin: 2200,
             ..ConfigInput::default()
-        })
-        .expect("valid edit");
+        }
+        .validate()
+        .expect("valid edit"),
+    );
     let request = runtime
         .configure(session.active(), OutputUpdate::LiveEdit, time(100))
         .expect("configure")
@@ -151,7 +152,7 @@ fn preview_entry_defers_automatic_suppression_while_calculation_is_pending() {
     }
     .validate()
     .expect("config");
-    let mut session = ConfigSession::new(Some(config));
+    let mut session = Layers::new(Some(config));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let request = runtime
@@ -188,7 +189,7 @@ fn pending_preview_expires_on_its_original_deadline_and_rejects_late_calculation
     }
     .validate()
     .expect("config");
-    let mut session = ConfigSession::new(Some(config));
+    let mut session = Layers::new(Some(config));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let request = runtime
@@ -214,7 +215,7 @@ fn pending_preview_expires_on_its_original_deadline_and_rejects_late_calculation
 
 #[test]
 fn preview_that_expired_before_native_dispatch_does_not_restart() {
-    let session = ConfigSession::new(Some(
+    let session = Layers::new(Some(
         ConfigInput {
             preview_seconds: 1,
             ..ConfigInput::default()
@@ -235,7 +236,7 @@ fn preview_that_expired_before_native_dispatch_does_not_restart() {
 
 #[test]
 fn clock_change_cancels_preview_before_evaluating_new_time_outside_cached_curve() {
-    let mut session = ConfigSession::new(Some(Config::default()));
+    let mut session = Layers::new(Some(Config::default()));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let request = runtime
@@ -280,7 +281,7 @@ fn solar_fallback_during_preview_preserves_position_and_original_deadline() {
     }
     .validate()
     .expect("solar configuration");
-    let mut session = ConfigSession::new(Some(config));
+    let mut session = Layers::new(Some(config));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let request = runtime
@@ -351,7 +352,7 @@ fn solar_fallback_during_preview_preserves_position_and_original_deadline() {
 
 #[test]
 fn schedule_failure_during_preview_cancels_playback_and_applies_retained_output() {
-    let mut session = ConfigSession::new(Some(Config::default()));
+    let mut session = Layers::new(Some(Config::default()));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let request = runtime
@@ -398,7 +399,7 @@ fn schedule_failure_during_preview_cancels_playback_and_applies_retained_output(
 #[test_case(PreviewRecomputeCase::ExpirePending; "expire pending playback")]
 #[test_case(PreviewRecomputeCase::FailAfterStop; "retain after calculation failure")]
 fn ending_preview_preserves_a_pending_recomputation(case: PreviewRecomputeCase) {
-    let mut session = ConfigSession::new(Some(Config::default()));
+    let mut session = Layers::new(Some(Config::default()));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let preview = runtime
@@ -458,7 +459,7 @@ fn ending_preview_preserves_a_pending_recomputation(case: PreviewRecomputeCase) 
 
 fn store(
     runtime: &mut ControlRuntime,
-    session: &mut ConfigSession,
+    session: &mut Layers,
     fresh_kelvin: i16,
     now: RuntimeTime,
 ) -> u16 {
@@ -518,7 +519,7 @@ fn suppression_only_storage_does_not_allow_control_after_clock_failure() {
     }
     .validate()
     .expect("config");
-    let mut session = ConfigSession::new(Some(config));
+    let mut session = Layers::new(Some(config));
     let mut runtime = initialize(&session, &Foreground::Application("game.exe".into()), 3400);
     assert!(runtime.suppression().automatic);
     assert_eq!(store(&mut runtime, &mut session, 6500, time(0)), 6500);
@@ -544,7 +545,7 @@ fn suppression_only_storage_does_not_allow_control_after_clock_failure() {
 
 #[test]
 fn retained_scheduled_output_allows_suppression_and_preserves_an_active_suppression_fade() {
-    let mut session = ConfigSession::new(Some(Config::default()));
+    let mut session = Layers::new(Some(Config::default()));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     assert_eq!(
@@ -589,61 +590,8 @@ fn retained_scheduled_output_allows_suppression_and_preserves_an_active_suppress
 }
 
 #[test]
-fn discard_uses_only_the_accepted_layers_last_scheduled_value() {
-    let mut session = ConfigSession::new(Some(Config::default()));
-    let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
-    store(&mut runtime, &mut session, 3400, time(0));
-    session.begin_edit();
-    session
-        .edit(ConfigInput {
-            sleep_kelvin: 2200,
-            ..ConfigInput::default()
-        })
-        .expect("draft");
-    let request = runtime
-        .configure(session.active(), OutputUpdate::LiveEdit, time(100))
-        .expect("configure draft")
-        .expect("request");
-    runtime.expect_calculation(2);
-    runtime
-        .calculated(result(2, request, 3000), time(100))
-        .expect("draft schedule");
-    store(&mut runtime, &mut session, 3400, time(100));
-    assert_eq!(
-        session.active().expect("draft").last_scheduled(),
-        Some(3000)
-    );
-    assert_eq!(
-        session.accepted().expect("accepted").last_scheduled(),
-        Some(3400)
-    );
-    fail(&mut runtime, &session, 3, OutputUpdate::Fade, time(200));
-    assert_eq!(runtime.state(), SchedulingState::Retained);
-    session.discard();
-    fail(&mut runtime, &session, 4, OutputUpdate::Apply, time(300));
-    let request = runtime
-        .output()
-        .prepare(
-            NativeSnapshot {
-                settings: NativeSettings {
-                    schedule_enabled: false,
-                    temperature: Some(3000),
-                    previewing: false,
-                },
-                active: true,
-            },
-            time(300).output,
-            Duration::from_millis(500),
-        )
-        .expect("selection")
-        .expect("discard application");
-    assert_eq!(request.temperature.kelvin(), 3400);
-    assert_eq!(request.mode, TemperatureMode::Apply);
-}
-
-#[test]
 fn manual_start_during_preview_selects_suppression_without_schedule_restoration() {
-    let mut session = ConfigSession::new(Some(Config::default()));
+    let mut session = Layers::new(Some(Config::default()));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let request = runtime
@@ -679,7 +627,7 @@ fn resume_discards_deferred_preview_activation_and_requires_a_fresh_focus_delay(
     }
     .validate()
     .expect("config");
-    let mut session = ConfigSession::new(Some(config));
+    let mut session = Layers::new(Some(config));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     let request = runtime
@@ -734,7 +682,7 @@ fn resume_discards_deferred_preview_activation_and_requires_a_fresh_focus_delay(
 
 #[test]
 fn resume_without_suspend_expires_manual_time_and_cancels_preview() {
-    let mut session = ConfigSession::new(Some(Config::default()));
+    let mut session = Layers::new(Some(Config::default()));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     runtime
@@ -774,7 +722,7 @@ fn resume_without_suspend_expires_manual_time_and_cancels_preview() {
 
 #[test]
 fn superseded_calculation_does_not_replace_current_configuration() {
-    let session = ConfigSession::new(Some(Config::default()));
+    let session = Layers::new(Some(Config::default()));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     let request = runtime
         .configure(session.active(), OutputUpdate::Fade, time(100))
@@ -801,7 +749,7 @@ fn foreground_changes_record_the_executable_and_decision_at_debug_level() {
     }
     .validate()
     .expect("config");
-    let session = ConfigSession::new(Some(config));
+    let session = Layers::new(Some(config));
     let records = crate::log::capture(tracing::Level::DEBUG, || {
         let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
         runtime
@@ -823,7 +771,7 @@ fn foreground_changes_record_the_executable_and_decision_at_debug_level() {
 
 #[test]
 fn suspend_and_a_new_resume_each_record_once_at_the_default_level() {
-    let session = ConfigSession::new(Some(Config::default()));
+    let session = Layers::new(Some(Config::default()));
     let records = crate::log::capture(tracing::Level::INFO, || {
         let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
         runtime.suspend(time(100));
@@ -841,4 +789,41 @@ fn suspend_and_a_new_resume_each_record_once_at_the_default_level() {
             "INFO circadia::controller::runtime: resumed",
         ]
     );
+}
+
+#[test]
+fn configure_keeps_the_last_scheduled_temperature_until_the_new_schedule_stores_one() {
+    let mut session = Layers::new(Some(Config::default()));
+    let mut runtime = initialize(&session, &Foreground::Unknown, 2400);
+    store(&mut runtime, &mut session, 2400, time(0));
+    session.configure(
+        ConfigInput {
+            sleep_kelvin: 2200,
+            ..ConfigInput::default()
+        }
+        .validate()
+        .expect("edited configuration"),
+    );
+    fail(&mut runtime, &session, 2, OutputUpdate::LiveEdit, time(100));
+    assert_eq!(runtime.state(), SchedulingState::Retained);
+    assert_eq!(
+        session.active().expect("accepted").last_scheduled(),
+        Some(2400)
+    );
+    let request = runtime
+        .output()
+        .prepare(
+            NativeSnapshot {
+                settings: NativeSettings {
+                    schedule_enabled: false,
+                    temperature: Some(2400),
+                    previewing: false,
+                },
+                active: true,
+            },
+            time(2000).output,
+            Duration::from_millis(500),
+        )
+        .expect("selection");
+    assert!(request.is_none_or(|request| request.temperature.kelvin() == 2400));
 }

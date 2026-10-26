@@ -27,6 +27,7 @@ pub use output::OutputDeadlines;
 pub use output::OutputTarget;
 pub use output::OutputUpdate;
 pub use output::TemperatureOutput;
+pub use runtime::ConfigLayer;
 pub use runtime::ControlRuntime;
 pub use runtime::RunningPreview;
 pub use runtime::RuntimeTime;
@@ -83,5 +84,29 @@ impl From<crate::SuppressionError> for ControlError {
 impl From<crate::ValidationError> for ControlError {
     fn from(error: crate::ValidationError) -> Self {
         Self(ErrorKind::Validation(error))
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct Layers(Option<ConfigLayer>);
+
+#[cfg(test)]
+impl Layers {
+    pub(crate) fn new(config: Option<crate::Config>) -> Self {
+        Self(config.map(ConfigLayer::new))
+    }
+
+    pub(crate) fn active(&self) -> Option<&ConfigLayer> {
+        self.0.as_ref()
+    }
+
+    pub(crate) fn configure(&mut self, config: crate::Config) {
+        self.0 = Some(ConfigLayer::reconfigured(self.0.as_ref(), config));
+    }
+
+    pub(crate) fn record_scheduled(&mut self, value: u16) -> Option<()> {
+        self.0
+            .as_mut()
+            .map(|layer| layer.last_scheduled = Some(value))
     }
 }

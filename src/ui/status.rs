@@ -4,17 +4,24 @@ use crate::ManualCommand;
 use crate::SchedulingState;
 use crate::l10n::Text;
 use crate::l10n::text;
+use crate::ui::configuration::Configuration;
 use windows_reactor::MenuItem;
 
-pub(super) fn open_on_start(snapshot: &ControllerSnapshot) -> bool {
-    snapshot
-        .accepted
-        .as_ref()
-        .is_some_and(|accepted| !accepted.config().input().start_minimized)
-        || snapshot
-            .startup
-            .as_ref()
-            .is_some_and(|startup| startup.restore.is_some())
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Saving {
+    pub(super) paused: bool,
+    pub(super) failed: bool,
+    pub(super) restored: bool,
+}
+
+impl Saving {
+    pub(super) fn new(configuration: &Configuration) -> Self {
+        Self {
+            paused: configuration.paused(),
+            failed: configuration.write_error().is_some(),
+            restored: configuration.restore().is_some(),
+        }
+    }
 }
 
 pub(super) fn tooltip(text: &Text, lines: &[String]) -> String {
@@ -36,6 +43,7 @@ pub(super) fn menu_items(
     text: &Text,
     snapshot: Option<&ControllerSnapshot>,
     manual: ManualCommand,
+    toggles: bool,
 ) -> Vec<MenuItem> {
     let manual_key = match manual {
         ManualCommand::Start => "manual-start",
@@ -47,12 +55,16 @@ pub(super) fn menu_items(
     } else {
         MenuItem::disabled(manual_key, manual_label(text, manual))
     });
-    items.extend(recent_menu_items(text, snapshot));
+    items.extend(recent_menu_items(text, snapshot, toggles));
     items.push(MenuItem::item("quit", text!(text, "tray-quit")));
     items
 }
 
-fn recent_menu_items(text: &Text, snapshot: Option<&ControllerSnapshot>) -> Vec<MenuItem> {
+fn recent_menu_items(
+    text: &Text,
+    snapshot: Option<&ControllerSnapshot>,
+    toggles: bool,
+) -> Vec<MenuItem> {
     let Some(snapshot) = snapshot else {
         return Vec::new();
     };
@@ -78,10 +90,10 @@ fn recent_menu_items(text: &Text, snapshot: Option<&ControllerSnapshot>) -> Vec<
                     } else {
                         text!(text, "tray-recent-add", executable = executable)
                     };
-                    if snapshot.accepted.is_none() {
-                        MenuItem::disabled(key, label)
-                    } else {
+                    if toggles {
                         MenuItem::item(key, label)
+                    } else {
+                        MenuItem::disabled(key, label)
                     }
                 }
             }
@@ -89,54 +101,11 @@ fn recent_menu_items(text: &Text, snapshot: Option<&ControllerSnapshot>) -> Vec<
         .collect()
 }
 
-pub(super) fn details(snapshot: Option<&ControllerSnapshot>) -> Vec<String> {
-    let Some(snapshot) = snapshot else {
-        return Vec::new();
-    };
-    let mut details = Vec::new();
-    details.extend(
-        snapshot
-            .storage_error
-            .iter()
-            .map(|error| error_text(error.as_ref())),
-    );
-    details.extend(
-        snapshot
-            .native_errors
-            .values()
-            .map(|error| error_text(error.as_ref())),
-    );
-    details.extend(
-        snapshot
-            .control_error
-            .iter()
-            .map(|error| error_text(error.as_ref())),
-    );
-    let Some(startup) = &snapshot.startup else {
-        return details;
-    };
-    details.extend(startup.problems.iter().map(|error| error_text(error)));
-    let Some(restore) = &startup.restore else {
-        return details;
-    };
-    details.push(format!(
-        "Backup restored because the configuration was {}.",
-        match restore.cause {
-            crate::RestoreCause::Missing => "missing",
-            crate::RestoreCause::Invalid => "invalid",
-            crate::RestoreCause::Unreadable => "unreadable",
-        }
-    ));
-    if let Some(path) = &restore.preserved_path {
-        details.push(format!("Previous file: {}", path.display()));
-    }
-    if let Some(error) = &restore.write_error {
-        details.push(error_text(error));
-    }
-    details
-}
-
-pub(super) fn lines(text: &Text, snapshot: Option<&ControllerSnapshot>) -> Vec<String> {
+pub(super) fn lines(
+    text: &Text,
+    snapshot: Option<&ControllerSnapshot>,
+    saving: Saving,
+) -> Vec<String> {
     let Some(snapshot) = snapshot else {
         return vec![text!(text, "status-starting")];
     };
@@ -162,11 +131,13 @@ pub(super) fn lines(text: &Text, snapshot: Option<&ControllerSnapshot>) -> Vec<S
     if snapshot.scheduling == SchedulingState::Retained {
         lines.push(text!(text, "status-schedule-retained"));
     }
-    if snapshot
-        .startup
-        .as_ref()
-        .is_some_and(|startup| startup.restore.is_some())
-    {
+    if saving.paused {
+        lines.push(text!(text, "status-saving-paused"));
+    }
+    if saving.failed {
+        lines.push(text!(text, "status-write-failed"));
+    }
+    if saving.restored {
         lines.push(text!(text, "status-backup-restored"));
     }
     if !output_failed
@@ -217,30 +188,14 @@ pub(super) fn manual_available(snapshot: Option<&ControllerSnapshot>) -> bool {
     })
 }
 
-pub(super) fn error_text(error: &dyn std::error::Error) -> String {
-    let mut text = error.to_string();
-    let mut source = error.source();
-    while let Some(cause) = source {
-        text.push_str(": ");
-        text.push_str(&cause.to_string());
-        source = cause.source();
-    }
-    text
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Config;
     use crate::ConfigInput;
-    use crate::ConfigSession;
     use crate::Foreground;
     use crate::ForegroundApps;
     use crate::NativeFailure;
     use crate::RecentApp;
-    use crate::RestoreCause;
-    use crate::RestoreNotice;
-    use crate::StartupConfig;
     use crate::SuppressionState;
     use crate::l10n::LanguageTag;
     use std::collections::BTreeMap;
@@ -253,11 +208,57 @@ mod tests {
         Text::load(&LanguageTag::english()).expect("English catalog loads")
     }
 
+    fn restored() -> Saving {
+        Saving {
+            restored: true,
+            ..Saving::default()
+        }
+    }
+
+    fn savings() -> Vec<Saving> {
+        [false, true]
+            .into_iter()
+            .flat_map(|paused| {
+                [false, true].into_iter().flat_map(move |failed| {
+                    [false, true].map(|restored| Saving {
+                        paused,
+                        failed,
+                        restored,
+                    })
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn paused_saving_precedes_a_failed_write_and_a_restored_backup() {
+        let state = snapshot(ConfigInput::default());
+        assert_eq!(
+            lines(
+                &english(),
+                Some(&state),
+                Saving {
+                    paused: true,
+                    failed: true,
+                    restored: true,
+                }
+            )
+            .get(..3),
+            Some(
+                &[
+                    "Some settings are invalid; changes are not saved until they are fixed."
+                        .to_owned(),
+                    "Changes are running but not saved.".to_owned(),
+                    "Configuration was restored from its backup.".to_owned(),
+                ][..]
+            )
+        );
+    }
+
     fn snapshot(input: ConfigInput) -> ControllerSnapshot {
         let config = input.validate().expect("valid settings fixture");
         ControllerSnapshot {
-            accepted: ConfigSession::new(Some(config)).accepted().cloned(),
-            draft: None,
+            accepted: Some(crate::ConfigLayer::new(config)),
             scheduling: SchedulingState::Available,
             preview: None,
             preview_active: false,
@@ -269,46 +270,12 @@ mod tests {
             manual_remaining: None,
             uptime: Duration::ZERO,
             recent: Vec::new(),
-            startup: None,
-            storage_error: None,
             command: None,
             native_errors: BTreeMap::new(),
+            configured_revision: 0,
             control_error: None,
             stopped: false,
         }
-    }
-
-    fn restored() -> Arc<StartupConfig> {
-        Arc::new(StartupConfig {
-            unsaved_defaults: false,
-            accepted: Some(Config::default()),
-            restore: Some(RestoreNotice {
-                cause: RestoreCause::Missing,
-                preserved_path: None,
-                write_error: None,
-            }),
-            problems: Vec::new(),
-        })
-    }
-
-    #[test]
-    fn startup_follows_saved_preference() {
-        assert!(!open_on_start(&snapshot(ConfigInput::default())));
-        let state = snapshot(ConfigInput {
-            start_minimized: false,
-            ..ConfigInput::default()
-        });
-        assert!(open_on_start(&state));
-    }
-
-    #[test]
-    fn backup_restoration_opens_minimized_startup_but_configuration_failure_does_not() {
-        let mut state = snapshot(ConfigInput::default());
-        state.accepted = None;
-        assert!(!open_on_start(&state));
-        let mut state = snapshot(ConfigInput::default());
-        state.startup = Some(restored());
-        assert!(open_on_start(&state));
     }
 
     #[test_case(SchedulingState::Waiting; "waiting for configuration")]
@@ -322,7 +289,7 @@ mod tests {
             Arc::new(NativeFailure::injected(DiagnosticOperation::Observation)),
         );
         assert!(
-            !lines(&english(), Some(&snapshot))
+            !lines(&english(), Some(&snapshot), Saving::default())
                 .iter()
                 .any(|line| line == "Control continues without change observation.")
         );
@@ -332,7 +299,6 @@ mod tests {
     fn native_failure_describes_requested_suppression_before_restore_notice() {
         let mut state = snapshot(ConfigInput::default());
         state.suppression.manual = true;
-        state.startup = Some(restored());
         state.native_errors.insert(
             DiagnosticOperation::TemperatureWrite,
             Arc::new(NativeFailure::injected(
@@ -340,7 +306,7 @@ mod tests {
             )),
         );
         assert_eq!(
-            lines(&english(), Some(&state)),
+            lines(&english(), Some(&state), restored()),
             [
                 "Output is unavailable; suppression is requested.",
                 "Configuration was restored from its backup.",
@@ -358,7 +324,7 @@ mod tests {
             Arc::new(NativeFailure::injected(DiagnosticOperation::Observation)),
         );
         assert_eq!(
-            lines(&english(), Some(&state)),
+            lines(&english(), Some(&state), Saving::default()),
             [
                 "The schedule is unavailable; its last temperature is retained.",
                 "Control continues without change observation.",
@@ -442,18 +408,18 @@ mod tests {
         let states = expand(&states, &[false, true], |state, preview_active| {
             state.preview_active = preview_active;
         });
-        let states = expand(&states, &[false, true], |state, restored_backup| {
-            if restored_backup {
-                state.startup = Some(restored());
-            }
-        });
-        assert_eq!(states.len(), 2 * 6 * 4 * 3 * 2 * 2);
+        assert_eq!(states.len(), 2 * 6 * 4 * 3 * 2);
         for language in [LanguageTag::english(), LanguageTag::pseudo()] {
             let text = Text::load(&language).expect("catalog loads");
             let tooltips = states
                 .iter()
-                .map(|state| tooltip(&text, &lines(&text, Some(state))))
-                .chain([tooltip(&text, &lines(&text, None))]);
+                .flat_map(|state| {
+                    savings()
+                        .into_iter()
+                        .map(|saving| tooltip(&text, &lines(&text, Some(state), saving)))
+                        .collect::<Vec<_>>()
+                })
+                .chain([tooltip(&text, &lines(&text, None, Saving::default()))]);
             for tooltip in tooltips {
                 assert!(
                     tooltip.encode_utf16().count() < 128,
@@ -492,7 +458,7 @@ mod tests {
         ];
         let items: Vec<_> = [ManualCommand::Start, ManualCommand::Stop]
             .into_iter()
-            .flat_map(|manual| menu_items(&text, Some(&state), manual))
+            .flat_map(|manual| menu_items(&text, Some(&state), manual, true))
             .collect();
         assert_eq!(items.len(), 14);
         for item in items {
@@ -529,10 +495,10 @@ mod tests {
         let mut state = snapshot(ConfigInput::default());
         state.recent = apps.recent(&config);
         let text = english();
-        let mut menus = vec![(menu_items(&text, None, manual), 3)];
-        menus.push((menu_items(&text, Some(&state), manual), 8));
+        let mut menus = vec![(menu_items(&text, None, manual, true), 3)];
+        menus.push((menu_items(&text, Some(&state), manual, true), 8));
         state.accepted = None;
-        menus.push((menu_items(&text, Some(&state), manual), 8));
+        menus.push((menu_items(&text, Some(&state), manual, true), 8));
         for (items, expected) in menus {
             let keys: HashSet<_> = items
                 .iter()
@@ -569,7 +535,7 @@ mod tests {
             },
         ];
         assert_eq!(
-            recent_menu_items(&text, Some(&state)),
+            recent_menu_items(&text, Some(&state), true),
             vec![
                 MenuItem::item(
                     "remove:listed.exe",
@@ -586,7 +552,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            menu_items(&text, None, ManualCommand::Start),
+            menu_items(&text, None, ManualCommand::Start, true),
             vec![
                 MenuItem::item("settings", "Settings"),
                 MenuItem::disabled("manual-start", "Suppress for one hour"),
@@ -597,9 +563,8 @@ mod tests {
             manual_label(&text, ManualCommand::Stop),
             "Stop manual suppression"
         );
-        state.accepted = None;
         assert!(
-            recent_menu_items(&text, Some(&state))
+            recent_menu_items(&text, Some(&state), false)
                 .iter()
                 .all(|item| matches!(item, MenuItem::Item { enabled: false, .. }))
         );

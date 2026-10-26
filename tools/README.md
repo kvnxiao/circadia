@@ -1,6 +1,8 @@
 # Native application checks
 
-Run these tools from the repository root on an interactive Windows 11 x64 desktop with an English Windows Shell. Install the development tools listed in the [project README](../README.md). Live native checks are separate from `just check`. The lifecycle, settings, and Explorer checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, shutdown, deployment, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
+These checks run the built Circadia executable on the Windows desktop and inspect it through UI Automation. Some change live Windows Night Light; others replace it with a simulated Night Light backend. Run them from the repository root on an interactive Windows 11 x64 desktop with an English Windows Shell. Install the development tools listed in the [project README](../README.md). Live native checks are separate from `just check`. The lifecycle, settings, and Explorer checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, shutdown, deployment, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
+
+The harness has not been updated for the current settings window. It still checks an earlier window that had Save, Discard, a close prompt, Preview controls, a graph, the executable lists, location and startup controls, and reloading of external configuration changes. The current application has none of these. Recipes that operate those controls or replace the configuration file while Circadia runs fail, and each section below describes the checks as written for the earlier window.
 
 ## Application lifecycle
 
@@ -31,7 +33,7 @@ Successful cleanup clears Windows' native preview flag, used to request immediat
 
 On failure, the harness attempts graceful cleanup of its child. If the child cannot exit, the harness forcibly terminates it and reports that Night Light may retain its state at termination. The harness prints the retained temporary directory for inspection.
 
-UI Automation runs on the harness's COM multithreaded apartment. Searches are restricted to process-verified application windows, the Shell taskbar, and its visible hidden-icons area. Hidden-icons button lookup currently requires English Shell labels. The application and harness share the `windows` 0.62 bindings; UI Automation features are enabled only for native tooling. The application uses the separately pinned Windows Reactor UI library.
+UI Automation runs on the harness's COM multithreaded apartment. Searches are restricted to process-verified application windows, the Shell taskbar, and its visible hidden-icons area. Hidden-icons button lookup currently requires English Shell labels. The application and harness share the `windows` 0.62 bindings; UI Automation features are enabled only for the harness. The application uses the Windows Reactor UI library from the microsoft/windows-rs repository, pinned to a separate commit.
 
 Power, session, and taskbar messages sent directly to the application are synthetic. `just native-lifecycle` does not restart Explorer, suspend Windows, sign out, or shut down the machine. These messages verify application handling, not delivery during an actual power or session transition. Successful library readback establishes native settings, not displayed color or smooth transitions.
 

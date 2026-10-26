@@ -1,7 +1,3 @@
-#[cfg(windows)]
-use crate::RestoreCause;
-#[cfg(windows)]
-use crate::StartupConfig;
 use std::io;
 use std::io::Write;
 use std::path::Path;
@@ -65,25 +61,7 @@ pub(crate) fn append_to_current_file(data_directory: &Path, record: &[u8]) {
 }
 
 #[cfg(windows)]
-pub(crate) fn record_start(startup: &StartupConfig) {
-    let configuration = if startup.accepted.is_none() {
-        "error"
-    } else if startup.restore.is_some() {
-        "backup"
-    } else if startup.unsaved_defaults {
-        "defaults"
-    } else {
-        "file"
-    };
-    let restore_cause = startup.restore.as_ref().map(|notice| match notice.cause {
-        RestoreCause::Missing => "missing",
-        RestoreCause::Invalid => "invalid",
-        RestoreCause::Unreadable => "unreadable",
-    });
-    let preserved_path = startup
-        .restore
-        .as_ref()
-        .and_then(|notice| notice.preserved_path.as_deref());
+pub(crate) fn record_start(configuration: &str, restore_cause: Option<&str>, problems: usize) {
     tracing::info!(
         version = %env!("CARGO_PKG_VERSION"),
         windows_build = windows_build().map(display),
@@ -91,8 +69,7 @@ pub(crate) fn record_start(startup: &StartupConfig) {
         process_id = std::process::id(),
         configuration = %configuration,
         restore_cause = restore_cause.map(display),
-        preserved_path = preserved_path.map(|path| display(path.display())),
-        problems = startup.problems.len(),
+        problems,
         "start"
     );
 }
@@ -118,6 +95,13 @@ fn windows_build() -> Option<String> {
 
 #[cfg(test)]
 pub(crate) fn capture(level: Level, run: impl FnOnce()) -> Vec<String> {
+    // While at most one dispatcher is registered, tracing-core caches a
+    // callsite's interest from the registering thread's own dispatcher, so a
+    // shared callsite first reached by a test without a capture stays disabled
+    // for every capture. A permanent second dispatcher makes tracing-core
+    // combine the interest of every registered dispatcher instead.
+    static SECOND_DISPATCHER: std::sync::OnceLock<Dispatch> = std::sync::OnceLock::new();
+    SECOND_DISPATCHER.get_or_init(|| Dispatch::new(tracing::subscriber::NoSubscriber::default()));
     let directory = tempfile::tempdir().expect("temporary log directory");
     tracing::dispatcher::with_default(&subscriber(LogWriter::new(directory.path()), level), run);
     match fs_err::read_to_string(current_path(directory.path())) {

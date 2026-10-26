@@ -1,6 +1,6 @@
 # Circadia
 
-Circadia is a Windows 11 x64 tray application under development that schedules native Windows Night Light. The [specification](docs/specs/SPEC.md) defines the application contract. The executable has a tray menu and native settings for schedule edits, a generated graph, Preview playback, and manual suppression. Retry requests another attempt at schedule calculation and native access. Settings supports Save, Discard, external-file conflicts, and adding or removing executable filenames. Adding an application opens a native file picker; the selected executable is not run. Closing with unsaved changes offers Save, Discard, or Keep Editing. Complete application conformance checks are still in progress.
+Circadia is a Windows 11 x64 tray application under development that schedules native Windows Night Light. The [specification](docs/specs/SPEC.md) defines the application contract. The executable has a tray menu and a settings window. The tray menu starts and stops manual suppression, a one-hour 6500 K override, and adds a recently focused application's executable to the suppression list or removes it. The settings window has Schedule, App suppression, Transitions, and General pages. So far only the Schedule page has controls: Wake and Bedtime, and the three color temperatures. The other pages show only their titles. Each valid edit takes effect at once and is saved automatically. The graph, Preview, solar and location controls, the executable lists, and the fields of the other pages are not in the window yet. Checks that the application meets every requirement of the specification are still in progress.
 
 ## Development
 
@@ -13,7 +13,7 @@ just check
 just check-msrv
 ```
 
-The lockfile fixes dependency resolution. Builds, tests, and Clippy use stable Rust; formatting uses nightly. Windows clock tests read installed zone rules without changing the host setting. `just check` does not run the separate [research probes](probes/README.md) or change live Night Light. The explicit [native lifecycle harness](tools/README.md) changes live Night Light and sends mouse and keyboard input. Its separate Explorer recovery recipe also restarts the Windows Shell.
+`Cargo.lock` pins the resolved dependency versions. Builds, tests, and Clippy use stable Rust; formatting uses nightly. Time-zone tests read the time-zone rules installed in Windows and do not change the computer's time-zone setting. `just check` does not run the [research probes](probes/README.md), which are standalone experiments under `probes/`, and does not change live Night Light. The [native lifecycle harness](tools/README.md) runs only through its own `just` recipes. It drives the built application on the Windows desktop, changes live Night Light, and sends mouse and keyboard input. Its separate Explorer recovery recipe also restarts the Windows Shell. The harness still checks an earlier settings window that had Save, Discard, a close prompt, Preview controls, a graph, and reloading of external configuration changes, so its recipes fail against the current window until the harness is updated.
 
 Build and launch the current application with its bundled runtime:
 
@@ -22,11 +22,11 @@ just build-self-contained
 ./target/debug/circadia.exe
 ```
 
-Launching Circadia starts management of live Night Light. Start minimized defaults on; open settings from the tray or launch the executable again. Closing settings keeps control running. Quit clears native preview and requests Night Light off. Every internal error (a Rust panic) writes a crash record to the log and then ends the process. If Circadia has begun accessing Night Light, it first clears native preview and requests Night Light off without changing the temperature gradually, and waits at most 2 seconds for both requests. An error on the thread that writes Night Light skips these two requests.
+Launching Circadia starts management of live Night Light. Start minimized defaults on; open settings from the tray or launch the executable again. A launch without configuration files opens settings even when Start minimized is on, and a launch that reports a configuration error does not open it. Closing settings saves any pending change and keeps control running. Quit turns off Night Light's native preview flag, a Night Light setting that Circadia turns on to make Windows apply a temperature at once, and requests Night Light off. Every internal error (a Rust panic) writes a crash record to the log and then ends the process. If Circadia has begun accessing Night Light, it first turns off the native preview flag and requests Night Light off without changing the temperature gradually, and waits at most 2 seconds for both requests. An error on the thread that writes Night Light skips these two requests.
 
 The command line is `circadia [--data-dir DIRECTORY] [--verbose | -V] [--language TAG]`. `--verbose` or `-V` adds `DEBUG` records to the log for that process:
 
-- Each Night Light temperature write, with its Kelvin value, duration, and outcome.
+- Each Night Light temperature write, with its Kelvin value, the duration of the Windows call, and its outcome.
 - Each change of the foreground app, with its executable name and whether Circadia suppresses the schedule for it.
 - Each configuration file write.
 
@@ -34,7 +34,7 @@ A launch while Circadia is already running opens settings in the running process
 
 Interface text, including the tray menu and tooltip, comes from Project Fluent message files (`.ftl`), one folder per language under `i18n/`. Circadia uses the first language in the user's ordered list of Windows display languages that has a folder, and English when none has one or Windows cannot return the list; English is the only language so far. Clock times and numbers follow the Windows regional format (**Settings > Time & language > Language & region**), including its Short time format and AM/PM symbols. Circadia reads that format once at startup, so a change takes effect at the next launch.
 
-`--language TAG` is a developer option that the usage error message does not list. TAG is a language tag such as `en-US`. The option forces the interface language for that process without saving it. `--language qps-Ploc` selects the Windows pseudo-locale tag, for which Circadia accents each message, brackets it, and pads it to at least 40% more characters, so hard-coded English text and clipped layouts stand out. A launch that starts Circadia stops with a usage error when TAG has no folder and is not `qps-Ploc`.
+`--language TAG` is a developer option that the usage error message does not list. TAG is a language tag such as `en-US`. The option forces the interface language for that process without saving it. `--language qps-Ploc` selects the Windows pseudo-locale tag, for which Circadia accents each message, brackets it, and pads it to at least 40% more characters, so hard-coded English text and clipped layouts stand out. A launch while Circadia is not running stops with a usage error when TAG has no folder and is not `qps-Ploc`.
 
 Release builds keep line tables (`debug = "line-tables-only"` in `[profile.release]`), so the release `circadia.pdb` can resolve the `module+0xoffset` frames in crash records to functions and lines. Archive the PDB of each distributed build and do not ship it; a rebuilt executable gets a new PDB that cannot resolve another build's offsets.
 
@@ -42,9 +42,9 @@ Release builds keep line tables (`debug = "line-tables-only"` in `[profile.relea
 
 Measured on 2026-10-22 with application source `0043f53`, Rust 1.99.0, and an optimized release build with its bundled Windows App SDK runtime. The reference machine ran Windows 11 x64 build 26300.9711 on a Ryzen 7 9800X3D with 16 logical processors. Windows reported 95.7 GiB of physical memory. The attached display ran at 2560 × 1440, 480 Hz on an NVIDIA GeForce RTX 5090; Settings used 96 DPI with outer window dimensions of 776 × 859 pixels.
 
-CPU percentages represent the application's share of all 16 logical processors: process CPU seconds ÷ elapsed seconds ÷ 16 × 100. Memory cells show **median / peak** in MiB, sampled once per second. Working set measures resident pages; private bytes measure private committed memory. They are separate quantities and should not be added.
+CPU percentages represent the application's share of all 16 logical processors: process CPU seconds ÷ sampled seconds ÷ 16 × 100. Memory cells show **median / peak** in MiB, sampled once per second. Working set measures resident pages; private bytes measure private committed memory. They are separate quantities and should not be added.
 
-| Scenario | Seconds | CPU seconds | CPU % | Working set MiB | Private MiB | Sampled context switches |
+| Scenario | Sampled seconds | CPU seconds | CPU % | Working set MiB | Private MiB | Sampled context switches |
 | :-- | --: | --: | --: | --: | --: | --: |
 | Idle, Settings initially closed | 600.000 | 0.203 | 0.0021 | 66.1 / 66.2 | 119.5 / 119.7 | 56,718 |
 | Idle, Settings open | 60.000 | 0.063 | 0.0065 | 121.4 / 122.1 | 163.9 / 164.3 | 11,419 |
@@ -54,7 +54,7 @@ CPU percentages represent the application's share of all 16 logical processors: 
 | Fade into manual suppression, Settings open | 8.000 | 0.469 | 0.3662 | 122.7 / 122.7 | 164.1 / 164.1 | 16,336 |
 | Fade out of manual suppression, Settings open | 8.001 | 0.625 | 0.4882 | 122.8 / 122.8 | 164.2 / 164.2 | 16,614 |
 
-All scenarios used a 60 Hz output-rate ceiling and disabled solar timing. The idle cases used constant 3400 K output in the same process. Preview used a 60-second playback with four-hour scheduled transitions between 2200 K and 6200 K. The one-minute transition used those same endpoints; each ordinary fade lasted ten seconds between 2400 K and 6500 K. Active samples cover part of each operation, as shown in the table. The harness verified changing native temperatures and completed without recorded application errors.
+All scenarios used a 60 Hz output-rate ceiling and disabled solar timing. The idle cases used constant 3400 K output in the same process. Preview used a 60-second playback with four-hour scheduled transitions between 2200 K and 6200 K. The one-minute transition used those same endpoints; each ordinary fade lasted ten seconds between 2400 K and 6500 K. In the Preview, transition, and fade scenarios, sampling covered only part of each operation, for the sampled seconds in the table. The harness verified changing native temperatures and completed without recorded application errors.
 
 These are observations from one run, not guaranteed resource limits. Opening Settings allocated resources that remained after it closed; this single cycle does not establish long-term memory growth. Context switches sum the observed increases in each application thread's counter. They omit unobserved activity from threads that exit between samples, and sampled memory peaks omit peaks between observations. Resource counters alone do not prove event-driven idle behavior or visible display smoothness.
 
@@ -62,24 +62,24 @@ Run `just measure-resources` to reproduce the scenarios. The separate harness re
 
 ## Configuration
 
-The configuration format is TOML with `schema_version = 1`. All fields except coordinates are required. Coordinates can be omitted when Sunrise and Sunset are disabled. Unknown fields and schema versions are rejected.
+The configuration format is TOML with `schema_version = 2`. Coordinates can be omitted when Sunrise and Sunset are disabled. [Local data](#local-data) describes how startup handles a missing, unknown, or invalid key and an unusable file.
 
-Solar coordinates can be entered manually or acquired with **Use current location**. That action requests Windows location permission and one position while settings is in the foreground. Valid coordinates enter the live draft; Save persists them. A denied or failed request preserves the existing fields. Closing settings or cancelling the request discards its eventual result. Windows location services can use network-backed positioning; Circadia does not request location at startup or track travel.
+Circadia reads the configuration file only at startup and does not watch it. Each write replaces the whole file with the configuration in use, so edit the file only while Circadia is not running. The settings window does not have solar or location controls yet; set `sunrise`, `sunset`, and `coordinates` in the file.
 
 The fields configure the specified application behavior:
 
 - Wake reaches Daytime and Bedtime reaches Sleep. When a selected Sunrise follows Wake, Wake reaches the middle temperature and Sunrise reaches Daytime. A selected Sunset reaches the same middle temperature. The solar selection rules are described below.
-- Scheduled transitions finish at their target times and use at most `scheduled_transition_minutes`. Suppression changes, schedule recomputation, and native-error recovery use `ordinary_fade_ms`.
+- Scheduled transitions finish at their target times and use at most `scheduled_transition_minutes`. Suppression changes, schedule recomputation after a clock, time-zone, or date change or a session unlock, and recovery from Night Light errors use `ordinary_fade_ms`. A settings edit that changes the scheduled temperature applies the new temperature without a fade.
 - A listed foreground executable requests a temporary 6500 K override called automatic suppression. Matching or nonmatching focus must persist for `focus_delay_ms` before automatic suppression changes; exclusions override the `suppression` inclusion list.
-- `output_rate_hz` limits attempts per second to change temperature or correct Night Light's enabled state, native schedule, or native preview flag. Circadia uses the native preview flag to request immediate application of changing temperatures. Circadia's Preview plays the compressed schedule on the graph and requests its temperatures through Night Light. It compresses the interval from the current instant through the next day's matching local clock into `preview_seconds`.
-- `start_at_sign_in` requests current-user sign-in startup. `start_minimized` starts with only a tray icon and no settings window.
+- `output_rate_hz` limits attempts per second to change temperature or correct Night Light's enabled state, native schedule, or native preview flag. Circadia uses the native preview flag to request immediate application of changing temperatures. Circadia's Preview plays the compressed schedule on the graph and requests its temperatures through Night Light. It compresses the interval from the current instant through the same local time on the next day into `preview_seconds`.
+- `start_at_sign_in` records the sign-in startup preference; see [Start at sign-in](#start-at-sign-in). `start_minimized` starts with only a tray icon and no settings window.
 
 | Setting | Default | Accepted values |
 | :-- | :-- | :-- |
-| `wake`, `bedtime` | `07:00`, `23:00` | Distinct `HH:mm` clocks, from `00:00` through `23:59` |
+| `wake`, `bedtime` | `07:00`, `23:00` | Distinct times of day as `HH:mm`, from `00:00` through `23:59` |
 | `daytime_kelvin`, `middle_kelvin`, `sleep_kelvin` | 6500, 3400, 2400 | Whole kelvin from 1200 through 6500; Daytime ≥ Middle ≥ Sleep after rounding |
 | `scheduled_transition_minutes` | 60 | 1–240 whole minutes |
-| `ordinary_fade_ms` | 500 | 100–10000 whole milliseconds |
+| `ordinary_fade_ms` | 250 | 100–10000 whole milliseconds |
 | `focus_delay_ms` | 250 | 0–5000 whole milliseconds |
 | `output_rate_hz` | 60 | 1–240 whole hertz |
 | `preview_seconds` | 10 | 1–60 whole seconds |
@@ -88,25 +88,19 @@ The fields configure the specified application behavior:
 | `suppression`, `exclusions` | Empty lists | Executable filenames, matched case-insensitively |
 | `start_at_sign_in`, `start_minimized` | false, true | Boolean preferences |
 
-Temperature input rounds to the nearest 10 K, with ties toward higher kelvin. Validation checks the range before rounding and the temperature order afterward. When the draft is valid, temperature fields show rounded values except for the field being edited. The Morning/Evening field (`middle_kelvin`) remains editable and is labeled unused when both solar switches are off.
+Temperatures round to the nearest 10 K, with ties toward higher kelvin. In the configuration file, Circadia checks the range before rounding and the temperature order afterward, so 2405 loads as 2410 and 1100 is invalid. In settings, a temperature slider moves in 10 K steps. When the user presses Enter in a kelvin field or leaves it, the field limits the value to the range and then rounds it, so 1100 becomes 1200 K. The Morning/Evening field (`middle_kelvin`) remains editable and is labeled unused when both solar switches are off.
 
-Validation preserves entries present in both `suppression` and `exclusions`. `ApplicationFrameHost.exe` and the running Circadia executable are always excluded from automatic suppression.
+An edit that is valid alone but conflicts with another value, such as Wake equal to Bedtime or a Sleep temperature above Morning/Evening, stays in its field with an error and does not change the configuration in use. It applies as soon as another edit resolves the conflict. The field keeps the conflicting input while settings is closed and reopened, and Circadia discards it at exit.
 
-Settings displays both executable lists, labels included but excluded entries as inactive, and allows removal from either user list. List edits remain unsaved until Save; Discard restores the accepted lists. Tray changes persist immediately and survive subsequent field edits and Discard. Fixed exclusions cannot be removed.
+Validation preserves entries present in both `suppression` and `exclusions`. `ApplicationFrameHost.exe`, the Windows process that hosts the windows of Store apps, and the running Circadia executable are always excluded from automatic suppression.
 
-Circadia's Rust library accepts editable `ConfigInput` values and produces a `Config` only after validation. Disk loading, live editing, and persistence use that same validation path. Valid unsaved edits supply the active configuration during an editing session. Invalid edits preserve the last valid draft. Save adopts the draft only after writing the primary file; Discard returns to the accepted configuration.
+The settings window does not show the executable lists yet. The tray's commands for recently focused applications add an executable to the `suppression` list or remove it, and save the change the same way as a settings edit.
 
-A valid external change updates the accepted configuration and marks an open draft stale, blocking Save until the draft is discarded or reloaded. Save and tray mutations also check the current file before writing, so an external edit does not depend on its notification being processed first. Tray mutations preserve unrelated externally changed fields.
+Circadia's Rust library accepts editable `ConfigInput` values and produces a `Config` only after validation. Startup loading, settings edits, and tray commands use that same validation. The controller is the worker thread that is the only part of Circadia that writes Night Light. Each valid edit becomes the configuration in use at once: the controller applies it, and Circadia writes the file about 200 ms after the last edit in a series. Closing settings, Quit, and a Windows sign-out or shutdown write a pending change at once.
 
 ## Start at sign-in
 
-Start at sign-in defaults off. Change its switch in Launch preferences and choose Save to register or remove startup for the current Windows user. Discard cancels that change. Startup follows the saved Start minimized preference.
-
-Settings shows Windows' startup state separately from the saved preference. If Task Manager or Windows Settings disables Circadia, enable it in **Windows Settings > Apps > Startup**. Circadia does not override that Windows choice. Status refreshes when settings opens or becomes active; **Refresh startup status** reads it again.
-
-A registration failure preserves the successful configuration Save and displays an error. Close-with-Save keeps settings open when registration fails. **Retry saved startup preference** applies the saved choice explicitly. Relaunching, editing the configuration file, and saving unrelated settings do not retry registration.
-
-Registration stores the current executable and data directory paths. After moving either directory, run Circadia from the new location and retry the saved startup preference. Windows limits the complete startup command to 260 characters; Circadia reports an error if these paths exceed that limit. Windows may delay startup after sign-in. The [startup integration research](docs/research/sign-in-startup.md) describes the mechanism and verification limits.
+Start at sign-in defaults off. The settings window does not have its switch yet, so Circadia keeps the `start_at_sign_in` value from the configuration file but does not register or remove sign-in startup for the current Windows user. The [startup integration research](docs/research/sign-in-startup.md) describes the registration mechanism and its verification limits.
 
 ## Local data
 
@@ -114,21 +108,29 @@ The application uses `%LOCALAPPDATA%/Circadia/`. The `--data-dir DIRECTORY` argu
 
 | File | Purpose |
 | :-- | :-- |
-| `config.toml` | Saved configuration, replaced atomically after validation |
-| `config.backup.toml` | Most recently written or accepted valid configuration |
-| `config.invalid-*.toml` | Invalid startup configuration preserved before restoring a valid backup |
+| `config.toml` | Saved configuration, replaced atomically |
+| `config.backup.toml` | Copy of the configuration, written after each write of `config.toml` |
 | `logs/circadia.log` | Current log of starts, lifecycle events, operation failures and recovery, and crash records |
 | `logs/circadia.1.log` | Older log, replaced when `circadia.log` rotates |
 | `logs/run.marker` | Process ID and start time of the running instance, deleted after exit finishes |
 
-Startup accepts defaults only when both configuration files are missing. A valid primary file takes precedence over the backup. If the primary file is missing, invalid, or unreadable, a valid backup becomes the accepted configuration even if restoring it to disk fails. If either file exists but neither is valid, the library reports a configuration error and does not supply an active configuration. A backup write failure does not undo a successful primary write.
+A configuration file is unusable when it cannot be read, has a TOML syntax error, is empty, or has a `schema_version` other than 2. At startup, Circadia selects its configuration:
 
-After restoring a backup, settings reports the cause until a successful Save. A successful tray configuration change clears a resolved write error from restoring the backup while retaining that notice.
+- If `config.toml` is usable, Circadia loads it one value at a time. It replaces each invalid value, and each value that conflicts with another, with the backup's value or, when the backup has no valid one, the default. Settings marks each replaced value at its field and shows the file's text. A missing key takes the backup's value or the default and gets a note at its field. A banner lists unknown keys, which the next write leaves out.
+- If `config.toml` is missing or unusable and the backup is usable, Circadia loads the backup the same way and writes it over `config.toml`. Settings shows a banner with the cause until the user closes it.
+- If both files are missing, Circadia starts with the defaults and opens settings.
+- Otherwise, Circadia reports a configuration error and does not manage Night Light. It leaves both files unchanged. Settings offers **Reset to default settings**, which writes the defaults over both files, and **Open folder**, which opens the data directory in Windows Explorer.
+
+While any marked value remains, saving pauses. Edits still take effect, the tray's commands for recently focused applications are disabled while manual suppression stays available, and exit records the edited fields in the log instead of writing them. Saving resumes when the user changes every marked value. A missing or unknown key does not pause saving.
+
+If a write fails, the edited configuration stays in use, settings shows a banner with **Retry**, and the next edit, Retry, or closing settings writes again. A failed write of `config.backup.toml` has its own banner and does not undo the write of `config.toml`.
 
 Each log record has a UTC timestamp, a level (`INFO`, `WARN`, `ERROR`, or `DEBUG` with `--verbose`), the Rust module that wrote it, a message, and `key=value` fields:
 
 - At each launch, an `interface language` record names the language in use. A `WARN` record precedes it when Windows cannot return the user's display languages. Another `WARN` record follows it when Windows rejects the request to show the built-in text of standard controls, such as their accessibility labels, in that language.
-- At each launch, a `start` record has the Circadia version, the Windows build, the commit of the windows-rs UI library that the build uses, the process ID, and whether startup used the configuration file, its backup, or the defaults, or reported a configuration error.
+- At each launch, a `start` record has the Circadia version, the Windows build, the commit of the Windows Reactor UI library from the microsoft/windows-rs repository that the build uses, the process ID, and whether startup used the configuration file, its backup, or the defaults, or reported a configuration error. It also has the cause when startup restored the backup, and the number of invalid values, missing keys, and unknown keys.
+- After the `start` record, an `invalid value` record for each replaced value has the field, the file's text, and whether the replacement came from the backup or the default. A `missing key` record names each missing field and the source of its value, and an `unknown key` record names each unknown key. A `restored backup` record has the cause and, when `config.toml` could be read, its first 64 KiB. A `configuration error` record names the problem with each file.
+- At exit while saving is paused, a `changes not saved` record lists the edited fields that Circadia did not write.
 - A `WARN` failure record names the operation, such as `temperature_write` or `configuration_read`, an error category such as `access_denied` or `invalid_data`, and an optional Windows error code. Circadia records a repeated identical failure of an operation once, and records it again only after the error changes or the operation recovers. An `INFO` record marks the recovery.
 - `INFO` lifecycle records cover settings opening and closing, suspend and resume, automatic and manual suppression starting and ending, Preview starting and ending, a Windows sign-out or shutdown, and exit.
 
@@ -137,17 +139,17 @@ Crash records use the `ERROR` level:
 - A panic record has the process ID, thread name, source location, message, and return addresses as `module+0xoffset` frames.
 - An unhandled native exception, such as an access violation, records its exception code, faulting module, and offset before Windows Error Reporting handles the crash.
 
-At the next launch, a leftover `run.marker` shows that the previous run did not exit cleanly. Circadia looks for that run's crash record in the log. If the log has none, it looks in the Windows Application event log for a crash event that Windows Error Reporting wrote for that process: event 1000, with the fast-fail code from event 1001. A found event produces a `WARN` record, `previous run crashed`. Otherwise, Circadia writes an `INFO` record, `previous run ended unexpectedly`, for example after power loss or forced termination.
+At the next launch, a leftover `run.marker` shows that the previous run did not exit cleanly. Circadia looks for that run's crash record in the log. If the log has none, it looks in the Windows Application event log for a crash event that Windows Error Reporting wrote for that process: event 1000 (Application Error), with the fast-fail code, the reason code of a deliberate immediate termination, from event 1001 (Windows Error Reporting). A found event produces a `WARN` record, `previous run crashed`. Otherwise, Circadia writes an `INFO` record, `previous run ended unexpectedly`, for example after power loss or forced termination.
 
 Before a write would make `circadia.log` larger than 1 MiB minus 16 KiB, Circadia renames it to `circadia.1.log`, replacing the older file. The 16 KiB leaves room for one crash record, which is cut to 16 KiB and written without rotation, so the two files together stay within 2 MiB. The log stays on the computer and can contain personal data, such as coordinates, executable names, file paths, and window titles. Logging failure does not prevent editing, control, or exit. The repository's [bug report template](.github/ISSUE_TEMPLATE/bug_report.md) asks reporters to attach the log and to remove anything they do not want to share.
 
-Choose **Open diagnostics folder** in settings to open the data directory in Windows Explorer. The log is in its `logs` folder.
+The log is in the data directory's `logs` folder. When Circadia reports a configuration error, **Open folder** in settings opens the data directory in Windows Explorer.
 
 ## Schedule calculation
 
-`Schedule` combines Wake/Bedtime occurrences on specific dates with optional solar events, then generates constant and linear intervals. Targets are processed chronologically before transitions are generated. A target less than 60 elapsed seconds after the preceding retained target merges into it, replacing its temperature but keeping its time. The next target is compared against that unchanged time. Fractional temperatures remain available for graph rendering; native output rounds to 10 K. The curve calculates the next instant when rounded output changes directly.
+`Schedule` combines Wake/Bedtime occurrences on specific dates with optional solar events, then generates constant and linear intervals. Targets are processed chronologically before transitions are generated. A target less than 60 elapsed seconds after the preceding retained target merges into it, replacing its temperature but keeping its time. The next target is compared against that unchanged time. Fractional temperatures remain available for graph rendering; native output rounds to 10 K. The temperature curve calculates the next instant when its rounded output changes, without sampling.
 
-`WindowsZone` reads a snapshot of the current Windows zone and its automatic daylight-saving adjustment setting. Explicit yearly rules identify repeated and nonexistent local clocks. The first Wake or Bedtime after a seasonal change preserves the clock-face interval from its predecessor as elapsed time: 23:00 to 07:00 remains eight hours. Later occurrences return to their configured clocks unless a gap, another seasonal change, or reversed or equal occurrence order requires further adjustment.
+`WindowsZone` reads a snapshot of the current Windows zone and its automatic daylight-saving adjustment setting. Explicit yearly rules identify repeated and nonexistent local times. The first Wake or Bedtime after a seasonal change preserves the clock-face interval from its predecessor as elapsed time: 23:00 to 07:00 remains eight hours. Later occurrences return to their configured times unless a nonexistent local time, another seasonal change, or an occurrence at or before its predecessor requires further adjustment.
 
 Jiff supplies date and instant arithmetic without an IANA database. Windows calls that require unsafe code are isolated in `src/platform/`; unsafe code is denied outside their scoped exceptions. Ambiguous historical UTC-to-local conversion returns an error. For example, different yearly rules can produce two self-consistent local dates near the start of 2012 in Samoa; the [recorded checks](docs/research/schedule-integration.md#verified-cases) describe that limitation.
 
@@ -158,17 +160,13 @@ Sunrise qualifies at or after Wake and before Bedtime. Sunset qualifies strictly
 - If both enabled inputs have candidates, retain the earliest Sunrise and the earliest Sunset after it. If no Sunset follows that Sunrise, omit both solar targets and report a timing conflict.
 - If only one enabled input has candidates, retain its earliest event.
 - A missing crossing is a successful empty result.
-- A required calculation failure returns the Wake/Bedtime-only curve with the error.
+- If a solar calculation that an enabled switch needs fails, the result is the Wake/Bedtime-only curve with the error.
 
 Dependency upgrades require rerunning the [solar reference checks](docs/research/solar-calculation.md).
 
-The graph spans the most recent daily boundary through the next boundary, each at the configured Wake clock minus four local hours. Preview captures the configuration and uniformly compresses the actual interval through tomorrow's matching local clock into its configured duration. Both use the first occurrence of repeated boundaries and the first valid instant after a gap. Clipping the graph preserves fractional endpoints and does not merge targets again.
+The graph spans the most recent daily boundary through the next boundary, each at the configured Wake time minus four local hours. Preview captures the configuration and uniformly compresses the actual interval through the same local time tomorrow into its configured duration. Both use the first occurrence of repeated boundaries and the first valid instant after a gap. Clipping the graph preserves fractional endpoints and does not merge targets again.
 
-`just native-settings` runs the native lifecycle harness with additional settings checks for graph availability, changing Preview temperatures, and restoration after Stop and Discard. It also checks Preview cancellation through synthetic lock, suspend/resume, clock-change, and session-end messages, plus Quit. These checks read Windows Night Light records; they do not verify displayed color or actual OS power transitions. `just measure-graph` measures native input-to-render timing, including solar fallback, and verifies Preview animation while a simulated output call is blocked. See the [measurement method and limits](tools/README.md#graph-rendering).
-
-`just measure-output` uses live Night Light to measure output start delay and public-call duration during fades, Preview, and a one-minute scheduled transition. It tests fades at 1, 60, and 240 Hz and verifies final native temperatures and cleanup. See the [output timing method and side effects](tools/README.md#native-output-timing).
-
-`just native-recovery` injects read, observation, and partial-write failures into a simulated Night Light backend while operating the real settings window. It checks error status, Retry, diagnostics, and Preview recovery without changing Windows Night Light or sending mouse or keyboard input. See the [recovery checks and limits](tools/README.md#native-failure-recovery).
+`just native-settings` checks settings controls, Preview playback, and Preview cancellation against live Night Light. `just measure-graph` measures input-to-render timing of the graph. `just measure-output` uses live Night Light to measure how late each output starts and how long each Night Light library call takes during fades, Preview, and a one-minute scheduled transition. `just native-recovery` injects read, observation, and partial-write failures into a simulated Night Light backend while operating the settings window. All four still operate the earlier settings window and fail until the harness is updated. The [tool instructions](tools/README.md) describe their methods, side effects, and limits.
 
 ## Foreground and manual suppression
 
@@ -176,28 +174,28 @@ Foreground identity uses window metadata and process handles with only `PROCESS_
 
 A foreground hook delivers callbacks inside Circadia on the thread that registered it. That thread runs a message loop and removes the hook when its guard is dropped. The hook includes events from Circadia itself so focusing settings can end automatic suppression. Stable focus does not trigger recurring process inspection. Recent history retains five distinct filenames, including closed applications, and moves a refocused application to the front. Desktop, taskbar, Circadia, and unresolved `ApplicationFrameHost.exe` identities do not replace those candidates.
 
-Once an accepted configuration and Windows time-zone conversion allow schedule evaluation, the suppression state machine initializes automatic suppression directly from current focus. Solar errors still permit the Wake/Bedtime-only schedule. Later matching-state changes use the configured focus delay. Preview defers automatic activation while its focus delay continues; a completed delay does not schedule repeated timer callbacks. Ending Preview applies a completed activation or preserves the remaining delay.
+Once an accepted configuration and Windows time-zone conversion allow schedule evaluation, the suppression state machine initializes automatic suppression directly from current focus. Solar errors still permit the Wake/Bedtime-only schedule. Later matching-state changes use the configured focus delay. During Preview, a pending automatic suppression keeps counting its focus delay. If the delay completes during Preview, suppression starts when Preview ends, and the completed delay does not schedule repeated timer callbacks. If Preview ends first, the remaining delay continues.
 
-Manual Start and Stop commands are idempotent. Start creates one hour of suppression; duplicate starts preserve its deadline. Stop cancels it, and a subsequent Start grants a new hour. The production elapsed counter includes sleep and hibernation and does not use the wall clock. Resume expires manual suppression only if its deadline has passed and starts a fresh delay for a pending focus change. Either suppression source requests 6500 K; ending one preserves that override while the other remains active. Native errors do not change their deadlines. The controller selects the override and requests its native transition.
+Manual Start and Stop commands are idempotent. Start creates one hour of suppression; duplicate starts preserve its deadline. Stop cancels it, and a subsequent Start grants a new hour. Outside tests, the elapsed-time counter includes sleep and hibernation and does not use the wall clock. Resume expires manual suppression only if its deadline has passed and starts a fresh delay for a pending focus change. Either suppression source requests 6500 K; ending one preserves that override while the other remains active. Native errors do not change their deadlines. The controller selects the override and requests its native transition.
 
 ## Native control
 
-`ControllerWorker` owns configuration state and serializes Night Light operations on a dedicated thread. A separate calculation worker generates schedule and graph results while native calls are blocked. The client submits bounded, ordered commands and reads immutable status snapshots. A successful submission acknowledges queue admission and returns a receipt that preserves that command's outcome independently of later snapshots. Superseded calculations are rejected, and output waits for fresh calculation after relevant input changes.
+`ControllerWorker` is the controller. It receives each configuration that the UI thread accepts and serializes Night Light operations on a dedicated thread. A separate calculation worker generates schedule and graph results, and keeps working while a Night Light call blocks. The UI thread submits commands through a fixed-capacity first-in, first-out queue and reads immutable status snapshots. A successful submission acknowledges queue admission and returns a receipt that preserves that command's outcome independently of later snapshots. Superseded calculations are rejected, and output waits for fresh calculation after relevant input changes.
 
-The controller selects suppression, Preview, or the active schedule in that order. The accepted configuration and draft each have a record of their last scheduled temperature successfully stored in Windows. An open draft supplies its last valid schedule inputs; when settings is closed, the accepted configuration supplies them. A time-zone failure ends Preview and retains the active configuration's recorded temperature. Without one, scheduled output, suppression output, and corrections to native Night Light settings stop until calculation succeeds; pending native preview cleanup remains eligible. Solar failure uses the Wake/Bedtime-only curve.
+The controller selects suppression, Preview, or the active schedule in that order. It records the last scheduled temperature successfully stored in Windows. A new configuration keeps that record until its own schedule stores a temperature. A time-zone failure ends Preview and retains the recorded temperature. Without a recorded temperature, scheduled output, suppression output, and corrections to native Night Light settings stop until calculation succeeds, but Circadia can still turn off the native preview flag. Solar failure uses the Wake/Bedtime-only curve.
 
-Preview admission captures its start instant and the UI's validated draft, then starts graph calculation independently of native dispatch. The returned receipt identifies the calculation and its original animation start. Before native playback, the worker checks:
+Preview admission captures its start instant and the configuration in use, then starts graph calculation independently of native dispatch. The returned receipt identifies the calculation and its original animation start. Before native playback, the worker checks:
 
-- The draft is current and valid.
-- Scheduling is available.
+- The captured configuration is still the one in use.
+- The configuration and time-zone conversion allow schedule evaluation.
 - Neither suppression source is active.
 
-Neither calculation nor native-call latency extends playback. Edits and Save are unavailable during Preview.
+Neither calculation nor native-call latency extends playback. A configuration change during Preview that changes the schedule applies when playback ends; other changes apply at once.
 
-Native access uses public `win-nightlight-lib` and `win-nightlight-watch` 0.5.0 operations, with one Night Light handle for the worker's lifetime. Each control attempt reads current settings and state before selecting writes. It disables the native schedule before enabling Night Light and preserves unrelated values. Cleanup clears Windows' native preview flag. Temperature writes and application through that flag are tracked separately, including successful storage followed by a cleanup failure.
+Native access uses the public API of `win-nightlight-lib` 0.5.0, which reads and writes Night Light, and `win-nightlight-watch` 0.5.0, which reports changes to it, with one Night Light handle for the worker's lifetime. Night Light stores its schedule, temperature, and native preview flag in a settings record, and its on/off state in a separate state record. Each control attempt reads both records before selecting writes. It disables the native schedule before enabling Night Light and preserves unrelated values. Cleanup turns off the native preview flag. Circadia records separately whether Windows stored a temperature and whether the flag applied it, so a stored temperature followed by a failed cleanup is reported as both.
 
-The worker waits for commands, native notifications, or the next required deadline. It calculates the next 10 K change directly and skips obsolete steps after slow calls. Constant output does not cause repeated temperature operations. Startup uses a one-second fade; ordinary transitions use the configured duration. Native failures share retry delays of 100, 200, 400, and then 800 ms. Each delay starts when the preceding failed attempt finishes. Restoring a lost change-notification registration schedules confirmation of current Night Light values without restarting an active fade.
+The worker waits for commands, native notifications, or the next required deadline. It calculates the next 10 K change directly and skips obsolete steps after slow calls. Constant output does not cause repeated temperature operations. Startup uses a one-second fade; ordinary transitions use the configured duration. Failed Night Light operations share one sequence of retry delays: 100, 200, 400, and then 800 ms. Each delay starts when the preceding failed attempt finishes. Restoring a lost change-notification registration schedules confirmation of current Night Light values without restarting an active fade.
 
-Suspend cancels Preview and pending output while preserving manual suppression's deadline. Resume recomputes current inputs and requests application of the current temperature even when its stored value matches. Windows resume timestamps, explicit suspend notifications, and sleep-inclusive versus awake-only counters identify notifications for one wake from sleep; duplicates do not authorize additional attempts. Taskbar recreation compares the Shell window and process identity before requesting another application of the current Night Light temperature.
+Suspend cancels Preview and pending output while preserving manual suppression's deadline. Resume recomputes current inputs and requests application of the current temperature even when its stored value matches. Windows resume timestamps, explicit suspend notifications, and a comparison of counters that include and exclude sleep identify notifications for one wake from sleep; duplicates do not authorize additional attempts. Taskbar recreation compares the Shell window and process identity before requesting another application of the current Night Light temperature.
 
-After native access has begun, shutdown finishes the current public call and independently attempts native preview cleanup and Night Light off. Shutdown joins both workers. Deterministic tests use an injected native backend. The native lifecycle harness exercises actual Shell activation, Explorer recreation, and configuration notifications; power and session messages are synthetic. Hardware power-transition delivery, visible display behavior, and complete application performance still require validation.
+After native access has begun, shutdown finishes the current public call and independently attempts native preview cleanup and Night Light off. Shutdown joins both workers. Deterministic tests use an injected native backend. The native lifecycle harness exercises actual Shell activation and Explorer recreation; power and session messages are synthetic. Hardware power-transition delivery, visible display behavior, and complete application performance still require validation.

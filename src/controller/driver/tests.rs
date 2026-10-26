@@ -5,7 +5,6 @@ use crate::CalculationRequest;
 use crate::CalculationResult;
 use crate::CalculationWorker;
 use crate::ConfigInput;
-use crate::ConfigSession;
 use crate::ControlTime;
 use crate::Curve;
 use crate::Foreground;
@@ -16,6 +15,7 @@ use crate::ScheduleError;
 use crate::Target;
 use crate::TemperatureMode;
 use crate::TimeInterval;
+use crate::controller::Layers;
 use crate::native::NativeBackend;
 use jiff::Timestamp;
 use std::sync::Arc;
@@ -167,7 +167,7 @@ fn at(milliseconds: u64) -> RuntimeTime {
 
 struct Fixture {
     driver: NativeDriver,
-    session: ConfigSession,
+    session: Layers,
     records: Arc<Mutex<Records>>,
     clock: Arc<AtomicU64>,
 }
@@ -176,11 +176,12 @@ impl Fixture {
     fn new(rate: i64) -> Self {
         let config = ConfigInput {
             output_rate_hz: rate,
+            ordinary_fade_ms: 500,
             ..ConfigInput::default()
         }
         .validate()
         .expect("config");
-        let session = ConfigSession::new(Some(config));
+        let session = Layers::new(Some(config));
         let mut runtime = ControlRuntime::new("circadia.exe").expect("runtime");
         let request = runtime
             .configure(session.active(), OutputUpdate::Fade, at(0))
@@ -808,14 +809,15 @@ fn recalculation_preserves_a_suppression_fades_cleanup_deadline() {
         .manual(ManualCommand::Start, at(100))
         .expect("manual");
     fixture.cycle(100);
-    fixture.session.begin_edit();
-    fixture
-        .session
-        .edit(ConfigInput {
+    fixture.session.configure(
+        ConfigInput {
             sleep_kelvin: 2200,
+            ordinary_fade_ms: 500,
             ..ConfigInput::default()
-        })
-        .expect("draft");
+        }
+        .validate()
+        .expect("draft"),
+    );
     let request = fixture
         .driver
         .runtime_mut()
