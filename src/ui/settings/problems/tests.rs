@@ -4,6 +4,7 @@ use crate::DiagnosticOperation;
 use crate::ManagementState;
 use crate::l10n::LanguageTag;
 use crate::ui::configuration::Configuration;
+use std::collections::BTreeMap;
 
 struct Fixture {
     directory: tempfile::TempDir,
@@ -29,12 +30,12 @@ impl Fixture {
     }
 
     fn load(&self) -> Configuration {
-        Configuration::load(self.directory.path())
+        Configuration::load(self.directory.path(), "circadia.exe")
     }
 
     fn banners(&self, configuration: &Configuration, page: Page) -> Vec<Banner> {
         banners(
-            &Model::new(configuration, None, false, String::new()),
+            &Model::new(configuration, None, false, String::new(), &BTreeMap::new()),
             &self.text,
             &self.region,
             page,
@@ -43,7 +44,7 @@ impl Fixture {
 
     fn feedback(&self, configuration: &Configuration, field: Field) -> Option<Feedback> {
         feedback(
-            &Model::new(configuration, None, false, String::new()),
+            &Model::new(configuration, None, false, String::new(), &BTreeMap::new()),
             &self.text,
             &self.region,
             field,
@@ -93,7 +94,10 @@ fn a_configuration_error_offers_reset_and_open_folder_on_every_page_and_disables
             ]
         );
     }
-    assert!(!configuration.toggles_available());
+    assert_eq!(
+        configuration.toggles(),
+        crate::ui::configuration::Toggles::ConfigurationError
+    );
 }
 
 #[test]
@@ -168,7 +172,7 @@ fn a_field_error_shows_at_its_field_and_as_a_banner_with_go_to_on_other_pages() 
             .message
             .ends_with("Everything else is saved automatically.")
     );
-    let model = Model::new(&configuration, None, false, String::new());
+    let model = Model::new(&configuration, None, false, String::new(), &BTreeMap::new());
     assert_eq!(
         marked_pages(&model).into_iter().collect::<Vec<_>>(),
         [Page::Schedule]
@@ -209,7 +213,7 @@ fn a_loaded_mark_quotes_the_file_and_names_the_value_in_use_without_a_command() 
                 .to_owned()
         ))
     );
-    let model = Model::new(&configuration, None, false, String::new());
+    let model = Model::new(&configuration, None, false, String::new(), &BTreeMap::new());
     assert!(marked_pages(&model).contains(&Page::Schedule));
     assert_eq!(
         ids(&fixture.banners(&configuration, Page::General)),
@@ -254,7 +258,7 @@ fn a_missing_key_shows_a_note_at_its_field() {
             "Not in the settings file. Using the default, \u{2068}11:00 PM\u{2069}.".to_owned()
         ))
     );
-    let model = Model::new(&configuration, None, false, String::new());
+    let model = Model::new(&configuration, None, false, String::new(), &BTreeMap::new());
     assert!(marked_pages(&model).is_empty());
     assert_eq!(fixture.banners(&configuration, Page::Schedule), []);
 }
@@ -306,7 +310,7 @@ fn native_model(
     failures: &[DiagnosticOperation],
 ) -> (Configuration, Model) {
     let configuration = fixture.load();
-    let mut model = Model::new(&configuration, None, false, String::new());
+    let mut model = Model::new(&configuration, None, false, String::new(), &BTreeMap::new());
     model.management = management;
     model.native_errors = failures
         .iter()

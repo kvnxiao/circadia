@@ -1,9 +1,10 @@
 use crate::Foreground;
 use crate::normalize_executable;
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
+use std::path::PathBuf;
 use std::rc::Rc;
 use windows_sys::Win32::Foundation::HWND as RawWindow;
 use windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK;
@@ -21,7 +22,7 @@ trait WindowSource {
     fn owner(&self, window: &Self::Window) -> Option<u32>;
     fn is_shell(&self, window: &Self::Window) -> Option<bool>;
     fn children(&self, window: &Self::Window) -> Vec<Self::Window>;
-    fn executable(&self, process: u32) -> Option<String>;
+    fn executable(&self, process: u32) -> Option<PathBuf>;
 }
 
 struct Windows;
@@ -54,22 +55,22 @@ impl WindowSource for Windows {
         children
     }
 
-    fn executable(&self, process: u32) -> Option<String> {
+    fn executable(&self, process: u32) -> Option<PathBuf> {
         process_executable(process).ok()
     }
 }
 
-fn process_executable(process: u32) -> io::Result<String> {
+fn process_executable(process: u32) -> io::Result<PathBuf> {
     let handle = HPROCESS::OpenProcess(co::PROCESS::QUERY_LIMITED_INFORMATION, false, process)
         .map_err(io::Error::other)?;
-    let path = handle
+    handle
         .QueryFullProcessImageName(co::PROCESS_NAME::WIN32)
-        .map_err(io::Error::other)?;
-    let name = Path::new(&path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid process filename"))?;
-    normalize_executable(name).map_err(io::Error::other)
+        .map(PathBuf::from)
+        .map_err(io::Error::other)
+}
+
+fn file_name(path: &Path) -> Option<String> {
+    normalize_executable(path.file_name()?.to_str()?).ok()
 }
 
 /// Read current foreground identity using window metadata and limited queries.
@@ -95,35 +96,42 @@ fn resolve_window<S: WindowSource>(source: &S, window: Option<S::Window>) -> For
     let Some(owner) = source.owner(&window) else {
         return Foreground::Unknown;
     };
-    let Some(name) = source.executable(owner) else {
+    let Some(path) = source.executable(owner) else {
         return Foreground::Unknown;
     };
-    let identity = if name.eq_ignore_ascii_case("applicationframehost.exe") {
-        hosted_identity(source, &window, owner)
-    } else {
-        normalize_executable(&name).ok()
+    let identity = match file_name(&path) {
+        Some(name) if name == "applicationframehost.exe" => hosted_identity(source, &window, owner),
+        Some(name) => Some((name, path)),
+        None => None,
     };
     // A window can exit or change ownership during synchronous identity
     // queries.
     if source.owner(&window) != Some(owner) {
         return Foreground::Unknown;
     }
-    identity.map_or(Foreground::Unknown, Foreground::Application)
+    identity.map_or(Foreground::Unknown, |(executable, path)| {
+        Foreground::Application { executable, path }
+    })
 }
 
-fn hosted_identity<S: WindowSource>(source: &S, window: &S::Window, host: u32) -> Option<String> {
-    let mut identities = BTreeSet::new();
+fn hosted_identity<S: WindowSource>(
+    source: &S,
+    window: &S::Window,
+    host: u32,
+) -> Option<(String, PathBuf)> {
+    let mut identities = BTreeMap::new();
     for child in source.children(window) {
         let owner = source.owner(&child)?;
         if owner == host {
             continue;
         }
-        let name = normalize_executable(&source.executable(owner)?).ok()?;
+        let path = source.executable(owner)?;
+        let name = file_name(&path)?;
         if source.owner(&child) != Some(owner) {
             return None;
         }
         if name != "applicationframehost.exe" {
-            identities.insert(name);
+            identities.insert(name, path);
         }
     }
     if identities.len() == 1 {
@@ -265,9 +273,13 @@ mod tests {
             self.children.clone()
         }
 
-        fn executable(&self, process: u32) -> Option<String> {
+        fn executable(&self, process: u32) -> Option<PathBuf> {
             self.gone.set(self.exit_on_query);
-            self.names.get(&process).cloned().flatten()
+            self.names
+                .get(&process)
+                .cloned()
+                .flatten()
+                .map(|name| PathBuf::from(format!("C:/Apps/{name}")))
         }
     }
 
@@ -288,7 +300,10 @@ mod tests {
         let source = fixture(&[(1, Some("VLC.EXE")), (2, Some("other.exe"))]);
         assert_eq!(
             resolve_window(&source, Some(1)),
-            Foreground::Application("vlc.exe".into())
+            Foreground::Application {
+                executable: "vlc.exe".into(),
+                path: PathBuf::from("C:/Apps/VLC.EXE"),
+            }
         );
     }
 
@@ -300,7 +315,10 @@ mod tests {
                     (1, Some("ApplicationFrameHost.exe")),
                     (2, Some("CalculatorApp.exe")),
                 ],
-                Foreground::Application("calculatorapp.exe".into()),
+                Foreground::Application {
+                    executable: "calculatorapp.exe".into(),
+                    path: PathBuf::from("C:/Apps/CalculatorApp.exe"),
+                },
             ),
             (
                 vec![
@@ -343,14 +361,18 @@ mod tests {
     #[test]
     fn limited_query_can_identify_this_process_without_changing_focus() {
         let expected = std::env::current_exe().expect("current path");
-        let expected = expected
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("filename")
-            .to_lowercase();
+        let path = process_executable(std::process::id()).expect("limited query");
+        assert!(
+            path.to_string_lossy()
+                .eq_ignore_ascii_case(&expected.to_string_lossy()),
+            "{path:?}"
+        );
         assert_eq!(
-            process_executable(std::process::id()).expect("limited query"),
+            file_name(&path),
             expected
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_lowercase)
         );
     }
 

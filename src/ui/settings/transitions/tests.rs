@@ -8,6 +8,7 @@ use crate::ui::configuration::Configuration;
 use crate::ui::settings::Model;
 use crate::ui::settings::number_edits;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use test_case::test_case;
 
@@ -21,7 +22,7 @@ fn twenty_four_hour() -> RegionalFormat {
 
 fn committed(field: Field, value: f64, expected: i64) -> i64 {
     let directory = tempfile::tempdir().expect("temporary data folder");
-    let mut configuration = Configuration::load(directory.path());
+    let mut configuration = Configuration::load(directory.path(), "circadia.exe");
     let range = field.range().expect("a number field");
     let seed = if expected == range.minimum {
         range.maximum
@@ -35,7 +36,7 @@ fn committed(field: Field, value: f64, expected: i64) -> i64 {
     );
     let edits = number_edits(field, Some(value)).expect("a committed value");
     assert!(configuration.edit(edits).is_some());
-    Model::new(&configuration, None, false, String::new()).number(field)
+    Model::new(&configuration, None, false, String::new(), &BTreeMap::new()).number(field)
 }
 
 #[test]
@@ -67,7 +68,7 @@ fn a_90_minute_example_before_a_19_30_sunset_starts_at_18_00() {
 #[test]
 fn changing_the_transition_length_to_30_moves_the_example_start_to_19_00() {
     let directory = tempfile::tempdir().expect("temporary data folder");
-    let mut configuration = Configuration::load(directory.path());
+    let mut configuration = Configuration::load(directory.path(), "circadia.exe");
     assert!(
         configuration
             .edit(vec![(
@@ -76,7 +77,7 @@ fn changing_the_transition_length_to_30_moves_the_example_start_to_19_00() {
             )])
             .is_some()
     );
-    let model = Model::new(&configuration, None, false, String::new());
+    let model = Model::new(&configuration, None, false, String::new(), &BTreeMap::new());
     let example = example(
         &english(),
         &twenty_four_hour(),
@@ -106,7 +107,10 @@ fn a_number_field_commit_applies_the_limited_whole_number(field: Field, value: f
 #[test_case(Field::PreviewSeconds, 30.0, 30)]
 fn a_slider_value_sends_one_configure_with_that_value(field: Field, value: f64, expected: i64) {
     let directory = tempfile::tempdir().expect("temporary data folder");
-    let configuration = Rc::new(RefCell::new(Configuration::load(directory.path())));
+    let configuration = Rc::new(RefCell::new(Configuration::load(
+        directory.path(),
+        "circadia.exe",
+    )));
     let mut desktop = Desktop::new(
         Rc::clone(&configuration),
         None,

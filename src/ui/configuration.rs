@@ -1,3 +1,4 @@
+use crate::AppEntry;
 use crate::Config;
 use crate::ConfigStore;
 use crate::DiagnosticCategory;
@@ -52,8 +53,16 @@ pub(crate) struct ConfigurationError {
     pub(crate) backup: FileProblem,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Toggles {
+    Available,
+    ConfigurationError,
+    Paused,
+}
+
 pub(crate) struct Configuration {
     store: ConfigStore,
+    running_executable: String,
     startup: Startup,
     accepted: Option<Arc<Config>>,
     error: Option<ConfigurationError>,
@@ -111,7 +120,7 @@ fn backup_problem(read: &Read) -> FileProblem {
 }
 
 impl Configuration {
-    pub(crate) fn load(directory: &Path) -> Self {
+    pub(crate) fn load(directory: &Path, running_executable: &str) -> Self {
         let store = ConfigStore::new(directory);
         let file = read(&store.primary_path());
         let backup = read(&store.backup_path());
@@ -121,6 +130,7 @@ impl Configuration {
         };
         let mut configuration = Self {
             store,
+            running_executable: running_executable.to_owned(),
             startup: Startup::File,
             accepted: None,
             error: None,
@@ -204,8 +214,15 @@ impl Configuration {
             Startup::NewInstall => "defaults",
             Startup::Error => "error",
         };
-        let problems =
-            self.report.marks.len() + self.report.missing.len() + self.report.unknown.len();
+        let entries = self.accepted.iter().flat_map(|config| {
+            [Field::Suppression, Field::Exclusions]
+                .into_iter()
+                .flat_map(|list| crate::entry_problems(config.entries(list)))
+        });
+        let problems = self.report.marks.len()
+            + self.report.missing.len()
+            + self.report.unknown.len()
+            + entries.flatten().count();
         let cause = self.restore.map(|problem| problem.to_string());
         crate::log::record_start(configuration, cause.as_deref(), problems);
         if let Some(problem) = self.restore {
@@ -263,6 +280,23 @@ impl Configuration {
         for key in &self.report.unknown {
             tracing::info!(key = %key, "unknown key");
         }
+        let lists = self.accepted.iter().flat_map(|config| {
+            [Field::Suppression, Field::Exclusions]
+                .into_iter()
+                .map(|list| (list, config.entries(list)))
+        });
+        for (list, entries) in lists {
+            let problems = entries.iter().zip(crate::entry_problems(entries));
+            for (entry, problem) in problems.filter_map(|(entry, problem)| Some((entry, problem?)))
+            {
+                tracing::info!(
+                    field = %list.key(),
+                    executable = %entry.executable,
+                    problem = ?problem,
+                    "invalid entry"
+                );
+            }
+        }
     }
 
     #[cfg(test)]
@@ -283,6 +317,10 @@ impl Configuration {
 
     pub(crate) fn accepted(&self) -> Option<&Arc<Config>> {
         self.accepted.as_ref()
+    }
+
+    pub(crate) fn running_executable(&self) -> &str {
+        &self.running_executable
     }
 
     pub(crate) fn launch_language(&self) -> &str {
@@ -314,6 +352,10 @@ impl Configuration {
 
     pub(crate) fn paused(&self) -> bool {
         !self.report.marks.is_empty()
+            || self
+                .accepted
+                .as_ref()
+                .is_some_and(|config| config.has_entry_problems())
     }
 
     pub(crate) fn restore(&self) -> Option<FileProblem> {
@@ -333,8 +375,14 @@ impl Configuration {
         self.backup_error.as_ref()
     }
 
-    pub(crate) fn toggles_available(&self) -> bool {
-        self.accepted.is_some() && !self.paused()
+    pub(crate) fn toggles(&self) -> Toggles {
+        if self.accepted.is_none() {
+            Toggles::ConfigurationError
+        } else if self.paused() {
+            Toggles::Paused
+        } else {
+            Toggles::Available
+        }
     }
 
     pub(crate) fn dismiss_restore(&mut self) {
@@ -342,6 +390,10 @@ impl Configuration {
     }
 
     pub(crate) fn edit(&mut self, edits: Vec<(Field, FieldValue)>) -> Option<Arc<Config>> {
+        self.apply(edits, Marks::Fix)
+    }
+
+    fn apply(&mut self, edits: Vec<(Field, FieldValue)>, marks: Marks) -> Option<Arc<Config>> {
         let accepted = Arc::clone(self.accepted.as_ref()?);
         let paused = self.paused();
         let mut committed: BTreeSet<Field> = self.inputs.fields().collect();
@@ -355,8 +407,10 @@ impl Configuration {
             .into_iter()
             .filter(|field| !errors.contains_key(field))
             .collect();
-        for field in &applied {
-            self.report.marks.remove(field);
+        if marks == Marks::Fix {
+            for field in &applied {
+                self.report.marks.remove(field);
+            }
         }
         let changed = config != *accepted;
         if changed {
@@ -375,17 +429,75 @@ impl Configuration {
         changed.then(|| self.accepted.clone()).flatten()
     }
 
-    pub(crate) fn toggle(&mut self, executable: &str, included: bool) -> Option<Arc<Config>> {
-        if self.paused() {
+    pub(crate) fn add(
+        &mut self,
+        list: Field,
+        entries: Vec<AppEntry>,
+    ) -> Result<Option<Arc<Config>>, FieldErrorKind> {
+        let Some(accepted) = &self.accepted else {
+            return Ok(None);
+        };
+        let entries = accepted.add_entries(list, entries, &self.running_executable)?;
+        let changed = self.edit(vec![(list, FieldValue::Apps(entries))]);
+        self.write();
+        Ok(changed)
+    }
+
+    pub(crate) fn remove(
+        &mut self,
+        list: Field,
+        index: usize,
+        executable: &str,
+    ) -> Option<Arc<Config>> {
+        let mut entries = self.accepted.as_ref()?.entries(list).to_vec();
+        let entry = entries.get(index)?;
+        if entry.executable != executable && entry.file_name().as_deref() != Some(executable) {
             return None;
         }
-        let executable = crate::normalize_executable(executable).ok()?;
-        let mut names = self.accepted.as_ref()?.input().suppression.clone();
-        names.retain(|name| *name != executable);
-        if included {
-            names.push(executable);
+        entries.remove(index);
+        let changed = self.edit(vec![(list, FieldValue::Apps(entries))]);
+        self.write();
+        changed
+    }
+
+    pub(crate) fn toggle(&mut self, entry: AppEntry, included: bool) -> Option<Arc<Config>> {
+        if self.toggles() != Toggles::Available {
+            return None;
         }
-        let changed = self.edit(vec![(Field::Suppression, FieldValue::Executables(names))]);
+        if included {
+            return self.add(Field::Suppression, vec![entry]).ok().flatten();
+        }
+        let executable = entry.file_name()?;
+        let index = self
+            .accepted
+            .as_ref()?
+            .entries(Field::Suppression)
+            .iter()
+            .position(|listed| listed.file_name().as_deref() == Some(executable.as_str()))?;
+        self.remove(Field::Suppression, index, &executable)
+    }
+
+    pub(crate) fn record_name(&mut self, executable: &str, name: &str) -> Option<Arc<Config>> {
+        let accepted = self.accepted.as_ref()?;
+        let stale = |entry: &AppEntry| {
+            entry.file_name().as_deref() == Some(executable) && entry.name != name
+        };
+        let edits: Vec<(Field, FieldValue)> = [Field::Suppression, Field::Exclusions]
+            .into_iter()
+            .filter(|list| accepted.entries(*list).iter().any(stale))
+            .map(|list| {
+                let mut entries = accepted.entries(list).to_vec();
+                entries
+                    .iter_mut()
+                    .filter(|entry| stale(entry))
+                    .for_each(|entry| name.clone_into(&mut entry.name));
+                (list, FieldValue::Apps(entries))
+            })
+            .collect();
+        if edits.is_empty() {
+            return None;
+        }
+        let changed = self.apply(edits, Marks::Keep);
         self.write();
         changed
     }
@@ -457,6 +569,12 @@ impl Configuration {
         }
         self.write();
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Marks {
+    Fix,
+    Keep,
 }
 
 fn source_name(source: Source) -> &'static str {

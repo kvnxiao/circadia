@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::io;
 use std::path::Path;
+use std::path::PathBuf;
 use windows_reactor::WindowHandle;
 use winsafe::co;
 use winsafe::prelude::*;
@@ -30,7 +31,7 @@ pub(crate) fn cancel() -> io::Result<()> {
     dialog.Close(cancelled).map_err(io::Error::other)
 }
 
-pub(crate) fn executable(window: &WindowHandle<'_>) -> io::Result<Option<String>> {
+pub(crate) fn executable(window: &WindowHandle<'_>) -> io::Result<Option<(String, PathBuf)>> {
     let mut parent = None;
     winsafe::EnumThreadWindows(winsafe::GetCurrentThreadId(), |candidate| {
         if candidate.ptr() == window.as_raw() {
@@ -85,7 +86,7 @@ pub(crate) fn executable(window: &WindowHandle<'_>) -> io::Result<Option<String>
                 "application filename is not Unicode",
             )
         })?;
-    crate::normalize_executable(name)
-        .map(Some)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))
+    let name = crate::normalize_executable(name)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    Ok(Some((name, PathBuf::from(path))))
 }

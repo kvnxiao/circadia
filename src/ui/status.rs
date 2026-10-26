@@ -7,6 +7,8 @@ use crate::SuppressionState;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::ui::configuration::Configuration;
+use crate::ui::configuration::Toggles;
+use std::collections::BTreeMap;
 use windows_reactor::MenuItem;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -41,74 +43,81 @@ pub(super) fn manual_label(text: &Text, manual: ManualCommand) -> String {
     }
 }
 
+fn item(key: impl Into<windows_reactor::Key>, label: String, enabled: bool) -> MenuItem {
+    if enabled {
+        MenuItem::item(key, label)
+    } else {
+        MenuItem::disabled(key, label)
+    }
+}
+
+// Normalized executable file names cannot contain ':', so the `add:` and
+// `remove:` keys stay distinct from the fixed keys.
 pub(super) fn menu_items(
     text: &Text,
     snapshot: Option<&ControllerSnapshot>,
     manual: ManualCommand,
-    toggles: bool,
+    toggles: Toggles,
+    names: &BTreeMap<String, String>,
 ) -> Vec<MenuItem> {
     let manual_key = match manual {
         ManualCommand::Start => "manual-start",
         ManualCommand::Stop => "manual-stop",
     };
-    let mut items = vec![MenuItem::item("settings", text!(text, "tray-settings"))];
-    items.push(
-        if snapshot.is_some_and(|snapshot| {
-            manual_available(
-                snapshot.management,
-                snapshot.scheduling,
-                snapshot.suppression,
+    let manual_enabled = snapshot.is_some_and(|snapshot| {
+        manual_available(
+            snapshot.management,
+            snapshot.scheduling,
+            snapshot.suppression,
+        )
+    });
+    let reason = match toggles {
+        Toggles::Available => "none",
+        Toggles::ConfigurationError => "error",
+        Toggles::Paused => "paused",
+    };
+    let mut items = vec![
+        MenuItem::item("settings", text!(text, "tray-settings")),
+        MenuItem::separator("separator-manual"),
+        item(manual_key, manual_label(text, manual), manual_enabled),
+        MenuItem::separator("separator-recent"),
+        MenuItem::disabled("caption", text!(text, "tray-caption", reason = reason)),
+    ];
+    let recent = snapshot.map_or(&[][..], |snapshot| snapshot.recent.as_slice());
+    items.extend(recent.iter().take(3).map(|recent| {
+        let executable = recent.executable.as_str();
+        let name = names.get(executable).map_or(executable, String::as_str);
+        let listed = if recent.included { "yes" } else { "no" };
+        let action = if recent.included { "remove" } else { "add" };
+        let key = format!("{action}:{executable}");
+        if recent.excluded {
+            MenuItem::disabled(
+                key,
+                text!(
+                    text,
+                    "tray-app-excluded",
+                    listed = listed,
+                    name = name,
+                    executable = executable
+                ),
             )
-        }) {
-            MenuItem::item(manual_key, manual_label(text, manual))
         } else {
-            MenuItem::disabled(manual_key, manual_label(text, manual))
-        },
-    );
-    items.extend(recent_menu_items(text, snapshot, toggles));
+            item(
+                key,
+                text!(
+                    text,
+                    "tray-app",
+                    listed = listed,
+                    name = name,
+                    executable = executable
+                ),
+                toggles == Toggles::Available,
+            )
+        }
+    }));
+    items.push(MenuItem::separator("separator-quit"));
     items.push(MenuItem::item("quit", text!(text, "tray-quit")));
     items
-}
-
-fn recent_menu_items(
-    text: &Text,
-    snapshot: Option<&ControllerSnapshot>,
-    toggles: bool,
-) -> Vec<MenuItem> {
-    let Some(snapshot) = snapshot else {
-        return Vec::new();
-    };
-    snapshot
-        .recent
-        .iter()
-        .map(|recent| {
-            let executable = recent.executable.as_str();
-            let action = if recent.included { "remove" } else { "add" };
-            let key = format!("{action}:{executable}");
-            match (recent.included, recent.excluded) {
-                (true, true) => MenuItem::disabled(
-                    key,
-                    text!(text, "tray-recent-remove-excluded", executable = executable),
-                ),
-                (false, true) => MenuItem::disabled(
-                    key,
-                    text!(text, "tray-recent-add-excluded", executable = executable),
-                ),
-                (included, false) => {
-                    let label = if included {
-                        text!(text, "tray-recent-remove", executable = executable)
-                    } else {
-                        text!(text, "tray-recent-add", executable = executable)
-                    };
-                    if toggles {
-                        MenuItem::item(key, label)
-                    } else {
-                        MenuItem::disabled(key, label)
-                    }
-                }
-            }
-        })
-        .collect()
 }
 
 pub(super) fn lines(
@@ -395,10 +404,16 @@ mod tests {
     ) {
         let mut state = snapshot(ConfigInput::default());
         state.management = management;
-        let item = menu_items(&english(), Some(&state), ManualCommand::Start, true)
-            .into_iter()
-            .nth(1)
-            .expect("manual item");
+        let item = menu_items(
+            &english(),
+            Some(&state),
+            ManualCommand::Start,
+            Toggles::Available,
+            &BTreeMap::new(),
+        )
+        .into_iter()
+        .nth(2)
+        .expect("manual item");
         assert_eq!(
             item,
             if available {
@@ -498,43 +513,230 @@ mod tests {
         }
     }
 
+    fn recent(executable: &str) -> RecentApp {
+        RecentApp {
+            executable: executable.into(),
+            path: std::path::PathBuf::from(format!("C:/Apps/{executable}")),
+            focus_ended: None,
+            included: false,
+            excluded: false,
+        }
+    }
+
+    fn plain(label: &str) -> String {
+        label.replace(['\u{2068}', '\u{2069}'], "")
+    }
+
+    fn labels(items: &[MenuItem]) -> Vec<(String, String, bool)> {
+        items
+            .iter()
+            .map(|item| match item {
+                MenuItem::Item {
+                    key,
+                    label,
+                    enabled,
+                } => (
+                    key.as_str().unwrap_or_default().to_owned(),
+                    plain(label),
+                    *enabled,
+                ),
+                MenuItem::Separator { key } | MenuItem::Submenu { key, .. } => (
+                    key.as_str().unwrap_or_default().to_owned(),
+                    "-".to_owned(),
+                    false,
+                ),
+            })
+            .collect()
+    }
+
+    fn entry(key: &str, label: &str, enabled: bool) -> (String, String, bool) {
+        (key.to_owned(), label.to_owned(), enabled)
+    }
+
+    #[test]
+    fn the_menu_has_its_groups_in_order_with_the_three_most_recent_apps() {
+        let mut state = snapshot(ConfigInput::default());
+        state.recent = vec![
+            RecentApp {
+                included: true,
+                ..recent("cs2.exe")
+            },
+            recent("vlc.exe"),
+            RecentApp {
+                excluded: true,
+                ..recent("browser.exe")
+            },
+            recent("old.exe"),
+        ];
+        let names = BTreeMap::from([("cs2.exe".to_owned(), "Counter-Strike 2".to_owned())]);
+        let items = menu_items(
+            &english(),
+            Some(&state),
+            ManualCommand::Start,
+            Toggles::Available,
+            &names,
+        );
+        assert_eq!(
+            labels(&items),
+            [
+                entry("settings", "Open Circadia settings", true),
+                entry("separator-manual", "-", false),
+                entry("manual-start", "Suppress for 1 hour", true),
+                entry("separator-recent", "-", false),
+                entry("caption", "Suppress while focused", false),
+                entry(
+                    "remove:cs2.exe",
+                    "\u{2713} Counter-Strike 2 (cs2.exe)",
+                    true
+                ),
+                entry("add:vlc.exe", "vlc.exe (vlc.exe)", true),
+                entry(
+                    "add:browser.exe",
+                    "browser.exe (browser.exe) (excluded)",
+                    false
+                ),
+                entry("separator-quit", "-", false),
+                entry("quit", "Quit Circadia", true),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_listed_and_excluded_app_keeps_its_check_mark_and_is_unavailable() {
+        let mut state = snapshot(ConfigInput::default());
+        state.recent = vec![RecentApp {
+            included: true,
+            excluded: true,
+            ..recent("both.exe")
+        }];
+        let items = menu_items(
+            &english(),
+            Some(&state),
+            ManualCommand::Stop,
+            Toggles::Available,
+            &BTreeMap::new(),
+        );
+        assert!(labels(&items).contains(&entry(
+            "remove:both.exe",
+            "\u{2713} both.exe (both.exe) (excluded)",
+            false
+        )));
+    }
+
+    #[test_case(Toggles::ConfigurationError, "Suppress while focused (settings couldn't be read)"; "configuration error")]
+    #[test_case(Toggles::Paused, "Suppress while focused (fix settings first)"; "paused saving")]
+    fn unavailable_toggles_are_disabled_and_the_caption_states_why(
+        toggles: Toggles,
+        caption: &str,
+    ) {
+        let mut state = snapshot(ConfigInput::default());
+        if toggles == Toggles::ConfigurationError {
+            state.accepted = None;
+            state.management = crate::ManagementState::Off;
+            state.scheduling = SchedulingState::Waiting;
+        }
+        state.recent = vec![recent("game.exe")];
+        let items = labels(&menu_items(
+            &english(),
+            Some(&state),
+            ManualCommand::Start,
+            toggles,
+            &BTreeMap::new(),
+        ));
+        assert!(
+            items.contains(&entry("caption", caption, false)),
+            "{items:?}"
+        );
+        assert!(
+            items.contains(&entry("add:game.exe", "game.exe (game.exe)", false)),
+            "{items:?}"
+        );
+        assert_eq!(
+            items.contains(&entry("manual-start", "Suppress for 1 hour", true)),
+            toggles == Toggles::Paused,
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn a_toggle_stays_available_during_preview() {
+        let mut state = snapshot(ConfigInput::default());
+        state.preview_active = true;
+        state.recent = vec![recent("game.exe")];
+        let items = labels(&menu_items(
+            &english(),
+            Some(&state),
+            ManualCommand::Start,
+            Toggles::Available,
+            &BTreeMap::new(),
+        ));
+        assert!(items.contains(&entry("add:game.exe", "game.exe (game.exe)", true)));
+    }
+
+    #[test]
+    fn the_menu_before_the_controller_starts_has_only_the_fixed_items() {
+        let items = labels(&menu_items(
+            &english(),
+            None,
+            ManualCommand::Start,
+            Toggles::Available,
+            &BTreeMap::new(),
+        ));
+        assert_eq!(
+            items,
+            [
+                entry("settings", "Open Circadia settings", true),
+                entry("separator-manual", "-", false),
+                entry("manual-start", "Suppress for 1 hour", false),
+                entry("separator-recent", "-", false),
+                entry("caption", "Suppress while focused", false),
+                entry("separator-quit", "-", false),
+                entry("quit", "Quit Circadia", true),
+            ]
+        );
+        assert_eq!(
+            manual_label(&english(), ManualCommand::Stop),
+            "Stop suppressing"
+        );
+    }
+
     #[test]
     fn pseudo_localized_tray_menu_has_no_english_label() {
         let text = Text::load(&LanguageTag::pseudo()).expect("pseudo-locale loads");
         let mut state = snapshot(ConfigInput::default());
         state.recent = vec![
             RecentApp {
-                executable: "listed.exe".into(),
                 included: true,
-                excluded: false,
+                ..recent("listed.exe")
             },
+            recent("unlisted.exe"),
             RecentApp {
-                executable: "unlisted.exe".into(),
-                included: false,
-                excluded: false,
-            },
-            RecentApp {
-                executable: "excluded.exe".into(),
-                included: false,
                 excluded: true,
-            },
-            RecentApp {
-                executable: "both.exe".into(),
-                included: true,
-                excluded: true,
+                ..recent("excluded.exe")
             },
         ];
-        let items: Vec<_> = [ManualCommand::Start, ManualCommand::Stop]
-            .into_iter()
-            .flat_map(|manual| menu_items(&text, Some(&state), manual, true))
-            .collect();
-        assert_eq!(items.len(), 14);
+        let mut items = Vec::new();
+        for manual in [ManualCommand::Start, ManualCommand::Stop] {
+            for toggles in [
+                Toggles::Available,
+                Toggles::ConfigurationError,
+                Toggles::Paused,
+            ] {
+                items.extend(menu_items(
+                    &text,
+                    Some(&state),
+                    manual,
+                    toggles,
+                    &BTreeMap::new(),
+                ));
+            }
+        }
+        assert_eq!(items.len(), 2 * 3 * 10);
         for item in items {
-            let MenuItem::Item { label, .. } = item else {
-                panic!("the tray menu has only items");
-            };
-            assert!(label.starts_with('['), "{label}");
-            assert!(label.ends_with(']'), "{label}");
+            if let MenuItem::Item { label, .. } = item {
+                assert!(label.starts_with('['), "{label}");
+                assert!(label.ends_with(']'), "{label}");
+            }
         }
     }
 
@@ -542,7 +744,7 @@ mod tests {
     #[test_case(ManualCommand::Stop; "manual stop")]
     fn tray_menu_keys_are_unique_with_a_full_recent_history(manual: ManualCommand) {
         let config = ConfigInput {
-            suppression: vec!["game.exe".into()],
+            suppression: vec![crate::AppEntry::new("game.exe", "game.exe")],
             ..ConfigInput::default()
         }
         .validate()
@@ -552,22 +754,23 @@ mod tests {
             "Game.exe",
             "settings.exe",
             "quit.exe",
+            "caption.exe",
             "GAME.EXE",
             "a.exe",
-            "b.exe",
-            "c.exe",
             "game.exe",
         ] {
-            apps.observe(&Foreground::Application(name.into()));
+            apps.observe(&Foreground::application(name), Duration::ZERO);
         }
         let mut state = snapshot(ConfigInput::default());
         state.recent = apps.recent(&config);
         let text = english();
-        let mut menus = vec![(menu_items(&text, None, manual, true), 3)];
-        menus.push((menu_items(&text, Some(&state), manual, true), 8));
-        state.accepted = None;
-        menus.push((menu_items(&text, Some(&state), manual, true), 8));
-        for (items, expected) in menus {
+        let names = BTreeMap::new();
+        let menus = [
+            menu_items(&text, None, manual, Toggles::Available, &names),
+            menu_items(&text, Some(&state), manual, Toggles::Available, &names),
+            menu_items(&text, Some(&state), manual, Toggles::Paused, &names),
+        ];
+        for (items, expected) in menus.iter().zip([7, 10, 10]) {
             let keys: HashSet<_> = items
                 .iter()
                 .map(|item| match item {
@@ -579,59 +782,5 @@ mod tests {
             assert_eq!(items.len(), expected);
             assert_eq!(keys.len(), expected);
         }
-    }
-
-    #[test]
-    fn recent_menu_preserves_membership_and_disables_exclusions() {
-        let text = english();
-        let mut state = snapshot(ConfigInput::default());
-        state.recent = vec![
-            RecentApp {
-                executable: "listed.exe".into(),
-                included: true,
-                excluded: false,
-            },
-            RecentApp {
-                executable: "unlisted.exe".into(),
-                included: false,
-                excluded: false,
-            },
-            RecentApp {
-                executable: "excluded.exe".into(),
-                included: true,
-                excluded: true,
-            },
-        ];
-        assert_eq!(
-            recent_menu_items(&text, Some(&state), true),
-            vec![
-                MenuItem::item(
-                    "remove:listed.exe",
-                    "Remove \u{2068}listed.exe\u{2069} from suppression"
-                ),
-                MenuItem::item(
-                    "add:unlisted.exe",
-                    "Suppress for \u{2068}unlisted.exe\u{2069}"
-                ),
-                MenuItem::disabled(
-                    "remove:excluded.exe",
-                    "Remove \u{2068}excluded.exe\u{2069} from suppression (excluded)"
-                ),
-            ]
-        );
-        assert_eq!(
-            menu_items(&text, None, ManualCommand::Start, true),
-            vec![
-                MenuItem::item("settings", "Settings"),
-                MenuItem::disabled("manual-start", "Suppress for 1 hour"),
-                MenuItem::item("quit", "Quit Circadia"),
-            ]
-        );
-        assert_eq!(manual_label(&text, ManualCommand::Stop), "Stop suppressing");
-        assert!(
-            recent_menu_items(&text, Some(&state), false)
-                .iter()
-                .all(|item| matches!(item, MenuItem::Item { enabled: false, .. }))
-        );
     }
 }

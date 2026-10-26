@@ -148,7 +148,7 @@ fn manual_start_survives_a_valid_edit_waiting_for_calculation() {
 #[test]
 fn automatic_suppression_while_preview_calculation_is_pending_keeps_the_playback_start() {
     let config = ConfigInput {
-        suppression: vec!["game.exe".into()],
+        suppression: vec![crate::AppEntry::new("game.exe", "game.exe")],
         ..managed()
     }
     .validate()
@@ -162,7 +162,7 @@ fn automatic_suppression_while_preview_calculation_is_pending_keeps_the_playback
     runtime.expect_calculation(2);
     assert!(!runtime.controlling());
     runtime
-        .foreground(&Foreground::Application("game.exe".into()), time(150))
+        .foreground(&Foreground::application("game.exe"), time(150))
         .expect("matching focus");
     runtime.advance(time(450)).expect("elapsed focus delay");
     assert!(runtime.suppression().automatic);
@@ -517,14 +517,14 @@ fn configuration_error_prevents_control_preview_and_new_manual_suppression() {
 #[test]
 fn suppression_only_storage_does_not_allow_control_after_clock_failure() {
     let config = ConfigInput {
-        suppression: vec!["game.exe".into()],
+        suppression: vec![crate::AppEntry::new("game.exe", "game.exe")],
         focus_delay_ms: 5000,
         ..managed()
     }
     .validate()
     .expect("config");
     let mut session = Layers::new(Some(config));
-    let mut runtime = initialize(&session, &Foreground::Application("game.exe".into()), 3400);
+    let mut runtime = initialize(&session, &Foreground::application("game.exe"), 3400);
     assert!(runtime.suppression().automatic);
     assert_eq!(store(&mut runtime, &mut session, 6500, time(0)), 6500);
     assert!(session.active().expect("active").last_scheduled().is_none());
@@ -703,7 +703,7 @@ fn a_backward_clock_change_moves_the_reported_manual_end_but_not_its_elapsed_dea
 #[test]
 fn resume_discards_a_focus_delay_pending_during_preview_and_requires_a_fresh_one() {
     let config = ConfigInput {
-        suppression: vec!["game.exe".into()],
+        suppression: vec![crate::AppEntry::new("game.exe", "game.exe")],
         ..managed()
     }
     .validate()
@@ -719,7 +719,7 @@ fn resume_discards_a_focus_delay_pending_during_preview_and_requires_a_fresh_one
         .calculated(result(2, request, 3000), time(100))
         .expect("preview calculation");
     runtime
-        .foreground(&Foreground::Application("game.exe".into()), time(150))
+        .foreground(&Foreground::application("game.exe"), time(150))
         .expect("matching focus");
     runtime
         .advance(time(350))
@@ -731,7 +731,7 @@ fn resume_discards_a_focus_delay_pending_during_preview_and_requires_a_fresh_one
         ..time(1000)
     };
     let request = runtime
-        .resume(1, &Foreground::Application("game.exe".into()), resumed)
+        .resume(1, &Foreground::application("game.exe"), resumed)
         .expect("resume")
         .expect("recompute");
     runtime.expect_calculation(3);
@@ -755,7 +755,7 @@ fn resume_discards_a_focus_delay_pending_during_preview_and_requires_a_fresh_one
     assert!(runtime.suppression().automatic);
     assert!(
         runtime
-            .resume(1, &Foreground::Application("game.exe".into()), time(1300))
+            .resume(1, &Foreground::application("game.exe"), time(1300))
             .expect("duplicate resume")
             .is_none()
     );
@@ -825,7 +825,7 @@ fn superseded_calculation_does_not_replace_current_configuration() {
 #[test]
 fn foreground_changes_record_the_executable_and_decision_at_debug_level() {
     let config = ConfigInput {
-        suppression: vec!["javaw.exe".into()],
+        suppression: vec![crate::AppEntry::new("javaw.exe", "javaw.exe")],
         ..managed()
     }
     .validate()
@@ -834,7 +834,7 @@ fn foreground_changes_record_the_executable_and_decision_at_debug_level() {
     let records = crate::log::capture(tracing::Level::DEBUG, || {
         let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
         runtime
-            .foreground(&Foreground::Application("javaw.exe".into()), time(100))
+            .foreground(&Foreground::application("javaw.exe"), time(100))
             .expect("matching focus");
         runtime
             .foreground(&Foreground::Shell, time(200))
@@ -911,7 +911,7 @@ fn configure_keeps_the_last_scheduled_temperature_until_the_new_schedule_stores_
 
 fn listed(executable: &str) -> Config {
     ConfigInput {
-        suppression: vec![executable.into()],
+        suppression: vec![crate::AppEntry::new(executable, executable)],
         ..managed()
     }
     .validate()
@@ -937,7 +937,7 @@ fn later(now: RuntimeTime, milliseconds: u64) -> RuntimeTime {
 #[test]
 fn preview_starts_under_automatic_suppression_and_fades_from_its_last_value_when_it_ends() {
     let mut session = Layers::new(Some(listed("game.exe")));
-    let mut runtime = initialize(&session, &Foreground::Application("game.exe".into()), 3400);
+    let mut runtime = initialize(&session, &Foreground::application("game.exe"), 3400);
     assert!(runtime.suppression().automatic);
     store(&mut runtime, &mut session, 3400, time(0));
     assert_eq!(store(&mut runtime, &mut session, 3400, time(500)), 6500);
@@ -968,7 +968,7 @@ fn ended_playback(end: PlaybackEnd, focused: &str) -> (ControlRuntime, Layers, R
     start_preview(&mut runtime, 2, 3000, time(100));
     assert_eq!(store(&mut runtime, &mut session, 3400, time(100)), 3000);
     runtime
-        .foreground(&Foreground::Application(focused.into()), time(200))
+        .foreground(&Foreground::application(focused), time(200))
         .expect("focus");
     runtime.advance(time(450)).expect("focus delay elapses");
     assert_eq!(runtime.suppression().automatic, focused == "game.exe");
@@ -1079,7 +1079,7 @@ fn a_preview_request_during_the_startup_fade_replaces_it() {
 #[test]
 fn listing_the_focused_app_during_preview_keeps_playback_and_fades_to_6500_k_when_it_ends() {
     let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
-    let mut runtime = initialize(&session, &Foreground::Application("game.exe".into()), 3400);
+    let mut runtime = initialize(&session, &Foreground::application("game.exe"), 3400);
     store(&mut runtime, &mut session, 3400, time(0));
     start_preview(&mut runtime, 2, 3000, time(100));
     assert_eq!(store(&mut runtime, &mut session, 3400, time(100)), 3000);

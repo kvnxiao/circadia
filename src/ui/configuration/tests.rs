@@ -72,7 +72,7 @@ impl Folder {
     }
 
     fn load(&self) -> Configuration {
-        Configuration::load(&self.path)
+        Configuration::load(&self.path, "circadia.exe")
     }
 
     fn block(&self) {
@@ -445,13 +445,19 @@ fn conflicting_input_survives_reopening_and_tray_toggles_but_not_exit() {
         Some(&FieldValue::Clock(23 * 60))
     );
     let toggled = configuration
-        .toggle("game.exe", true)
+        .toggle(crate::AppEntry::new("game.exe", "game.exe"), true)
         .expect("toggle applies");
-    assert_eq!(toggled.input().suppression, ["game.exe"]);
+    assert_eq!(
+        toggled.input().suppression,
+        [crate::AppEntry::new("game.exe", "game.exe")]
+    );
     assert_eq!(toggled.wake_minutes(), 7 * 60);
     assert_eq!(configuration.field_errors(), conflict);
     let saved = folder.read().0.expect("toggle writes at once");
-    assert!(saved.contains("suppression = [\"game.exe\"]"), "{saved}");
+    assert!(
+        saved.contains("[[suppression]]\nexecutable = \"game.exe\""),
+        "{saved}"
+    );
     configuration.exit();
     let relaunched = folder.load();
     assert!(relaunched.inputs().is_empty());
@@ -636,4 +642,32 @@ fn launch_opens_settings_by_start_minimized_new_install_and_problems() {
             configuration.startup()
         );
     }
+}
+
+#[test]
+fn removing_an_entry_that_moved_since_the_click_changes_nothing() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let mut configuration = Configuration::load(directory.path(), "circadia.exe");
+    configuration
+        .add(
+            Field::Suppression,
+            vec![
+                AppEntry::new("game.exe".to_owned(), "Game".to_owned()),
+                AppEntry::new("tool.exe".to_owned(), "Tool".to_owned()),
+            ],
+        )
+        .expect("added");
+    assert!(
+        configuration
+            .remove(Field::Suppression, 0, "tool.exe")
+            .is_none()
+    );
+    assert_eq!(
+        configuration
+            .accepted()
+            .expect("accepted")
+            .entries(Field::Suppression)
+            .len(),
+        2
+    );
 }

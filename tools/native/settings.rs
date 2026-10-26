@@ -113,9 +113,10 @@ fn check_lists(
     directory: &Path,
 ) -> io::Result<()> {
     let original = saved(directory)?;
+    let entry = |name: &str| circadia::AppEntry::new(name, name);
     let listed = ConfigInput {
-        suppression: vec!["circadia.exe".into(), "list-fixture.exe".into()],
-        exclusions: vec!["list-fixture.exe".into()],
+        suppression: vec![entry("circadia.exe"), entry("list-fixture.exe")],
+        exclusions: vec![entry("list-fixture.exe")],
         ..original.clone()
     };
     crate::lifecycle::replace(directory, &listed)?;
@@ -153,7 +154,7 @@ fn check_lists(
             .filter(|text| text == "Unsaved changes"))
     })?;
     require(
-        saved(directory)?.exclusions == ["list-fixture.exe"],
+        saved(directory)?.exclusions == [entry("list-fixture.exe")],
         "list edit persisted before Save",
     )?;
     automation.invoke(settings, process, "discard")?;
@@ -182,7 +183,7 @@ fn check_lists(
     automation.set_value(settings, process, "wake", "07:00")?;
     automation.invoke(settings, process, "save")?;
     wait("list removal persisted", || {
-        Ok((saved(directory)?.suppression == ["circadia.exe"]).then_some(()))
+        Ok((saved(directory)?.suppression == [entry("circadia.exe")]).then_some(()))
     })?;
     wait("list Save acknowledged", || {
         Ok(automation

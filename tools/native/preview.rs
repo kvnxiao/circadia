@@ -130,7 +130,7 @@ fn automatic_suppression(
     replace(
         directory,
         &ConfigInput {
-            suppression: vec![filename.to_owned()],
+            suppression: vec![circadia::AppEntry::new(filename, filename)],
             ..original.clone()
         },
     )?;
