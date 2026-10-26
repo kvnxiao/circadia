@@ -254,34 +254,43 @@ fn name(text: &Text, field: Field) -> String {
     text!(text, "field-name", field = field.key())
 }
 
-fn kelvin(region: &RegionalFormat, kelvin: i64) -> String {
+pub(super) fn kelvin(region: &RegionalFormat, kelvin: i64) -> String {
     u16::try_from(kelvin)
         .ok()
         .and_then(|kelvin| region.format_kelvin(kelvin).ok())
         .unwrap_or_else(|| format!("{kelvin} K"))
 }
 
+pub(super) fn clock(region: &RegionalFormat, minute: u16) -> String {
+    region
+        .format_clock(minute)
+        .unwrap_or_else(|_| format!("{:02}:{:02}", minute / 60, minute % 60))
+}
+
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "configuration numbers are at most 10000"
+)]
+pub(super) fn whole(region: &RegionalFormat, number: i64) -> String {
+    region
+        .format_decimal(number as f64, 0)
+        .unwrap_or_else(|_| number.to_string())
+}
+
 fn value(text: &Text, region: &RegionalFormat, field: Field, value: &FieldValue) -> String {
-    let number = |number: i64| {
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "configuration numbers are at most 10000"
-        )]
-        let number = number as f64;
-        region
-            .format_decimal(number, 0)
-            .unwrap_or_else(|_| number.to_string())
-    };
     match (field, value) {
-        (_, FieldValue::Clock(minute)) => region
-            .format_clock(*minute)
-            .unwrap_or_else(|_| format!("{:02}:{:02}", minute / 60, minute % 60)),
+        (_, FieldValue::Clock(minute)) => clock(region, *minute),
         (
             Field::DaytimeKelvin | Field::MiddleKelvin | Field::SleepKelvin,
             FieldValue::Number(n),
         ) => kelvin(region, *n),
         (_, FieldValue::Number(n)) => {
-            text!(text, "value-number", value = number(*n), unit = field.key())
+            text!(
+                text,
+                "value-number",
+                value = whole(region, *n),
+                unit = field.key()
+            )
         }
         (_, FieldValue::Switch(true)) => text!(text, "value-on"),
         (_, FieldValue::Switch(false)) => text!(text, "value-off"),

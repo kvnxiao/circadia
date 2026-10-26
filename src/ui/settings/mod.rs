@@ -44,8 +44,10 @@ use windows_reactor::NavigationView;
 use windows_reactor::NavigationViewBackButtonVisible;
 use windows_reactor::NavigationViewItem;
 use windows_reactor::NavigationViewPaneDisplayMode;
+use windows_reactor::NumberBox;
 use windows_reactor::Orientation;
 use windows_reactor::ScrollViewer;
+use windows_reactor::Slider;
 use windows_reactor::StackPanel;
 use windows_reactor::ThemeBrush;
 use windows_reactor::Thickness;
@@ -196,6 +198,18 @@ pub(super) enum Command {
     DismissRestore,
 }
 
+struct NumberControls<'a> {
+    field: Field,
+    id: &'a str,
+    title: &'a str,
+    unit: String,
+    slider: bool,
+}
+
+fn number_edits(field: Field, value: Option<f64>) -> Option<Vec<(Field, FieldValue)>> {
+    value.map(|value| vec![(field, FieldValue::Number(field.limit(value)))])
+}
+
 #[derive(Debug, Default)]
 struct PendingWrite(u64);
 
@@ -216,7 +230,7 @@ pub(super) enum Message {
     Placed,
     Activated,
     Edit(Vec<(Field, FieldValue)>),
-    Kelvin(Field, Option<f64>),
+    Number(Field, Option<f64>),
     WriteDue(u64),
     Action(Action),
     DismissRestore,
@@ -398,11 +412,85 @@ impl Settings {
         })
     }
 
+    fn with_feedback(&self, field: Field, control: View) -> Vec<View> {
+        std::iter::once(control)
+            .chain(self.feedback(field))
+            .collect()
+    }
+
+    fn number_controls(&self, number: NumberControls<'_>, context: &ViewContext<'_, Self>) -> View {
+        let NumberControls {
+            field,
+            id,
+            title,
+            unit,
+            slider,
+        } = number;
+        let range = field.range().unwrap_or(crate::NumberRange {
+            minimum: 0,
+            maximum: 0,
+            step: 1,
+        });
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "settings numbers and their bounds are at most 10000"
+        )]
+        let (value, minimum, maximum, step) = (
+            self.input.model.number(field) as f64,
+            range.minimum as f64,
+            range.maximum as f64,
+            range.step as f64,
+        );
+        let editable = self.input.model.editable();
+        let mut controls: Vec<View> = Vec::new();
+        if slider {
+            controls.push(
+                Slider::new()
+                    .width(220.0)
+                    .minimum(minimum)
+                    .maximum(maximum)
+                    .step_frequency(step)
+                    .value(value)
+                    .is_enabled(editable)
+                    .automation_id(format!("{id}-slider"))
+                    .automation_name(title)
+                    .on_value_changed(
+                        context.callback(move |value| Message::Number(field, Some(value))),
+                    )
+                    .into(),
+            );
+        }
+        controls.push(
+            NumberBox::new()
+                .width(96.0)
+                .minimum(minimum)
+                .maximum(maximum)
+                .small_change(step)
+                .value(Some(value))
+                .is_enabled(editable)
+                .automation_id(format!("{id}-number"))
+                .automation_name(title)
+                .vertical_alignment(VerticalAlignment::Top)
+                .on_value_changed(context.callback(move |value| Message::Number(field, value)))
+                .into(),
+        );
+        controls.push(
+            widgets::body(unit)
+                .margin(Thickness::new(0.0, 6.0, 0.0, 0.0))
+                .into(),
+        );
+        StackPanel::new()
+            .orientation(Orientation::Horizontal)
+            .spacing(12.0)
+            .children(controls)
+            .into()
+    }
+
     fn page_content(&self, context: &ViewContext<'_, Self>) -> Vec<View> {
         match self.page {
             Page::Schedule => schedule::view(self, context),
             Page::Apps => apps::view(),
-            Page::Transitions => transitions::view(),
+            Page::Transitions => transitions::view(self, context),
             Page::General => general::view(),
         }
     }
@@ -451,8 +539,8 @@ impl Component for Settings {
             }
             Message::Placed | Message::Activated => {}
             Message::Edit(edits) => self.edit(edits, context),
-            Message::Kelvin(field, value) => {
-                if let Some(edits) = schedule::kelvin_edits(field, value) {
+            Message::Number(field, value) => {
+                if let Some(edits) = number_edits(field, value) {
                     self.edit(edits, context);
                 }
             }

@@ -5,26 +5,27 @@ use crate::controller::ControllerCommand;
 use crate::ui::Desktop;
 use crate::ui::configuration::Configuration;
 use crate::ui::settings::Model;
+use crate::ui::settings::number_edits;
 use std::cell::RefCell;
 
 #[test]
 fn a_slider_moved_to_2405_k_applies_2410_k() {
     assert_eq!(
-        kelvin_edits(Field::MiddleKelvin, Some(2405.0)),
+        number_edits(Field::MiddleKelvin, Some(2405.0)),
         Some(vec![(Field::MiddleKelvin, FieldValue::Number(2410))])
     );
 }
 
 #[test]
 fn an_empty_kelvin_field_commit_sends_no_edit() {
-    assert_eq!(kelvin_edits(Field::SleepKelvin, None), None);
+    assert_eq!(number_edits(Field::SleepKelvin, None), None);
 }
 
 #[test]
 fn a_kelvin_field_commit_of_1100_applies_1200_k_to_both_controls() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let mut configuration = Configuration::load(directory.path());
-    let edits = kelvin_edits(Field::SleepKelvin, Some(1100.0)).expect("a committed value");
+    let edits = number_edits(Field::SleepKelvin, Some(1100.0)).expect("a committed value");
     assert!(configuration.edit(edits).is_some());
     let model = Model::new(&configuration, String::new());
     assert_eq!(model.number(Field::SleepKelvin), 1200);
