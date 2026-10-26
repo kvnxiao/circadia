@@ -247,7 +247,9 @@ fn shutdown_notifies_after_disconnecting_queued_actions() {
     let receipt = client
         .submit(ControllerCommand::Recompute(Recompute::Unlock))
         .expect("queued action");
-    client.request_exit().expect("exit requested");
+    client
+        .request_exit(ExitKind::SessionEnd)
+        .expect("exit requested");
     assert!(!client.is_finished());
     release.send(()).expect("finish native operation");
     notified
@@ -438,7 +440,9 @@ fn full_queue_rejects_more_commands_but_exit_still_cancels_admission() {
             .kind(),
         io::ErrorKind::WouldBlock
     );
-    client.request_exit().expect("exit bypasses queue capacity");
+    client
+        .request_exit(ExitKind::SessionEnd)
+        .expect("exit bypasses queue capacity");
     assert_eq!(
         client
             .submit(ControllerCommand::StopPreview)
@@ -560,6 +564,9 @@ fn duplicate_resume_preserves_generation_and_requires_only_one_application() {
         .expect("duplicate resume");
     assert_eq!(client.0.generation.load(Ordering::Acquire), generation);
     wait_for(&client, &notified, |snapshot| acknowledged(snapshot, &id));
+    client
+        .request_exit(ExitKind::SessionEnd)
+        .expect("exit requested");
     let exit = worker.shutdown();
     assert!(exit.worker.is_ok(), "{:?}", exit.worker);
     assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
@@ -990,4 +997,143 @@ fn a_worker_without_a_configuration_makes_no_native_call() {
     let exit = worker.shutdown();
     assert!(exit.native.is_none());
     assert_eq!(records.lock().expect("records").calls, []);
+}
+
+struct Started {
+    worker: ControllerWorker,
+    records: Arc<Mutex<Records>>,
+    before: usize,
+    _notified: mpsc::Receiver<()>,
+}
+
+fn start_at_kelvin(directory: &TempDir, ordinary_fade_ms: i64) -> Started {
+    ConfigStore::new(directory.path())
+        .save(
+            &ConfigInput {
+                ordinary_fade_ms,
+                ..input(2400)
+            }
+            .validate()
+            .expect("config"),
+        )
+        .expect("saved config");
+    let mut records = Records::default();
+    records.settings.temperature = Some(2400);
+    let records = Arc::new(Mutex::new(records));
+    let (worker, notified) = start(directory, &records);
+    let client = worker.client();
+    wait_for(&client, &notified, |snapshot| {
+        snapshot
+            .accepted
+            .as_ref()
+            .is_some_and(|layer| layer.last_scheduled() == Some(2400))
+    });
+    let before = records.lock().expect("records").calls.len();
+    Started {
+        worker,
+        records,
+        before,
+        _notified: notified,
+    }
+}
+
+fn kelvins(calls: &[Call]) -> Vec<u16> {
+    calls
+        .iter()
+        .filter_map(|call| match call {
+            Call::Temperature(kelvin, _) => Some(*kelvin),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn quit_fades_to_6500_k_before_cleanup_and_off() {
+    let directory = tempfile::tempdir().expect("directory");
+    let Started {
+        worker,
+        records,
+        before,
+        _notified,
+    } = start_at_kelvin(&directory, 250);
+    worker
+        .client()
+        .request_exit(ExitKind::Quit)
+        .expect("exit requested");
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    let native = exit.native.expect("exit after begun access");
+    assert!(native.preview.is_ok());
+    assert!(native.off.is_ok());
+    let calls = records.lock().expect("records").calls.split_off(before);
+    let written = kelvins(&calls);
+    assert!(written.len() > 2, "{calls:?}");
+    assert_eq!(written.last(), Some(&6500), "{calls:?}");
+    assert!(
+        written.windows(2).all(|pair| pair[0] < pair[1]),
+        "{calls:?}"
+    );
+    assert!(
+        calls.ends_with(&[Call::Cleanup, Call::Activate(false)]),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn confirmed_session_end_during_the_quit_fade_skips_the_rest_of_the_fade() {
+    let directory = tempfile::tempdir().expect("directory");
+    let Started {
+        worker,
+        records,
+        before,
+        _notified,
+    } = start_at_kelvin(&directory, 10_000);
+    let client = worker.client();
+    client.request_exit(ExitKind::Quit).expect("Quit requested");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !records.lock().expect("records").calls[before..]
+        .iter()
+        .any(|call| matches!(call, Call::Temperature(_, TemperatureMode::Hold)))
+    {
+        assert!(Instant::now() < deadline, "exit fade did not start");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let ending = Instant::now();
+    client
+        .request_exit(ExitKind::SessionEnd)
+        .expect("session end requested");
+    let exit = worker.shutdown();
+    assert!(ending.elapsed() < Duration::from_secs(5));
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    let calls = records.lock().expect("records").calls.split_off(before);
+    assert!(
+        kelvins(&calls).iter().all(|kelvin| *kelvin < 6500),
+        "{calls:?}"
+    );
+    assert!(
+        calls.ends_with(&[Call::Cleanup, Call::Activate(false)]),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn quit_after_a_confirmed_session_end_does_not_start_a_fade() {
+    let directory = tempfile::tempdir().expect("directory");
+    let Started {
+        worker,
+        records,
+        before,
+        _notified,
+    } = start_at_kelvin(&directory, 250);
+    let client = worker.client();
+    client
+        .request_exit(ExitKind::SessionEnd)
+        .expect("session end requested");
+    client.request_exit(ExitKind::Quit).expect("Quit requested");
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    assert_eq!(
+        records.lock().expect("records").calls.get(before..),
+        Some([Call::Cleanup, Call::Activate(false)].as_slice())
+    );
 }

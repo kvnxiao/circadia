@@ -1,5 +1,4 @@
 use super::ControlError;
-use super::STARTUP_FADE;
 use super::TemperatureFade;
 use crate::ActivationPreparation;
 use crate::Curve;
@@ -541,12 +540,7 @@ impl TemperatureOutput {
             } else {
                 self.last_written.unwrap_or_else(|| fresh.origin())
             };
-            let duration = if startup {
-                STARTUP_FADE
-            } else {
-                ordinary_duration
-            };
-            let fade = target.fade(now, duration, origin)?;
+            let fade = target.fade(now, ordinary_duration, origin)?;
             if fade.changes() && !(startup && origin == point.temperature) {
                 self.fade = Some(fade);
                 #[cfg(feature = "output-measurement")]

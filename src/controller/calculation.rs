@@ -1,4 +1,3 @@
-use super::STARTUP_FADE;
 use crate::ActivityInterval;
 use crate::Config;
 use crate::Curve;
@@ -18,7 +17,6 @@ use std::sync::Arc;
 use std::sync::Condvar;
 use std::sync::Mutex;
 use std::thread::JoinHandle;
-use std::time::Duration;
 
 /// Select whether a calculation also captures a new Preview interval.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -344,9 +342,7 @@ fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, Schedul
         graph_end = view.end;
         views.push(view);
     }
-    let padding = Duration::from_millis(request.config.input().ordinary_fade_ms.unsigned_abs())
-        .max(STARTUP_FADE);
-    let padding = SignedDuration::try_from(padding)?;
+    let padding = SignedDuration::from_millis(request.config.input().ordinary_fade_ms);
     let end = graph_end.max(next_date).checked_add(padding)?;
     let valid = TimeInterval {
         start: graph.start.min(request.at),
@@ -380,6 +376,7 @@ fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, Schedul
 mod tests {
     use super::*;
     use std::sync::mpsc;
+    use std::time::Duration;
 
     fn request(second: i64) -> CalculationRequest {
         CalculationRequest {

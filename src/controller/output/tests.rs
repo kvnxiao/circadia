@@ -70,7 +70,7 @@ fn initialized(value: u16) -> TemperatureOutput {
 }
 
 #[test]
-fn startup_uses_one_second_and_completes_after_cleanup() {
+fn startup_uses_the_ordinary_duration_and_completes_after_cleanup() {
     let mut output = TemperatureOutput::default();
     output
         .update(
@@ -80,35 +80,35 @@ fn startup_uses_one_second_and_completes_after_cleanup() {
         )
         .expect("target");
     let start = output
-        .prepare(fresh(6500, false), moment(0), Duration::from_secs(10))
+        .prepare(fresh(6500, false), moment(0), Duration::from_secs(2))
         .expect("selection")
         .expect("start");
     assert_eq!(start.temperature.kelvin(), 6500);
     assert_eq!(start.mode, TemperatureMode::ApplyHeld);
     assert_eq!(start.activation, ActivationPreparation::Startup);
-    assert_eq!(output.fade_deadline(), Some(Duration::from_secs(1)));
+    assert_eq!(output.fade_deadline(), Some(Duration::from_secs(2)));
     assert!(apply(&mut output, start, Duration::ZERO).is_none());
     assert!(!output.startup_complete());
     let middle = output
-        .prepare(fresh(6500, true), moment(500), Duration::from_secs(10))
+        .prepare(fresh(6500, true), moment(1000), Duration::from_secs(2))
         .expect("selection")
         .expect("middle");
     assert_eq!(middle.temperature.kelvin(), 4450);
     assert_eq!(middle.mode, TemperatureMode::Hold);
-    assert!(apply(&mut output, middle, Duration::from_millis(500)).is_none());
+    assert!(apply(&mut output, middle, Duration::from_secs(1)).is_none());
     let end = output
-        .prepare(fresh(4450, true), moment(1000), Duration::from_secs(10))
+        .prepare(fresh(4450, true), moment(2000), Duration::from_secs(2))
         .expect("selection")
         .expect("end");
     assert_eq!(end.temperature.kelvin(), 2400);
     assert_eq!(end.mode, TemperatureMode::FinishHeld);
     assert_eq!(
-        apply(&mut output, end, Duration::from_secs(1)),
+        apply(&mut output, end, Duration::from_secs(2)),
         Some(temperature(2400))
     );
     assert!(output.startup_complete());
     assert_eq!(
-        output.deadlines(moment(1000)).expect("idle"),
+        output.deadlines(moment(2000)).expect("idle"),
         OutputDeadlines::default()
     );
 }
@@ -352,13 +352,13 @@ fn padded_curve_points_do_not_authorize_output_outside_calculated_bounds() {
             .is_err()
     );
     output
-        .update(target, OutputUpdate::Fade, moment(199_500))
+        .update(target, OutputUpdate::Fade, moment(199_600))
         .expect("current instant valid");
     assert!(
         output
             .prepare(
                 fresh(6500, false),
-                moment(199_500),
+                moment(199_600),
                 Duration::from_millis(500)
             )
             .is_err()

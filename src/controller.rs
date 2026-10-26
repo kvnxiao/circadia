@@ -7,9 +7,7 @@ mod timing;
 mod worker;
 
 use crate::ScheduleError;
-use std::time::Duration;
 
-const STARTUP_FADE: Duration = Duration::from_secs(1);
 pub(crate) const COMMAND_QUEUE_CAPACITY: usize = 128;
 pub(crate) const COMMAND_QUEUE_BYTES: usize = 8 * 1024 * 1024;
 pub use calculation::CalculatedSchedule;
@@ -45,6 +43,17 @@ pub use worker::ControllerWorker;
 pub use worker::Recompute;
 #[cfg(test)]
 pub(crate) use worker::mark_controller_thread;
+
+/// Select whether exit fades toward 6500 K before the cleanup and off attempts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExitKind {
+    /// Fade toward 6500 K with an ordinary fade, then clean up.
+    Quit,
+    /// Clean up at once after Windows confirms session end.
+    SessionEnd,
+    /// Clean up at once after an internal error.
+    Panic,
+}
 
 /// Report an unrepresentable deadline or unavailable fade destination.
 #[derive(Debug, thiserror::Error)]

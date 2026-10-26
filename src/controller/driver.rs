@@ -1,6 +1,7 @@
 use super::AttemptStatus;
 use super::ControlError;
 use super::ControlRuntime;
+use super::ExitKind;
 use super::NativeRecovery;
 use super::OutputDeadlines;
 use super::OutputRate;
@@ -339,6 +340,11 @@ impl NativeDriver {
             if !runtime.controlling() {
                 return None;
             }
+            // The exit fade must not turn Night Light on to fade it out again.
+            if runtime.exiting() && !fresh.active {
+                runtime.output().stop();
+                return None;
+            }
             match runtime.output().prepare(fresh, at.output, duration) {
                 Ok(request) => request,
                 Err(error) => {
@@ -370,9 +376,32 @@ impl NativeDriver {
         Ok(())
     }
 
-    /// Cancel future work and independently attempt cleanup and off once.
-    pub fn exit(&mut self, now: RuntimeTime) -> Option<NativeExit> {
-        self.runtime.exit(now);
+    /// Cancel future control and, for `Quit`, start the exit fade.
+    ///
+    /// # Errors
+    /// Report invalid fade timing; exit then skips the fade.
+    pub fn begin_exit(&mut self, kind: ExitKind, now: RuntimeTime) -> Result<(), ControlError> {
+        self.runtime.exit(kind, now)
+    }
+
+    /// Return whether the exit fade has a remaining step that native access
+    /// permits.
+    ///
+    /// - A pending output or observation failure, including a failed fade step,
+    ///   ends the fade, and so does Night Light access that never began.
+    pub fn exit_fading(&self, now: RuntimeTime) -> bool {
+        self.native.access_begun()
+            && !self.recovery.blocks_output()
+            && !self.recovery.observation_failed()
+            && self.runtime.exit_fading(now.output)
+    }
+
+    /// Skip any remaining exit fade and independently attempt cleanup and off
+    /// once.
+    ///
+    /// - Call after [`Self::begin_exit`].
+    pub fn exit(&mut self) -> Option<NativeExit> {
+        self.runtime.output().stop();
         self.correction = false;
         self.native.exit()
     }

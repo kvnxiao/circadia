@@ -4,6 +4,7 @@ use super::CalculationRequest;
 use super::CalculationResult;
 use super::ControlError;
 use super::ControlTime;
+use super::ExitKind;
 use super::OutputTarget;
 use super::OutputUpdate;
 use super::TemperatureOutput;
@@ -568,13 +569,49 @@ impl ControlRuntime {
         Ok(Some(self.request(config, now)))
     }
 
-    /// Cancel future control before independent native exit cleanup begins.
-    pub fn exit(&mut self, now: RuntimeTime) {
+    /// Cancel future control, focus delays, manual suppression, and Preview.
+    ///
+    /// - `Quit` from running control whose scheduling permits temperature
+    ///   writes and that has written a temperature starts an ordinary fade from
+    ///   that temperature toward 6500 K; other kinds and later calls stop
+    ///   output.
+    ///
+    /// # Errors
+    /// Report invalid fade timing; output is then stopped.
+    pub fn exit(&mut self, kind: ExitKind, now: RuntimeTime) -> Result<(), ControlError> {
+        let writable = self.available()
+            || (self.state == SchedulingState::Evaluating && self.focus_initialized);
+        let at_maximum = self.output.last_written() == Some(ColorTemperature::MAX)
+            && self.output.fade_deadline().is_none();
+        let fade = kind == ExitKind::Quit
+            && self.lifecycle == Lifecycle::Running
+            && writable
+            && self.output.last_written().is_some()
+            && !at_maximum;
         self.lifecycle = Lifecycle::Exited;
         self.cancel_preview(now);
         self.expected_calculation = None;
         self.suppression = Suppression::default();
         self.output.stop();
+        if fade {
+            self.output
+                .update(OutputTarget::Suppression, OutputUpdate::Fade, now.output)?;
+        }
+        Ok(())
+    }
+
+    /// Return whether exit has started.
+    pub fn exiting(&self) -> bool {
+        self.lifecycle == Lifecycle::Exited
+    }
+
+    /// Return whether the exit fade has a remaining step or preview cleanup.
+    pub fn exit_fading(&self, now: ControlTime) -> bool {
+        self.lifecycle == Lifecycle::Exited
+            && self
+                .output
+                .deadlines(now)
+                .is_ok_and(|deadlines| deadlines.change.is_some() || deadlines.cleanup.is_some())
     }
 
     /// Record stored output and return the active layer's scheduled update.
@@ -611,7 +648,11 @@ impl ControlRuntime {
 
     /// Return whether the runtime currently permits output attempts.
     pub fn controlling(&self) -> bool {
-        self.lifecycle == Lifecycle::Running && self.available() && self.preview_entry.is_none()
+        match self.lifecycle {
+            Lifecycle::Running => self.available() && self.preview_entry.is_none(),
+            Lifecycle::Suspended => false,
+            Lifecycle::Exited => self.output.has_target(),
+        }
     }
 
     /// Return the active scheduling state.

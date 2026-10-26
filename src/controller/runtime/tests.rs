@@ -505,7 +505,7 @@ fn configuration_error_prevents_control_preview_and_new_manual_suppression() {
             .expect("manual request"),
         ManualOutcome::Unavailable
     );
-    runtime.exit(time(0));
+    runtime.exit(ExitKind::Quit, time(0)).expect("exit");
     assert!(!runtime.controlling());
     assert!(runtime.logical_deadline(time(0)).expect("exited").is_none());
 }

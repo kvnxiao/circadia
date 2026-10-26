@@ -10,6 +10,7 @@ use crate::ControllerSnapshot;
 use crate::ControllerWorker;
 use crate::DesktopEvent;
 use crate::ExistingInstance;
+use crate::ExitKind;
 use crate::Field;
 use crate::FieldValue;
 use crate::ForegroundEvents;
@@ -242,8 +243,8 @@ struct Runtime {
 }
 
 impl Runtime {
-    fn shutdown(self) -> io::Result<()> {
-        let requested = self.controller.client().request_exit();
+    fn shutdown(self, kind: ExitKind) -> io::Result<()> {
+        let requested = self.controller.client().request_exit(kind);
         let controller = self.controller.shutdown();
         let native = controller.native.map_or(Ok(()), |exit| {
             exit.preview.and(exit.off).map_err(io::Error::other)
@@ -330,7 +331,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        finish_runtime(&self.runtime, &self.result);
+        finish_runtime(&self.runtime, &self.result, ExitKind::Quit);
     }
 }
 
@@ -345,16 +346,20 @@ fn end_session(
     if let Ok(mut configuration) = configuration.try_borrow_mut() {
         configuration.exit();
     }
-    finish_runtime(runtime, result);
+    finish_runtime(runtime, result, ExitKind::SessionEnd);
 }
 
-fn finish_runtime(runtime: &RefCell<Option<Runtime>>, result: &RefCell<Option<io::Error>>) {
+fn finish_runtime(
+    runtime: &RefCell<Option<Runtime>>,
+    result: &RefCell<Option<io::Error>>,
+    kind: ExitKind,
+) {
     if let Err(error) = crate::platform::picker::cancel() {
         result.borrow_mut().get_or_insert(error);
     }
     let ending = runtime.borrow_mut().take();
     if let Some(ending) = ending
-        && let Err(error) = ending.shutdown()
+        && let Err(error) = ending.shutdown(kind)
     {
         result.borrow_mut().get_or_insert(error);
     }
@@ -407,22 +412,22 @@ impl Application for Desktop {
     }
 
     fn update(&mut self, message: Message, context: &ApplicationContext<Self>) {
-        if self.exiting && !matches!(message, Message::Opened | Message::Closed) {
+        if self.exiting
+            && !matches!(
+                message,
+                Message::Opened | Message::Closed | Message::Native(DesktopEvent::WorkerChanged)
+            )
+        {
             return;
         }
         match message {
             Message::Start => self.start(context),
             Message::Open => self.open_settings(context),
             Message::Opened => self.set_settings_open(true),
-            Message::Closed => {
-                self.settings_closed();
-                if self.exiting {
-                    context.exit();
-                }
-            }
+            Message::Closed => self.settings_closed(),
             Message::Edit(edits) => self.edit(edits),
             Message::Write => self.configuration.borrow_mut().write(),
-            Message::Command(command) => self.command(command, context),
+            Message::Command(command) => self.command(command),
             Message::Native(event) => self.native_event(event, context),
             Message::Menu(key) => self.menu(&key, context),
         }
@@ -430,10 +435,12 @@ impl Application for Desktop {
             if let Some(session) = &self.session {
                 session.result.borrow_mut().get_or_insert(error);
             }
-            self.quit(context);
+            self.quit();
         }
         if !self.exiting {
             self.flush();
+        } else if self.exit_ready() {
+            context.exit();
         }
     }
 
@@ -543,7 +550,7 @@ impl Desktop {
             }
             Err(error) => {
                 result.borrow_mut().get_or_insert(error);
-                self.quit(context);
+                self.quit();
             }
         }
     }
@@ -565,9 +572,9 @@ impl Desktop {
         }
     }
 
-    fn command(&mut self, command: settings::Command, context: &ApplicationContext<Self>) {
+    fn command(&mut self, command: settings::Command) {
         match command {
-            settings::Command::Quit => self.quit(context),
+            settings::Command::Quit => self.quit(),
             settings::Command::Reset => {
                 let config = self.configuration.borrow_mut().reset();
                 self.configure(Some(config));
@@ -678,7 +685,7 @@ impl Desktop {
     fn menu(&mut self, key: &Key, context: &ApplicationContext<Self>) {
         match key.as_str() {
             Some("settings") => self.open_settings(context),
-            Some("quit") => self.quit(context),
+            Some("quit") => self.quit(),
             Some("manual-start") => self.queue(ControllerCommand::Manual(ManualCommand::Start)),
             Some("manual-stop") => self.queue(ControllerCommand::Manual(ManualCommand::Stop)),
             Some(key) => {
@@ -747,7 +754,7 @@ impl Desktop {
                     )));
                 }
             }
-            DesktopEvent::SessionEnded => self.quit(context),
+            DesktopEvent::SessionEnded => self.quit(),
         }
     }
 
@@ -771,23 +778,31 @@ impl Desktop {
         self.exiting = true;
         self.pending.clear();
         if let Some(session) = &self.session
-            && let Err(error) = session.client.request_exit()
+            && let Err(error) = session.client.request_exit(ExitKind::Quit)
         {
             session.result.borrow_mut().get_or_insert(error);
         }
     }
 
-    fn quit(&mut self, context: &ApplicationContext<Self>) {
+    fn quit(&mut self) {
         if let Err(error) = crate::platform::picker::cancel()
             && let Some(session) = &self.session
         {
             session.result.borrow_mut().get_or_insert(error);
         }
         self.begin_exit();
+    }
+
+    fn exit_ready(&self) -> bool {
         // An open dialog must close before its native scheduler is dropped.
-        if !self.settings_open {
-            context.exit();
-        }
+        // Dropping the session joins the controller, so waiting for it to
+        // finish keeps this thread answering Windows messages during
+        // the exit fade.
+        !self.settings_open
+            && self
+                .session
+                .as_ref()
+                .is_none_or(|session| session.client.is_finished())
     }
 }
 
@@ -1335,6 +1350,16 @@ mod tests {
         assert!(desktop.exiting);
         let saved = saved(&directory).expect("written file");
         assert!(saved.contains("wake = \"06:00\""), "{saved}");
+    }
+
+    #[test]
+    fn exit_waits_for_open_settings_to_close() {
+        let (_directory, mut desktop) = desktop_with(None);
+        desktop.set_settings_open(true);
+        desktop.begin_exit();
+        assert!(!desktop.exit_ready());
+        desktop.settings_closed();
+        assert!(desktop.exit_ready());
     }
 
     fn panic_with_controller(directory: &Path, controller_thread: bool) {
