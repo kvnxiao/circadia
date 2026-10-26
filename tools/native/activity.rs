@@ -131,7 +131,10 @@ fn exercise(
     )?;
     advance(activity, time)?;
     input.bedtime = "00:30".into();
-    input.suppression = vec!["activity-game.exe".into()];
+    input.suppression = vec![circadia::AppEntry::new(
+        "activity-game.exe",
+        "activity-game.exe",
+    )];
     configure(activity, directory, &input)?;
     time = advance(activity, shifted(time, Duration::from_millis(100))?)?.now;
     wait_temperature(native, 6500)?;
@@ -331,7 +334,10 @@ fn automatic(
     time: &mut RuntimeTime,
 ) -> io::Result<()> {
     activity.mark("controlled-automatic-suppression-start");
-    let foreground = Foreground::Application("activity-game.exe".into());
+    let foreground = Foreground::Application {
+        executable: "activity-game.exe".into(),
+        path: std::path::PathBuf::from("activity-game.exe"),
+    };
     activity.set_foreground(foreground.clone())?;
     command(activity, ControllerCommand::Foreground(foreground))?;
     *time = advance(activity, shifted(*time, Duration::from_millis(100))?)?.now;

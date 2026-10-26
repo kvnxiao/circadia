@@ -7,6 +7,7 @@ use crate::ui::configuration::Configuration;
 use crate::ui::settings::Model;
 use crate::ui::settings::number_edits;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 
 #[test]
 fn a_slider_moved_to_2405_k_applies_2410_k() {
@@ -24,10 +25,10 @@ fn an_empty_kelvin_field_commit_sends_no_edit() {
 #[test]
 fn a_kelvin_field_commit_of_1100_applies_1200_k_to_both_controls() {
     let directory = tempfile::tempdir().expect("temporary data folder");
-    let mut configuration = Configuration::load(directory.path());
+    let mut configuration = Configuration::load(directory.path(), "circadia.exe");
     let edits = number_edits(Field::SleepKelvin, Some(1100.0)).expect("a committed value");
     assert!(configuration.edit(edits).is_some());
-    let model = Model::new(&configuration, None, false, String::new());
+    let model = Model::new(&configuration, None, false, String::new(), &BTreeMap::new());
     assert_eq!(model.number(Field::SleepKelvin), 1200);
     assert_eq!(
         model.config().value(Field::SleepKelvin),
@@ -38,7 +39,10 @@ fn a_kelvin_field_commit_of_1100_applies_1200_k_to_both_controls() {
 #[test]
 fn restore_recommended_colors_sends_one_configure_with_the_default_temperatures() {
     let directory = tempfile::tempdir().expect("temporary data folder");
-    let configuration = Rc::new(RefCell::new(Configuration::load(directory.path())));
+    let configuration = Rc::new(RefCell::new(Configuration::load(
+        directory.path(),
+        "circadia.exe",
+    )));
     let mut desktop = Desktop::new(
         Rc::clone(&configuration),
         None,
@@ -86,7 +90,10 @@ fn english() -> Text {
 }
 
 fn desktop(directory: &tempfile::TempDir) -> (Rc<RefCell<Configuration>>, Desktop) {
-    let configuration = Rc::new(RefCell::new(Configuration::load(directory.path())));
+    let configuration = Rc::new(RefCell::new(Configuration::load(
+        directory.path(),
+        "circadia.exe",
+    )));
     let desktop = Desktop::new(
         Rc::clone(&configuration),
         None,
@@ -134,7 +141,13 @@ fn the_switch_stays_locked_until_the_controller_applies_and_finishes_turning_on(
     let directory = tempfile::tempdir().expect("temporary data folder");
     let (configuration, mut desktop) = desktop(&directory);
     desktop.edit(switch_edit(true));
-    let mut model = Model::new(&configuration.borrow(), None, false, String::new());
+    let mut model = Model::new(
+        &configuration.borrow(),
+        None,
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    );
     let text = english();
     model.management = ManagementState::Off;
     model.applied = Some(false);
@@ -160,7 +173,13 @@ fn a_launch_with_management_on_locks_the_switch_until_startup_completes_or_waits
     .expect("configuration file");
     let (configuration, _desktop) = desktop(&directory);
     let text = english();
-    let mut model = Model::new(&configuration.borrow(), None, false, String::new());
+    let mut model = Model::new(
+        &configuration.borrow(),
+        None,
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    );
     assert_eq!(management_view(&model, &text), locked("Turning on…"));
     model.management = ManagementState::TurningOn;
     assert_eq!(management_view(&model, &text), locked("Turning on…"));
@@ -180,7 +199,13 @@ fn turning_off_locks_the_switch_until_the_controller_reports_off() {
     };
     assert!(!config.input().manage_night_light);
     let text = english();
-    let mut model = Model::new(&configuration.borrow(), None, false, String::new());
+    let mut model = Model::new(
+        &configuration.borrow(),
+        None,
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    );
     model.management = ManagementState::On;
     model.applied = Some(true);
     assert_eq!(management_view(&model, &text), locked("Turning off…"));
@@ -197,7 +222,13 @@ fn a_configuration_error_disables_the_switch_without_a_change_line() {
     fs_err::write(directory.path().join("config.toml"), "wake = [").expect("invalid file");
     fs_err::write(directory.path().join("config.backup.toml"), "wake = [").expect("invalid file");
     let (configuration, _desktop) = desktop(&directory);
-    let model = Model::new(&configuration.borrow(), None, false, String::new());
+    let model = Model::new(
+        &configuration.borrow(),
+        None,
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    );
     assert_eq!(
         management_view(&model, &english()),
         ManagementView {
@@ -217,7 +248,7 @@ fn plain(text: &str) -> String {
 }
 
 fn managing(configuration: &Configuration) -> Model {
-    let mut model = Model::new(configuration, None, false, String::new());
+    let mut model = Model::new(configuration, None, false, String::new(), &BTreeMap::new());
     model.management = ManagementState::On;
     model.applied = Some(model.managing());
     model.scheduling = crate::SchedulingState::Available;
@@ -225,7 +256,7 @@ fn managing(configuration: &Configuration) -> Model {
 }
 
 fn managed_configuration(directory: &tempfile::TempDir) -> Configuration {
-    let mut configuration = Configuration::load(directory.path());
+    let mut configuration = Configuration::load(directory.path(), "circadia.exe");
     assert!(configuration.edit(switch_edit(true)).is_some());
     configuration
 }
@@ -265,7 +296,13 @@ fn preview_is_ready_while_management_is_on_and_every_field_is_valid() {
 fn preview_cannot_start_while_management_is_off_and_says_why() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let (configuration, _desktop) = desktop(&directory);
-    let mut model = Model::new(&configuration.borrow(), None, false, String::new());
+    let mut model = Model::new(
+        &configuration.borrow(),
+        None,
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    );
     model.management = ManagementState::Off;
     model.scheduling = crate::SchedulingState::Available;
     assert_eq!(
@@ -306,7 +343,7 @@ fn a_loaded_bedtime_mark_with_saving_paused_leaves_preview_available() {
     document.insert("bedtime".into(), "25:00".into());
     fs_err::write(directory.path().join("config.toml"), document.to_string())
         .expect("configuration file");
-    let configuration = Configuration::load(directory.path());
+    let configuration = Configuration::load(directory.path(), "circadia.exe");
     assert!(configuration.paused());
     let model = managing(&configuration);
     assert_eq!(preview_reason(&model), (true, READY.to_owned()));

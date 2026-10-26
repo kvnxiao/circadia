@@ -427,7 +427,7 @@ impl ControlRuntime {
         foreground: &Foreground,
         now: RuntimeTime,
     ) -> Result<(), ControlError> {
-        self.foreground.observe(foreground);
+        self.foreground.observe(foreground, now.uptime);
         let Some(config) = &self.config else {
             record_foreground(foreground, None);
             return Ok(());
@@ -588,7 +588,7 @@ impl ControlRuntime {
         self.suppression.suspend(now.uptime);
         self.output.stop();
         self.output.request_refresh();
-        self.foreground.observe(foreground);
+        self.foreground.observe(foreground, now.uptime);
         let Some(config) = &self.config else {
             record_foreground(foreground, None);
             return Ok(None);
@@ -812,7 +812,7 @@ fn record_foreground(foreground: &Foreground, focus: Option<Focus>) {
     let executable = match foreground {
         Foreground::Unknown => "unknown",
         Foreground::Shell => "shell",
-        Foreground::Application(name) => name,
+        Foreground::Application { executable, .. } => executable,
     };
     let decision = focus.map(|focus| match focus {
         Focus::Matching => "suppress",

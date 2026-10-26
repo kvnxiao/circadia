@@ -4,6 +4,7 @@ use crate::l10n::LanguageTag;
 use crate::ui::Desktop;
 use crate::ui::configuration::Configuration;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 fn english() -> Text {
@@ -28,7 +29,10 @@ fn the_language_list_offers_windows_then_each_shipped_language_under_its_own_nam
 #[test]
 fn selecting_a_language_sends_one_configure_and_asks_for_a_restart_in_the_current_language() {
     let directory = tempfile::tempdir().expect("temporary data folder");
-    let configuration = Rc::new(RefCell::new(Configuration::load(directory.path())));
+    let configuration = Rc::new(RefCell::new(Configuration::load(
+        directory.path(),
+        "circadia.exe",
+    )));
     let mut desktop = Desktop::new(
         Rc::clone(&configuration),
         None,
@@ -38,7 +42,7 @@ fn selecting_a_language_sends_one_configure_and_asks_for_a_restart_in_the_curren
     let text = english();
     let prompt = |configuration: &Configuration| {
         restart_prompt(
-            &Model::new(configuration, None, false, String::new()),
+            &Model::new(configuration, None, false, String::new(), &BTreeMap::new()),
             &text,
         )
     };
@@ -85,7 +89,10 @@ impl SignInFixture {
         let registration = FakeRegistration::default();
         registration.0.borrow_mut().effective = effective;
         let desktop = Desktop::new(
-            Rc::new(RefCell::new(Configuration::load(directory.path()))),
+            Rc::new(RefCell::new(Configuration::load(
+                directory.path(),
+                "circadia.exe",
+            ))),
             None,
             directory.path().to_owned(),
             Box::new(registration.clone()),
@@ -327,7 +334,7 @@ fn start_minimized_changes_only_the_next_launch() {
     assert_eq!(fixture.desktop.pending.len(), 1);
     assert_eq!(fixture.sets(), Vec::<bool>::new());
     fixture.desktop.configuration.borrow_mut().write();
-    let relaunched = Configuration::load(fixture.directory.path());
+    let relaunched = Configuration::load(fixture.directory.path(), "circadia.exe");
     assert!(relaunched.opens_settings_at_launch());
 }
 
@@ -392,7 +399,10 @@ fn startup_state_read_failures_log_once_and_recover_once_under_their_own_operati
 #[test]
 fn the_night_light_card_shows_the_current_management_state() {
     let directory = tempfile::tempdir().expect("temporary data folder");
-    let configuration = Rc::new(RefCell::new(Configuration::load(directory.path())));
+    let configuration = Rc::new(RefCell::new(Configuration::load(
+        directory.path(),
+        "circadia.exe",
+    )));
     let mut desktop = Desktop::new(
         Rc::clone(&configuration),
         None,
@@ -401,7 +411,13 @@ fn the_night_light_card_shows_the_current_management_state() {
     );
     let text = english();
     let label = |management| {
-        let mut model = Model::new(&configuration.borrow(), None, false, String::new());
+        let mut model = Model::new(
+            &configuration.borrow(),
+            None,
+            false,
+            String::new(),
+            &BTreeMap::new(),
+        );
         model.management = management;
         management_label(&model, &text)
     };

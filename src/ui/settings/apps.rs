@@ -1,36 +1,113 @@
 use super::Command;
 use super::Message;
 use super::Model;
+use super::NumberControls;
+use super::Page;
 use super::Settings;
 use super::problems;
 use super::widgets;
 use super::widgets::Row;
+use crate::AppEntry;
+use crate::EntryProblem;
+use crate::Field;
+use crate::FieldErrorKind;
 use crate::ManualCommand;
+use crate::entry_problems;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
+use crate::ui::file_info::AppFile;
 use crate::ui::status;
+use std::collections::BTreeSet;
+use std::time::Duration;
+use windows_reactor::Border;
 use windows_reactor::Button;
+use windows_reactor::ButtonStyle;
+use windows_reactor::CheckBox;
+use windows_reactor::ContentDialog;
+use windows_reactor::ContentDialogButton;
+use windows_reactor::ContentDialogExt;
 use windows_reactor::FontIcon;
+use windows_reactor::Grid;
+use windows_reactor::GridLength;
+use windows_reactor::HorizontalAlignment;
 use windows_reactor::Orientation;
 use windows_reactor::StackPanel;
+use windows_reactor::ThemeBrush;
+use windows_reactor::Thickness;
+use windows_reactor::VerticalAlignment;
 use windows_reactor::View;
 use windows_reactor::ViewContext;
 
 const SUN_GLYPH: &str = "\u{E706}";
+const APP_GLYPH: &str = "\u{ECAA}";
+const ADD_GLYPH: &str = "\u{E710}";
+const COLLAPSE_GLYPH: &str = "\u{E70E}";
+pub(super) const MINUTE: Duration = Duration::from_mins(1);
 
 pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vec<View> {
-    let text = &settings.input.text;
-    let manual = manual_view(&settings.input.model, text, &settings.input.region);
-    vec![widgets::group(vec![widgets::card(
-        Row::new(
-            SUN_GLYPH,
-            text!(text, "manual-title"),
-            manual.description.clone(),
-        )
-        .controls(vec![manual_button(manual, context)])
-        .view(),
-    )])]
+    let model = &settings.input.model;
+    let (text, region) = (&settings.input.text, &settings.input.region);
+    let manual = manual_view(model, text, region);
+    let mut children = vec![
+        widgets::group(vec![
+            widgets::card(
+                Row::new(
+                    "\u{E7F4}",
+                    text!(text, "apps-explanation-title"),
+                    text!(
+                        text,
+                        "apps-explanation-description",
+                        kelvin = problems::kelvin(region, 6500)
+                    ),
+                )
+                .view(),
+            ),
+            widgets::card(
+                Row::new(
+                    SUN_GLYPH,
+                    text!(text, "manual-title"),
+                    manual.description.clone(),
+                )
+                .controls(vec![manual_button(manual, context)])
+                .view(),
+            ),
+        ]),
+        widgets::section(text!(text, "section-recent"), false),
+        recent_card(settings, context),
+        widgets::caption(text!(text, "recent-note"))
+            .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
+            .into(),
+        list_header(settings, context),
+    ];
+    children.extend(settings.feedback(Field::Suppression));
+    children.extend(suppression_cards(settings, context));
+    children.push(widgets::section(text!(text, "section-never"), false));
+    children.push(exclusions_card(settings, context));
+    children.push(widgets::section(text!(text, "section-timing"), false));
+    let delay = text!(text, "focus-delay-title");
+    children.push(widgets::card(
+        Row::new("\u{E916}", &delay, text!(text, "focus-delay-description"))
+            .controls(settings.with_feedback(
+                Field::FocusDelayMs,
+                settings.number_controls(
+                    NumberControls {
+                        field: Field::FocusDelayMs,
+                        id: "focus-delay",
+                        title: &delay,
+                        unit: text!(text, "milliseconds-unit"),
+                        slider: false,
+                    },
+                    context,
+                ),
+            ))
+            .view(),
+    ));
+    vec![
+        StackPanel::new()
+            .children(children)
+            .content_dialog(add_dialog(settings, context)),
+    ]
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -76,16 +153,731 @@ pub(super) fn manual_button(manual: ManualView, context: &ViewContext<'_, Settin
         .automation_id("manual-suppression")
         .automation_name(&manual.label)
         .on_click(context.message(Message::Command(Command::Manual(manual.command))))
+        .content(glyph_label(SUN_GLYPH, manual.label))
+        .into()
+}
+
+pub(super) fn relative_times_shown(page: Page, model: &Model) -> bool {
+    page == Page::Apps && !model.recent.is_empty()
+}
+
+pub(super) fn since(text: &Text, region: &RegionalFormat, elapsed: Duration) -> String {
+    let minutes = elapsed.as_secs() / MINUTE.as_secs();
+    let whole = |value: u64| problems::whole(region, i64::try_from(value).unwrap_or(i64::MAX));
+    match minutes {
+        0 => text!(text, "recent-now"),
+        1..60 => text!(text, "recent-minutes", minutes = whole(minutes)),
+        60..1440 => text!(text, "recent-hours", hours = whole(minutes / 60)),
+        _ => {
+            let days = minutes / 1440;
+            text!(text, "recent-days", count = days, days = whole(days))
+        }
+    }
+}
+
+fn display_name(model: &Model, executable: &str) -> String {
+    model
+        .names
+        .get(executable)
+        .cloned()
+        .unwrap_or_else(|| executable.to_owned())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct RecentRow {
+    pub(super) file: AppFile,
+    pub(super) name: String,
+    pub(super) detail: String,
+    pub(super) listed: Option<usize>,
+    pub(super) excluded: bool,
+}
+
+pub(super) fn recent_rows(
+    model: &Model,
+    text: &Text,
+    region: &RegionalFormat,
+    now: Duration,
+) -> Vec<RecentRow> {
+    let config = model.config();
+    model
+        .recent
+        .iter()
+        .map(|recent| RecentRow {
+            file: AppFile {
+                executable: recent.executable.clone(),
+                path: recent.path.clone(),
+            },
+            name: display_name(model, &recent.executable),
+            detail: text!(
+                text,
+                "recent-detail",
+                executable = recent.executable.as_str(),
+                since = since(text, region, recent.since_focus(now))
+            ),
+            listed: config
+                .entries(Field::Suppression)
+                .iter()
+                .position(|entry| entry.file_name().as_deref() == Some(recent.executable.as_str())),
+            excluded: config.is_excluded(&recent.executable, &model.running_executable),
+        })
+        .collect()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct EntryRow {
+    pub(super) index: usize,
+    pub(super) name: String,
+    pub(super) executable: String,
+    pub(super) inactive: bool,
+    pub(super) error: Option<String>,
+}
+
+pub(super) fn entry_rows(model: &Model, text: &Text, list: Field) -> Vec<EntryRow> {
+    let config = model.config();
+    let entries = config.entries(list);
+    entries
+        .iter()
+        .zip(entry_problems(entries))
+        .enumerate()
+        .map(|(index, (entry, problem))| EntryRow {
+            index,
+            name: entry.display_name().to_owned(),
+            executable: entry.executable.clone(),
+            inactive: list == Field::Suppression
+                && entry
+                    .file_name()
+                    .is_some_and(|name| config.is_excluded(&name, &model.running_executable)),
+            error: problem.map(|problem| match problem {
+                EntryProblem::Invalid => text!(text, "entry-invalid"),
+                EntryProblem::Duplicate => text!(
+                    text,
+                    "entry-duplicate",
+                    executable = entry.executable.as_str()
+                ),
+            }),
+        })
+        .collect()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct FixedRow {
+    pub(super) executable: String,
+    pub(super) description: String,
+}
+
+pub(super) fn fixed_rows(model: &Model, text: &Text) -> Vec<FixedRow> {
+    vec![
+        FixedRow {
+            executable: model.running_executable.clone(),
+            description: text!(text, "fixed-self"),
+        },
+        FixedRow {
+            executable: crate::config::SHARED_HOST.to_owned(),
+            description: text!(text, "fixed-host"),
+        },
+    ]
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct AddDialog {
+    pub(super) list: Field,
+    chosen: BTreeSet<String>,
+    browsed: Vec<AppFile>,
+    problem: Option<(String, FieldErrorKind)>,
+}
+
+impl AddDialog {
+    pub(super) fn new(list: Field) -> Self {
+        Self {
+            list,
+            chosen: BTreeSet::new(),
+            browsed: Vec::new(),
+            problem: None,
+        }
+    }
+
+    pub(super) fn choose(&mut self, executable: &str, checked: bool) {
+        if checked {
+            self.chosen.insert(executable.to_owned());
+        } else {
+            self.chosen.remove(executable);
+        }
+    }
+
+    pub(super) fn browsed(&mut self, model: &Model, file: AppFile) -> bool {
+        let entry = AppEntry::new(file.executable.clone(), file.executable.clone());
+        let added = model
+            .config()
+            .add_entries(self.list, [entry], &model.running_executable);
+        if let Err(kind) = added {
+            self.problem = Some((file.executable, kind));
+            return false;
+        }
+        self.problem = None;
+        self.chosen.insert(file.executable.clone());
+        if !self
+            .browsed
+            .iter()
+            .any(|browsed| browsed.executable == file.executable)
+        {
+            self.browsed.push(file);
+        }
+        true
+    }
+
+    pub(super) fn candidates(&self, model: &Model) -> Vec<AppFile> {
+        let config = model.config();
+        let entries = config.entries(self.list);
+        let mut candidates: Vec<AppFile> = Vec::new();
+        let recent = model.recent.iter().map(|recent| AppFile {
+            executable: recent.executable.clone(),
+            path: recent.path.clone(),
+        });
+        for file in recent.chain(self.browsed.iter().cloned()) {
+            let listed = entries
+                .iter()
+                .any(|entry| entry.executable.to_lowercase() == file.executable);
+            let shown = candidates
+                .iter()
+                .any(|candidate| candidate.executable == file.executable);
+            if !listed && !shown {
+                candidates.push(file);
+            }
+        }
+        candidates
+    }
+
+    pub(super) fn files(&self, model: &Model) -> Vec<AppFile> {
+        self.candidates(model)
+            .into_iter()
+            .filter(|file| self.chosen.contains(&file.executable))
+            .collect()
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct DialogRow {
+    pub(super) executable: String,
+    pub(super) name: String,
+    pub(super) checked: bool,
+    pub(super) browsed: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct DialogView {
+    pub(super) title: String,
+    pub(super) description: String,
+    pub(super) rows: Vec<DialogRow>,
+    pub(super) primary: String,
+    pub(super) primary_enabled: bool,
+    pub(super) message: Option<String>,
+}
+
+pub(super) fn dialog_view(
+    model: &Model,
+    text: &Text,
+    region: &RegionalFormat,
+    dialog: &AddDialog,
+) -> DialogView {
+    let count = dialog.files(model).len();
+    let apps = problems::whole(region, i64::try_from(count).unwrap_or(i64::MAX));
+    let exclusion = dialog.list == Field::Exclusions;
+    DialogView {
+        title: if exclusion {
+            text!(text, "dialog-exclude-title")
+        } else {
+            text!(text, "dialog-add-title")
+        },
+        description: if exclusion {
+            text!(text, "dialog-exclude-description")
+        } else {
+            text!(text, "dialog-add-description")
+        },
+        rows: dialog
+            .candidates(model)
+            .into_iter()
+            .map(|file| DialogRow {
+                name: display_name(model, &file.executable),
+                checked: dialog.chosen.contains(&file.executable),
+                browsed: !model
+                    .recent
+                    .iter()
+                    .any(|recent| recent.executable == file.executable),
+                executable: file.executable,
+            })
+            .collect(),
+        primary: if exclusion {
+            text!(text, "dialog-exclude", count = count, apps = apps.as_str())
+        } else {
+            text!(text, "dialog-add", count = count, apps = apps.as_str())
+        },
+        primary_enabled: count > 0,
+        message: dialog
+            .problem
+            .as_ref()
+            .and_then(|(executable, kind)| match kind {
+                FieldErrorKind::AlreadyListed => Some(text!(
+                    text,
+                    "dialog-already-listed",
+                    executable = executable.as_str()
+                )),
+                FieldErrorKind::FixedExclusion => Some(text!(
+                    text,
+                    "dialog-fixed",
+                    executable = executable.as_str()
+                )),
+                _ => None,
+            }),
+    }
+}
+
+fn glyph_label(glyph: &'static str, label: impl AsRef<str>) -> StackPanel {
+    StackPanel::new()
+        .orientation(Orientation::Horizontal)
+        .spacing(8.0)
+        .children((
+            FontIcon::new().glyph(glyph).font_size(16.0),
+            widgets::body(label),
+        ))
+}
+
+fn app_icon(size: f64) -> FontIcon {
+    FontIcon::new()
+        .glyph(APP_GLYPH)
+        .font_size(size)
+        .vertical_alignment(VerticalAlignment::Center)
+}
+
+fn app_row(name: &str, detail: Vec<View>, controls: Vec<View>, id: String) -> View {
+    Border::new()
+        .min_height(60.0)
+        .padding(Thickness::new(16.0, 10.0, 16.0, 10.0))
+        .automation_id(id)
         .content(
-            StackPanel::new()
-                .orientation(Orientation::Horizontal)
-                .spacing(8.0)
+            Grid::new()
+                .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                .column_spacing(16.0)
                 .children((
-                    FontIcon::new().glyph(SUN_GLYPH).font_size(16.0),
-                    widgets::body(manual.label),
+                    app_icon(32.0),
+                    StackPanel::new()
+                        .grid_column(1)
+                        .spacing(2.0)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .children(
+                            std::iter::once(widgets::body(name).into())
+                                .chain(detail)
+                                .collect::<Vec<View>>(),
+                        ),
+                    StackPanel::new()
+                        .grid_column(2)
+                        .orientation(Orientation::Horizontal)
+                        .spacing(12.0)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .children(controls),
                 )),
         )
         .into()
+}
+
+fn remove_button(
+    name: &str,
+    id: String,
+    enabled: bool,
+    remove: windows_reactor::Callback<()>,
+) -> Button {
+    Button::new()
+        .style(ButtonStyle::Subtle)
+        .width(32.0)
+        .height(32.0)
+        .is_enabled(enabled)
+        .automation_id(id)
+        .automation_name(name)
+        .content(FontIcon::new().glyph("\u{E74D}").font_size(16.0))
+        .on_click(remove)
+}
+
+fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
+    let model = &settings.input.model;
+    let (text, region) = (&settings.input.text, &settings.input.region);
+    let editable = model.editable();
+    let rows = recent_rows(model, text, region, crate::elapsed_since_boot());
+    if rows.is_empty() {
+        return widgets::card(
+            Border::new()
+                .padding(Thickness::new(16.0, 12.0, 16.0, 12.0))
+                .content(widgets::caption(text!(text, "recent-empty"))),
+        );
+    }
+    let views: Vec<View> = rows
+        .into_iter()
+        .enumerate()
+        .map(|(position, row)| {
+            let executable = row.file.executable.clone();
+            let mut controls: Vec<View> = Vec::new();
+            if row.excluded {
+                controls.push(
+                    widgets::caption(text!(text, "recent-excluded"))
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .into(),
+                );
+            }
+            if let Some(index) = row.listed {
+                controls.push(
+                    StackPanel::new()
+                        .orientation(Orientation::Horizontal)
+                        .spacing(4.0)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .children((
+                            FontIcon::new().glyph("\u{E73E}").font_size(12.0),
+                            widgets::caption(text!(text, "recent-on-list")),
+                        ))
+                        .into(),
+                );
+                controls.push(
+                    Button::new()
+                        .is_enabled(editable)
+                        .automation_id(format!("recent-remove:{executable}"))
+                        .automation_name(text!(
+                            text,
+                            "recent-remove-name",
+                            name = row.name.as_str()
+                        ))
+                        .on_click(context.message(Message::Command(Command::Remove(
+                            Field::Suppression,
+                            index,
+                            row.file.executable.clone(),
+                        ))))
+                        .content(text!(text, "recent-remove"))
+                        .into(),
+                );
+            } else {
+                controls.push(
+                    Button::new()
+                        .is_enabled(editable)
+                        .automation_id(format!("recent-add:{executable}"))
+                        .automation_name(text!(text, "recent-add-name", name = row.name.as_str()))
+                        .on_click(context.message(Message::Command(Command::Add(
+                            Field::Suppression,
+                            vec![row.file.clone()],
+                        ))))
+                        .content(glyph_label(ADD_GLYPH, text!(text, "recent-add")))
+                        .into(),
+                );
+            }
+            let row_view = app_row(
+                &row.name,
+                vec![widgets::caption(&row.detail).into()],
+                controls,
+                format!("recent:{executable}"),
+            );
+            divided(row_view, position > 0)
+        })
+        .collect();
+    widgets::card(StackPanel::new().children(views))
+}
+
+fn divided(view: View, divider: bool) -> View {
+    Border::new()
+        .border_brush(ThemeBrush::CardStroke)
+        .border_thickness(Thickness::new(
+            0.0,
+            if divider { 1.0 } else { 0.0 },
+            0.0,
+            0.0,
+        ))
+        .content(view)
+        .into()
+}
+
+fn list_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
+    let text = &settings.input.text;
+    let count = settings
+        .input
+        .model
+        .config()
+        .entries(Field::Suppression)
+        .len();
+    Grid::new()
+        .columns([GridLength::STAR, GridLength::Auto])
+        .margin(Thickness::new(0.0, 28.0, 0.0, 8.0))
+        .children((
+            widgets::strong(text!(text, "section-suppression", count = count))
+                .vertical_alignment(VerticalAlignment::Center),
+            Button::new()
+                .grid_column(1)
+                .style(ButtonStyle::Accent)
+                .is_enabled(settings.input.model.editable())
+                .automation_id("add-app")
+                .automation_name(text!(text, "add-app"))
+                .on_click(context.message(Message::OpenDialog(Field::Suppression)))
+                .content(glyph_label(ADD_GLYPH, text!(text, "add-app"))),
+        ))
+        .into()
+}
+
+fn entry_card(row: &EntryRow, text: &Text, controls: Vec<View>, id: String) -> View {
+    let mut detail: Vec<View> = vec![widgets::caption(&row.executable).into()];
+    if row.inactive {
+        detail.push(widgets::caption(text!(text, "entry-inactive")).into());
+    }
+    if let Some(error) = &row.error {
+        detail.push(widgets::field_error(error, &format!("{id}-message")));
+    }
+    let border = if row.error.is_some() {
+        ThemeBrush::SystemCritical
+    } else {
+        ThemeBrush::CardStroke
+    };
+    Border::new()
+        .background(ThemeBrush::CardBackground)
+        .border_brush(border)
+        .border_thickness(1.0)
+        .corner_radius(4.0)
+        .content(app_row(&row.name, detail, controls, id))
+        .into()
+}
+
+fn suppression_cards(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vec<View> {
+    let model = &settings.input.model;
+    let text = &settings.input.text;
+    let rows = entry_rows(model, text, Field::Suppression);
+    if rows.is_empty() {
+        return vec![widgets::card(
+            Row::new(
+                APP_GLYPH,
+                text!(text, "list-empty-title"),
+                text!(text, "list-empty-description"),
+            )
+            .view(),
+        )];
+    }
+    let cards = rows
+        .iter()
+        .map(|row| {
+            let id = format!("suppression-{}", row.index);
+            let remove = remove_button(
+                &text!(text, "entry-remove-name", name = row.name.as_str()),
+                format!("{id}-remove"),
+                model.editable(),
+                context.message(Message::Command(Command::Remove(
+                    Field::Suppression,
+                    row.index,
+                    row.executable.clone(),
+                ))),
+            );
+            entry_card(row, text, vec![remove.into()], id)
+        })
+        .collect();
+    vec![widgets::group(cards)]
+}
+
+fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
+    let model = &settings.input.model;
+    let text = &settings.input.text;
+    let rows = entry_rows(model, text, Field::Exclusions);
+    let held = rows.iter().any(|row| row.error.is_some())
+        || model.report.marks.contains_key(&Field::Exclusions);
+    let expanded = settings.exclusions_expanded || held;
+    let (expand_glyph, expand_name) = if held {
+        (COLLAPSE_GLYPH, text!(text, "exclusions-held"))
+    } else if expanded {
+        (COLLAPSE_GLYPH, text!(text, "exclusions-collapse"))
+    } else {
+        ("\u{E70D}", text!(text, "exclusions-expand"))
+    };
+    let header = Row::new(
+        "\u{E733}",
+        text!(text, "exclusions-title"),
+        text!(text, "exclusions-description"),
+    )
+    .controls(vec![
+        StackPanel::new()
+            .orientation(Orientation::Horizontal)
+            .spacing(12.0)
+            .children((
+                Button::new()
+                    .is_enabled(model.editable())
+                    .automation_id("add-exclusion")
+                    .on_click(context.message(Message::OpenDialog(Field::Exclusions)))
+                    .content(text!(text, "add-exclusion")),
+                Button::new()
+                    .style(ButtonStyle::Subtle)
+                    .width(32.0)
+                    .height(32.0)
+                    .is_enabled(!held)
+                    .automation_id("exclusions-expand")
+                    .automation_name(expand_name)
+                    .on_click(context.message(Message::Expand(!expanded)))
+                    .content(FontIcon::new().glyph(expand_glyph).font_size(12.0)),
+            ))
+            .into(),
+    ])
+    .view();
+    let mut children: Vec<View> = vec![header];
+    children.extend(settings.feedback(Field::Exclusions));
+    if expanded {
+        children.extend(fixed_rows(model, text).into_iter().map(|row| {
+            nested_app_row(
+                &row.executable,
+                widgets::caption(&row.description).into(),
+                FontIcon::new()
+                    .glyph("\u{E72E}")
+                    .font_size(16.0)
+                    .automation_name(text!(text, "fixed-locked"))
+                    .into(),
+                format!("fixed:{}", row.executable.to_lowercase()),
+            )
+        }));
+        children.extend(rows.iter().map(|row| {
+            let id = format!("exclusion-{}", row.index);
+            let mut detail: Vec<View> = vec![widgets::caption(&row.executable).into()];
+            if let Some(error) = &row.error {
+                detail.push(widgets::field_error(error, &format!("{id}-message")));
+            }
+            nested_app_row(
+                &row.name,
+                StackPanel::new().spacing(2.0).children(detail).into(),
+                remove_button(
+                    &text!(text, "entry-remove-name", name = row.name.as_str()),
+                    format!("{id}-remove"),
+                    model.editable(),
+                    context.message(Message::Command(Command::Remove(
+                        Field::Exclusions,
+                        row.index,
+                        row.executable.clone(),
+                    ))),
+                )
+                .into(),
+                id,
+            )
+        }));
+        if rows.is_empty() {
+            children.push(
+                Border::new()
+                    .padding(Thickness::new(52.0, 10.0, 16.0, 10.0))
+                    .border_brush(ThemeBrush::CardStroke)
+                    .border_thickness(Thickness::new(0.0, 1.0, 0.0, 0.0))
+                    .content(widgets::caption(text!(text, "exclusions-empty")))
+                    .into(),
+            );
+        }
+    }
+    widgets::card(StackPanel::new().children(children))
+}
+
+fn nested_app_row(name: &str, detail: View, action: View, id: String) -> View {
+    Border::new()
+        .min_height(56.0)
+        .padding(Thickness::new(52.0, 10.0, 16.0, 10.0))
+        .border_brush(ThemeBrush::CardStroke)
+        .border_thickness(Thickness::new(0.0, 1.0, 0.0, 0.0))
+        .automation_id(id)
+        .content(
+            Grid::new()
+                .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                .column_spacing(12.0)
+                .children((
+                    app_icon(32.0),
+                    StackPanel::new()
+                        .grid_column(1)
+                        .spacing(2.0)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .children((widgets::body(name), detail)),
+                    Border::new()
+                        .grid_column(2)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .content(action),
+                )),
+        )
+        .into()
+}
+
+fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> ContentDialog {
+    let model = &settings.input.model;
+    let (text, region) = (&settings.input.text, &settings.input.region);
+    let dialog = ContentDialog::new()
+        .close_button_text(text!(text, "dialog-cancel"))
+        .default_button(ContentDialogButton::Primary)
+        .is_open(settings.dialog.is_some())
+        .on_closed(context.callback(Message::DialogClosed));
+    let Some(state) = &settings.dialog else {
+        return dialog;
+    };
+    let view = dialog_view(model, text, region, state);
+    let choice = |row: DialogRow| -> View {
+        let executable = row.executable.clone();
+        CheckBox::new()
+            .is_checked(row.checked)
+            .automation_id(format!("dialog-choice:{}", row.executable))
+            .automation_name(text!(
+                text,
+                "app-entry-name",
+                name = row.name.as_str(),
+                executable = row.executable.as_str()
+            ))
+            .on_is_checked_changed(context.callback(move |checked: Option<bool>| {
+                Message::Choose(executable.clone(), checked == Some(true))
+            }))
+            .content(
+                Grid::new()
+                    .columns([GridLength::Auto, GridLength::STAR])
+                    .column_spacing(14.0)
+                    .children((
+                        app_icon(28.0),
+                        StackPanel::new().grid_column(1).children((
+                            widgets::body(&row.name),
+                            widgets::caption(&row.executable),
+                        )),
+                    )),
+            )
+            .into()
+    };
+    let (browsed, recent): (Vec<DialogRow>, Vec<DialogRow>) =
+        view.rows.into_iter().partition(|row| row.browsed);
+    let rows: Vec<View> = if recent.is_empty() {
+        vec![widgets::caption(text!(text, "dialog-all-listed")).into()]
+    } else {
+        recent.into_iter().map(choice).collect()
+    };
+    let mut browse: Vec<View> = vec![
+        widgets::body(text!(text, "dialog-file-title")).into(),
+        widgets::caption(text!(text, "dialog-file-description")).into(),
+        Button::new()
+            .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
+            .automation_id("dialog-browse")
+            .automation_name(text!(text, "dialog-browse"))
+            .on_click(context.message(Message::Browse))
+            .content(glyph_label("\u{E8B7}", text!(text, "dialog-browse")))
+            .into(),
+    ];
+    browse.extend(browsed.into_iter().map(choice));
+    if let Some(message) = view.message {
+        browse.push(
+            widgets::caption(message)
+                .margin(Thickness::new(0.0, 4.0, 0.0, 0.0))
+                .automation_id("dialog-message")
+                .automation_live_setting(windows_reactor::AutomationLiveSetting::Polite)
+                .into(),
+        );
+    }
+    dialog
+        .title(view.title)
+        .primary_button_text(view.primary)
+        .is_primary_button_enabled(view.primary_enabled)
+        .content(
+            StackPanel::new().spacing(16.0).max_width(472.0).children((
+                widgets::caption(view.description),
+                StackPanel::new().spacing(6.0).children((
+                    widgets::strong(text!(text, "dialog-recent")),
+                    StackPanel::new().spacing(2.0).children(rows),
+                )),
+                Border::new()
+                    .height(1.0)
+                    .background(ThemeBrush::CardStroke)
+                    .horizontal_alignment(HorizontalAlignment::Stretch),
+                StackPanel::new().spacing(2.0).children(browse),
+            )),
+        )
 }
 
 #[cfg(test)]

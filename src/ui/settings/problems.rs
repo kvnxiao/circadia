@@ -62,11 +62,16 @@ pub(super) fn page(field: Field) -> Page {
 }
 
 pub(super) fn marked_pages(model: &Model) -> BTreeSet<Page> {
+    let entries = model
+        .accepted
+        .as_ref()
+        .is_some_and(|config| config.has_entry_problems());
     model
         .errors
         .keys()
         .chain(model.report.marks.keys())
         .map(|field| page(*field))
+        .chain(entries.then_some(Page::Apps))
         .collect()
 }
 
@@ -124,7 +129,7 @@ pub(super) fn banners(
     if model.management.is_on() && output_failed(model) {
         banners.extend(native.take());
     }
-    if !model.report.marks.is_empty() {
+    if model.paused {
         banners.push(Banner {
             id: "banner-paused",
             severity: InfoBarSeverity::Error,
@@ -266,11 +271,7 @@ fn other_pages(
     lines.push(text!(
         text,
         "banner-invalid-note",
-        saving = if model.report.marks.is_empty() {
-            "automatic"
-        } else {
-            "paused"
-        }
+        saving = if model.paused { "paused" } else { "automatic" }
     ));
     let pages: BTreeSet<Page> = problems.iter().map(|(field, _)| page(*field)).collect();
     Some(Banner {
@@ -375,7 +376,7 @@ fn value(text: &Text, region: &RegionalFormat, field: Field, value: &FieldValue)
             )
         }
         (_, FieldValue::Coordinates(None)) => text!(text, "value-none"),
-        (_, FieldValue::Executables(names)) => text!(text, "value-apps", count = names.len()),
+        (_, FieldValue::Apps(entries)) => text!(text, "value-apps", count = entries.len()),
         (_, FieldValue::Language(language)) => super::general::language_label(text, language),
     }
 }
@@ -446,6 +447,8 @@ fn error_message(
         | FieldErrorKind::Clock
         | FieldErrorKind::Coordinates
         | FieldErrorKind::Executable
+        | FieldErrorKind::AlreadyListed
+        | FieldErrorKind::FixedExclusion
         | FieldErrorKind::Language
         | FieldErrorKind::Inconsistent => text!(text, "error-invalid", field = field_name),
     }
@@ -503,6 +506,8 @@ fn mark_message(
         | FieldErrorKind::OutOfRange { .. }
         | FieldErrorKind::Coordinates
         | FieldErrorKind::Executable
+        | FieldErrorKind::AlreadyListed
+        | FieldErrorKind::FixedExclusion
         | FieldErrorKind::Language => text!(
             text,
             "mark-invalid",

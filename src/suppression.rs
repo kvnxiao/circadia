@@ -2,6 +2,7 @@ use crate::Config;
 use crate::ValidationError;
 use crate::normalize_executable;
 use jiff::Timestamp;
+use std::path::PathBuf;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -12,19 +13,45 @@ pub enum Foreground {
     Unknown,
     /// Ignore desktop and taskbar interactions when retaining recent apps.
     Shell,
-    /// Use the resolved application's executable filename.
-    Application(String),
+    /// Use the resolved application's executable.
+    Application {
+        /// Executable file name used for matching.
+        executable: String,
+        /// Full path of the executable file.
+        path: PathBuf,
+    },
 }
 
-/// Present the current inclusion and exclusion of one recent executable.
+/// Present one recent executable, when it had focus, and its current
+/// inclusion and exclusion.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecentApp {
     /// Normalized executable filename used for matching.
     pub executable: String,
+    /// Full path of the executable file when it last had focus.
+    pub path: PathBuf,
+    /// Elapsed time since boot at which focus moved to another executable,
+    /// or none while it still has focus.
+    pub focus_ended: Option<Duration>,
     /// Membership in the active suppression list.
     pub included: bool,
     /// Exclusion that disables the tray toggle and automatic suppression.
     pub excluded: bool,
+}
+
+impl RecentApp {
+    /// Return the time since the app last had focus, zero while it has focus.
+    pub fn since_focus(&self, now: Duration) -> Duration {
+        self.focus_ended
+            .map_or(Duration::ZERO, |ended| now.saturating_sub(ended))
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Recent {
+    executable: String,
+    path: PathBuf,
+    focus_ended: Option<Duration>,
 }
 
 /// Track current identity and the five most recent distinct applications.
@@ -32,7 +59,7 @@ pub struct RecentApp {
 pub struct ForegroundApps {
     own_executable: String,
     current: Option<String>,
-    recent: Vec<String>,
+    recent: Vec<Recent>,
 }
 
 impl ForegroundApps {
@@ -50,17 +77,35 @@ impl ForegroundApps {
     }
 
     /// Replace current identity and retain eligible recent applications.
-    pub fn observe(&mut self, foreground: &Foreground) {
-        self.current = match foreground {
-            Foreground::Application(name) => normalize_executable(name).ok(),
+    ///
+    /// - `now` is the elapsed time since boot, recorded as the moment focus
+    ///   left the previous executable.
+    pub fn observe(&mut self, foreground: &Foreground, now: Duration) {
+        let application = match foreground {
+            Foreground::Application { executable, path } => normalize_executable(executable)
+                .ok()
+                .map(|name| (name, path.clone())),
             Foreground::Unknown | Foreground::Shell => None,
         };
-        if let Some(name) = &self.current
-            && name != &self.own_executable
+        self.current = application.as_ref().map(|(name, _)| name.clone());
+        for recent in &mut self.recent {
+            if recent.focus_ended.is_none() && self.current.as_ref() != Some(&recent.executable) {
+                recent.focus_ended = Some(now);
+            }
+        }
+        if let Some((name, path)) = application
+            && name != self.own_executable
             && name != "applicationframehost.exe"
         {
-            self.recent.retain(|previous| previous != name);
-            self.recent.insert(0, name.clone());
+            self.recent.retain(|previous| previous.executable != name);
+            self.recent.insert(
+                0,
+                Recent {
+                    executable: name,
+                    path,
+                    focus_ended: None,
+                },
+            );
             self.recent.truncate(5);
         }
     }
@@ -81,10 +126,12 @@ impl ForegroundApps {
     pub fn recent(&self, config: &Config) -> Vec<RecentApp> {
         self.recent
             .iter()
-            .map(|name| RecentApp {
-                executable: name.clone(),
-                included: config.includes(name),
-                excluded: config.is_excluded(name, &self.own_executable),
+            .map(|recent| RecentApp {
+                executable: recent.executable.clone(),
+                path: recent.path.clone(),
+                focus_ended: recent.focus_ended,
+                included: config.includes(&recent.executable),
+                excluded: config.is_excluded(&recent.executable, &self.own_executable),
             })
             .collect()
     }
@@ -326,8 +373,19 @@ impl Suppression {
 }
 
 #[cfg(test)]
+impl Foreground {
+    pub(crate) fn application(name: &str) -> Self {
+        Self::Application {
+            executable: name.into(),
+            path: PathBuf::from(format!("C:/Apps/{name}")),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AppEntry;
     use crate::ConfigInput;
     use test_case::test_case;
 
@@ -347,12 +405,10 @@ mod tests {
     #[test]
     fn matching_uses_normalized_names_and_exclusion_precedence() {
         let config = ConfigInput {
-            suppression: vec![
-                "VLC.EXE".into(),
-                "browser.exe".into(),
-                "night-colors.exe".into(),
-            ],
-            exclusions: vec!["BROWSER.EXE".into()],
+            suppression: ["VLC.EXE", "browser.exe", "night-colors.exe"]
+                .map(|name| AppEntry::new(name, name))
+                .to_vec(),
+            exclusions: vec![AppEntry::new("BROWSER.EXE", "Browser")],
             ..ConfigInput::default()
         }
         .validate()
@@ -365,7 +421,7 @@ mod tests {
             ("unlisted.exe", false),
             ("ApplicationFrameHost.exe", false),
         ] {
-            apps.observe(&Foreground::Application(name.into()));
+            apps.observe(&Foreground::application(name), milliseconds(0));
             assert_eq!(apps.matches(&config), expected);
         }
         let browser = apps
@@ -377,34 +433,95 @@ mod tests {
         assert!(browser.excluded);
     }
 
+    fn executables(apps: &ForegroundApps) -> Vec<&str> {
+        apps.recent
+            .iter()
+            .map(|recent| recent.executable.as_str())
+            .collect()
+    }
+
     #[test]
-    fn recent_history_retains_five_distinct_names_and_refocusing_moves_to_front() {
+    fn recent_history_retains_five_distinct_names_with_paths_and_refocusing_moves_to_front() {
         let mut apps = ForegroundApps::new("circadia.exe").expect("own name");
-        for name in [
-            "a.exe", "b.exe", "c.exe", "d.exe", "e.exe", "f.exe", "C.EXE",
-        ] {
-            apps.observe(&Foreground::Application(name.into()));
+        for name in ["a.exe", "b.exe", "c.exe", "d.exe", "e.exe", "f.exe"] {
+            apps.observe(&Foreground::application(name), milliseconds(0));
         }
-        assert_eq!(apps.recent, ["c.exe", "f.exe", "e.exe", "d.exe", "b.exe"]);
+        let recent = apps.recent(&Config::default());
+        let listed: Vec<(&str, &std::path::Path)> = recent
+            .iter()
+            .map(|app| (app.executable.as_str(), app.path.as_path()))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("f.exe", std::path::Path::new("C:/Apps/f.exe")),
+                ("e.exe", std::path::Path::new("C:/Apps/e.exe")),
+                ("d.exe", std::path::Path::new("C:/Apps/d.exe")),
+                ("c.exe", std::path::Path::new("C:/Apps/c.exe")),
+                ("b.exe", std::path::Path::new("C:/Apps/b.exe")),
+            ]
+        );
+        apps.observe(&Foreground::application("C.EXE"), milliseconds(0));
+        assert_eq!(
+            executables(&apps),
+            ["c.exe", "f.exe", "e.exe", "d.exe", "b.exe"]
+        );
         assert_eq!(apps.current(), Some("c.exe"));
-        apps.observe(&Foreground::Unknown);
+        apps.observe(&Foreground::Unknown, milliseconds(0));
         assert_eq!(apps.current(), None);
-        assert_eq!(apps.recent, ["c.exe", "f.exe", "e.exe", "d.exe", "b.exe"]);
+        assert_eq!(
+            executables(&apps),
+            ["c.exe", "f.exe", "e.exe", "d.exe", "b.exe"]
+        );
+    }
+
+    #[test]
+    fn the_time_since_focus_counts_from_when_focus_moved_to_another_executable() {
+        let hour = Duration::from_hours(1);
+        let mut apps = ForegroundApps::new("circadia.exe").expect("own name");
+        apps.observe(&Foreground::application("game.exe"), hour);
+        apps.observe(&Foreground::application("browser.exe"), hour * 4);
+        let now = hour * 4 + Duration::from_mins(4);
+        let since: Vec<(String, Duration)> = apps
+            .recent(&Config::default())
+            .into_iter()
+            .map(|app| {
+                let since = app.since_focus(now);
+                (app.executable, since)
+            })
+            .collect();
+        assert_eq!(
+            since,
+            [
+                ("browser.exe".to_owned(), Duration::ZERO),
+                ("game.exe".to_owned(), Duration::from_mins(4)),
+            ]
+        );
+        apps.observe(&Foreground::application("circadia.exe"), now);
+        let browser = apps
+            .recent(&Config::default())
+            .into_iter()
+            .find(|app| app.executable == "browser.exe")
+            .expect("browser stays in the history");
+        assert_eq!(
+            browser.since_focus(now + Duration::from_mins(1)),
+            Duration::from_mins(1)
+        );
     }
 
     #[test]
     fn shell_own_host_and_failed_identity_do_not_replace_recent_candidates() {
         let mut apps = ForegroundApps::new("renamed.exe").expect("own name");
-        apps.observe(&Foreground::Application("game.exe".into()));
+        apps.observe(&Foreground::application("game.exe"), milliseconds(0));
         for foreground in [
             Foreground::Shell,
-            Foreground::Application("RENAMED.EXE".into()),
-            Foreground::Application("ApplicationFrameHost.exe".into()),
-            Foreground::Application("C:\\bad.exe".into()),
+            Foreground::application("RENAMED.EXE"),
+            Foreground::application("ApplicationFrameHost.exe"),
+            Foreground::application("C:/bad.exe"),
             Foreground::Unknown,
         ] {
-            apps.observe(&foreground);
-            assert_eq!(apps.recent, ["game.exe"]);
+            apps.observe(&foreground, milliseconds(0));
+            assert_eq!(executables(&apps), ["game.exe"]);
         }
     }
 
@@ -412,7 +529,7 @@ mod tests {
     fn nonmatching_focus_changes_still_replace_current_identity() {
         let mut apps = ForegroundApps::new("circadia.exe").expect("own name");
         for name in ["first.exe", "second.exe"] {
-            apps.observe(&Foreground::Application(name.into()));
+            apps.observe(&Foreground::application(name), milliseconds(0));
             assert_eq!(apps.current(), Some(name));
             assert!(!apps.matches(&Config::default()));
         }

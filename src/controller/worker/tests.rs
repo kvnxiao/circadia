@@ -284,7 +284,7 @@ fn shutdown_notifies_after_disconnecting_queued_actions() {
 fn configuration_recomputation_refreshes_previously_unknown_foreground() {
     let directory = tempfile::tempdir().expect("directory");
     let mut config = input(3400);
-    config.suppression = vec!["game.exe".into()];
+    config.suppression = vec![crate::AppEntry::new("game.exe", "game.exe")];
     config.focus_delay_ms = 0;
     ConfigStore::new(directory.path())
         .save(&config.clone().validate().expect("config"))
@@ -295,7 +295,7 @@ fn configuration_recomputation_refreshes_previously_unknown_foreground() {
         if std::mem::take(&mut initial) {
             Foreground::Unknown
         } else {
-            Foreground::Application("game.exe".into())
+            Foreground::application("game.exe")
         }
     });
     let client = worker.client();
@@ -774,7 +774,7 @@ fn panic_cleanup_on_the_controller_thread_returns_without_requesting_exit() {
 fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
     let directory = tempfile::tempdir().expect("directory");
     let mut config = input(3400);
-    config.suppression = vec!["game.exe".into()];
+    config.suppression = vec![crate::AppEntry::new("game.exe", "game.exe")];
     config.focus_delay_ms = 0;
     ConfigStore::new(directory.path())
         .save(&config.clone().validate().expect("config"))
@@ -796,8 +796,8 @@ fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
             })
         };
         for executable in ["editor.exe", "browser.exe", "game.exe", "editor.exe"] {
-            submit(ControllerCommand::Foreground(Foreground::Application(
-                executable.into(),
+            submit(ControllerCommand::Foreground(Foreground::application(
+                executable,
             )));
             let snapshot = wait_for(&client, &notified, |snapshot| {
                 snapshot.suppression.automatic == (executable == "game.exe")
@@ -916,9 +916,8 @@ fn a_tray_toggle_sent_as_configure_changes_suppression_for_the_focused_app() {
     let directory = tempfile::tempdir().expect("directory");
     saved(&directory);
     let records = Arc::new(Mutex::new(Records::default()));
-    let (worker, notified) = start_with_foreground(&directory, &records, || {
-        Foreground::Application("game.exe".into())
-    });
+    let (worker, notified) =
+        start_with_foreground(&directory, &records, || Foreground::application("game.exe"));
     let client = worker.client();
     wait_for(&client, &notified, scheduled);
     assert!(
@@ -930,7 +929,7 @@ fn a_tray_toggle_sent_as_configure_changes_suppression_for_the_focused_app() {
             .automatic
     );
     let config = ConfigInput {
-        suppression: vec!["game.exe".into()],
+        suppression: vec![crate::AppEntry::new("game.exe", "game.exe")],
         ..input(3400)
     }
     .validate()
@@ -1008,7 +1007,7 @@ fn configure_after_a_queued_preview_keeps_its_playback() {
         acknowledged(snapshot, &preview)
     });
     let mut toggled = input(3400);
-    toggled.suppression = vec!["game.exe".into()];
+    toggled.suppression = vec![crate::AppEntry::new("game.exe", "game.exe")];
     client
         .submit(ControllerCommand::Configure {
             config: Arc::new(toggled.validate().expect("config")),
@@ -1025,7 +1024,7 @@ fn configure_after_a_queued_preview_keeps_its_playback() {
 fn preview_plays_over_automatic_suppression_and_a_lock_fades_from_its_last_value_to_6500_k() {
     let directory = tempfile::tempdir().expect("directory");
     let config = ConfigInput {
-        suppression: vec!["game.exe".into()],
+        suppression: vec![crate::AppEntry::new("game.exe", "game.exe")],
         ..input(3000)
     }
     .validate()
@@ -1034,9 +1033,8 @@ fn preview_plays_over_automatic_suppression_and_a_lock_fades_from_its_last_value
         .save(&config)
         .expect("saved config");
     let records = Arc::new(Mutex::new(Records::default()));
-    let (worker, notified) = start_with_foreground(&directory, &records, || {
-        Foreground::Application("game.exe".into())
-    });
+    let (worker, notified) =
+        start_with_foreground(&directory, &records, || Foreground::application("game.exe"));
     let client = worker.client();
     wait_for(&client, &notified, |snapshot| {
         snapshot.suppression.automatic && temperatures(&records).last() == Some(&6500)

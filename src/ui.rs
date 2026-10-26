@@ -1,4 +1,5 @@
 mod configuration;
+mod file_info;
 #[cfg(feature = "graph-measurement")]
 pub(crate) mod measurement;
 mod settings;
@@ -32,6 +33,8 @@ use crate::platform::nls::RegionalFormat;
 use crate::platform::startup::Registration;
 use crate::read_foreground;
 use configuration::Configuration;
+use file_info::AppFile;
+use file_info::FileInfoClient;
 use settings::general::Registrar;
 use settings::general::SignIn;
 use std::cell::Cell;
@@ -136,14 +139,6 @@ fn run_with_native(
     if let Some(error) = preferred_error {
         tracing::warn!(%error, "Windows preferred UI languages are unavailable");
     }
-    let configuration = Configuration::load(&directory);
-    let language = interface_language(forced, Some(configuration.launch_language()), &preferred)?;
-    tracing::info!(%language, "interface language");
-    if let Err(error) = crate::platform::nls::prefer_ui_language(&language.to_string()) {
-        tracing::warn!(%error, "Windows controls keep the Windows display language");
-    }
-    let text = Text::load(&language).map_err(io::Error::other)?;
-    let regional_format = RegionalFormat::capture_user_default()?;
     let executable = std::env::current_exe()?;
     let running_executable = executable
         .file_name()
@@ -155,6 +150,14 @@ fn run_with_native(
             )
         })?
         .to_owned();
+    let configuration = Configuration::load(&directory, &running_executable);
+    let language = interface_language(forced, Some(configuration.launch_language()), &preferred)?;
+    tracing::info!(%language, "interface language");
+    if let Err(error) = crate::platform::nls::prefer_ui_language(&language.to_string()) {
+        tracing::warn!(%error, "Windows controls keep the Windows display language");
+    }
+    let text = Text::load(&language).map_err(io::Error::other)?;
+    let regional_format = RegionalFormat::capture_user_default()?;
     let configuration = Rc::new(RefCell::new(configuration));
     let previous_run = crate::log::run::begin(&directory, &running_executable);
     let result = Rc::new(RefCell::new(None));
@@ -269,6 +272,7 @@ impl Runtime {
 struct Session {
     runtime: Rc<RefCell<Option<Runtime>>>,
     client: ControllerClient,
+    wake: crate::UiWake,
     focus_pending: Rc<Cell<bool>>,
     _foreground: ForegroundEvents,
     _window: LifecycleWindow,
@@ -324,6 +328,7 @@ impl Session {
         Ok(Self {
             runtime,
             client,
+            wake: window.wake(),
             focus_pending,
             _foreground: foreground,
             _window: window,
@@ -370,6 +375,7 @@ fn finish_runtime(
 
 struct Desktop {
     session: Option<Session>,
+    file_info: Option<FileInfoClient>,
     configuration: Rc<RefCell<Configuration>>,
     startup: Option<Startup>,
     snapshot: Option<Arc<ControllerSnapshot>>,
@@ -456,17 +462,32 @@ impl Application for Desktop {
             status::Saving::new(&configuration),
         );
         let manual = self.manual_command();
+        let mut names: std::collections::BTreeMap<String, String> = configuration
+            .accepted()
+            .into_iter()
+            .flat_map(|config| {
+                [Field::Suppression, Field::Exclusions]
+                    .into_iter()
+                    .flat_map(|list| config.entries(list))
+                    .filter_map(|entry| Some((entry.file_name()?, entry.display_name().to_owned())))
+            })
+            .collect();
+        if let Some(file_info) = &self.file_info {
+            names.extend(file_info.names().clone());
+        }
         let items = status::menu_items(
             &input.text,
             self.snapshot.as_deref(),
             manual,
-            configuration.toggles_available(),
+            configuration.toggles(),
+            &names,
         );
         let model = settings::Model::new(
             &configuration,
             self.snapshot.as_deref(),
             self.retrying(),
             lines.first().cloned().unwrap_or_default(),
+            &names,
         );
         ApplicationView::new()
             .window::<settings::Settings>(
@@ -504,6 +525,7 @@ impl Desktop {
     ) -> Self {
         Self {
             session: None,
+            file_info: None,
             configuration,
             startup,
             snapshot: None,
@@ -552,6 +574,13 @@ impl Desktop {
             context.sender(),
         ) {
             Ok(session) => {
+                let wake = session.wake.clone();
+                self.file_info =
+                    FileInfoClient::spawn(crate::platform::file_info::display_name, move || {
+                        let _notified = wake.notify();
+                    })
+                    .inspect_err(|error| tracing::warn!(%error, "starting the display-name reader"))
+                    .ok();
                 self.session = Some(session);
                 if self.configuration.borrow().opens_settings_at_launch() {
                     context.show_window("settings");
@@ -611,6 +640,64 @@ impl Desktop {
             }
             settings::Command::StopPreview => self.queue(ControllerCommand::StopPreview),
             settings::Command::Manual(command) => self.queue(ControllerCommand::Manual(command)),
+            settings::Command::Add(list, files) => self.add(list, &files),
+            settings::Command::Remove(list, index, executable) => {
+                let changed = self
+                    .configuration
+                    .borrow_mut()
+                    .remove(list, index, &executable);
+                self.configure(changed);
+            }
+            settings::Command::Browsed(file) => {
+                if let Some(file_info) = &mut self.file_info {
+                    file_info.request(&file.executable, &file.path);
+                }
+            }
+        }
+    }
+
+    fn entry(&self, file: &AppFile) -> crate::AppEntry {
+        let name = self
+            .file_info
+            .as_ref()
+            .and_then(|file_info| file_info.name(&file.executable))
+            .map(str::to_owned);
+        crate::AppEntry::new(
+            file.executable.clone(),
+            name.unwrap_or_else(|| file.executable.clone()),
+        )
+    }
+
+    fn add(&mut self, list: Field, files: &[AppFile]) {
+        let entries = files.iter().map(|file| self.entry(file)).collect();
+        let added = self.configuration.borrow_mut().add(list, entries);
+        match added {
+            Ok(changed) => self.configure(changed),
+            Err(error) => tracing::debug!(field = %list.key(), ?error, "apps not added"),
+        }
+    }
+
+    fn receive_names(&mut self) {
+        let names = self
+            .file_info
+            .as_mut()
+            .map(FileInfoClient::receive)
+            .unwrap_or_default();
+        for (executable, name) in names {
+            let changed = self
+                .configuration
+                .borrow_mut()
+                .record_name(&executable, &name);
+            self.configure(changed);
+        }
+    }
+
+    fn request_names(&mut self) {
+        let (Some(file_info), Some(snapshot)) = (&mut self.file_info, &self.snapshot) else {
+            return;
+        };
+        for recent in &snapshot.recent {
+            file_info.request(&recent.executable, &recent.path);
         }
     }
 
@@ -729,17 +816,26 @@ impl Desktop {
             Some("quit") => self.quit(),
             Some("manual-start") => self.queue(ControllerCommand::Manual(ManualCommand::Start)),
             Some("manual-stop") => self.queue(ControllerCommand::Manual(ManualCommand::Stop)),
-            Some(key) => {
-                if let Some((action, executable)) = key.split_once(':') {
-                    let changed = self
-                        .configuration
-                        .borrow_mut()
-                        .toggle(executable, action == "add");
-                    self.configure(changed);
-                }
-            }
+            Some(key) => self.tray_toggle(key),
             None => {}
         }
+    }
+
+    fn tray_toggle(&mut self, key: &str) {
+        let Some((action, executable)) = key.split_once(':') else {
+            return;
+        };
+        let name = self
+            .file_info
+            .as_ref()
+            .and_then(|file_info| file_info.name(executable))
+            .unwrap_or(executable);
+        let entry = crate::AppEntry::new(executable, name);
+        let changed = self
+            .configuration
+            .borrow_mut()
+            .toggle(entry, action == "add");
+        self.configure(changed);
     }
 
     fn native_event(&mut self, event: DesktopEvent, context: &ApplicationContext<Self>) {
@@ -810,12 +906,17 @@ impl Desktop {
         if self.pending.len() < COMMAND_QUEUE_CAPACITY && session.focus_pending.replace(false) {
             self.queue(ControllerCommand::Foreground(read_foreground()));
         }
+        self.request_names();
+        self.receive_names();
     }
 
     fn begin_exit(&mut self) {
         if !self.exiting {
             self.configuration.borrow_mut().exit();
         }
+        // Dropping the client does not join its worker, so a slow file read
+        // cannot delay Night Light cleanup, and later names change nothing.
+        self.file_info = None;
         self.exiting = true;
         self.pending.clear();
         if let Some(session) = &self.session
@@ -1115,7 +1216,10 @@ mod tests {
         let marker = directory.path().join("logs").join("run.marker");
         assert!(marker.exists());
         let result = RefCell::new(None);
-        let configuration = RefCell::new(configuration::Configuration::load(directory.path()));
+        let configuration = RefCell::new(configuration::Configuration::load(
+            directory.path(),
+            "circadia.exe",
+        ));
         let log = crate::log::capture(tracing::Level::INFO, || {
             let controller = ControllerWorker::with_native(
                 "circadia.exe",
@@ -1211,7 +1315,7 @@ mod tests {
             "interface_language = \"en-US\"",
         );
         fs_err::write(&path, &file).expect("configuration fixture");
-        let configuration = configuration::Configuration::load(directory.path());
+        let configuration = configuration::Configuration::load(directory.path(), "circadia.exe");
         assert_eq!(configuration.launch_language(), "en-US");
         let language = interface_language(
             Some("qps-Ploc"),
@@ -1235,6 +1339,7 @@ mod tests {
         let mut desktop = Desktop::new(
             Rc::new(RefCell::new(configuration::Configuration::load(
                 directory.path(),
+                "circadia.exe",
             ))),
             None,
             PathBuf::new(),
@@ -1258,7 +1363,10 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary data directory");
         let path = directory.path().join("config.toml");
         fs_err::write(&path, file).expect("configuration fixture");
-        let configuration = RefCell::new(configuration::Configuration::load(directory.path()));
+        let configuration = RefCell::new(configuration::Configuration::load(
+            directory.path(),
+            "circadia.exe",
+        ));
         configuration.borrow_mut().edit(vec![edit]);
         let controller = ControllerWorker::with_native(
             "circadia.exe",
@@ -1307,7 +1415,7 @@ mod tests {
         if let Some(file) = file {
             fs_err::write(directory.path().join("config.toml"), file).expect("fixture");
         }
-        let configuration = configuration::Configuration::load(directory.path());
+        let configuration = configuration::Configuration::load(directory.path(), "circadia.exe");
         let desktop = Desktop::new(
             Rc::new(RefCell::new(configuration)),
             None,
@@ -1436,6 +1544,229 @@ mod tests {
         assert!(desktop.exiting);
         let saved = saved(&directory).expect("written file");
         assert!(saved.contains("wake = \"06:00\""), "{saved}");
+    }
+
+    fn gated_reader(name: &str) -> (std::sync::mpsc::Sender<()>, FileInfoClient) {
+        let (gate, opened) = std::sync::mpsc::channel::<()>();
+        let opened = std::sync::Mutex::new(opened);
+        let name = name.to_owned();
+        let client = FileInfoClient::spawn(
+            move |_path| {
+                opened.lock().ok()?.recv().ok()?;
+                Some(name.clone())
+            },
+            || {},
+        )
+        .expect("file-information worker");
+        (gate, client)
+    }
+
+    fn receive_name(desktop: &mut Desktop, executable: &str) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while desktop
+            .file_info
+            .as_ref()
+            .and_then(|file_info| file_info.name(executable))
+            .is_none()
+        {
+            assert!(
+                Instant::now() < deadline,
+                "no display name for {executable}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+            desktop.receive_names();
+        }
+    }
+
+    fn game() -> AppFile {
+        AppFile {
+            executable: "game.exe".into(),
+            path: PathBuf::from("C:/Games/game.exe"),
+        }
+    }
+
+    fn suppression_list(desktop: &Desktop) -> Vec<crate::AppEntry> {
+        desktop
+            .configuration
+            .borrow()
+            .accepted()
+            .map(|config| config.entries(Field::Suppression).to_vec())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn an_entry_added_before_its_name_arrives_records_the_name_with_one_configure() {
+        let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+        let (gate, client) = gated_reader("Game");
+        desktop.file_info = Some(client);
+        desktop.command(settings::Command::Browsed(game()));
+        desktop.command(settings::Command::Add(Field::Suppression, vec![game()]));
+        assert_eq!(
+            suppression_list(&desktop),
+            [crate::AppEntry::new("game.exe", "game.exe")]
+        );
+        let first = saved(&directory).expect("an addition writes at once");
+        assert!(first.contains("name = \"game.exe\""), "{first}");
+        desktop.pending.clear();
+        gate.send(()).expect("reader waits");
+        receive_name(&mut desktop, "game.exe");
+        let configured: Vec<Vec<crate::AppEntry>> = desktop
+            .pending
+            .iter()
+            .filter_map(|command| match command {
+                ControllerCommand::Configure { config, .. } => {
+                    Some(config.entries(Field::Suppression).to_vec())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(configured, [vec![crate::AppEntry::new("game.exe", "Game")]]);
+        let renamed = saved(&directory).expect("a display name writes at once");
+        assert!(renamed.contains("name = \"Game\""), "{renamed}");
+    }
+
+    #[test]
+    fn a_name_that_arrives_after_the_entry_was_removed_changes_nothing() {
+        let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+        let (gate, client) = gated_reader("Game");
+        desktop.file_info = Some(client);
+        desktop.command(settings::Command::Browsed(game()));
+        desktop.command(settings::Command::Add(Field::Suppression, vec![game()]));
+        let removed = desktop
+            .configuration
+            .borrow_mut()
+            .remove(Field::Suppression, 0, "game.exe");
+        assert!(removed.is_some());
+        let before = saved(&directory);
+        let revision = desktop.configuration.borrow().revision();
+        desktop.pending.clear();
+        gate.send(()).expect("reader waits");
+        receive_name(&mut desktop, "game.exe");
+        assert!(desktop.pending.is_empty());
+        assert_eq!(suppression_list(&desktop), Vec::<crate::AppEntry>::new());
+        assert_eq!(desktop.configuration.borrow().revision(), revision);
+        assert_eq!(saved(&directory), before);
+    }
+
+    #[test]
+    fn a_browsed_executable_passes_its_path_and_stores_its_display_name() {
+        let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+        desktop.file_info = Some(
+            FileInfoClient::spawn(crate::platform::file_info::display_name, || {})
+                .expect("file-information worker"),
+        );
+        let notepad = AppFile {
+            executable: "notepad.exe".into(),
+            path: PathBuf::from("C:\\Windows\\System32\\notepad.exe"),
+        };
+        desktop.command(settings::Command::Browsed(notepad.clone()));
+        desktop.command(settings::Command::Add(Field::Suppression, vec![notepad]));
+        receive_name(&mut desktop, "notepad.exe");
+        assert_eq!(
+            suppression_list(&desktop),
+            [crate::AppEntry::new("notepad.exe", "Notepad")]
+        );
+        let written = saved(&directory).expect("written file");
+        assert!(written.contains("name = \"Notepad\""), "{written}");
+    }
+
+    #[test]
+    fn a_blocked_display_name_read_does_not_delay_a_configure_round_trip() {
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        let mut file_info = FileInfoClient::spawn(
+            |_path| {
+                std::thread::sleep(Duration::from_secs(5));
+                None
+            },
+            || {},
+        )
+        .expect("file-information worker");
+        let controller = ControllerWorker::with_native(
+            "circadia.exe",
+            Some(Arc::new(crate::Config::default())),
+            || Ok(()),
+            crate::Native::with_backend(RecordingBackend(
+                directory.path().join("native-calls.txt"),
+            )),
+            || crate::Foreground::Unknown,
+        )
+        .expect("controller");
+        let started = Instant::now();
+        let file = game();
+        file_info.request(&file.executable, &file.path);
+        controller
+            .client()
+            .submit(ControllerCommand::Configure {
+                config: Arc::new(crate::Config::default()),
+                revision: 1,
+            })
+            .expect("Configure admitted");
+        while controller
+            .client()
+            .snapshot()
+            .ok()
+            .flatten()
+            .is_none_or(|snapshot| snapshot.configured_revision != 1)
+        {
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "the Configure round trip waited for the file read"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(file_info.receive(), Vec::<(String, String)>::new());
+        drop(controller);
+    }
+
+    fn configures(desktop: &Desktop) -> usize {
+        desktop
+            .pending
+            .iter()
+            .filter(|command| matches!(command, ControllerCommand::Configure { .. }))
+            .count()
+    }
+
+    #[test]
+    fn a_tray_toggle_with_settings_closed_sends_one_configure_and_writes_at_once() {
+        let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+        assert!(!desktop.settings_open);
+        desktop.tray_toggle("add:game.exe");
+        assert_eq!(configures(&desktop), 1);
+        assert_eq!(
+            suppression_list(&desktop),
+            [crate::AppEntry::new("game.exe", "game.exe")]
+        );
+        let written = saved(&directory).expect("a tray toggle writes at once");
+        assert!(written.contains("executable = \"game.exe\""), "{written}");
+    }
+
+    #[test]
+    fn a_tray_click_acts_on_the_offered_file_name_after_the_history_changed() {
+        let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+        desktop.tray_toggle("add:game.exe");
+        desktop.tray_toggle("add:other.exe");
+        desktop.pending.clear();
+        desktop.tray_toggle("remove:game.exe");
+        assert_eq!(configures(&desktop), 1);
+        assert_eq!(
+            suppression_list(&desktop),
+            [crate::AppEntry::new("other.exe", "other.exe")]
+        );
+        let written = saved(&directory).expect("written file");
+        assert!(!written.contains("game.exe"), "{written}");
+        desktop.pending.clear();
+        desktop.tray_toggle("add:other.exe");
+        assert_eq!(configures(&desktop), 0);
+    }
+
+    #[test]
+    fn a_tray_toggle_while_saving_is_paused_changes_nothing() {
+        let file = configuration_file("25:00");
+        let (directory, mut desktop) = desktop_with(Some(&file));
+        desktop.tray_toggle("add:game.exe");
+        assert_eq!(configures(&desktop), 0);
+        assert_eq!(suppression_list(&desktop), Vec::<crate::AppEntry>::new());
+        assert_eq!(saved(&directory), Some(file));
     }
 
     #[test]

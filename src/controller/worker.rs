@@ -148,16 +148,22 @@ impl ControllerCommand {
                         .suppression
                         .iter()
                         .chain(&input.exclusions)
-                        .map(|name| name.len().saturating_add(size_of::<String>()))
+                        .map(|entry| {
+                            entry
+                                .executable
+                                .len()
+                                .saturating_add(entry.name.len())
+                                .saturating_add(size_of::<crate::AppEntry>())
+                        })
                         .fold(0_usize, usize::saturating_add),
                 )
         } else {
             match self {
-                Self::Foreground(Foreground::Application(executable))
+                Self::Foreground(Foreground::Application { executable, path })
                 | Self::Resume {
-                    foreground: Foreground::Application(executable),
+                    foreground: Foreground::Application { executable, path },
                     ..
-                } => executable.len(),
+                } => executable.len().saturating_add(path.as_os_str().len()),
                 _ => 0,
             }
         };

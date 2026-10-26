@@ -1,8 +1,21 @@
-tray-settings = Settings
-tray-recent-add = Suppress for { $executable }
-tray-recent-remove = Remove { $executable } from suppression
-tray-recent-add-excluded = Suppress for { $executable } (excluded)
-tray-recent-remove-excluded = Remove { $executable } from suppression (excluded)
+tray-settings = Open Circadia settings
+tray-caption =
+    { $reason ->
+        [error] Suppress while focused (settings couldn't be read)
+        [paused] Suppress while focused (fix settings first)
+       *[none] Suppress while focused
+    }
+tray-app =
+    { $listed ->
+        [yes] ✓ { $name } ({ $executable })
+       *[no] { $name } ({ $executable })
+    }
+tray-app-excluded =
+    { $listed ->
+        [yes] ✓ { $name } ({ $executable }) (excluded)
+       *[no] { $name } ({ $executable }) (excluded)
+    }
+app-entry-name = { $name } ({ $executable })
 tray-quit = Quit Circadia
 
 tooltip = Circadia: { $status }
@@ -84,6 +97,72 @@ manual-description = Request { $kelvin } for the next hour, whichever app is foc
 manual-until = Suppressed until { $time }.
 manual-active = Suppressed for 1 hour.
 manual-unmanaged = Turn on Night Light management on the Schedule page to suppress.
+apps-explanation-title = Suppress while listed apps are focused
+apps-explanation-description = Circadia fades to { $kelvin } while a listed app is in the foreground, in any window mode, and returns to your schedule after you switch away.
+section-recent = Recently focused
+recent-detail = { $executable } · { $since }
+recent-now = just now
+recent-minutes = { $minutes } min ago
+recent-hours = { $hours } hr ago
+recent-days =
+    { $count ->
+        [one] { $days } day ago
+       *[other] { $days } days ago
+    }
+recent-add = Add
+recent-add-name = Add { $name } to the suppression list
+recent-on-list = On your list
+recent-remove = Remove
+recent-remove-name = Remove { $name } from the suppression list
+recent-excluded = Excluded
+recent-empty = Apps you switch to appear here.
+recent-note = The last 5 apps you switched to. Circadia itself is never listed.
+section-suppression = Suppression list ({ $count })
+add-app = Add app
+list-empty-title = No apps yet
+list-empty-description = Add a game, video player or photo editor to keep its colors accurate.
+entry-remove-name = Remove { $name }
+entry-inactive = Inactive because this app is excluded.
+entry-invalid = Invalid file name. This entry matches nothing until you remove it.
+entry-duplicate = { $executable } is on this list twice. Remove one entry.
+section-never = Never suppress
+exclusions-title = Excluded apps
+exclusions-description = Exclusions win over the suppression list. They don't affect Suppress for 1 hour.
+add-exclusion = Add exclusion
+exclusions-expand = Expand excluded apps
+exclusions-collapse = Collapse excluded apps
+exclusions-held = Excluded apps stay expanded while an entry needs a fix
+fixed-self = This app. Built in, can't be removed.
+fixed-host = Windows app host. Hosted apps are matched by their own executable instead. Built in.
+fixed-locked = Locked
+exclusions-empty = No exclusions added yet.
+section-timing = Timing
+focus-delay-title = Switch delay
+focus-delay-description = How long an app must stay focused before suppression starts or ends. Stops flicker when you alt-tab.
+dialog-add-title = Add apps to suppress
+dialog-add-description = Pick from apps you used recently, or browse for any .exe file.
+dialog-exclude-title = Exclude apps from suppression
+dialog-exclude-description = Pick from apps you used recently, or browse for any .exe file. Excluded apps never start suppression on their own.
+dialog-recent = Recently focused
+dialog-all-listed = Every recent app is already on your list.
+dialog-file-title = Choose an app file
+dialog-file-description = Matched by file name, such as game.exe, in any folder.
+dialog-browse = Browse
+dialog-already-listed = { $executable } is already on your list. To match several window titles, use a regular expression such as minecraft|terraria in its window title condition.
+dialog-fixed = { $executable } is always excluded from automatic suppression, so it can't be added to either list.
+dialog-add =
+    { $count ->
+        [0] Add
+        [one] Add
+       *[other] Add { $apps } apps
+    }
+dialog-exclude =
+    { $count ->
+        [0] Exclude
+        [one] Exclude
+       *[other] Exclude { $apps } apps
+    }
+dialog-cancel = Cancel
 preview-start = Preview
 preview-stop = Stop
 preview-ready =

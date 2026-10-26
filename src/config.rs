@@ -16,6 +16,97 @@ pub struct Coordinates {
     pub longitude: f64,
 }
 
+/// Store one suppression or exclusion list entry.
+///
+/// - A loaded entry keeps its file's text when that text is not a plain
+///   executable file name, and such an entry matches nothing.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+pub struct AppEntry {
+    /// Executable file name, lowercase when it is a valid file name.
+    pub executable: String,
+    /// Display name read from the executable's version information.
+    pub name: String,
+    #[serde(skip)]
+    wrong_type: bool,
+}
+
+impl AppEntry {
+    /// Create an entry from a file name and a display name.
+    pub fn new(executable: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            executable: executable.into(),
+            name: name.into(),
+            wrong_type: false,
+        }
+    }
+
+    /// Return the normalized file name that the entry matches, or none for an
+    /// invalid entry.
+    pub fn file_name(&self) -> Option<String> {
+        if self.wrong_type {
+            return None;
+        }
+        normalize_executable(&self.executable).ok()
+    }
+
+    /// Return the display name, or the file name when the name is empty.
+    pub fn display_name(&self) -> &str {
+        if self.name.is_empty() {
+            &self.executable
+        } else {
+            &self.name
+        }
+    }
+
+    fn normalize(&mut self) {
+        if let Some(name) = self.file_name() {
+            self.executable = name;
+        }
+    }
+}
+
+/// Explain why loading marks a list entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntryProblem {
+    /// The file name is missing, empty, or not a plain file name, or a value
+    /// has the wrong type; the entry matches nothing.
+    Invalid,
+    /// Another entry on the same list has the same file name.
+    Duplicate,
+}
+
+/// Mark each entry of a list that is invalid or that shares its file name with
+/// another entry, compared case-insensitively.
+pub fn entry_problems(entries: &[AppEntry]) -> Vec<Option<EntryProblem>> {
+    entries
+        .iter()
+        .map(|entry| {
+            let name = entry.executable.to_lowercase();
+            if entry.file_name().is_none() {
+                Some(EntryProblem::Invalid)
+            } else if entries
+                .iter()
+                .filter(|other| other.executable.to_lowercase() == name)
+                .nth(1)
+                .is_some()
+            {
+                Some(EntryProblem::Duplicate)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+pub(crate) const SHARED_HOST: &str = "ApplicationFrameHost.exe";
+
+/// Report whether an executable file name is a fixed exclusion:
+/// `ApplicationFrameHost.exe` or the running executable's file name.
+pub fn is_fixed_exclusion(executable: &str, running_executable: &str) -> bool {
+    executable.eq_ignore_ascii_case(SHARED_HOST)
+        || executable.to_lowercase() == running_executable.to_lowercase()
+}
+
 /// Collect settings before validating their complete state.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -52,10 +143,10 @@ pub struct ConfigInput {
     pub sunset: bool,
     /// Saved coordinates; unnecessary when both solar inputs are off.
     pub coordinates: Option<Coordinates>,
-    /// Executable filenames included in automatic suppression.
-    pub suppression: Vec<String>,
+    /// Entries included in automatic suppression.
+    pub suppression: Vec<AppEntry>,
     /// User exclusions, applied in addition to fixed exclusions.
-    pub exclusions: Vec<String>,
+    pub exclusions: Vec<AppEntry>,
     /// Requested current-user sign-in registration.
     pub start_at_sign_in: bool,
     /// Whether future launches initially show only the tray icon.
@@ -304,6 +395,10 @@ pub enum FieldErrorKind {
     Inconsistent,
     /// A list entry is not a plain executable file name.
     Executable,
+    /// The added executable already has an entry on the list.
+    AlreadyListed,
+    /// The added executable is a fixed exclusion.
+    FixedExclusion,
     /// The interface language is neither `windows` nor a shipped language.
     Language,
 }
@@ -348,8 +443,8 @@ pub enum FieldValue {
     Switch(bool),
     /// Coordinates, or none to clear them.
     Coordinates(Option<Coordinates>),
-    /// Executable file names of a list.
-    Executables(Vec<String>),
+    /// Entries of a suppression or exclusion list.
+    Apps(Vec<AppEntry>),
     /// `windows` or a language tag.
     Language(String),
 }
@@ -482,8 +577,8 @@ impl ConfigInput {
         };
         let wake_minutes = clock(&self.wake)?;
         let bedtime_minutes = clock(&self.bedtime)?;
-        self.suppression = normalize_names(&self.suppression);
-        self.exclusions = normalize_names(&self.exclusions);
+        self.suppression.iter_mut().for_each(AppEntry::normalize);
+        self.exclusions.iter_mut().for_each(AppEntry::normalize);
         Ok(Config {
             input: self,
             wake_minutes,
@@ -509,8 +604,8 @@ impl ConfigInput {
                 self.manage_night_light = value;
             }
             (Field::Coordinates, FieldValue::Coordinates(value)) => self.coordinates = value,
-            (Field::Suppression, FieldValue::Executables(names)) => self.suppression = names,
-            (Field::Exclusions, FieldValue::Executables(names)) => self.exclusions = names,
+            (Field::Suppression, FieldValue::Apps(entries)) => self.suppression = entries,
+            (Field::Exclusions, FieldValue::Apps(entries)) => self.exclusions = entries,
             (Field::InterfaceLanguage, FieldValue::Language(tag)) => self.interface_language = tag,
             (field, FieldValue::Number(value)) => {
                 *self.number_mut(field).ok_or(FieldErrorKind::WrongType)? = value;
@@ -558,8 +653,8 @@ impl ConfigInput {
             Field::StartMinimized => FieldValue::Switch(self.start_minimized),
             Field::ManageNightLight => FieldValue::Switch(self.manage_night_light),
             Field::Coordinates => FieldValue::Coordinates(self.coordinates),
-            Field::Suppression => FieldValue::Executables(self.suppression.clone()),
-            Field::Exclusions => FieldValue::Executables(self.exclusions.clone()),
+            Field::Suppression => FieldValue::Apps(self.suppression.clone()),
+            Field::Exclusions => FieldValue::Apps(self.exclusions.clone()),
             Field::InterfaceLanguage => FieldValue::Language(self.interface_language.clone()),
             _ => FieldValue::Number(self.number(field).unwrap_or_default()),
         }
@@ -595,8 +690,6 @@ fn check_alone(field: Field, input: &ConfigInput) -> Result<(), FieldErrorKind> 
                 Err(FieldErrorKind::Coordinates)
             }
         }),
-        Field::Suppression => check_names(&input.suppression),
-        Field::Exclusions => check_names(&input.exclusions),
         Field::InterfaceLanguage if crate::l10n::saveable(&input.interface_language) => Ok(()),
         Field::InterfaceLanguage => Err(FieldErrorKind::Language),
         _ => match (field.range(), input.number(field)) {
@@ -677,18 +770,68 @@ impl Config {
 
     /// Check membership without applying exclusions.
     pub fn includes(&self, executable: &str) -> bool {
-        self.input
-            .suppression
-            .binary_search(&executable.to_lowercase())
-            .is_ok()
+        listed(&self.input.suppression, executable)
     }
 
     /// Apply fixed and user exclusions to the resolved executable filename.
     pub fn is_excluded(&self, executable: &str, running_executable: &str) -> bool {
-        let executable = executable.to_lowercase();
-        executable == "applicationframehost.exe"
-            || executable == running_executable.to_lowercase()
-            || self.input.exclusions.binary_search(&executable).is_ok()
+        is_fixed_exclusion(executable, running_executable)
+            || listed(&self.input.exclusions, executable)
+    }
+
+    /// Return the entries of the suppression or exclusion list.
+    pub fn entries(&self, list: Field) -> &[AppEntry] {
+        match list {
+            Field::Exclusions => &self.input.exclusions,
+            _ => &self.input.suppression,
+        }
+    }
+
+    /// Report whether either list has an entry that loading marks.
+    pub fn has_entry_problems(&self) -> bool {
+        [Field::Suppression, Field::Exclusions]
+            .into_iter()
+            .any(|list| {
+                entry_problems(self.entries(list))
+                    .iter()
+                    .any(Option::is_some)
+            })
+    }
+
+    /// Return a list with `added` appended in order, each with its normalized
+    /// file name.
+    ///
+    /// # Errors
+    ///
+    /// Return the first problem of an added entry, which leaves the list
+    /// unchanged:
+    /// - [`FieldErrorKind::Executable`] when the file name is not a plain
+    ///   executable file name.
+    /// - [`FieldErrorKind::FixedExclusion`] for a fixed exclusion.
+    /// - [`FieldErrorKind::AlreadyListed`] when the list, including an entry
+    ///   added before it, has the same file name.
+    pub fn add_entries(
+        &self,
+        list: Field,
+        added: impl IntoIterator<Item = AppEntry>,
+        running_executable: &str,
+    ) -> Result<Vec<AppEntry>, FieldErrorKind> {
+        let mut entries = self.entries(list).to_vec();
+        for mut entry in added {
+            let name = entry.file_name().ok_or(FieldErrorKind::Executable)?;
+            if is_fixed_exclusion(&name, running_executable) {
+                return Err(FieldErrorKind::FixedExclusion);
+            }
+            if entries
+                .iter()
+                .any(|existing| existing.executable.to_lowercase() == name)
+            {
+                return Err(FieldErrorKind::AlreadyListed);
+            }
+            entry.executable = name;
+            entries.push(entry);
+        }
+        Ok(entries)
     }
 
     /// Compare inputs that determine the dated temperature curve.
@@ -705,6 +848,13 @@ impl Config {
             && left.sunset == right.sunset
             && left.coordinates == right.coordinates
     }
+}
+
+fn listed(entries: &[AppEntry], executable: &str) -> bool {
+    let executable = executable.to_lowercase();
+    entries
+        .iter()
+        .any(|entry| entry.file_name().as_deref() == Some(executable.as_str()))
 }
 
 fn parse_clock(input: &str) -> Option<u16> {
@@ -746,24 +896,6 @@ pub fn normalize_executable(name: &str) -> Result<String, ValidationError> {
         }));
     }
     Ok(normalized)
-}
-
-fn check_names(names: &[String]) -> Result<(), FieldErrorKind> {
-    if names.iter().all(|name| normalize_executable(name).is_ok()) {
-        Ok(())
-    } else {
-        Err(FieldErrorKind::Executable)
-    }
-}
-
-fn normalize_names(names: &[String]) -> Vec<String> {
-    let mut normalized: Vec<_> = names
-        .iter()
-        .filter_map(|name| normalize_executable(name).ok())
-        .collect();
-    normalized.sort_unstable();
-    normalized.dedup();
-    normalized
 }
 
 /// Explain why a configuration file cannot be used.
@@ -1011,15 +1143,16 @@ fn decode_value(
                 longitude: coordinate("longitude").ok_or(FieldErrorKind::WrongType)?,
             }))
         }
-        (Field::Suppression | Field::Exclusions, toml::Value::Array(items)) => {
-            FieldValue::Executables(
-                items
-                    .iter()
-                    .map(|item| item.as_str().map(str::to_owned))
-                    .collect::<Option<_>>()
-                    .ok_or(FieldErrorKind::WrongType)?,
-            )
-        }
+        (Field::Suppression | Field::Exclusions, toml::Value::Array(items)) => FieldValue::Apps(
+            items
+                .iter()
+                .map(|item| match item {
+                    toml::Value::Table(table) => Some(decode_entry(field, table, unknown)),
+                    _ => None,
+                })
+                .collect::<Option<_>>()
+                .ok_or(FieldErrorKind::WrongType)?,
+        ),
         (_, toml::Value::Boolean(value)) => FieldValue::Switch(*value),
         (_, toml::Value::Integer(value)) => FieldValue::Number(*value),
         _ => return Err(FieldErrorKind::WrongType),
@@ -1027,9 +1160,35 @@ fn decode_value(
     input.set(field, decoded)?;
     check_alone(field, &input)?;
     input.normalize_temperatures();
-    input.suppression = normalize_names(&input.suppression);
-    input.exclusions = normalize_names(&input.exclusions);
     Ok(input.value(field))
+}
+
+fn decode_entry(list: Field, table: &toml::Table, unknown: &mut Vec<String>) -> AppEntry {
+    let mut wrong_type = false;
+    let mut text = |key: &str| match table.get(key) {
+        Some(toml::Value::String(text)) => Some(text.clone()),
+        Some(other) => {
+            wrong_type = true;
+            Some(other.to_string())
+        }
+        None => None,
+    };
+    let executable = text("executable").unwrap_or_default();
+    let name = text("name");
+    for key in table.keys() {
+        let path = format!("{}.{key}", list.key());
+        if !matches!(key.as_str(), "executable" | "name") && !unknown.contains(&path) {
+            unknown.push(path);
+        }
+    }
+    let mut entry = AppEntry {
+        executable,
+        name: String::new(),
+        wrong_type,
+    };
+    entry.normalize();
+    entry.name = name.unwrap_or_else(|| entry.executable.clone());
+    entry
 }
 
 #[cfg(test)]
@@ -1353,23 +1512,43 @@ mod tests {
         assert_eq!(input.validate().is_ok(), valid);
     }
 
+    fn apps(names: &[&str]) -> Vec<AppEntry> {
+        names
+            .iter()
+            .map(|name| AppEntry::new(*name, *name))
+            .collect()
+    }
+
     #[test]
-    fn normalizes_filename_sets_without_removing_overlaps_or_fixed_names() {
+    fn validation_normalizes_file_names_and_keeps_order_duplicates_and_fixed_names() {
         let input = ConfigInput {
-            suppression: vec![
-                "VLC.EXE".into(),
-                "vlc.exe".into(),
-                "ApplicationFrameHost.exe".into(),
-            ],
-            exclusions: vec!["VLC.EXE".into()],
+            suppression: apps(&["VLC.EXE", "vlc.exe", "ApplicationFrameHost.exe"]),
+            exclusions: apps(&["VLC.EXE"]),
             ..ConfigInput::default()
         };
-        let config = input.validate().expect("filename sets");
+        let config = input.validate().expect("file name lists");
+        let executables: Vec<&str> = config
+            .input()
+            .suppression
+            .iter()
+            .map(|entry| entry.executable.as_str())
+            .collect();
         assert_eq!(
-            config.input().suppression,
-            ["applicationframehost.exe", "vlc.exe"]
+            executables,
+            ["vlc.exe", "vlc.exe", "applicationframehost.exe"]
         );
-        assert_eq!(config.input().exclusions, ["vlc.exe"]);
+        assert_eq!(
+            config
+                .input()
+                .suppression
+                .first()
+                .map(|entry| entry.name.as_str()),
+            Some("VLC.EXE")
+        );
+        assert_eq!(
+            config.input().exclusions,
+            [AppEntry::new("vlc.exe", "VLC.EXE")]
+        );
     }
 
     #[test_case("C:\\Games\\game.exe")]
@@ -1379,12 +1558,20 @@ mod tests {
     #[test_case("game.exe ")]
     #[test_case("bad\n.exe")]
     #[test_case("")]
-    fn rejects_paths_and_invalid_executable_names(name: &str) {
-        let input = ConfigInput {
-            suppression: vec![name.into()],
+    fn an_entry_that_is_not_a_plain_file_name_is_invalid_and_matches_nothing(name: &str) {
+        let config = ConfigInput {
+            suppression: apps(&[name]),
             ..ConfigInput::default()
-        };
-        assert!(input.validate().is_err());
+        }
+        .validate()
+        .expect("an invalid entry does not reject the configuration");
+        assert_eq!(
+            entry_problems(&config.input().suppression),
+            [Some(EntryProblem::Invalid)]
+        );
+        assert!(config.has_entry_problems());
+        assert!(!config.includes(name));
+        assert!(!config.includes("game.exe"));
     }
 
     #[test]
@@ -1407,12 +1594,12 @@ mod tests {
     #[test]
     fn fixed_exclusions_follow_the_running_binary_name() {
         let config = ConfigInput {
-            suppression: vec![
-                "ApplicationFrameHost.exe".into(),
-                "night-colors.exe".into(),
-                "browser.exe".into(),
-            ],
-            exclusions: vec!["BROWSER.EXE".into()],
+            suppression: apps(&[
+                "ApplicationFrameHost.exe",
+                "night-colors.exe",
+                "browser.exe",
+            ]),
+            exclusions: apps(&["BROWSER.EXE"]),
             ..ConfigInput::default()
         }
         .validate()
@@ -1819,6 +2006,260 @@ mod tests {
                 .get(&Field::InterfaceLanguage)
                 .map(|mark| mark.source),
             Some(Source::Default)
+        );
+    }
+
+    fn entries(entries: &[&[(&str, &str)]]) -> toml::Value {
+        toml::Value::Array(
+            entries
+                .iter()
+                .map(|entry| {
+                    toml::Value::Table(
+                        entry
+                            .iter()
+                            .map(|(key, value)| ((*key).to_owned(), (*value).into()))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn a_list_of_file_names_is_marked_and_takes_the_backup_list_or_an_empty_list() {
+        let file = file(|table| set(table, "suppression", vec!["game.exe"]));
+        let backup = self::file(|table| {
+            set(
+                table,
+                "suppression",
+                entries(&[&[("executable", "vlc.exe"), ("name", "VLC")]]),
+            );
+        });
+        let (config, report) = load(&file, Some(&backup)).expect("usable file");
+        assert!(config.includes("vlc.exe"));
+        assert!(!config.includes("game.exe"));
+        assert_eq!(
+            report.marks,
+            BTreeMap::from([(
+                Field::Suppression,
+                mark("[\"game.exe\"]", FieldErrorKind::WrongType, Source::Backup)
+            )])
+        );
+        let (config, report) = load(&file, None).expect("usable file");
+        assert!(!config.includes("game.exe"));
+        assert_eq!(
+            report
+                .marks
+                .get(&Field::Suppression)
+                .map(|mark| mark.source),
+            Some(Source::Default)
+        );
+    }
+
+    #[test]
+    fn an_unknown_key_in_an_entry_is_reported_without_a_mark() {
+        let file = file(|table| {
+            set(
+                table,
+                "suppression",
+                entries(&[&[
+                    ("executable", "game.exe"),
+                    ("name", "Game"),
+                    ("color", "red"),
+                ]]),
+            );
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert!(config.includes("game.exe"));
+        assert!(report.marks.is_empty(), "{:?}", report.marks);
+        assert_eq!(report.unknown, ["suppression.color"]);
+    }
+
+    #[test]
+    fn duplicate_entries_are_both_marked_still_match_and_removing_either_clears_both() {
+        let file = file(|table| {
+            set(
+                table,
+                "suppression",
+                entries(&[
+                    &[("executable", "game.exe"), ("name", "Game")],
+                    &[("executable", "GAME.exe"), ("name", "Game")],
+                ]),
+            );
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert!(report.marks.is_empty(), "{:?}", report.marks);
+        assert_eq!(
+            entry_problems(config.entries(Field::Suppression)),
+            [Some(EntryProblem::Duplicate), Some(EntryProblem::Duplicate)]
+        );
+        assert!(config.has_entry_problems());
+        assert!(config.includes("game.exe"));
+        for removed in 0..2 {
+            let mut remaining = config.entries(Field::Suppression).to_vec();
+            remaining.remove(removed);
+            let (edited, errors) = apply_inputs(
+                &config,
+                &inputs(&[(Field::Suppression, FieldValue::Apps(remaining))]),
+            );
+            assert!(errors.is_empty(), "{errors:?}");
+            assert_eq!(entry_problems(edited.entries(Field::Suppression)), [None]);
+            assert!(!edited.has_entry_problems());
+            assert!(edited.includes("game.exe"));
+        }
+    }
+
+    #[test_case(""; "empty file name")]
+    #[test_case("C:\\Games\\game.exe"; "path")]
+    fn a_loaded_entry_without_a_plain_file_name_is_marked_and_matches_nothing(executable: &str) {
+        let file = file(|table| {
+            set(
+                table,
+                "suppression",
+                entries(&[&[("executable", executable), ("name", "Game")]]),
+            );
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert!(report.marks.is_empty(), "{:?}", report.marks);
+        assert_eq!(
+            config.entries(Field::Suppression),
+            [AppEntry::new(executable, "Game")]
+        );
+        assert_eq!(
+            entry_problems(config.entries(Field::Suppression)),
+            [Some(EntryProblem::Invalid)]
+        );
+        assert!(!config.includes("game.exe"));
+    }
+
+    #[test]
+    fn a_loaded_entry_with_a_value_of_the_wrong_type_is_marked_and_matches_nothing() {
+        let file = file(|table| {
+            let mut entry = toml::Table::new();
+            entry.insert("executable".into(), "game.exe".into());
+            entry.insert("name".into(), 5.into());
+            set(table, "suppression", vec![toml::Value::Table(entry)]);
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert!(report.marks.is_empty(), "{:?}", report.marks);
+        assert_eq!(
+            entry_problems(config.entries(Field::Suppression)),
+            [Some(EntryProblem::Invalid)]
+        );
+        assert!(!config.includes("game.exe"));
+    }
+
+    #[test]
+    fn a_loaded_file_name_is_normalized_for_matching_and_keeps_its_display_name() {
+        let file = file(|table| {
+            set(
+                table,
+                "suppression",
+                entries(&[&[("executable", "Game.EXE"), ("name", "Game")]]),
+            );
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert_eq!(report, LoadReport::default());
+        assert_eq!(
+            config.entries(Field::Suppression),
+            [AppEntry::new("game.exe", "Game")]
+        );
+        assert!(config.includes("GAME.exe"));
+        assert!(!config.has_entry_problems());
+    }
+
+    #[test]
+    fn the_shared_host_on_the_suppression_list_stays_inactive_without_a_mark() {
+        let file = file(|table| {
+            set(
+                table,
+                "suppression",
+                entries(&[&[
+                    ("executable", "ApplicationFrameHost.exe"),
+                    ("name", "Application Frame Host"),
+                ]]),
+            );
+            set(table, "bedtime", "22:00");
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert_eq!(report, LoadReport::default());
+        assert!(!config.has_entry_problems());
+        assert_eq!(config.bedtime_minutes(), 22 * 60);
+        assert!(config.includes("applicationframehost.exe"));
+        assert!(config.is_excluded("applicationframehost.exe", "circadia.exe"));
+    }
+
+    #[test_case(Field::Suppression; "suppression list")]
+    #[test_case(Field::Exclusions; "exclusion list")]
+    fn adding_a_listed_file_name_reports_already_listed_without_a_change(list: Field) {
+        let config = ConfigInput {
+            suppression: apps(&["game.exe"]),
+            exclusions: apps(&["game.exe"]),
+            ..ConfigInput::default()
+        }
+        .validate()
+        .expect("valid lists");
+        assert_eq!(
+            config.add_entries(list, [AppEntry::new("Game.exe", "Game")], "circadia.exe"),
+            Err(FieldErrorKind::AlreadyListed)
+        );
+        assert_eq!(
+            config.add_entries(list, [AppEntry::new("Other.EXE", "Other")], "circadia.exe"),
+            Ok(vec![
+                AppEntry::new("game.exe", "game.exe"),
+                AppEntry::new("other.exe", "Other")
+            ])
+        );
+    }
+
+    #[test_case(Field::Suppression, "ApplicationFrameHost.exe"; "shared host to suppression")]
+    #[test_case(Field::Exclusions, "applicationframehost.exe"; "shared host to exclusions")]
+    #[test_case(Field::Suppression, "NIGHT-COLORS.EXE"; "renamed binary to suppression")]
+    #[test_case(Field::Exclusions, "night-colors.exe"; "renamed binary to exclusions")]
+    fn adding_a_fixed_exclusion_reports_it_without_a_change(list: Field, executable: &str) {
+        assert_eq!(
+            Config::default().add_entries(
+                list,
+                [AppEntry::new(executable, executable)],
+                "Night-Colors.exe"
+            ),
+            Err(FieldErrorKind::FixedExclusion)
+        );
+    }
+
+    #[test]
+    fn adding_a_path_reports_an_invalid_file_name() {
+        assert_eq!(
+            Config::default().add_entries(
+                Field::Suppression,
+                [AppEntry::new("C:\\Games\\game.exe", "Game")],
+                "circadia.exe"
+            ),
+            Err(FieldErrorKind::Executable)
+        );
+    }
+
+    #[test]
+    fn adding_two_apps_appends_both_and_a_repeated_one_adds_nothing() {
+        let config = Config::default();
+        assert_eq!(
+            config.add_entries(
+                Field::Exclusions,
+                [AppEntry::new("a.exe", "A"), AppEntry::new("b.exe", "B")],
+                "circadia.exe"
+            ),
+            Ok(vec![
+                AppEntry::new("a.exe", "A"),
+                AppEntry::new("b.exe", "B")
+            ])
+        );
+        assert_eq!(
+            config.add_entries(
+                Field::Exclusions,
+                [AppEntry::new("a.exe", "A"), AppEntry::new("A.EXE", "A")],
+                "circadia.exe"
+            ),
+            Err(FieldErrorKind::AlreadyListed)
         );
     }
 

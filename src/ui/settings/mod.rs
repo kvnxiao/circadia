@@ -20,6 +20,7 @@ use crate::FieldValue;
 use crate::LoadReport;
 use crate::ManagementState;
 use crate::ManualCommand;
+use crate::RecentApp;
 use crate::SchedulingState;
 use crate::SuppressionState;
 use crate::WindowsZone;
@@ -119,6 +120,7 @@ pub(super) struct Model {
     inputs: FieldInputs,
     errors: BTreeMap<Field, FieldErrorKind>,
     report: LoadReport,
+    paused: bool,
     restore: Option<FileProblem>,
     error: Option<ConfigurationError>,
     write_error: Option<DiagnosticFailure>,
@@ -134,6 +136,9 @@ pub(super) struct Model {
     preview_active: bool,
     playing: Option<schedule::Playing>,
     manual_end: Option<u16>,
+    running_executable: String,
+    recent: Vec<RecentApp>,
+    names: BTreeMap<String, String>,
 }
 
 impl Model {
@@ -142,6 +147,7 @@ impl Model {
         snapshot: Option<&ControllerSnapshot>,
         retrying: bool,
         status: String,
+        names: &BTreeMap<String, String>,
     ) -> Self {
         let managing = configuration
             .accepted()
@@ -151,6 +157,7 @@ impl Model {
             inputs: configuration.inputs().clone(),
             errors: configuration.field_errors(),
             report: configuration.report().clone(),
+            paused: configuration.paused(),
             restore: configuration.restore(),
             error: configuration.error(),
             write_error: configuration.write_error().map(|error| error.diagnostic()),
@@ -189,6 +196,9 @@ impl Model {
                         .manual_end(crate::elapsed_since_boot(), Timestamp::now())
                 })
                 .and_then(local_minute),
+            running_executable: configuration.running_executable().to_owned(),
+            recent: snapshot.map_or_else(Vec::new, |snapshot| snapshot.recent.clone()),
+            names: names.clone(),
         }
     }
 
@@ -275,7 +285,7 @@ pub(super) enum Folder {
     Logs,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Command {
     Reset,
     Retry,
@@ -287,6 +297,9 @@ pub(super) enum Command {
     Preview,
     StopPreview,
     Manual(ManualCommand),
+    Add(Field, Vec<super::file_info::AppFile>),
+    Browsed(super::file_info::AppFile),
+    Remove(Field, usize, String),
 }
 
 fn local_minute(instant: Timestamp) -> Option<u16> {
@@ -334,6 +347,13 @@ pub(super) enum Message {
     Action(Action),
     Command(Command),
     Tick,
+    Minute,
+    OpenDialog(Field),
+    DialogClosed(ContentDialogResult),
+    Choose(String, bool),
+    Browse,
+    Picked(Option<super::file_info::AppFile>),
+    Expand(bool),
 }
 
 pub(super) struct Settings {
@@ -343,7 +363,10 @@ pub(super) struct Settings {
     write: PendingWrite,
     timer: Option<ComponentTimer>,
     tick: Option<ComponentTimer>,
+    minute: Option<ComponentTimer>,
     consent: bool,
+    dialog: Option<apps::AddDialog>,
+    exclusions_expanded: bool,
 }
 
 impl Settings {
@@ -389,6 +412,48 @@ impl Settings {
         } else if self.tick.is_none() {
             self.tick =
                 Some(context.set_local_timeout(Duration::from_millis(100), || Message::Tick));
+        }
+        if !apps::relative_times_shown(self.page, &self.input.model) {
+            self.minute = None;
+        } else if self.minute.is_none() {
+            self.minute = Some(context.set_local_timeout(apps::MINUTE, || Message::Minute));
+        }
+    }
+
+    fn browse(context: &ComponentContext<Self>) {
+        let _queued =
+            context.run_window(
+                |window| match crate::platform::picker::executable(&window) {
+                    Ok(file) => {
+                        Message::Picked(file.map(|(executable, path)| super::file_info::AppFile {
+                            executable,
+                            path,
+                        }))
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "choosing an executable failed");
+                        Message::Picked(None)
+                    }
+                },
+            );
+    }
+
+    fn dialog_closed(&mut self, result: ContentDialogResult) {
+        let Some(dialog) = self.dialog.take() else {
+            return;
+        };
+        let files = dialog.files(&self.input.model);
+        if result == ContentDialogResult::Primary && !files.is_empty() {
+            self.input.command.call(Command::Add(dialog.list, files));
+        }
+    }
+
+    fn picked(&mut self, file: super::file_info::AppFile) {
+        let Some(dialog) = &mut self.dialog else {
+            return;
+        };
+        if dialog.browsed(&self.input.model, file.clone()) {
+            self.input.command.call(Command::Browsed(file));
         }
     }
 
@@ -631,7 +696,10 @@ impl Component for Settings {
             write: PendingWrite::default(),
             timer: None,
             tick: None,
+            minute: None,
             consent: false,
+            dialog: None,
+            exclusions_expanded: false,
         };
         settings.animate(context);
         settings
@@ -696,6 +764,21 @@ impl Component for Settings {
             }
             Message::Command(command) => self.input.command.call(command),
             Message::Tick => self.tick = None,
+            Message::Minute => self.minute = None,
+            Message::OpenDialog(list) => self.dialog = Some(apps::AddDialog::new(list)),
+            Message::DialogClosed(result) => self.dialog_closed(result),
+            Message::Choose(executable, checked) => {
+                if let Some(dialog) = &mut self.dialog {
+                    dialog.choose(&executable, checked);
+                }
+            }
+            Message::Browse => Self::browse(context),
+            Message::Picked(file) => {
+                if let Some(file) = file {
+                    self.picked(file);
+                }
+            }
+            Message::Expand(expanded) => self.exclusions_expanded = expanded,
         }
         self.animate(context);
     }
