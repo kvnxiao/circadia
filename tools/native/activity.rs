@@ -433,7 +433,7 @@ fn manual(
         Ok(activity
             .controller()?
             .snapshot()?
-            .filter(|snapshot| snapshot.suppression.manual))
+            .filter(|snapshot| snapshot.suppression.manual()))
     })?;
     activity.set_foreground(Foreground::Unknown)?;
     command(activity, ControllerCommand::Foreground(Foreground::Unknown))?;
@@ -491,7 +491,7 @@ fn manual(
             activity
                 .controller()?
                 .snapshot()?
-                .is_some_and(|snapshot| snapshot.suppression.manual == expected),
+                .is_some_and(|snapshot| snapshot.suppression.manual() == expected),
             &format!(
                 "manual suppression at {:?} must be {expected}",
                 time.output.elapsed

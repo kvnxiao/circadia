@@ -134,19 +134,19 @@ fn manual_start_survives_a_valid_edit_waiting_for_calculation() {
             .expect("manual request"),
         ManualOutcome::Started
     );
-    assert!(runtime.suppression().manual);
+    assert!(runtime.suppression().manual());
     runtime
         .calculated(result(2, request, 3000), time(102))
         .expect("calculated");
-    assert!(runtime.suppression().manual);
+    assert!(runtime.suppression().manual());
     assert_eq!(
-        runtime.manual_remaining(time(102).uptime),
-        Some(Duration::from_millis(3_599_999))
+        runtime.suppression().manual_deadline,
+        Some(Duration::from_millis(3_600_101))
     );
 }
 
 #[test]
-fn preview_entry_defers_automatic_suppression_while_calculation_is_pending() {
+fn automatic_suppression_while_preview_calculation_is_pending_keeps_the_playback_start() {
     let config = ConfigInput {
         suppression: vec!["game.exe".into()],
         ..managed()
@@ -160,13 +160,13 @@ fn preview_entry_defers_automatic_suppression_while_calculation_is_pending() {
         .preview_request(time(100).output, time(100))
         .expect("preview request");
     runtime.expect_calculation(2);
-    assert!(runtime.suppression().preview);
     assert!(!runtime.controlling());
     runtime
         .foreground(&Foreground::Application("game.exe".into()), time(150))
         .expect("matching focus");
     runtime.advance(time(450)).expect("elapsed focus delay");
-    assert!(!runtime.suppression().automatic);
+    assert!(runtime.suppression().automatic);
+    assert!(runtime.preview_active());
     runtime
         .calculated(result(2, request, 3000), time(500))
         .expect("delayed calculation");
@@ -178,8 +178,14 @@ fn preview_entry_defers_automatic_suppression_while_calculation_is_pending() {
         runtime.preview().expect("playback").end,
         Duration::from_millis(10_100)
     );
+    assert_eq!(store(&mut runtime, &mut session, 3400, time(500)), 3000);
     runtime.stop_preview(time(600)).expect("stop");
     assert!(runtime.suppression().automatic);
+    assert_eq!(store(&mut runtime, &mut session, 3000, time(600)), 3000);
+    assert_eq!(
+        runtime.output().fade_deadline(),
+        Some(Duration::from_millis(1100))
+    );
 }
 
 #[test]
@@ -205,7 +211,6 @@ fn pending_preview_expires_on_its_original_deadline_and_rejects_late_calculation
     );
     runtime.advance(time(1100)).expect("logical completion");
     assert!(!runtime.preview_active());
-    assert!(!runtime.suppression().preview);
     assert!(
         !runtime
             .calculated(result(2, request, 3000), time(1200))
@@ -231,7 +236,6 @@ fn preview_that_expired_before_native_dispatch_does_not_restart() {
             .is_none()
     );
     assert!(!runtime.preview_active());
-    assert!(!runtime.suppression().preview);
     assert!(runtime.controlling());
 }
 
@@ -255,7 +259,7 @@ fn clock_change_cancels_preview_before_evaluating_new_time_outside_cached_curve(
         },
         ..time(200)
     };
-    assert!(runtime.stop_preview_for_recompute(changed));
+    assert!(runtime.stop_preview_for_recompute());
     assert!(!runtime.output().has_target());
     fail(&mut runtime, &session, 3, OutputUpdate::Apply, changed);
     assert_eq!(runtime.state(), SchedulingState::Retained);
@@ -368,7 +372,6 @@ fn schedule_failure_during_preview_cancels_playback_and_applies_retained_output(
     fail(&mut runtime, &session, 3, OutputUpdate::Fade, time(5100));
     assert_eq!(runtime.state(), SchedulingState::Retained);
     assert!(!runtime.preview_active());
-    assert!(!runtime.suppression().preview);
     assert_eq!(
         runtime
             .logical_deadline(time(5100))
@@ -563,7 +566,7 @@ fn retained_scheduled_output_allows_suppression_and_preserves_an_active_suppress
     fail(&mut runtime, &session, 2, OutputUpdate::Fade, time(200));
     assert_eq!(runtime.state(), SchedulingState::Retained);
     assert!(runtime.controlling());
-    assert!(runtime.suppression().manual);
+    assert!(runtime.suppression().manual());
     assert_eq!(
         runtime.output().fade_deadline(),
         Some(Duration::from_millis(600))
@@ -590,38 +593,115 @@ fn retained_scheduled_output_allows_suppression_and_preserves_an_active_suppress
     assert_eq!(request.temperature.kelvin(), 3400);
 }
 
+const TEN_PM: u64 = 79_200_000;
+
 #[test]
-fn manual_start_during_preview_selects_suppression_without_schedule_restoration() {
+fn manual_start_at_10_pm_during_preview_keeps_playback_and_fades_from_3000_k_when_it_ends() {
     let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
     let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
     store(&mut runtime, &mut session, 3400, time(0));
-    let request = runtime
-        .preview_request(time(100).output, time(100))
-        .expect("preview available");
-    runtime.expect_calculation(2);
-    runtime
-        .calculated(result(2, request, 3000), time(100))
-        .expect("preview calculation");
-    assert!(runtime.preview().is_some());
-    store(&mut runtime, &mut session, 3400, time(100));
+    start_preview(&mut runtime, 2, 3000, time(TEN_PM - 1000));
     assert_eq!(
-        session.active().expect("active").last_scheduled(),
-        Some(3400)
+        store(&mut runtime, &mut session, 3400, time(TEN_PM - 1000)),
+        3000
+    );
+    assert_eq!(
+        runtime
+            .manual(ManualCommand::Start, time(TEN_PM))
+            .expect("manual start"),
+        ManualOutcome::Started
+    );
+    assert!(runtime.suppression().manual());
+    let preview = runtime.preview().expect("playback continues");
+    assert_eq!(preview.end, Duration::from_millis(TEN_PM + 9000));
+    assert_eq!(
+        runtime
+            .output()
+            .deadlines(time(TEN_PM).output)
+            .expect("deadlines")
+            .change,
+        None
     );
     runtime
-        .manual(ManualCommand::Start, time(200))
-        .expect("manual start");
-    assert!(runtime.preview().is_none());
-    assert!(runtime.suppression().manual);
-    assert_eq!(store(&mut runtime, &mut session, 3000, time(200)), 3000);
+        .advance(time(TEN_PM + 9000))
+        .expect("playback completes");
+    assert!(!runtime.preview_active());
+    assert_eq!(
+        store(&mut runtime, &mut session, 3000, time(TEN_PM + 9000)),
+        3000
+    );
     assert_eq!(
         runtime.output().fade_deadline(),
-        Some(Duration::from_millis(700))
+        Some(Duration::from_millis(TEN_PM + 9500))
+    );
+    assert_eq!(
+        store(&mut runtime, &mut session, 3000, time(TEN_PM + 9500)),
+        6500
     );
 }
 
+fn an_hour_behind(milliseconds: u64) -> RuntimeTime {
+    RuntimeTime {
+        output: ControlTime {
+            wall: time(milliseconds - 3_600_000).output.wall,
+            ..time(milliseconds).output
+        },
+        ..time(milliseconds)
+    }
+}
+
+fn local_end(state: SuppressionState, now: RuntimeTime) -> jiff::civil::Time {
+    let end = state
+        .manual_end(now.uptime, now.output.wall)
+        .expect("manual end");
+    WindowsZone::named("UTC", false)
+        .expect("UTC")
+        .local(end)
+        .expect("local end")
+        .time()
+}
+
 #[test]
-fn resume_discards_deferred_preview_activation_and_requires_a_fresh_focus_delay() {
+fn a_backward_clock_change_moves_the_reported_manual_end_but_not_its_elapsed_deadline() {
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
+    let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
+    store(&mut runtime, &mut session, 3400, time(0));
+    runtime
+        .manual(ManualCommand::Start, time(TEN_PM))
+        .expect("manual start at 22:00");
+    let deadline = Some(Duration::from_millis(TEN_PM + 3_600_000));
+    assert_eq!(runtime.suppression().manual_deadline, deadline);
+    assert_eq!(
+        local_end(runtime.suppression(), time(TEN_PM + 1_800_000)),
+        jiff::civil::time(23, 0, 0, 0)
+    );
+    let changed = an_hour_behind(TEN_PM + 1_800_000);
+    assert!(!runtime.stop_preview_for_recompute());
+    let request = runtime
+        .configure(session.active(), OutputUpdate::Fade, changed)
+        .expect("clock recompute")
+        .expect("calculation request");
+    runtime.expect_calculation(2);
+    runtime
+        .calculated(result(2, request, 3400), changed)
+        .expect("recomputed schedule");
+    assert_eq!(runtime.suppression().manual_deadline, deadline);
+    assert_eq!(
+        local_end(runtime.suppression(), changed),
+        jiff::civil::time(22, 0, 0, 0)
+    );
+    runtime
+        .advance(an_hour_behind(TEN_PM + 3_599_999))
+        .expect("before expiry");
+    assert!(runtime.suppression().manual());
+    runtime
+        .advance(an_hour_behind(TEN_PM + 3_600_000))
+        .expect("expiry after 60 elapsed minutes");
+    assert!(!runtime.suppression().manual());
+}
+
+#[test]
+fn resume_discards_a_focus_delay_pending_during_preview_and_requires_a_fresh_one() {
     let config = ConfigInput {
         suppression: vec!["game.exe".into()],
         ..managed()
@@ -642,10 +722,10 @@ fn resume_discards_deferred_preview_activation_and_requires_a_fresh_focus_delay(
         .foreground(&Foreground::Application("game.exe".into()), time(150))
         .expect("matching focus");
     runtime
-        .advance(time(450))
-        .expect("delay elapsed during preview");
+        .advance(time(350))
+        .expect("delay pending during preview");
     assert!(!runtime.suppression().automatic);
-    runtime.suspend(time(500));
+    runtime.suspend(time(350));
     let resumed = RuntimeTime {
         uptime: Duration::from_secs(50),
         ..time(1000)
@@ -697,7 +777,7 @@ fn resume_without_suspend_expires_manual_time_and_cancels_preview() {
         .resume(1, &Foreground::Unknown, resumed)
         .expect("resume")
         .expect("request");
-    assert!(!runtime.suppression().manual);
+    assert!(!runtime.suppression().manual());
     runtime.expect_calculation(2);
     runtime
         .calculated(result(2, request, 3400), resumed)
@@ -827,4 +907,208 @@ fn configure_keeps_the_last_scheduled_temperature_until_the_new_schedule_stores_
         )
         .expect("selection");
     assert!(request.is_none_or(|request| request.temperature.kelvin() == 2400));
+}
+
+fn listed(executable: &str) -> Config {
+    ConfigInput {
+        suppression: vec![executable.into()],
+        ..managed()
+    }
+    .validate()
+    .expect("listed configuration")
+}
+
+fn start_preview(runtime: &mut ControlRuntime, revision: u64, kelvin: u16, now: RuntimeTime) {
+    let request = runtime
+        .preview_request(now.output, now)
+        .expect("preview request");
+    runtime.expect_calculation(revision);
+    assert!(
+        runtime
+            .calculated(result(revision, request, kelvin), now)
+            .expect("preview calculation")
+    );
+}
+
+fn later(now: RuntimeTime, milliseconds: u64) -> RuntimeTime {
+    time(u64::try_from(now.output.elapsed.as_millis()).expect("fixture time") + milliseconds)
+}
+
+#[test]
+fn preview_starts_under_automatic_suppression_and_fades_from_its_last_value_when_it_ends() {
+    let mut session = Layers::new(Some(listed("game.exe")));
+    let mut runtime = initialize(&session, &Foreground::Application("game.exe".into()), 3400);
+    assert!(runtime.suppression().automatic);
+    store(&mut runtime, &mut session, 3400, time(0));
+    assert_eq!(store(&mut runtime, &mut session, 3400, time(500)), 6500);
+    start_preview(&mut runtime, 2, 3000, time(1000));
+    assert_eq!(store(&mut runtime, &mut session, 6500, time(1000)), 3000);
+    assert_eq!(runtime.output().fade_deadline(), None);
+    runtime.advance(time(11_000)).expect("playback completes");
+    assert!(!runtime.preview_active());
+    assert_eq!(store(&mut runtime, &mut session, 3000, time(11_000)), 3000);
+    assert_eq!(
+        runtime.output().fade_deadline(),
+        Some(Duration::from_millis(11_500))
+    );
+    assert_eq!(store(&mut runtime, &mut session, 3000, time(11_500)), 6500);
+}
+
+#[derive(Clone, Copy)]
+enum PlaybackEnd {
+    Completion,
+    Stop,
+    ClockChange,
+}
+
+fn ended_playback(end: PlaybackEnd, focused: &str) -> (ControlRuntime, Layers, RuntimeTime) {
+    let mut session = Layers::new(Some(listed("game.exe")));
+    let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
+    store(&mut runtime, &mut session, 3400, time(0));
+    start_preview(&mut runtime, 2, 3000, time(100));
+    assert_eq!(store(&mut runtime, &mut session, 3400, time(100)), 3000);
+    runtime
+        .foreground(&Foreground::Application(focused.into()), time(200))
+        .expect("focus");
+    runtime.advance(time(450)).expect("focus delay elapses");
+    assert_eq!(runtime.suppression().automatic, focused == "game.exe");
+    assert!(runtime.preview().is_some());
+    assert_eq!(
+        runtime
+            .output()
+            .deadlines(time(450).output)
+            .expect("deadlines")
+            .change,
+        None
+    );
+    let ended = match end {
+        PlaybackEnd::Completion => {
+            runtime.advance(time(10_100)).expect("completion");
+            time(10_100)
+        }
+        PlaybackEnd::Stop => {
+            runtime.stop_preview(time(5000)).expect("stop");
+            time(5000)
+        }
+        PlaybackEnd::ClockChange => {
+            assert!(runtime.stop_preview_for_recompute());
+            let request = runtime
+                .configure(session.active(), OutputUpdate::Apply, time(5000))
+                .expect("recompute")
+                .expect("calculation request");
+            runtime.expect_calculation(3);
+            runtime
+                .calculated(result(3, request, 3400), time(5000))
+                .expect("recomputed schedule");
+            time(5000)
+        }
+    };
+    assert!(!runtime.preview_active());
+    (runtime, session, ended)
+}
+
+#[test_case(PlaybackEnd::Completion; "completion")]
+#[test_case(PlaybackEnd::Stop; "stop closing settings or lock")]
+#[test_case(PlaybackEnd::ClockChange; "clock change")]
+fn suppression_that_starts_during_preview_fades_from_the_last_preview_value_when_playback_ends(
+    end: PlaybackEnd,
+) {
+    let (mut runtime, mut session, ended) = ended_playback(end, "game.exe");
+    assert_eq!(store(&mut runtime, &mut session, 3000, ended), 3000);
+    assert_eq!(
+        runtime.output().fade_deadline(),
+        Some(later(ended, 500).output.elapsed)
+    );
+    assert_eq!(
+        store(&mut runtime, &mut session, 3000, later(ended, 500)),
+        6500
+    );
+}
+
+#[test_case(PlaybackEnd::Completion, 3000; "completion")]
+#[test_case(PlaybackEnd::Stop, 3000; "stop closing settings or lock")]
+#[test_case(PlaybackEnd::ClockChange, 3400; "clock change")]
+fn playback_that_ends_without_suppression_applies_the_schedule_at_once(
+    end: PlaybackEnd,
+    schedule: u16,
+) {
+    let (mut runtime, mut session, ended) = ended_playback(end, "browser.exe");
+    assert_eq!(store(&mut runtime, &mut session, 3000, ended), schedule);
+    assert_eq!(runtime.output().fade_deadline(), None);
+    assert_eq!(
+        session.active().expect("active").last_scheduled(),
+        Some(schedule)
+    );
+}
+
+#[test]
+fn a_preview_request_during_the_startup_fade_replaces_it() {
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
+    let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
+    assert_eq!(store(&mut runtime, &mut session, 2400, time(0)), 2400);
+    assert_eq!(
+        runtime.output().fade_deadline(),
+        Some(Duration::from_millis(500))
+    );
+    assert!(!runtime.startup_complete());
+    start_preview(&mut runtime, 2, 3000, time(100));
+    let request = runtime
+        .output()
+        .prepare(
+            NativeSnapshot {
+                settings: NativeSettings {
+                    schedule_enabled: false,
+                    temperature: Some(2400),
+                    previewing: false,
+                },
+                active: true,
+            },
+            time(100).output,
+            Duration::from_millis(500),
+        )
+        .expect("output selection")
+        .expect("output request");
+    assert_eq!(request.mode, TemperatureMode::Apply);
+    assert_eq!(
+        runtime.output().intended().map(ColorTemperature::kelvin),
+        Some(3000)
+    );
+    assert_eq!(runtime.output().fade_deadline(), None);
+}
+
+#[test]
+fn listing_the_focused_app_during_preview_keeps_playback_and_fades_to_6500_k_when_it_ends() {
+    let mut session = Layers::new(Some(managed().validate().expect("managed configuration")));
+    let mut runtime = initialize(&session, &Foreground::Application("game.exe".into()), 3400);
+    store(&mut runtime, &mut session, 3400, time(0));
+    start_preview(&mut runtime, 2, 3000, time(100));
+    assert_eq!(store(&mut runtime, &mut session, 3400, time(100)), 3000);
+    session.configure(listed("game.exe"));
+    let request = runtime
+        .configure(session.active(), OutputUpdate::LiveEdit, time(200))
+        .expect("configure")
+        .expect("calculation request");
+    runtime.expect_calculation(3);
+    runtime
+        .calculated(result(3, request, 3000), time(200))
+        .expect("calculation during playback");
+    runtime.advance(time(450)).expect("focus delay elapses");
+    assert!(runtime.suppression().automatic);
+    let preview = runtime.preview().expect("playback continues");
+    assert_eq!(preview.end, Duration::from_millis(10_100));
+    assert_eq!(
+        runtime
+            .output()
+            .deadlines(time(450).output)
+            .expect("deadlines")
+            .change,
+        None
+    );
+    runtime.advance(time(10_100)).expect("completion");
+    assert_eq!(store(&mut runtime, &mut session, 3000, time(10_100)), 3000);
+    assert_eq!(
+        runtime.output().fade_deadline(),
+        Some(Duration::from_millis(10_600))
+    );
+    assert_eq!(store(&mut runtime, &mut session, 3000, time(10_600)), 6500);
 }

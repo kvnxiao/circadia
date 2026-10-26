@@ -484,13 +484,9 @@ fn full_queue_rejects_more_commands_but_exit_still_cancels_admission() {
     );
 }
 
-#[test_case(ControllerCommand::StopPreview, false; "stop")]
-#[test_case(ControllerCommand::Manual(ManualCommand::Start), true; "manual start")]
-#[test_case(ControllerCommand::Suspend, false; "suspend")]
-fn cancellation_after_queued_preview_does_not_start_late_playback(
-    command: ControllerCommand,
-    manual: bool,
-) {
+#[test_case(ControllerCommand::StopPreview; "stop")]
+#[test_case(ControllerCommand::Suspend; "suspend")]
+fn cancellation_after_queued_preview_does_not_start_late_playback(command: ControllerCommand) {
     let directory = tempfile::tempdir().expect("directory");
     ConfigStore::new(directory.path())
         .save(&input(3400).validate().expect("config"))
@@ -519,8 +515,6 @@ fn cancellation_after_queued_preview_does_not_start_late_playback(
             && (suspended || snapshot.scheduling == SchedulingState::Available)
     });
     assert!(!snapshot.preview_active);
-    assert!(!snapshot.suppression.preview);
-    assert_eq!(snapshot.suppression.manual, manual);
     assert!(matches!(
         preview.completion.try_recv().expect("Preview result"),
         CommandOutcome::Applied
@@ -535,6 +529,43 @@ fn cancellation_after_queued_preview_does_not_start_late_playback(
     let exit = worker.shutdown();
     assert!(exit.worker.is_ok(), "{:?}", exit.worker);
     assert!(exit.calculation.is_ok(), "{:?}", exit.calculation);
+}
+
+#[test]
+fn manual_start_after_a_queued_preview_keeps_its_playback() {
+    let directory = tempfile::tempdir().expect("directory");
+    saved(&directory);
+    let (entered, started) = mpsc::sync_channel(1);
+    let (release, finish) = mpsc::sync_channel(1);
+    let records = Arc::new(Mutex::new(Records {
+        blocked: Some((entered, finish)),
+        ..Records::default()
+    }));
+    let (worker, notified) = start(&directory, &records);
+    let client = worker.client();
+    started
+        .recv_timeout(Duration::from_secs(10))
+        .expect("native call blocked");
+    let preview = client
+        .submit(ControllerCommand::Preview(Box::new(
+            input(3400).validate().expect("config"),
+        )))
+        .expect("Preview");
+    let manual = client
+        .submit(ControllerCommand::Manual(ManualCommand::Start))
+        .expect("manual start");
+    release.send(()).expect("finish native call");
+    let snapshot = wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &manual) && snapshot.preview.is_some()
+    });
+    assert!(snapshot.suppression.manual());
+    for receipt in [preview, manual] {
+        assert!(matches!(
+            receipt.completion.try_recv().expect("command result"),
+            CommandOutcome::Applied
+        ));
+    }
+    assert!(worker.shutdown().worker.is_ok());
 }
 
 #[test]
@@ -771,7 +802,7 @@ fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
             let snapshot = wait_for(&client, &notified, |snapshot| {
                 snapshot.suppression.automatic == (executable == "game.exe")
             });
-            assert!(!snapshot.suppression.manual);
+            assert!(!snapshot.suppression.manual());
         }
         submit(ControllerCommand::Manual(ManualCommand::Start));
         submit(ControllerCommand::Manual(ManualCommand::Stop));
@@ -987,6 +1018,61 @@ fn configure_after_a_queued_preview_keeps_its_playback() {
     wait_for(&client, &notified, |snapshot| {
         snapshot.configured_revision == 1 && snapshot.preview.is_some()
     });
+    assert!(worker.shutdown().worker.is_ok());
+}
+
+#[test]
+fn preview_plays_over_automatic_suppression_and_a_lock_fades_from_its_last_value_to_6500_k() {
+    let directory = tempfile::tempdir().expect("directory");
+    let config = ConfigInput {
+        suppression: vec!["game.exe".into()],
+        ..input(3000)
+    }
+    .validate()
+    .expect("config");
+    ConfigStore::new(directory.path())
+        .save(&config)
+        .expect("saved config");
+    let records = Arc::new(Mutex::new(Records::default()));
+    let (worker, notified) = start_with_foreground(&directory, &records, || {
+        Foreground::Application("game.exe".into())
+    });
+    let client = worker.client();
+    wait_for(&client, &notified, |snapshot| {
+        snapshot.suppression.automatic && temperatures(&records).last() == Some(&6500)
+    });
+    let preview = client
+        .submit(ControllerCommand::Preview(Box::new(config)))
+        .expect("Preview");
+    wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &preview)
+            && snapshot.preview.is_some()
+            && temperatures(&records).last() == Some(&3000)
+    });
+    assert!(matches!(
+        preview.completion.try_recv().expect("Preview result"),
+        CommandOutcome::Applied
+    ));
+    let before = records.lock().expect("records").calls.len();
+    let lock = client.submit(ControllerCommand::Lock).expect("lock");
+    wait_for(&client, &notified, |snapshot| {
+        acknowledged(snapshot, &lock)
+            && !snapshot.preview_active
+            && kelvins(&calls_since(&records, before)).last() == Some(&6500)
+    });
+    let calls = calls_since(&records, before);
+    assert_eq!(
+        calls
+            .iter()
+            .find(|call| matches!(call, Call::Temperature(..))),
+        Some(&Call::Temperature(3000, TemperatureMode::Hold)),
+        "{calls:?}"
+    );
+    let written = kelvins(&calls);
+    assert!(
+        written.windows(2).all(|pair| pair[0] < pair[1]),
+        "{calls:?}"
+    );
     assert!(worker.shutdown().worker.is_ok());
 }
 
@@ -1213,7 +1299,7 @@ fn management_off_rejects_preview_manual_suppression_and_retry_without_native_ca
             "{:?}",
             snapshot.command
         );
-        assert!(!snapshot.preview_active && !snapshot.suppression.manual);
+        assert!(!snapshot.preview_active && !snapshot.suppression.manual());
     }
     let exit = worker.shutdown();
     assert!(exit.native.is_none());

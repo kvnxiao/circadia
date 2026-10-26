@@ -207,3 +207,131 @@ fn a_configuration_error_disables_the_switch_without_a_change_line() {
         }
     );
 }
+
+fn region() -> RegionalFormat {
+    RegionalFormat::capture("en-US").expect("Windows resolves en-US")
+}
+
+fn plain(text: &str) -> String {
+    text.replace(['\u{2068}', '\u{2069}'], "")
+}
+
+fn managing(configuration: &Configuration) -> Model {
+    let mut model = Model::new(configuration, None, false, String::new());
+    model.management = ManagementState::On;
+    model.applied = Some(model.managing());
+    model.scheduling = crate::SchedulingState::Available;
+    model
+}
+
+fn managed_configuration(directory: &tempfile::TempDir) -> Configuration {
+    let mut configuration = Configuration::load(directory.path());
+    assert!(configuration.edit(switch_edit(true)).is_some());
+    configuration
+}
+
+fn preview_reason(model: &Model) -> (bool, String) {
+    let view = preview_view(model, &english(), &region(), Instant::now());
+    (view.enabled, plain(&view.caption))
+}
+
+const READY: &str = "Plays the next 24 hours on your screen in 10 seconds, even while suppressed.";
+
+#[test]
+fn preview_playback_disables_inputs_but_not_stop_the_management_switch_or_manual_suppression() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = managed_configuration(&directory);
+    let mut model = managing(&configuration);
+    assert!(model.editable());
+    model.preview_active = true;
+    assert!(!model.editable());
+    assert_eq!(management_view(&model, &english()), unlocked(true));
+    let preview = preview_view(&model, &english(), &region(), Instant::now());
+    assert!(preview.playing && preview.enabled);
+    assert_eq!(plain(&preview.caption), "Starting the preview…");
+    assert!(apps::manual_view(&model, &english(), &region()).enabled);
+    model.preview_active = false;
+    assert!(model.editable());
+}
+
+#[test]
+fn preview_is_ready_while_management_is_on_and_every_field_is_valid() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let model = managing(&managed_configuration(&directory));
+    assert_eq!(preview_reason(&model), (true, READY.to_owned()));
+}
+
+#[test]
+fn preview_cannot_start_while_management_is_off_and_says_why() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let (configuration, _desktop) = desktop(&directory);
+    let mut model = Model::new(&configuration.borrow(), None, false, String::new());
+    model.management = ManagementState::Off;
+    model.scheduling = crate::SchedulingState::Available;
+    assert_eq!(
+        preview_reason(&model),
+        (
+            false,
+            "Turn on Night Light management on the Schedule page to preview.".to_owned()
+        )
+    );
+}
+
+#[test]
+fn preview_cannot_start_while_wake_equals_bedtime_and_says_why() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let mut configuration = managed_configuration(&directory);
+    assert!(
+        configuration
+            .edit(vec![(Field::Wake, FieldValue::Clock(23 * 60))])
+            .is_none()
+    );
+    let model = managing(&configuration);
+    assert_eq!(
+        preview_reason(&model),
+        (false, "Fix the highlighted values to preview.".to_owned())
+    );
+}
+
+#[test]
+fn a_loaded_bedtime_mark_with_saving_paused_leaves_preview_available() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let toml::Value::Table(mut document) = toml::Value::try_from(ConfigInput {
+        manage_night_light: true,
+        ..ConfigInput::default()
+    })
+    .expect("serialized configuration") else {
+        panic!("the configuration serializes as a table");
+    };
+    document.insert("bedtime".into(), "25:00".into());
+    fs_err::write(directory.path().join("config.toml"), document.to_string())
+        .expect("configuration file");
+    let configuration = Configuration::load(directory.path());
+    assert!(configuration.paused());
+    let model = managing(&configuration);
+    assert_eq!(preview_reason(&model), (true, READY.to_owned()));
+}
+
+#[test]
+fn the_preview_stop_and_manual_commands_queue_their_controller_commands() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let (configuration, mut desktop) = desktop(&directory);
+    desktop.command(crate::ui::settings::Command::Preview);
+    desktop.command(crate::ui::settings::Command::StopPreview);
+    desktop.command(crate::ui::settings::Command::Manual(
+        crate::ManualCommand::Start,
+    ));
+    let commands: Vec<_> = desktop.pending.drain(..).collect();
+    let [
+        ControllerCommand::Preview(config),
+        ControllerCommand::StopPreview,
+        ControllerCommand::Manual(crate::ManualCommand::Start),
+    ] = commands.as_slice()
+    else {
+        panic!("Preview, StopPreview, and Manual commands, got {commands:?}");
+    };
+    assert_eq!(
+        Some(config.as_ref()),
+        configuration.borrow().accepted().map(AsRef::as_ref)
+    );
+}

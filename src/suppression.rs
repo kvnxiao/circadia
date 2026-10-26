@@ -1,6 +1,7 @@
 use crate::Config;
 use crate::ValidationError;
 use crate::normalize_executable;
+use jiff::Timestamp;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -110,7 +111,7 @@ pub enum ManualCommand {
 /// Identify the effect of a manual command independently of native output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ManualOutcome {
-    /// Start a new interval and stop Preview.
+    /// Start a new interval; Preview keeps playing.
     Started,
     /// Cancel the existing interval.
     Stopped,
@@ -126,20 +127,33 @@ pub enum ManualOutcome {
 pub struct SuppressionError;
 
 /// Report runtime suppression requests independently of output availability.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SuppressionState {
-    /// Automatic source after focus delay and Preview deferral.
+    /// Automatic source after the focus delay.
     pub automatic: bool,
-    /// Active manual interval after logical expiry is processed.
-    pub manual: bool,
-    /// Playback currently defers automatic activation.
-    pub preview: bool,
+    /// Sleep-inclusive elapsed deadline of the active manual interval, after
+    /// logical expiry is processed.
+    pub manual_deadline: Option<Duration>,
 }
 
 impl SuppressionState {
+    /// Return whether a manual interval is active.
+    pub fn manual(self) -> bool {
+        self.manual_deadline.is_some()
+    }
+
     /// Combine both suppression sources.
     pub fn active(self) -> bool {
-        self.automatic || self.manual
+        self.automatic || self.manual()
+    }
+
+    /// Return the wall-clock instant at which the manual interval ends.
+    ///
+    /// - `uptime` and `now` are read together; a clock or time-zone change
+    ///   moves the result without moving the elapsed deadline.
+    pub fn manual_end(self, uptime: Duration, now: Timestamp) -> Option<Timestamp> {
+        let remaining = self.manual_deadline?.saturating_sub(uptime);
+        now.checked_add(remaining).ok()
     }
 }
 
@@ -160,23 +174,14 @@ impl From<Focus> for Automatic {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum PendingFocus {
-    #[default]
-    None,
-    Waiting(Duration),
-    Deferred,
-}
-
 /// Apply focus delays and manual expiry using sleep-inclusive elapsed time.
 #[derive(Clone, Debug)]
 pub struct Suppression {
     automatic: Automatic,
     focus: Focus,
     focus_since: Duration,
-    pending: PendingFocus,
+    pending: Option<Duration>,
     manual_deadline: Option<Duration>,
-    preview: bool,
 }
 
 impl Default for Suppression {
@@ -185,9 +190,8 @@ impl Default for Suppression {
             automatic: Automatic::Uninitialized,
             focus: Focus::Nonmatching,
             focus_since: Duration::ZERO,
-            pending: PendingFocus::None,
+            pending: None,
             manual_deadline: None,
-            preview: false,
         }
     }
 }
@@ -195,11 +199,10 @@ impl Default for Suppression {
 impl Suppression {
     /// Initialize current focus immediately after startup prerequisites pass.
     pub fn initialize_focus(&mut self, focus: Focus, now: Duration) {
-        self.preview = false;
         self.advance(now);
         self.focus = focus;
         self.focus_since = now;
-        self.pending = PendingFocus::None;
+        self.pending = None;
         self.automatic = focus.into();
     }
 
@@ -223,11 +226,11 @@ impl Suppression {
             return Ok(());
         }
         if (self.automatic == Automatic::Active) == (focus == Focus::Matching) {
-            self.pending = PendingFocus::None;
+            self.pending = None;
             return Ok(());
         }
         let delay = Duration::from_millis(config.input().focus_delay_ms.unsigned_abs());
-        self.pending = PendingFocus::Waiting(
+        self.pending = Some(
             self.focus_since
                 .checked_add(delay)
                 .ok_or(SuppressionError)?,
@@ -236,10 +239,9 @@ impl Suppression {
         Ok(())
     }
 
-    /// Cancel pending focus changes and Preview while retaining active sources.
+    /// Cancel pending focus changes while retaining active sources.
     pub fn suspend(&mut self, now: Duration) {
-        self.preview = false;
-        self.pending = PendingFocus::None;
+        self.pending = None;
         self.advance(now);
     }
 
@@ -255,8 +257,7 @@ impl Suppression {
         now: Duration,
         config: &Config,
     ) -> Result<(), SuppressionError> {
-        self.preview = false;
-        self.pending = PendingFocus::None;
+        self.pending = None;
         self.focus = focus;
         self.focus_since = now;
         self.observe_focus(focus, now, config)
@@ -267,36 +268,9 @@ impl Suppression {
         if self.manual_deadline.is_some_and(|deadline| deadline <= now) {
             self.manual_deadline = None;
         }
-        if let PendingFocus::Waiting(deadline) = self.pending
-            && deadline <= now
-        {
-            if self.preview && self.focus == Focus::Matching {
-                self.pending = PendingFocus::Deferred;
-            } else {
-                self.automatic = self.focus.into();
-                self.pending = PendingFocus::None;
-            }
-        }
-    }
-
-    /// Start Preview only after initialization and while both sources are
-    /// inactive.
-    pub fn begin_preview(&mut self, now: Duration) -> bool {
-        self.advance(now);
-        if self.automatic == Automatic::Uninitialized || self.state().active() {
-            return false;
-        }
-        self.preview = true;
-        true
-    }
-
-    /// Release Preview deferral while preserving an unexpired focus delay.
-    pub fn end_preview(&mut self, now: Duration) {
-        self.advance(now);
-        self.preview = false;
-        if self.pending == PendingFocus::Deferred {
-            self.automatic = Automatic::Active;
-            self.pending = PendingFocus::None;
+        if self.pending.is_some_and(|deadline| deadline <= now) {
+            self.automatic = self.focus.into();
+            self.pending = None;
         }
     }
 
@@ -331,7 +305,6 @@ impl Suppression {
                 let deadline = now
                     .checked_add(Duration::from_hours(1))
                     .ok_or(SuppressionError)?;
-                self.end_preview(now);
                 self.manual_deadline = Some(deadline);
                 Ok(ManualOutcome::Started)
             }
@@ -342,25 +315,13 @@ impl Suppression {
     pub fn state(&self) -> SuppressionState {
         SuppressionState {
             automatic: self.automatic == Automatic::Active,
-            manual: self.manual_deadline.is_some(),
-            preview: self.preview,
+            manual_deadline: self.manual_deadline,
         }
     }
 
-    /// Return the next necessary wake-up, excluding deferred automatic
-    /// activation.
+    /// Return the next focus or manual deadline.
     pub fn next_deadline(&self) -> Option<Duration> {
-        let focus = match self.pending {
-            PendingFocus::Waiting(deadline) => Some(deadline),
-            PendingFocus::None | PendingFocus::Deferred => None,
-        };
-        focus.into_iter().chain(self.manual_deadline).min()
-    }
-
-    /// Return remaining manual time for a visible countdown.
-    pub fn manual_remaining(&self, now: Duration) -> Option<Duration> {
-        self.manual_deadline
-            .map(|deadline| deadline.saturating_sub(now))
+        self.pending.into_iter().chain(self.manual_deadline).min()
     }
 }
 
@@ -521,44 +482,6 @@ mod tests {
     }
 
     #[test]
-    fn preview_defers_elapsed_automatic_activation_without_a_repeating_timer() {
-        let mut state = Suppression::default();
-        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
-        assert!(state.begin_preview(milliseconds(0)));
-        state
-            .observe_focus(Focus::Matching, milliseconds(100), &Config::default())
-            .expect("focus");
-        state.advance(milliseconds(350));
-        assert!(!state.state().active());
-        assert!(state.state().preview);
-        assert_eq!(state.next_deadline(), None);
-        state.end_preview(milliseconds(400));
-        assert!(state.state().automatic);
-        assert!(!state.state().preview);
-    }
-
-    #[test]
-    fn preview_end_preserves_a_pending_delay_and_nonmatching_focus_cancels_deferral() {
-        let mut state = Suppression::default();
-        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
-        assert!(state.begin_preview(milliseconds(0)));
-        state
-            .observe_focus(Focus::Matching, milliseconds(100), &Config::default())
-            .expect("focus");
-        state.end_preview(milliseconds(200));
-        assert_eq!(state.next_deadline(), Some(milliseconds(350)));
-        assert!(!state.state().active());
-        assert!(state.begin_preview(milliseconds(250)));
-        state.advance(milliseconds(350));
-        state
-            .observe_focus(Focus::Nonmatching, milliseconds(400), &Config::default())
-            .expect("leave");
-        state.end_preview(milliseconds(500));
-        assert!(!state.state().active());
-        assert_eq!(state.next_deadline(), None);
-    }
-
-    #[test]
     fn manual_commands_are_idempotent_and_stop_then_start_grants_a_fresh_hour() {
         let mut state = Suppression::default();
         state.initialize_focus(Focus::Nonmatching, milliseconds(0));
@@ -606,7 +529,7 @@ mod tests {
             .expect("start");
         state.advance(milliseconds(3_600_000));
         assert!(state.state().automatic);
-        assert!(!state.state().manual);
+        assert!(!state.state().manual());
         state
             .manual(ManualCommand::Start, milliseconds(3_600_000), true)
             .expect("new start");
@@ -619,7 +542,7 @@ mod tests {
             .expect("leave");
         state.advance(milliseconds(3_600_250));
         assert!(!state.state().automatic);
-        assert!(state.state().manual);
+        assert!(state.state().manual());
         assert!(state.state().active());
         state.advance(milliseconds(7_200_000));
         assert!(!state.state().active());
@@ -650,30 +573,10 @@ mod tests {
                 .expect("duplicate during error"),
             ManualOutcome::Unchanged
         );
-        assert_eq!(
-            state.manual_remaining(milliseconds(1000)),
-            Some(milliseconds(3_599_100))
-        );
+        assert_eq!(state.state().manual_deadline, Some(milliseconds(3_600_100)));
         state.advance(milliseconds(4_200_100));
-        assert!(!state.state().manual);
+        assert!(!state.state().manual());
         assert_eq!(state.next_deadline(), None);
-    }
-
-    #[test]
-    fn manual_start_cancels_preview_and_blocks_new_playback() {
-        let mut state = Suppression::default();
-        state.initialize_focus(Focus::Nonmatching, milliseconds(0));
-        assert!(state.begin_preview(milliseconds(0)));
-        state
-            .manual(ManualCommand::Start, milliseconds(100), true)
-            .expect("start");
-        assert!(!state.state().preview);
-        assert!(state.state().manual);
-        assert!(!state.begin_preview(milliseconds(100)));
-        state
-            .manual(ManualCommand::Stop, milliseconds(200), true)
-            .expect("stop");
-        assert!(!state.state().preview);
     }
 
     #[test]

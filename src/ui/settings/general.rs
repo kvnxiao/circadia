@@ -428,8 +428,9 @@ fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
     let model = &settings.input.model;
     let view = sign_in_view(
         model
-            .editable()
-            .then(|| model.config().input().start_at_sign_in),
+            .accepted
+            .as_ref()
+            .map(|config| config.input().start_at_sign_in),
         settings.input.sign_in,
         text,
     );

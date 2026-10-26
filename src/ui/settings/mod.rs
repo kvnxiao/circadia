@@ -19,9 +19,14 @@ use crate::FieldInputs;
 use crate::FieldValue;
 use crate::LoadReport;
 use crate::ManagementState;
+use crate::ManualCommand;
+use crate::SchedulingState;
+use crate::SuppressionState;
+use crate::WindowsZone;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
+use jiff::Timestamp;
 use problems::Action;
 use problems::Banner;
 use problems::Feedback;
@@ -124,6 +129,11 @@ pub(super) struct Model {
     applied: Option<bool>,
     native_errors: Vec<(DiagnosticOperation, DiagnosticFailure)>,
     retrying: bool,
+    scheduling: SchedulingState,
+    suppression: SuppressionState,
+    preview_active: bool,
+    playing: Option<schedule::Playing>,
+    manual_end: Option<u16>,
 }
 
 impl Model {
@@ -166,11 +176,24 @@ impl Model {
                     .collect()
             }),
             retrying,
+            scheduling: snapshot.map_or(SchedulingState::Waiting, |snapshot| snapshot.scheduling),
+            suppression: snapshot
+                .map(|snapshot| snapshot.suppression)
+                .unwrap_or_default(),
+            preview_active: snapshot.is_some_and(|snapshot| snapshot.preview_active),
+            playing: snapshot.and_then(schedule::Playing::new),
+            manual_end: snapshot
+                .and_then(|snapshot| {
+                    snapshot
+                        .suppression
+                        .manual_end(crate::elapsed_since_boot(), Timestamp::now())
+                })
+                .and_then(local_minute),
         }
     }
 
     fn editable(&self) -> bool {
-        self.accepted.is_some()
+        self.accepted.is_some() && !self.preview_active
     }
 
     fn managing(&self) -> bool {
@@ -261,6 +284,14 @@ pub(super) enum Command {
     DismissRestore,
     Quit,
     RetrySignIn,
+    Preview,
+    StopPreview,
+    Manual(ManualCommand),
+}
+
+fn local_minute(instant: Timestamp) -> Option<u16> {
+    let local = WindowsZone::current().ok()?.local(instant).ok()?;
+    u16::try_from(i32::from(local.hour()) * 60 + i32::from(local.minute())).ok()
 }
 
 struct NumberControls<'a> {
@@ -302,6 +333,7 @@ pub(super) enum Message {
     WriteDue(u64),
     Action(Action),
     Command(Command),
+    Tick,
 }
 
 pub(super) struct Settings {
@@ -310,6 +342,7 @@ pub(super) struct Settings {
     placed: bool,
     write: PendingWrite,
     timer: Option<ComponentTimer>,
+    tick: Option<ComponentTimer>,
     consent: bool,
 }
 
@@ -345,6 +378,17 @@ impl Settings {
         if self.write.due(token) {
             self.timer = None;
             self.input.write.call(());
+        }
+    }
+
+    // Preview playback text and progress follow the playback clock between
+    // controller snapshots, which arrive only when output changes.
+    fn animate(&mut self, context: &ComponentContext<Self>) {
+        if self.page != Page::Schedule || self.input.model.playing.is_none() {
+            self.tick = None;
+        } else if self.tick.is_none() {
+            self.tick =
+                Some(context.set_local_timeout(Duration::from_millis(100), || Message::Tick));
         }
     }
 
@@ -567,7 +611,7 @@ impl Settings {
     fn page_content(&self, context: &ViewContext<'_, Self>) -> Vec<View> {
         match self.page {
             Page::Schedule => schedule::view(self, context),
-            Page::Apps => apps::view(),
+            Page::Apps => apps::view(self, context),
             Page::Transitions => transitions::view(self, context),
             Page::General => general::view(self, context),
         }
@@ -578,16 +622,19 @@ impl Component for Settings {
     type Input = Input;
     type Message = Message;
 
-    fn create(input: &Input, _: &ComponentContext<Self>) -> Self {
+    fn create(input: &Input, context: &ComponentContext<Self>) -> Self {
         input.opened.call(());
-        Self {
+        let mut settings = Self {
             input: input.clone(),
             page: Page::Schedule,
             placed: false,
             write: PendingWrite::default(),
             timer: None,
+            tick: None,
             consent: false,
-        }
+        };
+        settings.animate(context);
+        settings
     }
 
     fn input_changed(&mut self, input: &Input, context: &ComponentContext<Self>) {
@@ -597,6 +644,7 @@ impl Component for Settings {
             let _closed = context.close_window();
             return;
         }
+        self.animate(context);
         if activated && self.placed {
             Self::activate(context);
         }
@@ -647,7 +695,9 @@ impl Component for Settings {
                 self.input.command.call(Command::OpenFolder(Folder::Data));
             }
             Message::Command(command) => self.input.command.call(command),
+            Message::Tick => self.tick = None,
         }
+        self.animate(context);
     }
 
     fn view(&self, _: &Input, context: &mut ViewContext<'_, Self>) -> View {

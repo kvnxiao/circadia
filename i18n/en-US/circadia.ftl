@@ -1,6 +1,4 @@
 tray-settings = Settings
-tray-manual-start = Suppress for one hour
-tray-manual-stop = Stop manual suppression
 tray-recent-add = Suppress for { $executable }
 tray-recent-remove = Remove { $executable } from suppression
 tray-recent-add-excluded = Suppress for { $executable } (excluded)
@@ -80,6 +78,24 @@ color-bedtime-description = From bedtime until your next wake time.
 not-used = Not used
 kelvin-unit = K
 restore-colors = Restore recommended colors
+manual-title = Suppress for 1 hour
+manual-stop = Stop suppressing
+manual-description = Request { $kelvin } for the next hour, whichever app is focused.
+manual-until = Suppressed until { $time }.
+manual-active = Suppressed for 1 hour.
+manual-unmanaged = Turn on Night Light management on the Schedule page to suppress.
+preview-start = Preview
+preview-stop = Stop
+preview-ready =
+    Plays the next 24 hours on your screen in { $count ->
+        [one] { $seconds } second
+       *[other] { $seconds } seconds
+    }, even while suppressed.
+preview-playing = Previewing
+preview-playing-detail = { $time } · { $kelvin }
+preview-starting = Starting the preview…
+preview-invalid = Fix the highlighted values to preview.
+preview-unmanaged = Turn on Night Light management on the Schedule page to preview.
 
 section-slow = Slow transitions
 transition-length = Transition length
