@@ -6,6 +6,7 @@ use super::ConfigLayer;
 use super::ControlError;
 use super::ControlRuntime;
 use super::ControlTime;
+use super::ExitKind;
 use super::NativeCycle;
 use super::NativeDriver;
 use super::OutputUpdate;
@@ -241,10 +242,20 @@ struct Shared {
     latest: Mutex<Option<Arc<ControllerSnapshot>>>,
     generation: AtomicU64,
     stopping: AtomicBool,
+    exit: Mutex<Option<ExitKind>>,
     finished: AtomicBool,
     wake: Arc<NativeWake>,
     calculation: CalculationClient,
     notify: Arc<dyn Fn() -> io::Result<()> + Send + Sync>,
+}
+
+impl Shared {
+    fn exit_kind(&self) -> Option<ExitKind> {
+        *self
+            .exit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 struct StopAdmission(Arc<Shared>);
@@ -391,12 +402,23 @@ impl ControllerClient {
         self.0.calculation.clone()
     }
 
-    /// Stop admission and request graceful exit without waiting for native
-    /// work.
+    /// Stop admission and request exit without waiting for native work.
+    ///
+    /// - `SessionEnd` or `Panic` replaces an earlier `Quit` and ends its fade;
+    ///   `Quit` does not replace an earlier request.
     ///
     /// # Errors
     /// Report a failed wake operation.
-    pub fn request_exit(&self) -> io::Result<()> {
+    pub fn request_exit(&self, kind: ExitKind) -> io::Result<()> {
+        let mut exit = self
+            .0
+            .exit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if exit.is_none() || kind != ExitKind::Quit {
+            *exit = Some(kind);
+        }
+        drop(exit);
         self.0.stopping.store(true, Ordering::Release);
         self.0.wake.signal()
     }
@@ -408,7 +430,7 @@ impl ControllerClient {
         // Several aborting panics can reach the hook; later calls share the
         // first deadline instead of extending it.
         let deadline = *deadline.get_or_init(|| {
-            drop(self.request_exit());
+            drop(self.request_exit(ExitKind::Panic));
             Instant::now()
                 .checked_add(wait)
                 .unwrap_or_else(Instant::now)
@@ -497,6 +519,7 @@ impl ControllerWorker {
             latest: Mutex::new(None),
             generation: AtomicU64::new(0),
             stopping: AtomicBool::new(false),
+            exit: Mutex::new(None),
             finished: AtomicBool::new(false),
             wake,
             calculation: calculation.client(),
@@ -515,7 +538,8 @@ impl ControllerWorker {
                 let mut worker = Worker::new(config, runtime, shared, native, foreground);
                 let result = worker.run();
                 worker.shared.stopping.store(true, Ordering::Release);
-                let exit = worker.driver.exit(worker.now());
+                let faded = worker.fade_before_exit();
+                let exit = worker.driver.exit();
                 for failure in exit
                     .iter()
                     .flat_map(|exit| [&exit.preview, &exit.off])
@@ -526,7 +550,7 @@ impl ControllerWorker {
                         .failure(failure.operation(), failure.diagnostic());
                 }
                 let published = worker.publish();
-                (exit, result.and(published))
+                (exit, result.and(faded).and(published))
             });
         let thread = match thread {
             Ok(thread) => thread,
@@ -550,14 +574,15 @@ impl ControllerWorker {
         self.client.clone()
     }
 
-    /// Wait for the current native call, independent exit attempts, and both
-    /// workers.
+    /// Request `Quit` unless another exit was requested, then wait for the
+    /// current native call, the exit fade, the independent exit attempts, and
+    /// both workers.
     pub fn shutdown(mut self) -> ControllerExit {
         self.finish()
     }
 
     fn finish(&mut self) -> ControllerExit {
-        let signal = self.client.request_exit();
+        let signal = self.client.request_exit(ExitKind::Quit);
         let joined = self.thread.take().map(JoinHandle::join);
         let (native, worker) = match joined {
             Some(Ok(result)) => result,
@@ -774,6 +799,52 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             crate::activity::record(crate::ActivityEvent::WorkerWake(reason));
             #[cfg(not(feature = "graph-measurement"))]
             let _ = reason;
+        }
+        Ok(())
+    }
+
+    fn fade_before_exit(&mut self) -> io::Result<()> {
+        // A worker failure ends `run` without an exit request.
+        let kind = self.shared.exit_kind().unwrap_or(ExitKind::Panic);
+        if let Err(error) = self.driver.begin_exit(kind, self.now()) {
+            tracing::warn!(%error, "starting the exit fade");
+            return Ok(());
+        }
+        let origin = self.origin;
+        let shared = Arc::clone(&self.shared);
+        let quitting = || shared.exit_kind() == Some(ExitKind::Quit);
+        while quitting() && self.driver.exit_fading(self.now()) {
+            let now = self.now();
+            let deadline = match self.driver.next_deadline(now) {
+                Ok(Some(deadline)) => deadline,
+                Ok(None) => break,
+                Err(error) => {
+                    tracing::warn!(%error, "exit fade");
+                    break;
+                }
+            };
+            self.shared.wake.wait(
+                &self.driver.handles(),
+                Some(deadline.saturating_sub(now.output.elapsed)),
+            )?;
+            let mut report = match self.driver.cycle(|| time(origin), quitting) {
+                Ok(report) => report,
+                Err(error) => {
+                    tracing::warn!(%error, "exit fade");
+                    break;
+                }
+            };
+            let error = report.control_error.take();
+            self.native_result(report)?;
+            if let Some(error) = error {
+                tracing::warn!(%error, "exit fade");
+                break;
+            }
+            let observed = self
+                .driver
+                .observe(|| time(origin))
+                .map_err(io::Error::other)?;
+            self.native_result(observed)?;
         }
         Ok(())
     }

@@ -11,10 +11,12 @@ use crate::Foreground;
 use crate::ManualCommand;
 use crate::NativeSettings;
 use crate::OutputUpdate;
+use crate::Playback;
 use crate::ScheduleError;
 use crate::Target;
 use crate::TemperatureMode;
 use crate::TimeInterval;
+use crate::WindowsZone;
 use crate::controller::Layers;
 use crate::native::NativeBackend;
 use jiff::Timestamp;
@@ -174,13 +176,18 @@ struct Fixture {
 
 impl Fixture {
     fn new(rate: i64) -> Self {
-        let config = ConfigInput {
-            output_rate_hz: rate,
-            ordinary_fade_ms: 500,
-            ..ConfigInput::default()
-        }
-        .validate()
-        .expect("config");
+        Self::with_config(
+            ConfigInput {
+                output_rate_hz: rate,
+                ordinary_fade_ms: 500,
+                ..ConfigInput::default()
+            },
+            3400,
+        )
+    }
+
+    fn with_config(input: ConfigInput, kelvin: u16) -> Self {
+        let config = input.validate().expect("config");
         let session = Layers::new(Some(config));
         let mut runtime = ControlRuntime::new("circadia.exe").expect("runtime");
         let request = runtime
@@ -196,11 +203,11 @@ impl Fixture {
                 vec![
                     Target {
                         instant: valid.start,
-                        kelvin: 3400,
+                        kelvin,
                     },
                     Target {
                         instant: valid.end,
-                        kelvin: 3400,
+                        kelvin,
                     },
                 ],
                 60,
@@ -230,7 +237,7 @@ impl Fixture {
         let records = Arc::new(Mutex::new(Records {
             settings: NativeSettings {
                 schedule_enabled: false,
-                temperature: Some(3400),
+                temperature: Some(kelvin.cast_signed()),
                 previewing: false,
             },
             active: true,
@@ -644,9 +651,14 @@ fn exit_before_prerequisites_does_not_access_native_records() {
         .runtime_mut()
         .configure(None, OutputUpdate::Fade, at(0))
         .expect("configuration error");
-    assert!(fixture.driver.exit(at(0)).is_none());
+    fixture
+        .driver
+        .begin_exit(ExitKind::Quit, at(0))
+        .expect("exit");
+    assert!(!fixture.driver.exit_fading(at(0)));
+    assert!(fixture.driver.exit().is_none());
     assert_eq!(fixture.take_calls(), []);
-    assert!(fixture.driver.exit(at(1)).is_none());
+    assert!(fixture.driver.exit().is_none());
 }
 
 #[test]
@@ -725,7 +737,11 @@ fn graph_calculation_and_playback_progress_while_a_cancelled_native_call_finishe
             Call::Temperature(6500, TemperatureMode::Apply)
         ]
     );
-    fixture.driver.exit(at(1)).expect("exit after begun access");
+    fixture
+        .driver
+        .begin_exit(ExitKind::SessionEnd, at(1))
+        .expect("exit");
+    fixture.driver.exit().expect("exit after begun access");
     assert_eq!(fixture.take_calls(), [Call::Cleanup, Call::Activate(false)]);
     calculation.shutdown().expect("calculation shutdown");
 }
@@ -862,4 +878,388 @@ fn recalculation_preserves_a_suppression_fades_cleanup_deadline() {
             Call::Temperature(4330, TemperatureMode::Hold)
         ]
     );
+}
+
+fn startup_from_off(ordinary_fade_ms: i64) -> Fixture {
+    let mut fixture = Fixture::with_config(
+        ConfigInput {
+            ordinary_fade_ms,
+            ..ConfigInput::default()
+        },
+        3400,
+    );
+    {
+        let mut records = fixture.records.lock().expect("records");
+        records.active = false;
+        records.settings.temperature = Some(4000);
+    }
+    fixture.cycle(0);
+    assert_eq!(
+        fixture.take_calls(),
+        [
+            Call::Register,
+            Call::Settings,
+            Call::State,
+            Call::Temperature(6500, TemperatureMode::Apply),
+            Call::Activate(true),
+            Call::Temperature(6500, TemperatureMode::ApplyHeld)
+        ]
+    );
+    fixture
+}
+
+fn assert_startup_finishes(fixture: &mut Fixture, milliseconds: u64) {
+    assert_eq!(
+        fixture.driver.runtime_mut().output().fade_deadline(),
+        Some(Duration::from_millis(milliseconds))
+    );
+    fixture.cycle(milliseconds);
+    assert_eq!(
+        fixture.take_calls(),
+        [
+            Call::Settings,
+            Call::State,
+            Call::Temperature(3400, TemperatureMode::Hold),
+            Call::Cleanup
+        ]
+    );
+    assert!(fixture.driver.runtime_mut().output().startup_complete());
+    assert_eq!(
+        fixture
+            .driver
+            .next_deadline(at(milliseconds))
+            .expect("idle"),
+        None
+    );
+}
+
+#[test]
+fn startup_from_off_fades_to_the_schedule_over_the_configured_duration() {
+    let mut fixture = startup_from_off(2000);
+    fixture.cycle(1000);
+    assert_eq!(
+        fixture.take_calls(),
+        [
+            Call::Settings,
+            Call::State,
+            Call::Temperature(4950, TemperatureMode::Hold)
+        ]
+    );
+    assert!(!fixture.driver.runtime_mut().output().startup_complete());
+    assert_startup_finishes(&mut fixture, 2000);
+}
+
+#[test]
+fn startup_from_off_fades_over_250_ms_by_default() {
+    let mut fixture = startup_from_off(ConfigInput::default().ordinary_fade_ms);
+    assert_startup_finishes(&mut fixture, 250);
+}
+
+#[test]
+fn outside_change_during_the_startup_fade_keeps_its_original_deadline() {
+    let mut fixture = startup_from_off(2000);
+    {
+        let mut records = fixture.records.lock().expect("records");
+        records.settings.temperature = Some(5000);
+        records.notifications = NativeNotifications {
+            changed: true,
+            settings: Some(records.settings),
+            active: Some(true),
+            errors: Vec::new(),
+        };
+    }
+    fixture.observe(500);
+    fixture.cycle(500);
+    assert_eq!(
+        fixture.take_calls(),
+        [
+            Call::Observe(ObservationMode::Read),
+            Call::Settings,
+            Call::State,
+            Call::Temperature(5730, TemperatureMode::Hold)
+        ]
+    );
+    assert_startup_finishes(&mut fixture, 2000);
+}
+
+fn at_kelvin(kelvin: u16) -> Fixture {
+    let mut fixture = Fixture::with_config(ConfigInput::default(), kelvin);
+    fixture.cycle(0);
+    assert_eq!(
+        fixture.take_calls(),
+        [
+            Call::Register,
+            Call::Settings,
+            Call::State,
+            Call::Temperature(kelvin, TemperatureMode::Apply)
+        ]
+    );
+    fixture
+}
+
+fn fade_out(fixture: &mut Fixture, from: u64) -> Vec<(u64, Call)> {
+    fixture
+        .driver
+        .begin_exit(ExitKind::Quit, at(from))
+        .expect("exit");
+    let mut now = from;
+    let mut calls = Vec::new();
+    while fixture.driver.exit_fading(at(now)) {
+        assert!(calls.len() < 1000, "exit fade does not finish");
+        let due = fixture
+            .driver
+            .next_deadline(at(now))
+            .expect("deadline")
+            .expect("remaining exit step");
+        now = u64::try_from(due.as_micros().div_ceil(1000)).expect("milliseconds");
+        fixture.cycle(now);
+        calls.extend(fixture.take_calls().into_iter().map(|call| (now, call)));
+    }
+    calls
+}
+
+fn temperatures(calls: &[(u64, Call)]) -> Vec<u16> {
+    calls
+        .iter()
+        .filter_map(|(_, call)| match call {
+            Call::Temperature(kelvin, _) => Some(*kelvin),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn quit_fades_to_6500_k_over_the_default_duration_before_cleanup_and_off() {
+    let mut fixture = at_kelvin(2400);
+    let calls = fade_out(&mut fixture, 100);
+    let written = temperatures(&calls);
+    assert_eq!(written.first(), Some(&2400));
+    assert_eq!(written.last(), Some(&6500));
+    assert!(written.len() > 2, "{written:?}");
+    assert!(
+        written.windows(2).all(|pair| pair[0] < pair[1]),
+        "{written:?}"
+    );
+    assert!(calls.contains(&(350, Call::Cleanup)), "{calls:?}");
+    let finished = calls.last().map(|(milliseconds, _)| *milliseconds);
+    assert!(
+        finished.is_some_and(|milliseconds| (350..=367).contains(&milliseconds)),
+        "{calls:?}"
+    );
+    let exit = fixture.driver.exit().expect("exit after begun access");
+    assert!(exit.preview.is_ok());
+    assert!(exit.off.is_ok());
+    assert_eq!(fixture.take_calls(), [Call::Cleanup, Call::Activate(false)]);
+}
+
+#[test]
+fn quit_during_preview_fades_from_the_preview_value() {
+    let mut fixture = at_kelvin(3400);
+    let request = fixture
+        .driver
+        .runtime_mut()
+        .preview_request(at(100).output, at(100))
+        .expect("Preview available");
+    let mut zone = WindowsZone::named("UTC", false).expect("UTC");
+    let playback =
+        Arc::new(Playback::capture(&request.config, &mut zone, request.at).expect("playback"));
+    let valid = TimeInterval {
+        start: Timestamp::from_second(-86_400).expect("start"),
+        end: Timestamp::from_second(172_800).expect("end"),
+    };
+    let curve = Arc::new(
+        Curve::new(
+            vec![
+                Target {
+                    instant: valid.start,
+                    kelvin: 3000,
+                },
+                Target {
+                    instant: valid.end,
+                    kelvin: 3000,
+                },
+            ],
+            60,
+        )
+        .expect("curve"),
+    );
+    fixture.driver.runtime_mut().expect_calculation(2);
+    fixture
+        .driver
+        .runtime_mut()
+        .calculated(
+            Arc::new(CalculationResult {
+                revision: 2,
+                request,
+                result: Ok(CalculatedSchedule {
+                    curve,
+                    valid,
+                    graph: valid,
+                    views: vec![valid],
+                    preview: Some(playback),
+                    next_date: valid.end,
+                    solar_error: None,
+                    conflicts: Vec::new(),
+                }),
+            }),
+            at(100),
+        )
+        .expect("Preview calculation");
+    fixture.cycle(100);
+    assert_eq!(
+        fixture.take_calls(),
+        [
+            Call::Settings,
+            Call::State,
+            Call::Temperature(3000, TemperatureMode::Apply)
+        ]
+    );
+    fixture
+        .driver
+        .begin_exit(ExitKind::Quit, at(200))
+        .expect("exit");
+    assert!(fixture.driver.runtime().preview().is_none());
+    fixture.cycle(200);
+    fixture.cycle(325);
+    assert_eq!(
+        fixture.take_calls(),
+        [
+            Call::Settings,
+            Call::State,
+            Call::Temperature(3000, TemperatureMode::Hold),
+            Call::Settings,
+            Call::State,
+            Call::Temperature(4750, TemperatureMode::Hold)
+        ]
+    );
+}
+
+#[test_case::test_case(ExitKind::SessionEnd, 2200; "confirmed session end")]
+#[test_case::test_case(ExitKind::Panic, 2400; "panic")]
+fn exit_without_a_fade_cleans_up_and_turns_off_without_a_temperature_write(
+    kind: ExitKind,
+    kelvin: u16,
+) {
+    let mut fixture = at_kelvin(kelvin);
+    fixture.driver.begin_exit(kind, at(100)).expect("exit");
+    assert!(!fixture.driver.exit_fading(at(100)));
+    assert_eq!(fixture.driver.next_deadline(at(100)).expect("idle"), None);
+    let exit = fixture.driver.exit().expect("exit after begun access");
+    assert!(exit.preview.is_ok());
+    assert!(exit.off.is_ok());
+    assert_eq!(fixture.take_calls(), [Call::Cleanup, Call::Activate(false)]);
+}
+
+#[test]
+fn failed_exit_fade_step_skips_the_remaining_fade_and_still_cleans_up_and_turns_off() {
+    let mut fixture = at_kelvin(2400);
+    fixture
+        .driver
+        .begin_exit(ExitKind::Quit, at(100))
+        .expect("exit");
+    fixture.cycle(100);
+    assert_eq!(
+        fixture.take_calls(),
+        [
+            Call::Settings,
+            Call::State,
+            Call::Temperature(2400, TemperatureMode::Hold)
+        ]
+    );
+    fixture.records.lock().expect("records").fail = Some(DiagnosticOperation::TemperatureWrite);
+    let attempt = fixture.cycle(200).attempt.expect("failed exit step");
+    assert_eq!(
+        attempt.error.expect("temperature write failed").operation(),
+        DiagnosticOperation::TemperatureWrite
+    );
+    assert!(!fixture.driver.exit_fading(at(200)));
+    fixture.take_calls();
+    fixture.driver.exit().expect("exit after begun access");
+    assert_eq!(fixture.take_calls(), [Call::Cleanup, Call::Activate(false)]);
+}
+
+#[test]
+fn quit_after_failed_normal_reads_skips_the_fade_and_still_cleans_up_and_turns_off() {
+    let mut fixture = Fixture::with_config(ConfigInput::default(), 2400);
+    fixture.records.lock().expect("records").fail = Some(DiagnosticOperation::NativeSettingsRead);
+    assert!(fixture.cycle(0).attempt.expect("attempt").error.is_some());
+    assert_eq!(fixture.take_calls(), [Call::Register, Call::Settings]);
+    fixture
+        .driver
+        .begin_exit(ExitKind::Quit, at(10))
+        .expect("exit");
+    assert!(!fixture.driver.exit_fading(at(10)));
+    let exit = fixture.driver.exit().expect("exit after begun access");
+    assert!(exit.preview.is_ok());
+    assert!(exit.off.is_ok());
+    assert_eq!(fixture.take_calls(), [Call::Cleanup, Call::Activate(false)]);
+}
+
+#[test]
+fn quit_with_a_pending_observation_failure_skips_the_fade() {
+    let mut fixture = Fixture::with_config(ConfigInput::default(), 2400);
+    fixture.records.lock().expect("records").registration_fails = true;
+    fixture.cycle(0);
+    assert!(fixture.driver.recovery().observation_failed());
+    assert!(!fixture.driver.recovery().blocks_output());
+    assert!(
+        fixture
+            .take_calls()
+            .iter()
+            .any(|call| matches!(call, Call::Temperature(..)))
+    );
+    fixture
+        .driver
+        .begin_exit(ExitKind::Quit, at(10))
+        .expect("exit");
+    assert!(!fixture.driver.exit_fading(at(10)));
+    fixture.driver.exit().expect("exit after begun access");
+    assert_eq!(fixture.take_calls(), [Call::Cleanup, Call::Activate(false)]);
+}
+
+#[test]
+fn quit_while_night_light_is_off_does_not_turn_it_on_to_fade() {
+    let mut fixture = at_kelvin(2400);
+    fixture.records.lock().expect("records").active = false;
+    let calls = fade_out(&mut fixture, 100);
+    assert!(
+        calls
+            .iter()
+            .all(|(_, call)| !matches!(call, Call::Temperature(..) | Call::Activate(true))),
+        "{calls:?}"
+    );
+    assert!(!fixture.driver.exit_fading(at(200)));
+    let exit = fixture.driver.exit().expect("exit after begun access");
+    assert!(exit.preview.is_ok());
+    assert!(exit.off.is_ok());
+    assert!(
+        fixture
+            .take_calls()
+            .iter()
+            .all(|call| !matches!(call, Call::Temperature(..) | Call::Activate(true)))
+    );
+}
+
+#[test]
+fn quit_before_night_light_access_began_makes_no_native_call() {
+    let mut fixture = Fixture::with_config(ConfigInput::default(), 2400);
+    fixture
+        .driver
+        .begin_exit(ExitKind::Quit, at(0))
+        .expect("exit");
+    assert!(!fixture.driver.exit_fading(at(0)));
+    assert!(fixture.driver.exit().is_none());
+    assert_eq!(fixture.take_calls(), []);
+}
+
+#[test]
+fn quit_at_6500_k_cleans_up_and_turns_off_without_a_temperature_write() {
+    let mut fixture = at_kelvin(6500);
+    fixture
+        .driver
+        .begin_exit(ExitKind::Quit, at(100))
+        .expect("exit");
+    assert!(!fixture.driver.exit_fading(at(100)));
+    fixture.driver.exit().expect("exit after begun access");
+    assert_eq!(fixture.take_calls(), [Call::Cleanup, Call::Activate(false)]);
 }
