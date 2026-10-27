@@ -3,12 +3,15 @@ use crate::lifecycle::Process;
 use crate::lifecycle::native_message;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
+use crate::lifecycle::settings_window;
 use crate::lifecycle::wait;
 use crate::lifecycle::wait_temperature;
 use crate::lifecycle::window;
 use circadia::ConfigInput;
 use circadia::ConfigStore;
 use circadia::InstanceClaim;
+use circadia::automation_id;
+use std::ffi::OsString;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
@@ -24,17 +27,14 @@ use winsafe::HWND;
 use winsafe::co;
 use winsafe::prelude::*;
 
-pub(super) fn run() -> io::Result<()> {
-    let executable = std::env::args_os().nth(2).ok_or_else(|| {
-        io::Error::new(
+pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
+    let [_, executable] = arguments else {
+        return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "expected copied Circadia executable",
-        )
-    })?;
-    require(
-        std::env::args_os().count() == 3,
-        "expected one executable path",
-    )?;
+            "expected one copied Circadia executable",
+        ));
+    };
+    crate::lifecycle::require_english()?;
     match InstanceClaim::acquire()? {
         InstanceClaim::Primary(_) => {}
         InstanceClaim::Existing(_) => {
@@ -51,6 +51,7 @@ pub(super) fn run() -> io::Result<()> {
         middle_kelvin: 3400,
         sleep_kelvin: 3400,
         start_minimized: true,
+        manage_night_light: true,
         ..ConfigInput::default()
     };
     let saved = ConfigStore::new(directory.path())
@@ -126,12 +127,10 @@ fn launch_shortcut(shortcut: &Path) -> io::Result<()> {
 }
 
 fn editable(automation: &Automation, process: u32) -> io::Result<()> {
-    let settings = wait("deployed settings window", || {
-        window(process, "Circadia", true)
-    })?;
+    let settings = wait("deployed settings window", || settings_window(process))?;
     crate::automation::wait("deployed settings editing", || {
         Ok(automation
-            .enabled(&settings, process, "wake")?
+            .enabled(&settings, process, automation_id::WAKE)?
             .filter(|enabled| *enabled))
     })?;
     Ok(())
@@ -150,7 +149,7 @@ fn direct(
     })?;
     wait_temperature(native, 3400)?;
     require(
-        window(application.id(), "Circadia", true)?.is_none(),
+        settings_window(application.id())?.is_none(),
         "minimized deployment opened settings",
     )?;
     launch_shortcut(shortcut)?;

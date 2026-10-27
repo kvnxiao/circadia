@@ -2,6 +2,7 @@
 
 #[cfg(all(windows, feature = "graph-measurement"))]
 mod activity;
+pub mod automation_id;
 mod config;
 #[cfg(windows)]
 mod controller;
@@ -128,6 +129,7 @@ pub use diagnostics::DiagnosticCategory;
 pub use diagnostics::DiagnosticFailure;
 pub use diagnostics::DiagnosticLog;
 pub use diagnostics::DiagnosticOperation;
+pub use l10n::InterfaceText;
 #[cfg(all(windows, feature = "output-measurement"))]
 pub use measurement::OutputMeasurement;
 #[cfg(windows)]

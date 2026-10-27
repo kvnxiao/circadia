@@ -9,13 +9,16 @@ use crate::lifecycle::native_message;
 use crate::lifecycle::read_log;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
+use crate::lifecycle::settings_window;
 use crate::lifecycle::wait_temperature;
 use crate::lifecycle::window;
 use circadia::ConfigInput;
 use circadia::ConfigStore;
 use circadia::InstanceClaim;
 use circadia::WindowsZone;
+use circadia::automation_id;
 use jiff::Timestamp;
+use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use std::time::Duration;
@@ -24,19 +27,19 @@ use win_nightlight_lib::Nightlight;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
 use winsafe::HWND;
 
-pub(super) fn run() -> io::Result<()> {
+pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     require(
         !cfg!(debug_assertions),
         "resource measurements require a release build",
     )?;
-    let mut args = std::env::args_os().skip(2);
+    let mut args = arguments.iter().skip(1);
     let executable = fs_err::canonicalize(
         args.next()
             .ok_or_else(|| io::Error::other("expected release Circadia executable"))?,
     )?;
     let quick = match args.next() {
         None => false,
-        Some(value) if value == "--quick" => true,
+        Some(value) if *value == "--quick" => true,
         Some(_) => {
             return Err(io::Error::other(
                 "expected --quick or no additional argument",
@@ -87,7 +90,7 @@ fn exercise(executable: &Path, directory: &Path, quick: bool) -> io::Result<()> 
     let process = application.id();
     wait_temperature(&native, 3400)?;
     require(
-        window(process, "Circadia", true)?.is_none(),
+        settings_window(process)?.is_none(),
         "settings opened despite minimized startup",
     )?;
     settle(quick);
@@ -108,7 +111,7 @@ fn exercise(executable: &Path, directory: &Path, quick: bool) -> io::Result<()> 
     )?;
     automation.close(&settings, process)?;
     wait("settings closed for resource measurement", || {
-        Ok(window(process, "Circadia", true)?.is_none().then_some(()))
+        Ok(settings_window(process)?.is_none().then_some(()))
     })?;
     settle(quick);
     measure(
@@ -152,12 +155,10 @@ fn save(directory: &Path, input: &ConfigInput) -> io::Result<()> {
 }
 
 fn editable(automation: &Automation, process: u32) -> io::Result<HWND> {
-    let settings = wait("resource settings window", || {
-        window(process, "Circadia", true)
-    })?;
+    let settings = wait("resource settings window", || settings_window(process))?;
     wait("resource settings editable", || {
         Ok(automation
-            .enabled(&settings, process, "wake")?
+            .enabled(&settings, process, automation_id::WAKE)?
             .filter(|value| *value))
     })?;
     let rectangle = settings.GetWindowRect().map_err(io::Error::other)?;
@@ -198,14 +199,14 @@ fn preview(
     let settings = editable(automation, process)?;
     wait("Preview available for resource measurement", || {
         Ok(automation
-            .enabled(&settings, process, "preview")?
+            .enabled(&settings, process, automation_id::PREVIEW)?
             .filter(|value| *value))
     })?;
     settle(quick);
-    automation.invoke(&settings, process, "preview")?;
+    automation.invoke(&settings, process, automation_id::PREVIEW)?;
     wait("Preview active for resource measurement", || {
         Ok(automation
-            .enabled(&settings, process, "wake")?
+            .enabled(&settings, process, automation_id::WAKE)?
             .filter(|value| !*value))
     })?;
     let started = Instant::now();
@@ -221,13 +222,13 @@ fn preview(
     )?;
     require(
         started.elapsed() < Duration::from_secs(60)
-            && automation.enabled(&settings, process, "wake")? == Some(false),
+            && automation.enabled(&settings, process, automation_id::WAKE)? == Some(false),
         "Preview ended before resource sampling completed",
     )?;
-    automation.invoke(&settings, process, "preview")?;
+    automation.invoke(&settings, process, automation_id::PREVIEW)?;
     wait("Preview stopped before shutdown", || {
         Ok(automation
-            .enabled(&settings, process, "wake")?
+            .enabled(&settings, process, automation_id::WAKE)?
             .filter(|value| *value))
     })?;
     shutdown(&mut application, native)
@@ -327,7 +328,7 @@ fn fades(
         "fade-to-suppression-settings-open",
         "fade-from-suppression-settings-open",
     ] {
-        automation.invoke(&settings, process, "manual-suppression")?;
+        automation.invoke(&settings, process, automation_id::MANUAL_SUPPRESSION)?;
         wait("ordinary fade holds native preview", || {
             Ok(native
                 .read_settings()

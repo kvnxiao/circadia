@@ -31,6 +31,7 @@ use crate::RecentApp;
 use crate::SchedulingState;
 use crate::SuppressionState;
 use crate::WindowsZone;
+use crate::automation_id;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::log::run::CrashSummary;
@@ -101,6 +102,15 @@ impl Page {
             Self::Apps => "apps",
             Self::Transitions => "transitions",
             Self::General => "general",
+        }
+    }
+
+    fn automation_id(self) -> &'static str {
+        match self {
+            Self::Schedule => automation_id::NAV_SCHEDULE,
+            Self::Apps => automation_id::NAV_APPS,
+            Self::Transitions => automation_id::NAV_TRANSITIONS,
+            Self::General => automation_id::NAV_GENERAL,
         }
     }
 
@@ -404,10 +414,10 @@ fn local_minute(instant: Timestamp) -> Option<u16> {
 
 struct NumberControls<'a> {
     field: Field,
-    id: &'a str,
+    number: &'static str,
+    slider: Option<&'static str>,
     title: &'a str,
     unit: String,
-    slider: bool,
 }
 
 fn number_edits(field: Field, value: Option<f64>) -> Option<Vec<(Field, FieldValue)>> {
@@ -583,22 +593,21 @@ impl Settings {
         }
     }
 
-    fn browse(context: &ComponentContext<Self>) {
-        let _queued =
-            context.run_window(
-                |window| match crate::platform::picker::executable(&window) {
-                    Ok(file) => {
-                        Message::Picked(file.map(|(executable, path)| super::file_info::AppFile {
-                            executable,
-                            path,
-                        }))
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "choosing an executable failed");
-                        Message::Picked(None)
-                    }
-                },
-            );
+    fn browse(&self, context: &ComponentContext<Self>) {
+        let text = &self.input.text;
+        let title = text!(text, "dialog-file-title");
+        let file_types = text!(text, "dialog-file-types");
+        let _queued = context.run_window(move |window| {
+            match crate::platform::picker::executable(&window, &title, &file_types) {
+                Ok(file) => Message::Picked(
+                    file.map(|(executable, path)| super::file_info::AppFile { executable, path }),
+                ),
+                Err(error) => {
+                    tracing::warn!(%error, "choosing an executable failed");
+                    Message::Picked(None)
+                }
+            }
+        });
     }
 
     fn dialog_closed(&mut self, result: ContentDialogResult) {
@@ -727,7 +736,7 @@ impl Settings {
             .height(48.0)
             .title(text!(text, "app-name"))
             .icon(Icon::image_svg(EncodedImage::from_static(APP_ICON)))
-            .automation_id("title-bar")
+            .automation_id(automation_id::TITLE_BAR)
             .into()
     }
 
@@ -749,7 +758,13 @@ impl Settings {
             .column_spacing(14.0)
             .margin(Thickness::new(4.0, 4.0, 4.0, 18.0))
             .children((
-                phase::view(&phase, phase.art_name(text), palette, 60.0, "pane-art"),
+                phase::view(
+                    &phase,
+                    phase.art_name(text),
+                    palette,
+                    60.0,
+                    automation_id::PANE_ART,
+                ),
                 StackPanel::new()
                     .grid_column(1)
                     .spacing(2.0)
@@ -758,7 +773,7 @@ impl Settings {
                         widgets::strong(text!(text, "app-name")),
                         widgets::caption(&self.input.model.status)
                             .foreground(palette.secondary)
-                            .automation_id("pane-status")
+                            .automation_id(automation_id::PANE_STATUS)
                             .automation_live_setting(schedule::status_live(
                                 self.input.model.preview_active,
                             )),
@@ -785,7 +800,7 @@ impl Settings {
                             .margin(Thickness::new(8.0, 0.0, 0.0, 0.0))
                             .background(ThemeBrush::SystemCritical)
                             .vertical_alignment(VerticalAlignment::Center)
-                            .automation_id(format!("nav-{}-mark", page.tag())),
+                            .automation_id(automation_id::mark(page.automation_id())),
                     ))
                     .into(),
             )
@@ -799,7 +814,7 @@ impl Settings {
                 .icon(Icon::font(page.glyph()))
                 .is_selected(self.page == page)
                 .selects_on_invoked(true)
-                .automation_id(format!("nav-{}", page.tag()))
+                .automation_id(page.automation_id())
                 .automation_name(name)
                 .content(content),
         )
@@ -811,12 +826,12 @@ impl Settings {
             .into_iter()
             .map(|(action, label)| {
                 let id = match action {
-                    Action::Reset => "banner-reset".to_owned(),
-                    Action::OpenFolder => "banner-open-folder".to_owned(),
-                    Action::OpenLogs => format!("{}-open-folder", banner.id),
-                    Action::Report => format!("{}-report", banner.id),
-                    Action::Retry | Action::RetryNative => format!("{}-retry", banner.id),
-                    Action::GoTo(page) => format!("banner-go-to-{}", page.tag()),
+                    Action::Reset => automation_id::BANNER_RESET.to_owned(),
+                    Action::OpenFolder => automation_id::BANNER_OPEN_FOLDER.to_owned(),
+                    Action::OpenLogs => automation_id::open_folder(banner.id),
+                    Action::Report => automation_id::report(banner.id),
+                    Action::Retry | Action::RetryNative => automation_id::retry(banner.id),
+                    Action::GoTo(page) => automation_id::go_to(page.tag()),
                 };
                 let message = context.message(Message::Action(action));
                 match action {
@@ -876,7 +891,7 @@ impl Settings {
             &self.input.region,
             field,
         )?;
-        let id = format!("{}-message", field.key());
+        let id = automation_id::field_message(field);
         Some(match feedback {
             Feedback::Error(message) => widgets::field_error(message, &id),
             Feedback::Note(message) => widgets::field_note(message, &id),
@@ -892,10 +907,10 @@ impl Settings {
     fn number_controls(&self, number: NumberControls<'_>, context: &ViewContext<'_, Self>) -> View {
         let NumberControls {
             field,
-            id,
+            number,
+            slider,
             title,
             unit,
-            slider,
         } = number;
         let range = field.range().unwrap_or(crate::NumberRange {
             minimum: 0,
@@ -914,7 +929,7 @@ impl Settings {
         );
         let editable = self.input.model.editable();
         let mut controls: Vec<View> = Vec::new();
-        if slider {
+        if let Some(slider) = slider {
             let control = Slider::new()
                 .width(220.0)
                 .minimum(minimum)
@@ -922,7 +937,7 @@ impl Settings {
                 .step_frequency(step)
                 .value(value)
                 .is_enabled(editable)
-                .automation_id(format!("{id}-slider"))
+                .automation_id(slider)
                 .automation_name(title)
                 .on_value_changed(
                     context.callback(move |value| Message::Number(field, Some(value))),
@@ -954,7 +969,7 @@ impl Settings {
                 .small_change(step)
                 .value(Some(value))
                 .is_enabled(editable)
-                .automation_id(format!("{id}-number"))
+                .automation_id(number)
                 .automation_name(title)
                 .vertical_alignment(VerticalAlignment::Top)
                 .on_value_changed(context.callback(move |value| Message::Number(field, value)))
@@ -1035,6 +1050,12 @@ impl Component for Settings {
         self.input = input.clone();
         self.graph = graph::retained(self.graph.take(), input.model.calculation.as_ref());
         if input.exiting {
+            // Closing the window while a ContentDialog is open makes Reactor
+            // hide the dialog during disposal, which ends the process with an
+            // access violation, so the render before the close removes it.
+            self.dialog = None;
+            self.title_dialog = None;
+            self.consent = false;
             let _closed = context.close_window();
             return;
         }
@@ -1106,7 +1127,7 @@ impl Component for Settings {
                     dialog.choose(&executable, checked);
                 }
             }
-            Message::Browse => Self::browse(context),
+            Message::Browse => self.browse(context),
             Message::Picked(file) => {
                 if let Some(file) = file {
                     self.picked(file);
@@ -1158,7 +1179,7 @@ impl Component for Settings {
         let mut children: Vec<View> = vec![
             widgets::title(self.page.label(&text))
                 .margin(Thickness::new(0.0, 4.0, 0.0, 20.0))
-                .automation_id("page-title")
+                .automation_id(automation_id::PAGE_TITLE)
                 .into(),
             StackPanel::new()
                 .keyed_children(
@@ -1192,11 +1213,11 @@ impl Component for Settings {
             .on_selected_tag_changed(context.callback(|tag: Option<Rc<str>>| {
                 Message::Navigate(tag.as_deref().map(str::to_owned))
             }))
-            .automation_id("navigation")
+            .automation_id(automation_id::NAVIGATION)
             .grid_row(1)
             .content(
                 ScrollViewer::new()
-                    .automation_id("settings-scroll")
+                    .automation_id(automation_id::SCROLL)
                     .content(column),
             );
         Grid::new()

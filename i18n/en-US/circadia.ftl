@@ -273,6 +273,7 @@ dialog-all-listed = Every recent app is already on your list.
 dialog-file-title = Choose an app file
 dialog-file-description = Matched by file name, such as game.exe, in any folder.
 dialog-browse = Browse
+dialog-file-types = Apps (*.exe)
 dialog-already-listed = { $executable } is already on your list. To match several window titles, use a regular expression such as minecraft|terraria in its window title condition.
 dialog-fixed = { $executable } is always excluded from automatic suppression, so it can't be added to either list.
 dialog-add =

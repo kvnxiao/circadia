@@ -166,6 +166,62 @@ impl Text {
     }
 }
 
+/// Interface text that desktop checks compare with the settings window title,
+/// the tray menu, the tray tooltip, and the status line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InterfaceText {
+    /// Settings window title.
+    pub app_name: String,
+    /// Tray item that opens settings.
+    pub tray_settings: String,
+    /// Command that starts manual suppression.
+    pub manual_start: String,
+    /// Command that stops manual suppression.
+    pub manual_stop: String,
+    /// Tray caption above the recent apps while their toggles are available.
+    pub tray_caption: String,
+    /// Tray item that quits Circadia.
+    pub tray_quit: String,
+    /// Text that every tray tooltip starts with.
+    pub tooltip_prefix: String,
+    /// Status line while Night Light change observation fails.
+    pub observation_failed: String,
+    /// Status line while Night Light output fails.
+    pub output_unavailable: String,
+    /// Title of the file picker that Browse opens.
+    pub picker_title: String,
+}
+
+impl InterfaceText {
+    /// Load the text of the interface language `language`, such as `en-US` or
+    /// `qps-Ploc`.
+    ///
+    /// # Errors
+    /// Report a language that Circadia does not ship or a catalog that does
+    /// not load.
+    pub fn load(language: &str) -> std::io::Result<Self> {
+        let tag = resolve(Some(language), None, &[])
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+        let text = Text::load(&tag).map_err(std::io::Error::other)?;
+        let tooltip = text!(text, "tooltip", status = "");
+        Ok(Self {
+            app_name: text!(text, "app-name"),
+            tray_settings: text!(text, "tray-settings"),
+            manual_start: text!(text, "manual-title"),
+            manual_stop: text!(text, "manual-stop"),
+            tray_caption: text!(text, "tray-caption", reason = "none"),
+            tray_quit: text!(text, "tray-quit"),
+            tooltip_prefix: tooltip
+                .split_once('\u{2068}')
+                .map_or(tooltip.as_str(), |(prefix, _)| prefix)
+                .to_owned(),
+            observation_failed: text!(text, "status-observation-failed"),
+            output_unavailable: text!(text, "status-output-unavailable"),
+            picker_title: text!(text, "dialog-file-title"),
+        })
+    }
+}
+
 fn pseudo_text(text: &str) -> Cow<'_, str> {
     fluent_pseudo::transform(text, false, false)
 }
@@ -350,6 +406,34 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
 
     fn preferred(tags: &[&str]) -> Vec<String> {
         tags.iter().map(|tag| (*tag).to_owned()).collect()
+    }
+
+    #[test]
+    fn interface_text_matches_the_english_catalog() {
+        let text = InterfaceText::load("en-US").expect("English text");
+        assert_eq!(text.app_name, "Circadia");
+        assert_eq!(text.tray_settings, "Open Circadia settings");
+        assert_eq!(text.manual_start, "Suppress for 1 hour");
+        assert_eq!(text.manual_stop, "Stop suppressing");
+        assert_eq!(text.tray_caption, "Suppress while focused");
+        assert_eq!(text.tray_quit, "Quit Circadia");
+        assert_eq!(text.tooltip_prefix, "Circadia: ");
+    }
+
+    #[test]
+    fn interface_text_in_the_pseudo_locale_is_bracketed() {
+        let text = InterfaceText::load("qps-Ploc").expect("pseudo-locale text");
+        assert!(text.app_name.starts_with('[') && text.app_name.ends_with(']'));
+        assert!(text.tooltip_prefix.starts_with('['));
+        assert_ne!(text.tray_quit, "Quit Circadia");
+    }
+
+    #[test]
+    fn interface_text_rejects_a_language_that_is_not_shipped() {
+        assert_eq!(
+            InterfaceText::load("de-DE").map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::InvalidInput)
+        );
     }
 
     #[test]

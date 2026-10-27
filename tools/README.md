@@ -1,8 +1,12 @@
 # Native application checks
 
-These checks run the built Circadia executable on the Windows desktop and inspect it through UI Automation. Some change live Windows Night Light; others replace it with a simulated Night Light backend. Run them from the repository root on an interactive Windows 11 x64 desktop with an English Windows Shell. Install the development tools listed in the [project README](../README.md). Live native checks are separate from `just check`. The lifecycle, settings, and Explorer checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, shutdown, deployment, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
+These checks run the built Circadia executable on the Windows desktop and inspect it through UI Automation. Some change live Windows Night Light; others replace it with a simulated Night Light backend. Run them from the repository root on an interactive Windows 11 x64 desktop. Install the development tools listed in the [project README](../README.md). `just check` does not run any of these recipes. The lifecycle, settings, Explorer, and shutdown checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, pseudo-locale, deployment, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
 
-The [graph rendering](#graph-rendering), [worker activity](#worker-activity-and-idle-behavior), and [CPU and memory](#cpu-and-memory) recipes drive the current settings window. Each starts Circadia with `manage_night_light = true` in its configuration file, which Circadia reads at startup, so Circadia controls Night Light without first asking the user to allow it. The other recipes have not been updated. They still check an earlier window that had Save, Discard, a close prompt, the executable lists, location and startup controls, and reloading of external configuration changes. The current window arranges the executable lists and the location and startup controls differently and has no Save, Discard, close prompt, or reloading of external configuration changes. Recipes that operate those controls or replace the configuration file while Circadia runs fail, and their sections below describe the checks as written for the earlier window.
+The checks find the settings window by its title and every settings control by the automation identifiers that `circadia::automation_id` lists, so they do not depend on the interface language. A unit test of the harness fails when a check names an identifier that the list does not have. UI Automation exposes a panel or border only when it has an accessible name, so the checks use the controls and text inside a settings row, the panel that holds one setting's label and controls, rather than the row's own identifier. The tray menu's items expose only their text, so the checks find each item by its position (Open Circadia settings, manual suppression, the recent-apps caption, the recent apps, Quit Circadia) and compare its label with the catalog text of the language under test, which is the message in that language's Fluent `.ftl` file; they find the tray icon by the text that every tooltip starts with, `Circadia:` in English. The checks find the Windows file picker by its title, which is catalog text, and its filename box and Open button by their control identifiers, because Circadia shows the picker in the interface language. The Shell's hidden-icons button lookup requires an English Windows Shell.
+
+The recipes that launch `circadia.exe` (`native-lifecycle`, `native-settings`, `native-explorer`, `native-startup`, `native-shutdown`, and `native-picker`) accept `--language TAG`, which they pass to every Circadia launch, for example `just native-settings --language qps-Ploc` for the pseudo-locale. The deployment, recovery, and measurement recipes run English only.
+
+Each recipe that changes Night Light starts Circadia with `manage_night_light = true` in its configuration file, which Circadia reads at startup, so Circadia controls Night Light without first asking the user to allow it. The startup and picker recipes start with management off and do not change Night Light. Circadia reads its configuration file only at startup, so the checks change settings through the settings controls and read the file to confirm each write.
 
 ## Application lifecycle
 
@@ -16,12 +20,11 @@ The recipe builds the application with its bundled Windows App SDK runtime, then
 
 The harness creates temporary configuration directories and checks both Start minimized preferences. It exercises:
 
-- Tray-icon mouse activation and the tray's Settings command through keyboard menu activation and a mouse click. Both must bring settings to the foreground in the original process.
+- Tray-icon mouse activation and the tray's Open Circadia settings item through keyboard menu activation and a mouse click. Both must bring settings to the foreground in the original process. The menu's items must have the catalog's labels in order.
 - Second-launch settings opening, restoration after minimizing, and unchanged Night Light settings and state timestamps.
 - Settings closure and reopening in the same process.
 - Manual suppression, a temporary 6500 K override, and restoration of the configured temperature.
-- Atomic configuration replacement with settings closed and with an open settings editing session, called a draft. The accepted configuration is the validated base loaded from disk, restored from backup, saved, or updated by a tray action. Defaults supply that base when the primary configuration and backup files are absent.
-- Quit through UI Automation.
+- Quit Circadia on the General page through UI Automation.
 - A resume notification without a preceding suspend notification, then a suspend/resume pair, then a taskbar-recreation notification. Each case reapplies the current temperature once. Repeated notifications within each case preserve native timestamps.
 - Session-end query, cancellation, and confirmed cleanup through messages sent directly to the child application's hidden window.
 
@@ -33,7 +36,7 @@ Successful cleanup clears Windows' native preview flag, used to request immediat
 
 On failure, the harness attempts graceful cleanup of its child. If the child cannot exit, the harness forcibly terminates it and reports that Night Light may retain its state at termination. The harness prints the retained temporary directory for inspection.
 
-UI Automation runs on the harness's COM multithreaded apartment. Searches are restricted to process-verified application windows, the Shell taskbar, and its visible hidden-icons area. Hidden-icons button lookup currently requires English Shell labels. The application and harness share the `windows` 0.62 bindings; UI Automation features are enabled only for the harness. The application uses the Windows Reactor UI library from the microsoft/windows-rs repository, pinned to a separate commit.
+UI Automation runs on the harness's COM multithreaded apartment. Searches are restricted to process-verified application windows, the Shell taskbar, and its visible hidden-icons area. The application and harness share the `windows` 0.62 bindings; UI Automation features are enabled only for the harness. The application uses the Windows Reactor UI library from the microsoft/windows-rs repository, pinned to a separate commit.
 
 Power, session, and taskbar messages sent directly to the application are synthetic. `just native-lifecycle` does not restart Explorer, suspend Windows, sign out, or shut down the machine. These messages verify application handling, not delivery during an actual power or session transition. Successful library readback establishes native settings, not displayed color or smooth transitions.
 
@@ -47,39 +50,29 @@ just native-settings
 
 Preview plays the schedule from the current time through the same local time on the next date, compressed into a configured duration. It animates the graph and requests the corresponding Night Light temperatures.
 
-A schedule target specifies a temperature to reach by a clock or solar-event time. Sleep is the temperature reached at Bedtime. Daytime is the highest configured temperature; Morning/Evening is the shared middle temperature used with solar timing. Optional Sunrise and Sunset targets anchor temperature changes to those solar events. Accepted values satisfy Daytime >= Morning/Evening >= Sleep.
+A schedule target specifies a temperature to reach by a clock or solar-event time. Sleep is the temperature reached at Bedtime. Daytime is the highest configured temperature; Morning/Evening is the shared middle temperature used with solar timing. Accepted values satisfy Daytime >= Morning/Evening >= Sleep.
 
 Automatic suppression requests 6500 K while a listed, non-excluded application has foreground focus. The focus delay is the configured wait before a changed foreground match starts or ends automatic suppression.
 
-This recipe runs the lifecycle checks and exercises the native settings controls with both Start minimized preferences. It verifies:
+This recipe runs the lifecycle checks and exercises the settings controls with both Start minimized preferences. It verifies:
 
-- The generated schedule graph exposes its current-time indicator.
-- Preview completes without saving; Stop restores editing. Playback disables schedule edits and Save while keeping Discard available.
-- Starting manual suppression stops Preview and disables it with an explanation. Stopping manual suppression restores the configured output.
-- Closing during Preview stops playback before the close decision. Keep Editing preserves the draft without restarting playback.
-- Changing Preview output reaches the captured draft's 2200 K and 6200 K levels even after an external configuration replacement. Save remains disabled after playback; Discard selects the latest accepted configuration.
-- Stop, synthetic clock changes, and synthetic session lock restore an unsaved 3000 K draft. Discard restores the latest accepted configuration's 3400 K output.
-- Synthetic suspend/resume stops Preview without restarting it. Quit and confirmed session end clear an active native preview flag and turn Night Light off.
-- Focusing a listed test window keeps Preview running until completion, then starts automatic suppression. Returning focus to settings restores the schedule after the focus delay.
-- Valid temperature edits affect Night Light before Save.
-- Invalid numeric text remains visible, disables Save, and preserves the last valid output.
-- Save persists the complete draft, and Discard returns to the last successful Save.
-- Keep Editing preserves unsaved fields after a close request.
-- A failed Save keeps settings open and preserves both the draft and the existing file.
-- A valid external replacement preserves unsaved fields and disables Save until the user explicitly loads the latest accepted configuration.
-- The automatic-suppression inclusion and exclusion lists show their filenames. An exclusion prevents an included app from triggering suppression. The fixed exclusions, ApplicationFrameHost.exe and the running Circadia executable, remain visible and cannot be removed.
-- The settings window owns the executable picker and remains disabled until the picker closes. Cancellation, including after folder navigation, restores editing. Selection records the filename without its directory and converts it to lowercase. It rejects fixed exclusions and updates the unsaved inclusion or exclusion list. Discard removes those additions.
-- The explicit current-location action requests one Windows position. Success updates valid draft coordinates; failure preserves the existing coordinates and displays an error. The check exercises whichever outcome Windows supplies, then verifies manual entry and Discard. It does not print or save acquired coordinates.
-- List removal stays unsaved until Save. Discard restores the list; removing an entry while a clock is invalid preserves the invalid text and keeps Save disabled.
-- Choosing Discard while closing does not persist the edited daily Wake time.
+- The navigation pane has the picture of the current schedule phase, the status line, and the Schedule, App suppression, Transitions, and General items in order. Each page shows its content in the order the specification requires, by automation identifier, and its title matches its navigation item. Solar timing, turned on for the check and then off, shows Sunrise, Sunset, their times today, Use my Windows location, latitude, and longitude in order. The Add app dialog's Add command is unavailable while no app is chosen.
+- Pressing Tab from each page's navigation item reaches every enabled control of the page, including each number field through its text box, and every focused control has an accessible name. The harness prints each page's focus order.
+- Browse in the Add app and Add exclusion dialogs opens the Windows file picker owned by the settings window. Cancellation, including after folder navigation, returns to the dialog. Browsing to `ApplicationFrameHost.exe` shows the dialog's message instead of a choice. A selected file becomes a chosen entry with its lowercase file name, and the dialog's Add command writes it to the list. The fixed exclusions, `ApplicationFrameHost.exe` and the running Circadia executable, are listed. Remove writes each removal at once.
+- Turning solar timing on without coordinates shows the coordinates message and writes nothing. Typed latitude and longitude apply when the field loses focus, and the file then has solar timing and both coordinates. Turning solar timing off keeps the coordinates. The check does not turn on Use my Windows location, so it does not request a Windows position or show a Windows permission prompt.
+- Valid temperature edits change Night Light and are written to the configuration file and its backup without a Save command. Entering 1.5 Hz as the maximum update rate saves 2 Hz.
+- A Daytime value below Morning/Evening keeps its error at the field, blocks Preview, and leaves output and the file unchanged until it is corrected.
+- The schedule graph is shown. Preview disables schedule edits while manual suppression and the management setting stay available; Stop and natural completion restore editing, and Preview does not write the configuration. Manual suppression started during Preview does not stop it; after Stop, output fades to 6500 K.
+- A changing Preview stores many distinct temperatures, including the 2200 K and 6200 K levels.
+- A focused test window appears under Recently focused; its Add command writes a suppression entry. Focusing that window during Preview keeps Preview running until completion, then requests automatic 6500 K suppression. Returning focus to settings restores the schedule after the focus delay, and Remove writes the removal.
+- Stop, synthetic clock changes, and synthetic session lock end Preview and restore the schedule. Synthetic suspend stops Preview, and resume does not restart it.
+- Quit and confirmed session end during a changing Preview clear the native preview flag and turn Night Light off.
 
-The failed-save case opens the temporary configuration file with sharing restrictions that prevent atomic replacement. It releases that handle after checking the failure. These checks use live Night Light and the same cleanup behavior as `native-lifecycle`.
+These checks use live Night Light and the same cleanup behavior as `native-lifecycle`.
 
-The focus case starts a separate harness process with a blank native window and adds its executable filename to the temporary suppression list. That process does not control Night Light. The harness closes it after the check; Circadia still uses one application process.
+The focus case starts a separate harness process with a blank native window. That process does not control Night Light. The harness closes it after the check; Circadia still uses one application process.
 
 The picker cases create an isolated temporary folder with copies of the harness executable. The test sets the filename field to that folder and invokes Open, then verifies that the address bar shows the requested directory. It selects the exact fixture file and invokes Open again. All actions use UI Automation without a foreground-focus requirement. The test does not execute the selected copies or depend on files in Documents.
-
-The location check can display Windows' permission prompt and use network-backed positioning. It does not change Windows location privacy settings. Unit tests separately exercise denied access, unavailable access, cancellation requests, discarded results, and invalid acquired coordinates.
 
 The cases use both constant and changing schedules. Registry readback verifies requested temperatures and cleanup, not displayed color or smoothness.
 
@@ -91,9 +84,9 @@ Close any running Circadia instance, then run:
 just native-picker
 ```
 
-This recipe runs the picker cancellation, folder navigation, exact-file selection, exclusion, and Discard cases separately from the lifecycle checks. It does not move the cursor, send keys, or require the picker to retain foreground focus. You can use another application during these checks, although the settings and picker windows can take focus when they open.
+This recipe runs the Browse cases of the Add app and Add exclusion dialogs separately from the lifecycle checks. It does not move the cursor, send keys, or require the picker to retain foreground focus. You can use another application during these checks, although the settings and picker windows can take focus when they open.
 
-It uses isolated configuration and changes live Night Light. Successful exit clears native preview and turns Night Light off; it does not restore the previous native schedule or temperature. On failure, the harness attempts graceful exit and prints the retained temporary directory.
+It uses isolated configuration with management off, so it does not change Night Light. On failure, the harness attempts graceful exit and prints the retained temporary directory.
 
 ## Sign-in startup
 
@@ -103,20 +96,19 @@ Close any running Circadia instance, then run:
 just native-startup
 ```
 
-This recipe builds the application and uses isolated configuration to test startup registration. The Windows Run registry value stores the command to launch at sign-in; a separate StartupApproved registry value records whether Windows permits that startup entry to run. The recipe refuses to run if either Circadia value already exists under the current Windows user. Existing user registration is preserved.
+This recipe builds the application and uses isolated configuration with management off to test startup registration. The Windows Run registry value stores the command to launch at sign-in; a separate StartupApproved registry value records whether Windows permits that startup entry to run. The recipe refuses to run if either Circadia value already exists under the current Windows user. Existing user registration is preserved.
 
 The test checks:
 
-- Editing and Discard do not register startup; Save does.
+- Opening settings does not register startup. Turning Start at sign-in on registers at once and writes the preference.
 - The registered command selects the tested executable and isolated data directory.
-- An injected Windows-disabled approval remains unchanged after an unrelated Save and an explicit registration retry.
-- The Refresh startup status button reads an injected enabled approval and clears the resolved registration error without another retry. An unrelated close-with-Save then closes settings.
-- Saving startup disabled removes the Run command.
-- A command exceeding Windows' 260-character limit fails registration while preserving the saved preference and Bedtime. Close-with-Save keeps settings open with that error.
+- Settings reads Windows' approval each time it opens. An injected Windows-disabled approval shows a message without Retry and the switch off; turning the switch on again registers the same command and leaves the approval unchanged.
+- An injected enabled approval clears the message and shows the switch on. Turning Start at sign-in off removes the Run command at once and writes the preference.
+- A command longer than Windows' limit fails registration: the preference is still written, the switch shows off with an error and Retry, a retry fails the same way, and no Run command is written.
 
 The harness removes its temporary Run and approval values after checking their ownership. If either value changed externally, cleanup reports the conflict and preserves that value. Production Circadia never writes the Windows approval value. These checks inject approval records; they do not exercise Task Manager or an actual sign-in.
 
-This recipe controls Circadia through UI Automation without moving the cursor or sending keyboard input. Its windows can take focus. It changes live Night Light and uses the lifecycle harness's graceful cleanup, which requests Night Light off without restoring the prior schedule or temperature.
+This recipe controls Circadia through UI Automation without moving the cursor or sending keyboard input. Its windows can take focus. It does not change Night Light.
 
 ## Shutdown with an open dialog
 
@@ -126,15 +118,17 @@ Close any running Circadia instance, then run:
 just native-shutdown
 ```
 
-The recipe runs five application instances in sequence with isolated configuration. It checks confirmed session end and Quit through UI Automation with either the unsaved-changes dialog or executable picker open. It also checks session end during settings startup. The test requires:
+The recipe runs five application instances in sequence with isolated configuration. Except in the case that ends the session during startup, it changes Sleep to 3000 K before the exit, then opens the Add app dialog, the Windows file picker from that dialog's Browse, or the Wake time flyout:
 
-- Each child process exits successfully.
-- Native readback shows the preview flag cleared and Night Light off.
-- The saved configuration keeps its original Bedtime; the unconfirmed edit is not saved.
+- Confirmed session end with the Add app dialog open.
+- Quit Circadia from the tray menu with the Add app dialog open.
+- Confirmed session end as soon as the settings window is detected, without waiting for editable controls.
+- Confirmed session end with the file picker open.
+- Confirmed session end with the Wake time flyout open.
 
-For the unsaved-changes cases, the harness waits until **Keep Editing** appears before requesting exit. For the picker cases, it waits for the owned executable dialog. The startup case requests session end as soon as the settings window is detected, without waiting for editable controls. This exercises early shutdown but does not force every ordering of Windows events.
+Each case requires that the child process exits successfully and that native readback shows the preview flag cleared and Night Light off. Each other case also requires that the configuration file has the Sleep edit. The recipe runs every case and then reports the failed ones. The startup case exercises early shutdown but does not force every ordering of Windows events. The recipe does not check Quit with the file picker open, because the tray menu did not open while the picker was open.
 
-These are synthetic session messages; the recipe does not sign out or shut down Windows. It uses UI Automation without moving the cursor or sending keyboard input. Its windows can take focus, and it changes live Night Light with the same cleanup behavior as the lifecycle checks. On failure, it prints the retained temporary configuration directory.
+Session end uses synthetic messages; the recipe does not sign out or shut down Windows. The tray case sends keyboard and mouse input to open the tray menu and choose Quit Circadia; the other cases use UI Automation without input. Its windows can take focus, and it changes live Night Light with the same cleanup behavior as the lifecycle checks. On failure, it prints the retained temporary configuration directory.
 
 ## Graph rendering
 
@@ -170,15 +164,15 @@ Close any running Circadia instance, then run:
 just native-recovery
 ```
 
-The recipe runs the complete release application with its bundled runtime, isolated configuration, and a simulated Night Light backend. UI Automation operates the real settings controls without moving the cursor, sending keys, or requiring foreground focus. Settings can take focus when it opens. The recipe does not change Windows Night Light.
+The recipe runs Circadia's release build with its bundled runtime, isolated configuration with management on, and a simulated Night Light backend. UI Automation operates the real settings controls without moving the cursor, sending keys, or requiring foreground focus. Settings can take focus when it opens. The recipe does not change Windows Night Light.
 
 Observation registration subscribes to changes in Windows Night Light settings and state. The checks verify:
 
-- Failed observation registration still permits live edits and output. Retry restores observation, and repeated failures produce one failure record before the recovery record in the `logs/circadia.log` of the run's temporary data directory.
+- Failed observation registration still permits live edits and output, and the status line reports it. Retry in the Night Light failure banner restores observation, and repeated failures produce one failure record before the recovery record in the `logs/circadia.log` of the run's temporary data directory.
 - Failed settings reads prevent temperature, schedule, and on/off writes while Preview advances on the graph. Recovery applies the current 6500 K position instead of earlier playback steps.
-- Stop and natural Preview completion restore editing while access still fails. Automatic recovery selects the current live draft without replaying obsolete temperatures.
-- A temperature operation reports failure after storing 2300 K, and its subsequent preview cleanup also fails. The stored temperature and enabled state are preserved, and settings shows both errors.
-- Retry replaces a pending 800 ms delay and requests application of the current target even when the stored temperature already equals it. Successful recovery clears both errors.
+- Stop and natural Preview completion restore editing while access still fails. Automatic recovery selects the current schedule without replaying obsolete temperatures.
+- A temperature operation reports failure after storing 2300 K, and its subsequent preview cleanup also fails. The stored temperature and enabled state are preserved, settings shows the failure banner, and the log records both failures.
+- Retry replaces a pending 800 ms delay and requests application of the current target even when the stored temperature already equals it. Successful recovery clears the banner.
 - Recorded simulated public operations execute without overlap.
 
 Wake and Bedtime are configured relative to the current local clock so Preview moves from a 2200 K Sleep period to 6500 K Daytime. A separate live edit to 2300 K exercises partial storage. The tool prints each completed operation's start, duration, request, failure, and resulting simulated state. Capture is bounded; overflow fails the check. On failure, the tool retains and prints the temporary configuration directory.
@@ -193,20 +187,20 @@ Close any running Circadia instance, then run:
 just measure-output
 ```
 
-The recipe builds the complete release application with its bundled runtime and the `output-measurement` feature. A driver thread edits the real settings controls through UI Automation. The run fails if the `logs/circadia.log` in the run's temporary data directory has a failure or crash record, which use the `WARN` and `ERROR` levels. The run takes roughly three minutes and exercises:
+The recipe builds Circadia in the release profile with its bundled runtime and the `output-measurement` feature. A driver thread edits the real settings controls through UI Automation. The time entry has no UI Automation value pattern, so the starting configuration sets Wake about two minutes after launch and Bedtime twelve hours later, and the run changes only number fields. The run fails if the `logs/circadia.log` in the run's temporary data directory has a failure or crash record, which use the `WARN` and `ERROR` levels. The run takes roughly four minutes and exercises, in order:
 
+- A one-minute scheduled transition from 2400 K to 6200 K at 60 Hz that ends at Wake, with the settings window closed. The harness then opens settings in the running process.
 - Ten-second fades into and out of manual suppression at 1, 60, and 240 Hz, between 2400 K and 6500 K.
 - Half-second fades in both directions at 60 and 240 Hz to exercise the rate ceiling during faster changes.
-- A ten-second Preview at 240 Hz, with 2400–6200 K temperatures and four-hour scheduled transitions.
-- A one-minute scheduled transition from 2400 K to 6200 K at 60 Hz with Settings closed.
+- A ten-second Preview at 240 Hz, with 2400–6200 K temperatures and four-hour scheduled transitions, which returns to the current 6200 K.
 
-The trace preserves each output's original due time before a delayed wake or synchronous native call. Eligibility also accounts for the configured attempt-rate ceiling and completion of the preceding native call. Startup, native preview setup/cleanup, immediate Preview entry/exit, explicit recovery, resume/taskbar refresh, Discard, and shutdown remain serialized but bypass the rate interval. Explicit recovery means a retry requested by Settings Retry, a valid Preview request, successful Save, or a manual-suppression command.
+The trace preserves each output's original due time before a delayed wake or synchronous native call. Eligibility also accounts for the configured attempt-rate ceiling and completion of the preceding native call. Startup, native preview setup/cleanup, immediate Preview entry/exit, explicit recovery, resume/taskbar refresh, and shutdown remain serialized but bypass the rate interval. Explicit recovery means a retry requested by a Retry button in settings, a valid Preview request, or a manual-suppression command.
 
 Each temperature-call record includes the attempt start, public-call start, and public-call completion. Reading current Night Light settings and state after starting an attempt counts toward its temperature-call start delay. Call duration is reported separately. Automatic correction attempts restore Circadia's intended native values after Windows or another application changes them; they share the output-rate ceiling.
 
 The tool requires at least 95% of temperature calls in each scenario to start within 20 ms of eligibility. It also checks final temperatures and Preview restoration, rejects native errors or incomplete traces, and verifies cleanup through native readback. The raw trace and scenario summaries print after the application exits. Ordinary builds exclude the instrumentation; measured call timings include its overhead and do not establish displayed color or smoothness.
 
-This recipe changes live Night Light without moving the cursor or sending keyboard input. Settings can take focus. Graceful exit clears native preview and requests Night Light off without restoring the previous native schedule or temperature. Failure retains the temporary configuration directory. The tool prints the source revision, executable, build profile, hardware, Windows build, display modes, and Settings dimensions; preserve those details with the raw results.
+This recipe changes live Night Light without moving the cursor or sending keyboard input. Settings can take focus. Graceful exit clears native preview and requests Night Light off without restoring the previous native schedule or temperature. Failure retains the temporary configuration directory. The tool prints the source revision, executable, build profile, hardware, Windows build, display modes, and settings window dimensions; preserve those details with the raw results. On 2026-10-27 the reworked order ran twice and failed its trace checks both times, although every measured output started at most 2.7 ms after it became eligible. In both runs, the first step of the scheduled transition, which the worker starts on a timer at the end of the 2400 K plateau, ran outside a measured attempt because the trace had no due time for it. In the second run, one call during Preview at 240 Hz also started before the eligibility time that the trace computed. Both are defects of the `output-measurement` trace, not of output timing.
 
 ## Worker activity and idle behavior
 
@@ -269,7 +263,7 @@ Build the bundled runtime with `just build-self-contained`. From `target/debug`,
 just native-deployment "path/to/copied/Circadia/circadia.exe"
 ```
 
-The recipe uses isolated configuration at constant 3400 K with Start minimized enabled. It checks direct launch, shortcut activation of settings in the existing process, and a fresh primary launch through a shortcut. The shortcut's working directory differs from the runtime directory. The tool verifies the launched executable, editable settings, native temperature, successful process exit, preview cleanup, and Night Light off.
+The recipe uses isolated configuration at constant 3400 K with Start minimized and management on. It runs English only. It checks direct launch, shortcut activation of settings in the existing process, and a launch through a shortcut while Circadia is not running. The shortcut's working directory differs from the runtime directory. The tool verifies the launched executable, editable settings, native temperature, successful process exit, preview cleanup, and Night Light off.
 
 This recipe uses UI Automation without mouse or keyboard input. Settings can take focus. It changes live Night Light and uses the lifecycle harness's cleanup behavior, including forced termination if graceful exit fails. It does not restore the prior native schedule or temperature. Failures during the direct or shortcut application checks retain the temporary configuration directory.
 
@@ -285,4 +279,45 @@ just native-explorer
 
 This recipe runs the lifecycle checks and restarts the current Explorer Shell once. The taskbar briefly disappears, and File Explorer windows may close. Before termination, the harness checks the Shell window's process identity and confirms that its executable is the Windows `explorer.exe`. It waits for automatic restart and launches that verified executable if the Shell has not returned after five seconds.
 
-After restart, the harness verifies one usable Circadia tray icon, foreground settings activation, and reapplication of the current Night Light temperature in the original Circadia process. This recipe does not suspend Windows, sign out, or shut down the machine.
+After restart, the harness verifies one usable Circadia tray icon, the tray menu's labels, foreground settings activation, and reapplication of the current Night Light temperature in the original Circadia process. This recipe does not suspend Windows, sign out, or shut down the machine.
+
+## Pseudo-locale
+
+Close any running Circadia instance, then run:
+
+```bash
+just native-translation
+```
+
+This recipe starts Circadia in the `qps-Ploc` pseudo-locale with management off, so it does not change Night Light. Its configuration has an invalid focus delay, an unknown key, a suppression entry with a window title, a second suppression entry, an exclusion, and a crash notice from a previous run, so the settings window shows a field message and banners for the invalid field, the unknown key, and the crash. The recipe uses UI Automation without moving the cursor or sending keys; settings can take focus. It inspects nine views: the four pages, the Schedule page with solar timing on, the App suppression page with its exclusion list expanded, the Night Light consent dialog, the Add app dialog, and the window-title dialog. It cancels each dialog, turns solar timing back off, and quits through the General page.
+
+In each view the recipe reads the text of every element and reports:
+
+- Text that has letters outside the pseudo-locale's brackets. Values that a message inserts between Unicode isolation marks, and each word of such a value, are exempt, as are executable names and text that has a digit and no run of more than two letters, such as `10:30 PM` and `6500 K`.
+- Text that extends horizontally past its parent element, or vertically past a parent that is not a pane. A scrolling pane moves text past its edges.
+
+Windows' caption buttons, the system menu, and WinUI's popup hosts show Windows' text and are not checked. WinUI's own names for parts of its controls are exempt only on the part that shows them: "Close" on an InfoBar's close button, the InfoBar icon names, "Vertical" on a scroll bar, and the range text that a number box appends to its field name. Text inside other WinUI parts, such as an InfoBar's title and message and a dialog's buttons, is checked.
+
+The layout check has two limits. UI Automation reports a text element's rectangle clipped to its layout slot, so text that is cut off inside a fixed-width or fixed-height container, such as a long label that does not wrap, is not reported. A text element scrolled out of view has an empty rectangle, so the check sees layout only for the part of each page that is visible without scrolling. The recipe does not open the Windows file picker; `just native-picker --language qps-Ploc` opens it in the pseudo-locale. It checks layout only at the current display scale; run it again at 150% and 200% scaling to check those scales. Failure retains the temporary configuration directory.
+
+## Recorded results
+
+On 2026-10-27, on Windows 11 build 26300.9711 at 100% scaling (96 DPI) with the English Shell, the harness described above ran against the working tree based on `4647f8b`:
+
+| Recipe | Result |
+| :-- | :-- |
+| `just native-picker` | Passed, then passed again in English and with `--language qps-Ploc` after the picker's title and file type became catalog text. |
+| `just native-startup` | Passed on the second run. The first run could not find the startup message because its identifier was on an unnamed border; settings now puts the message identifier on its text. |
+| `just native-lifecycle` | Passed. |
+| `just native-settings` | Passed on the third run. The first run counted tray menu items from every window of the process; the second read the configuration file before the Preview length was written. Both were harness errors. A fourth run, with the page-order and keyboard checks added, passed. |
+| `just native-recovery` | Passed on the second run. The first run expected 6500 K at the top edge of the graph, which now keeps a margin. It passed again after the review changes. |
+| `just native-explorer` | Passed, including the Explorer restart. |
+| `just measure-graph` | Passed: 15 samples, with a maximum of 21.2 ms from input event to XAML rendering callback. |
+| `just measure-activity --quick` | Passed. The quick run shortens idle observation to two seconds, so it is a harness check, not a baseline. |
+| `just measure-resources --quick` | Passed with no recorded application errors. The quick run uses two-second observations, so its numbers are not baselines. |
+| `just native-deployment` | Passed with a copied runtime. |
+| `just measure-output` | Failed its trace checks in two runs; see [Native output timing](#native-output-timing). The first run also reported an empty scenario, because the harness added a second `startup` label; the label was removed. |
+| `just native-translation` | Passed at 100% scaling on the first recipe run: 9 views and 196 distinct texts, with no untranslated or clipped text. A later version that also checks text inside WinUI parts passed. With temporary English text in the crash banner's title and the consent dialog's Cancel button, it reported both; a temporary non-wrapping label of about 70 characters in a 120 epx container was not reported. Runs at 150% and 200% scaling were not performed. |
+| `just native-shutdown` | Failed in the first three runs, then passed twice. In the failed runs, confirmed session end with the Add app dialog open, and with the file picker open, completed Night Light cleanup and logged a successful exit, then the process ended with exception 0xc0000005 in `Microsoft.ui.xaml.dll`, and the Quit case could not read the tray menu because the harness counted the settings window's system menu item. Settings now closes its dialogs before its window closes on exit, and the harness reads the tray menu from one host window; all four cases passed in both later runs. A later run added two cases. Session end with the Wake time flyout open passed. Quit from the tray menu with the file picker open failed, because the tray menu did not open while the picker was open, so the recipe does not include that case. |
+
+Each passing run left Night Light off with the native preview flag cleared.

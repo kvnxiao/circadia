@@ -16,6 +16,7 @@ use crate::EntryProblem;
 use crate::Field;
 use crate::FieldErrorKind;
 use crate::ManualCommand;
+use crate::automation_id;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
@@ -98,10 +99,10 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 settings.number_controls(
                     NumberControls {
                         field: Field::FocusDelayMs,
-                        id: "focus-delay",
+                        number: automation_id::FOCUS_DELAY_NUMBER,
+                        slider: None,
                         title: &delay,
                         unit: text!(text, "milliseconds-unit"),
-                        slider: false,
                     },
                     context,
                 ),
@@ -159,7 +160,7 @@ pub(super) fn manual_view(model: &Model, text: &Text, region: &RegionalFormat) -
 pub(super) fn manual_button(manual: ManualView, context: &ViewContext<'_, Settings>) -> View {
     Button::new()
         .is_enabled(manual.enabled)
-        .automation_id("manual-suppression")
+        .automation_id(automation_id::MANUAL_SUPPRESSION)
         .automation_name(&manual.label)
         .on_click(context.message(Message::Command(Command::Manual(manual.command))))
         .content(glyph_label(SUN_GLYPH, manual.label))
@@ -696,7 +697,7 @@ fn title_button(
         .width(32.0)
         .height(32.0)
         .is_enabled(settings.input.model.editable())
-        .automation_id(format!("{id}-title"))
+        .automation_id(automation_id::title(id))
         .automation_name(text!(
             settings.input.text,
             "entry-title-name",
@@ -764,7 +765,7 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 controls.push(
                     Button::new()
                         .is_enabled(editable)
-                        .automation_id(format!("recent-remove:{executable}"))
+                        .automation_id(automation_id::recent_remove(&executable))
                         .automation_name(text!(
                             text,
                             "recent-remove-name",
@@ -782,7 +783,7 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 controls.push(
                     Button::new()
                         .is_enabled(editable)
-                        .automation_id(format!("recent-add:{executable}"))
+                        .automation_id(automation_id::recent_add(&executable))
                         .automation_name(text!(text, "recent-add-name", name = row.name.as_str()))
                         .on_click(context.message(Message::Command(Command::Add(
                             Field::Suppression,
@@ -797,7 +798,7 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 &row.name,
                 vec![widgets::caption(&row.detail).into()],
                 controls,
-                format!("recent:{executable}"),
+                automation_id::recent(&executable),
             );
             divided(row_view, position > 0)
         })
@@ -836,7 +837,7 @@ fn list_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 .grid_column(1)
                 .style(ButtonStyle::Accent)
                 .is_enabled(settings.input.model.editable())
-                .automation_id("add-app")
+                .automation_id(automation_id::ADD_APP)
                 .automation_name(text!(text, "add-app"))
                 .on_click(context.message(Message::OpenDialog(Field::Suppression)))
                 .content(glyph_label(ADD_GLYPH, text!(text, "add-app"))),
@@ -851,7 +852,7 @@ fn entry_card(row: &EntryRow, settings: &Settings, controls: Vec<View>, id: Stri
         detail.push(widgets::caption(text!(text, "entry-inactive")).into());
     }
     if let Some(error) = &row.error {
-        detail.push(widgets::field_error(error, &format!("{id}-message")));
+        detail.push(widgets::field_error(error, &automation_id::message(&id)));
     }
     let border = if row.error.is_some() {
         ThemeBrush::SystemCritical
@@ -890,10 +891,10 @@ fn suppression_cards(settings: &Settings, context: &ViewContext<'_, Settings>) -
     let cards = rows
         .iter()
         .map(|row| {
-            let id = format!("suppression-{}", row.index);
+            let id = automation_id::suppression_entry(row.index);
             let remove = remove_button(
                 &text!(text, "entry-remove-name", name = row.name.as_str()),
-                format!("{id}-remove"),
+                automation_id::remove(&id),
                 model.editable(),
                 context.message(Message::Command(Command::Remove(
                     Field::Suppression,
@@ -933,13 +934,13 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             .children((
                 Button::new()
                     .is_enabled(model.editable())
-                    .automation_id("add-exclusion")
+                    .automation_id(automation_id::ADD_EXCLUSION)
                     .on_click(context.message(Message::OpenDialog(Field::Exclusions)))
                     .content(text!(text, "add-exclusion")),
                 widgets::expand_button(
                     expansion,
                     expand_name,
-                    "exclusions-expand",
+                    automation_id::EXCLUSIONS_EXPAND,
                     context.message(Message::Expand(!expanded)),
                 ),
             ))
@@ -959,14 +960,14 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                     .font_size(16.0)
                     .automation_name(text!(text, "fixed-locked"))
                     .into(),
-                format!("fixed:{}", row.executable.to_lowercase()),
+                automation_id::fixed_exclusion(&row.executable.to_lowercase()),
             )
         }));
         children.extend(rows.iter().map(|row| {
-            let id = format!("exclusion-{}", row.index);
+            let id = automation_id::exclusion_entry(row.index);
             let mut detail: Vec<View> = vec![widgets::caption(&row.detail).into()];
             if let Some(error) = &row.error {
-                detail.push(widgets::field_error(error, &format!("{id}-message")));
+                detail.push(widgets::field_error(error, &automation_id::message(&id)));
             }
             let actions = StackPanel::new()
                 .orientation(Orientation::Horizontal)
@@ -975,7 +976,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                     title_button(row, Field::Exclusions, &id, settings, context),
                     remove_button(
                         &text!(text, "entry-remove-name", name = row.name.as_str()),
-                        format!("{id}-remove"),
+                        automation_id::remove(&id),
                         model.editable(),
                         context.message(Message::Command(Command::Remove(
                             Field::Exclusions,
@@ -1049,7 +1050,7 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
         let executable = row.executable.clone();
         CheckBox::new()
             .is_checked(row.checked)
-            .automation_id(format!("dialog-choice:{}", row.executable))
+            .automation_id(automation_id::dialog_choice(&row.executable))
             .automation_name(text!(
                 text,
                 "app-entry-name",
@@ -1085,7 +1086,7 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
         widgets::caption(text!(text, "dialog-file-description")).into(),
         Button::new()
             .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
-            .automation_id("dialog-browse")
+            .automation_id(automation_id::DIALOG_BROWSE)
             .automation_name(text!(text, "dialog-browse"))
             .on_click(context.message(Message::Browse))
             .content(glyph_label("\u{E8B7}", text!(text, "dialog-browse")))
@@ -1096,7 +1097,7 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
         browse.push(
             widgets::caption(message)
                 .margin(Thickness::new(0.0, 4.0, 0.0, 0.0))
-                .automation_id("dialog-message")
+                .automation_id(automation_id::DIALOG_MESSAGE)
                 .automation_live_setting(windows_reactor::AutomationLiveSetting::Polite)
                 .into(),
         );
@@ -1135,7 +1136,7 @@ fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Con
         TextBox::new()
             .header(widgets::body(&view.label))
             .text(&view.text)
-            .automation_id("title-dialog-text")
+            .automation_id(automation_id::TITLE_DIALOG_TEXT)
             .automation_name(&view.label)
             .on_text_changed(
                 context.callback(|text: std::rc::Rc<str>| Message::TitleText(text.to_string())),
@@ -1143,12 +1144,15 @@ fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Con
             .into(),
     ];
     if let Some(error) = &view.error {
-        field.push(widgets::field_error(error, "title-dialog-error"));
+        field.push(widgets::field_error(
+            error,
+            automation_id::TITLE_DIALOG_ERROR,
+        ));
     }
     field.push(
         CheckBox::new()
             .is_checked(Some(view.regex))
-            .automation_id("title-dialog-regex")
+            .automation_id(automation_id::TITLE_DIALOG_REGEX)
             .automation_name(text!(text, "title-dialog-regex"))
             .on_is_checked_changed(
                 context
@@ -1164,10 +1168,10 @@ fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Con
                 .spacing(8.0)
                 .children((
                     widgets::caption(suggestion)
-                        .automation_id("title-dialog-last-seen")
+                        .automation_id(automation_id::TITLE_DIALOG_LAST_SEEN)
                         .vertical_alignment(VerticalAlignment::Center),
                     HyperlinkButton::new()
-                        .automation_id("title-dialog-use")
+                        .automation_id(automation_id::TITLE_DIALOG_USE)
                         .on_click(context.message(Message::UseTitle))
                         .content(text!(text, "title-dialog-use")),
                 ))

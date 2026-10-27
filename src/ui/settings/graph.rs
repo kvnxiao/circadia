@@ -6,6 +6,7 @@ use crate::CalculatedSchedule;
 use crate::EventKind;
 use crate::LocalEvent;
 use crate::TimeInterval;
+use crate::automation_id;
 use jiff::Timestamp;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -626,7 +627,7 @@ fn event_chip(event: &LocalEvent, name: String, palette: &Palette) -> View {
         .background(palette.chip_fill)
         .border_brush(outline)
         .border_thickness(1.0)
-        .automation_id(format!("graph-{}", event_key(event.kind)))
+        .automation_id(automation_id::graph_event(event_key(event.kind)))
         .automation_name(name.clone())
         .content(icon)
         .tooltip(name)
@@ -695,14 +696,14 @@ pub(super) fn plot(plot: Plot<'_>) -> View {
                 .fill(fill)
                 .stroke(palette.primary())
                 .stroke_thickness(2.0)
-                .automation_id("graph-now"),
+                .automation_id(automation_id::GRAPH_NOW),
         ));
     }
     let mut plot: Vec<View> = vec![
         Border::new()
             .corner_radius(4.0)
             .background(palette.plot_fill)
-            .automation_id("graph")
+            .automation_id(automation_id::GRAPH)
             .automation_name(name)
             .into(),
         Border::new().corner_radius(4.0).content(surface).into(),

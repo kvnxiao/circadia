@@ -1,8 +1,8 @@
 use crate::automation::Automation;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
+use crate::lifecycle::settings_window;
 use crate::lifecycle::wait;
-use crate::lifecycle::window;
 use circadia::ActivityEvent;
 use circadia::ActivityMeasurement;
 use circadia::ActivityWait;
@@ -17,19 +17,22 @@ use circadia::RuntimeTime;
 use circadia::SchedulingState;
 use circadia::SimulatedNativeFault;
 use circadia::WindowsZone;
+use circadia::automation_id;
 use jiff::Timestamp;
 use jiff::civil::Time;
+use std::ffi::OsString;
 use std::io;
 use std::time::Duration;
 use std::time::Instant;
 
-pub(super) fn run() -> io::Result<()> {
-    let arguments: Vec<_> = std::env::args_os().skip(2).collect();
-    let quick = arguments.as_slice() == ["--quick"];
+pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
+    let options = arguments.get(1..).unwrap_or_default();
+    let quick = options == ["--quick"];
     require(
-        arguments.is_empty() || quick,
+        options.is_empty() || quick,
         "usage: native-lifecycle --measure-activity [--quick]",
     )?;
+    crate::lifecycle::require_english()?;
     crate::environment::report(&std::env::current_exe()?, "Activity trace")?;
     report(
         "Native output is simulated. The idle phase uses real clocks, Windows waits, and foreground events. Later phases freeze application clocks, record selected deadlines, and wake the worker explicitly; they do not test Windows timeout delivery. Windows clocks and focus are not changed.",
@@ -82,7 +85,7 @@ fn exercise(
     })?;
     quiet_wait(activity)?;
     require(
-        window(std::process::id(), "Circadia", true)?.is_none(),
+        settings_window(std::process::id())?.is_none(),
         "idle settings must be closed",
     )?;
     idle(activity, native, quick)?;
@@ -433,14 +436,14 @@ fn manual(
     let automation = Automation::new()?;
     let process = std::process::id();
     let settings = wait("settings for manual suppression", || {
-        window(process, "Circadia", true)
+        settings_window(process)
     })?;
     crate::automation::wait("manual suppression control", || {
         Ok(automation
-            .enabled(&settings, process, "manual-suppression")?
+            .enabled(&settings, process, automation_id::MANUAL_SUPPRESSION)?
             .filter(|enabled| *enabled))
     })?;
-    automation.invoke(&settings, process, "manual-suppression")?;
+    automation.invoke(&settings, process, automation_id::MANUAL_SUPPRESSION)?;
     wait("manual suppression active", || {
         Ok(activity
             .controller()?
@@ -465,7 +468,7 @@ fn manual(
     open_settings_idle(activity, &automation, &settings)?;
     automation.close(&settings, process)?;
     wait("settings closed with manual suppression", || {
-        Ok(window(process, "Circadia", true)?.is_none().then_some(()))
+        Ok(settings_window(process)?.is_none().then_some(()))
     })?;
     quiet_wait(activity)?;
     let calls = native.native_calls()?.len();
@@ -539,7 +542,7 @@ fn open_settings_idle(
     let (ticks, views) = settings_updates(activity, mark)?;
     require(
         automation
-            .text(settings, std::process::id(), "status-sentence")?
+            .text(settings, std::process::id(), automation_id::STATUS_SENTENCE)?
             .is_some(),
         "the open Settings window does not show the Schedule page",
     )?;

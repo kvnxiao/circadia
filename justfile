@@ -11,23 +11,26 @@ build:
 build-self-contained:
     cargo +stable build --bin circadia --features self-contained --locked
 
-native-lifecycle: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- target/debug/circadia.exe
+native-lifecycle *args: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} target/debug/circadia.exe
 
-native-explorer: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --restart-explorer target/debug/circadia.exe
+native-explorer *args: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --restart-explorer target/debug/circadia.exe
 
-native-settings: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --settings target/debug/circadia.exe
+native-settings *args: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --settings target/debug/circadia.exe
 
-native-startup: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --startup target/debug/circadia.exe
+native-startup *args: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --startup target/debug/circadia.exe
 
-native-shutdown: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --modal-shutdown target/debug/circadia.exe
+native-shutdown *args: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --modal-shutdown target/debug/circadia.exe
 
-native-picker: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --picker target/debug/circadia.exe
+native-picker *args: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --picker target/debug/circadia.exe
+
+native-translation: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --language qps-Ploc --translation target/debug/circadia.exe
 
 native-deployment executable:
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- --deployment "{{executable}}"

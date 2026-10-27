@@ -3,25 +3,30 @@ use crate::automation::wait as wait_automation;
 use crate::lifecycle::read_log;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
+use crate::lifecycle::settings_window;
+use crate::lifecycle::show_page;
+use crate::lifecycle::text;
 use crate::lifecycle::wait;
-use crate::lifecycle::window;
 use circadia::ConfigInput;
 use circadia::DiagnosticOperation;
 use circadia::GraphMeasurement;
 use circadia::SimulatedNativeCall;
 use circadia::SimulatedNativeFault;
 use circadia::TemperatureMode;
+use circadia::automation_id;
+use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 use winsafe::HWND;
 
-pub(super) fn run() -> io::Result<()> {
+pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     require(
-        std::env::args_os().len() == 2,
+        arguments.len() == 1,
         "usage: native-lifecycle --native-recovery",
     )?;
+    crate::lifecycle::require_english()?;
     let local = circadia::WindowsZone::current()
         .map_err(io::Error::other)?
         .local(jiff::Timestamp::now())
@@ -34,6 +39,7 @@ pub(super) fn run() -> io::Result<()> {
         ordinary_fade_ms: 100,
         start_minimized: false,
         preview_seconds: 20,
+        manage_night_light: true,
         ..ConfigInput::default()
     };
     crate::graph::desktop_check(input, &[SimulatedNativeFault::Observation], exercise)
@@ -42,9 +48,7 @@ pub(super) fn run() -> io::Result<()> {
 fn exercise(measurement: &GraphMeasurement, directory: &Path) -> io::Result<()> {
     let automation = Automation::new()?;
     let process = std::process::id();
-    let settings = wait("recovery settings window", || {
-        window(process, "Circadia", true)
-    })?;
+    let settings = wait("recovery settings window", || settings_window(process))?;
     let checks = (|| {
         observation_failure(measurement, &automation, &settings, directory)?;
         preview_recovery(measurement, &automation, &settings, directory)?;
@@ -89,14 +93,10 @@ fn observation_failure(
     settings: &HWND,
     directory: &Path,
 ) -> io::Result<()> {
-    status(
-        automation,
-        settings,
-        "Control continues without change observation.",
-    )?;
+    status(automation, settings, &text()?.observation_failed)?;
     written(measurement, 2200, None)?;
     let edited = Instant::now();
-    automation.set_value(settings, std::process::id(), "sleep_kelvin", "2300")?;
+    sleep(automation, settings, 2300)?;
     written(measurement, 2300, Some(edited))?;
     wait("repeated observation recovery", || {
         Ok((measurement
@@ -109,7 +109,7 @@ fn observation_failure(
     })?;
     diagnostics(directory, "observation", &["failure"])?;
     measurement.fail_native(&[])?;
-    automation.invoke(settings, std::process::id(), "retry")?;
+    retry(automation, settings)?;
     recovered(automation, settings)?;
     diagnostics(directory, "observation", &["failure", "recovered"])?;
     report(
@@ -126,8 +126,8 @@ fn preview_recovery(
 ) -> io::Result<()> {
     measurement.fail_native(&[SimulatedNativeFault::SettingsRead])?;
     let failed_since = Instant::now();
-    automation.set_value(settings, std::process::id(), "sleep_kelvin", "2200")?;
-    status(automation, settings, "Night Light output is unavailable.")?;
+    sleep(automation, settings, 2200)?;
+    status(automation, settings, &text()?.output_unavailable)?;
     wait("repeated settings-read failures", || {
         Ok((measurement
             .native_calls()?
@@ -153,7 +153,7 @@ fn preview_recovery(
     )?;
     let recovery = Instant::now();
     measurement.fail_native(&[])?;
-    automation.invoke(settings, std::process::id(), "retry")?;
+    retry(automation, settings)?;
     let current = written(measurement, 6500, Some(recovery))?;
     require(
         current.temperature == Some((6500, TemperatureMode::Apply))
@@ -171,7 +171,7 @@ fn preview_recovery(
             .all(|(kelvin, _)| kelvin == 6500),
         "Preview recovery replayed an earlier position",
     )?;
-    automation.invoke(settings, std::process::id(), "preview")?;
+    automation.invoke(settings, std::process::id(), automation_id::PREVIEW)?;
     editable(automation, settings)?;
     written(measurement, 2200, Some(current.completed))?;
     report(
@@ -187,12 +187,12 @@ fn preview_stop_during_failure(
 ) -> io::Result<()> {
     measurement.fail_native(&[SimulatedNativeFault::SettingsRead])?;
     start_preview(automation, settings)?;
-    status(automation, settings, "Night Light output is unavailable.")?;
+    status(automation, settings, &text()?.output_unavailable)?;
     daytime(measurement)?;
     let stopped = Instant::now();
-    automation.invoke(settings, std::process::id(), "preview")?;
+    automation.invoke(settings, std::process::id(), automation_id::PREVIEW)?;
     editable(automation, settings)?;
-    status(automation, settings, "Night Light output is unavailable.")?;
+    status(automation, settings, &text()?.output_unavailable)?;
     measurement.fail_native(&[])?;
     written(measurement, 2200, Some(stopped))?;
     recovered(automation, settings)?;
@@ -206,7 +206,7 @@ fn preview_stop_during_failure(
         "Stop recovery replayed an obsolete Preview temperature",
     )?;
     report(
-        "PASS: Stop restores editing during failed access; automatic recovery selects the live draft without replay",
+        "PASS: Stop restores editing during failed access; automatic recovery applies the edited 2200 K without replaying Preview",
     );
     Ok(())
 }
@@ -216,22 +216,30 @@ fn preview_completion_during_failure(
     automation: &Automation,
     settings: &HWND,
 ) -> io::Result<()> {
-    automation.set_value(settings, std::process::id(), "preview_seconds", "1")?;
+    let process = std::process::id();
+    show_page(
+        automation,
+        settings,
+        process,
+        automation_id::NAV_TRANSITIONS,
+    )?;
+    automation.set_number(settings, process, automation_id::PREVIEW_LENGTH_NUMBER, 1.0)?;
     wait_automation("one-second Preview configuration", || {
         Ok(automation
-            .value(settings, std::process::id(), "preview_seconds")?
-            .filter(|value| value == "1"))
+            .number(settings, process, automation_id::PREVIEW_LENGTH_NUMBER)?
+            .filter(|value| (value - 1.0).abs() < f64::EPSILON))
     })?;
+    show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     measurement.fail_native(&[SimulatedNativeFault::SettingsRead])?;
     let started = Instant::now();
     start_preview(automation, settings)?;
-    status(automation, settings, "Night Light output is unavailable.")?;
+    status(automation, settings, &text()?.output_unavailable)?;
     editable(automation, settings)?;
     require(
         started.elapsed().as_secs_f64() < 4.0,
         "native errors prolonged the one-second Preview",
     )?;
-    status(automation, settings, "Night Light output is unavailable.")?;
+    status(automation, settings, &text()?.output_unavailable)?;
     let completed = Instant::now();
     measurement.fail_native(&[])?;
     written(measurement, 2200, Some(completed))?;
@@ -260,11 +268,9 @@ fn partial_write_failure(
         SimulatedNativeFault::Cleanup,
     ])?;
     let started = Instant::now();
-    automation.set_value(settings, std::process::id(), "sleep_kelvin", "2300")?;
-    wait_automation("stored temperature and cleanup errors", || {
-        Ok(automation
-            .text(settings, std::process::id(), "error-details")?
-            .filter(|text| text.contains("temperature_write") && text.contains("preview_cleanup")))
+    sleep(automation, settings, 2300)?;
+    wait_automation("Night Light failure banner", || {
+        automation.text(settings, std::process::id(), automation_id::BANNER_NATIVE)
     })?;
     wait("repeated partial write failure", || {
         Ok((measurement
@@ -300,7 +306,7 @@ fn partial_write_failure(
         .ok_or_else(|| io::Error::other("last write failure absent"))?;
     let retry = Instant::now();
     measurement.fail_native(&[])?;
-    automation.invoke(settings, std::process::id(), "retry")?;
+    self::retry(automation, settings)?;
     let applied = written(measurement, 2300, Some(retry))?;
     require(
         applied.started.duration_since(last_failure.completed) < Duration::from_millis(800),
@@ -314,7 +320,7 @@ fn partial_write_failure(
     recovered(automation, settings)?;
     diagnostics(directory, "temperature_write", &["failure", "recovered"])?;
     diagnostics(directory, "preview_cleanup", &["failure", "recovered"])?;
-    automation.set_value(settings, std::process::id(), "sleep_kelvin", "2200")?;
+    sleep(automation, settings, 2200)?;
     written(measurement, 2200, Some(applied.completed))?;
     report(
         "PASS: stored 2300 K survives write/cleanup failures; Retry reapplies matching kelvin and clears both errors",
@@ -325,16 +331,33 @@ fn partial_write_failure(
 fn status(automation: &Automation, settings: &HWND, expected: &str) -> io::Result<()> {
     wait_automation(expected, || {
         Ok(automation
-            .text(settings, std::process::id(), "control-status")?
+            .text(settings, std::process::id(), automation_id::PANE_STATUS)?
             .filter(|text| text.contains(expected)))
     })
     .map(|_| ())
 }
 
+fn sleep(automation: &Automation, settings: &HWND, kelvin: u16) -> io::Result<()> {
+    automation.set_number(
+        settings,
+        std::process::id(),
+        automation_id::SLEEP_NUMBER,
+        f64::from(kelvin),
+    )
+}
+
+fn retry(automation: &Automation, settings: &HWND) -> io::Result<()> {
+    automation.invoke(
+        settings,
+        std::process::id(),
+        &automation_id::retry(automation_id::BANNER_NATIVE),
+    )
+}
+
 fn recovered(automation: &Automation, settings: &HWND) -> io::Result<()> {
-    wait_automation("native error details cleared", || {
+    wait_automation("Night Light failure banner cleared", || {
         Ok(automation
-            .text(settings, std::process::id(), "error-details")?
+            .text(settings, std::process::id(), automation_id::BANNER_NATIVE)?
             .is_none()
             .then_some(()))
     })
@@ -343,7 +366,7 @@ fn recovered(automation: &Automation, settings: &HWND) -> io::Result<()> {
 fn editable(automation: &Automation, settings: &HWND) -> io::Result<()> {
     wait_automation("editing available", || {
         Ok(automation
-            .enabled(settings, std::process::id(), "wake")?
+            .enabled(settings, std::process::id(), automation_id::WAKE)?
             .filter(|enabled| *enabled))
     })
     .map(|_| ())
@@ -352,13 +375,13 @@ fn editable(automation: &Automation, settings: &HWND) -> io::Result<()> {
 fn start_preview(automation: &Automation, settings: &HWND) -> io::Result<()> {
     wait_automation("Preview available", || {
         Ok(automation
-            .enabled(settings, std::process::id(), "preview")?
+            .enabled(settings, std::process::id(), automation_id::PREVIEW)?
             .filter(|enabled| *enabled))
     })?;
-    automation.invoke(settings, std::process::id(), "preview")?;
+    automation.invoke(settings, std::process::id(), automation_id::PREVIEW)?;
     wait_automation("Preview disables editing", || {
         Ok(automation
-            .enabled(settings, std::process::id(), "wake")?
+            .enabled(settings, std::process::id(), automation_id::WAKE)?
             .filter(|enabled| !enabled))
     })?;
     wait("Preview graph visible", || {
@@ -368,13 +391,29 @@ fn start_preview(automation: &Automation, settings: &HWND) -> io::Result<()> {
     })
 }
 
+// The plot keeps a margin above 6500 K, so the plateau is found as the first
+// level, well above the starting Sleep level, that stays unchanged.
 fn daytime(measurement: &GraphMeasurement) -> io::Result<()> {
+    let (_, _, sleep) = wait("rendered Preview position", || measurement.position())?;
+    let mut level: Option<(f64, Instant)> = None;
     wait("rendered Preview advances to daytime plateau", || {
-        Ok(measurement
-            .position()?
-            .filter(|(_, _, y)| y.abs() < f64::EPSILON))
+        let Some((_, _, y)) = measurement.position()? else {
+            return Ok(None);
+        };
+        match level {
+            _ if sleep - y < 0.5 => {
+                level = None;
+                Ok(None)
+            }
+            Some((plateau, since)) if (plateau - y).abs() < f64::EPSILON => {
+                Ok((since.elapsed() >= Duration::from_millis(300)).then_some(()))
+            }
+            _ => {
+                level = Some((y, Instant::now()));
+                Ok(None)
+            }
+        }
     })
-    .map(|_| ())
 }
 
 fn written(

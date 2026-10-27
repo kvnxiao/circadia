@@ -1,9 +1,15 @@
 use crate::automation::Automation;
+use crate::automation::DialogButton;
 use crate::automation::wait;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
+use crate::lifecycle::settings_window;
+use crate::lifecycle::show_page;
+use crate::lifecycle::text;
 use crate::lifecycle::window;
 use crate::settings::saved;
+use circadia::automation_id;
+use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use windows::Win32::UI::Accessibility::IUIAutomationInvokePattern;
@@ -17,14 +23,13 @@ use windows::Win32::UI::Accessibility::UIA_SelectionItemPatternId;
 use windows::Win32::UI::Accessibility::UIA_ValuePatternId;
 use winsafe::HWND;
 
-pub(super) fn run() -> io::Result<()> {
-    require(
-        std::env::args_os().count() == 3,
-        "expected one executable path",
-    )?;
-    let executable = std::env::args_os().nth(2).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "expected Circadia executable")
-    })?;
+pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
+    let [_, executable] = arguments else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "expected one executable path",
+        ));
+    };
     match circadia::InstanceClaim::acquire()? {
         circadia::InstanceClaim::Primary(_) => {}
         circadia::InstanceClaim::Existing(_) => {
@@ -36,46 +41,24 @@ pub(super) fn run() -> io::Result<()> {
         .prefix("circadia-picker-")
         .tempdir()?;
     let result = (|| {
-        let config = circadia::ConfigInput {
-            daytime_kelvin: 3400,
-            middle_kelvin: 3400,
-            sleep_kelvin: 3400,
-            start_minimized: false,
-            ..circadia::ConfigInput::default()
-        }
-        .validate()
-        .map_err(io::Error::other)?;
-        let saved = circadia::ConfigStore::new(directory.path())
-            .save(&config)
-            .map_err(io::Error::other)?;
-        if let Some(error) = saved.backup_error {
-            return Err(io::Error::other(error));
-        }
+        crate::lifecycle::seed(
+            directory.path(),
+            &circadia::ConfigInput {
+                start_minimized: false,
+                ..circadia::ConfigInput::default()
+            },
+        )?;
         let automation = Automation::new()?;
-        let native = win_nightlight_lib::Nightlight::new();
         let mut application = crate::lifecycle::Process::start(&executable, directory.path())?;
         let process = application.id();
-        let settings = wait("picker settings window", || {
-            window(process, "Circadia", true)
-        })?;
-        wait("editable picker settings", || {
-            Ok(automation
-                .enabled(&settings, process, "add-suppression")?
-                .filter(|enabled| *enabled))
-        })?;
-        crate::lifecycle::wait_temperature(&native, 3400)?;
+        let settings = wait("picker settings window", || settings_window(process))?;
+        crate::settings::editable(&automation, &settings, process)?;
         exercise(&automation, &settings, process, directory.path())?;
-        automation.invoke(&settings, process, "quit")?;
+        crate::lifecycle::quit(&automation, &settings, process)?;
         application.wait_exit()?;
-        require(
-            !native
-                .read_settings()
-                .map_err(io::Error::other)?
-                .is_previewing()
-                && !native.read_state().map_err(io::Error::other)?.is_active(),
-            "picker test exit did not clear native preview and turn Night Light off",
-        )?;
-        report("PASS: picker checks and cleanup completed without mouse or keyboard input");
+        report(
+            "PASS: picker checks completed without mouse or keyboard input; Night Light was not managed",
+        );
         Ok(())
     })();
     if result.is_err() {
@@ -100,108 +83,171 @@ pub(super) fn exercise(
     process: u32,
     directory: &Path,
 ) -> io::Result<()> {
+    show_page(automation, settings, process, automation_id::NAV_APPS)?;
     let original = saved(directory)?;
-    select(
-        automation,
-        settings,
-        process,
-        "add-suppression",
-        Selection::Cancel,
-    )?;
-    report("PASS: executable picker cancellation restores editing");
-    require(
-        saved(directory)? == original,
-        "cancelling the picker changed the saved configuration",
-    )?;
+    open_dialog(automation, settings, process, automation_id::ADD_APP)?;
+    select(automation, settings, process, Selection::Cancel)?;
+    report("PASS: executable picker cancellation returns to the Add app dialog");
     let fixtures = directory.join("Executable picker fixtures");
     fs_err::create_dir(&fixtures)?;
     select(
         automation,
         settings,
         process,
-        "add-suppression",
         Selection::CancelIn(&fixtures),
     )?;
     require(
         saved(directory)? == original,
-        "folder navigation changed the saved configuration",
+        "cancelling the picker changed the saved configuration",
     )?;
     let fixed = fixtures.join("ApplicationFrameHost.exe");
     let executable = std::env::current_exe()?;
     fs_err::copy(&executable, &fixed)?;
-    select(
-        automation,
-        settings,
-        process,
-        "add-suppression",
-        Selection::File(&fixed),
-    )?;
-    report("Executable picker returned the fixed-name fixture");
-    wait("fixed excluded filename is rejected", || {
-        Ok(automation
-            .text(settings, process, "error-details")?
-            .filter(|text| text.contains("excluded")))
+    select(automation, settings, process, Selection::File(&fixed))?;
+    wait("fixed exclusion is rejected with a message", || {
+        automation.text(settings, process, automation_id::DIALOG_MESSAGE)
     })?;
     require(
         automation
-            .text(settings, process, "suppression:applicationframehost.exe")?
+            .enabled(
+                settings,
+                process,
+                &automation_id::dialog_choice("applicationframehost.exe"),
+            )?
             .is_none(),
-        "fixed exclusion entered the draft list",
+        "a fixed exclusion became a dialog choice",
     )?;
     let selected = fixtures.join("Picker-Fixture.EXE");
     fs_err::copy(&executable, &selected)?;
-    select(
-        automation,
-        settings,
-        process,
-        "add-suppression",
-        Selection::File(&selected),
-    )?;
-    wait("selected filename enters the suppression list", || {
-        automation.text(settings, process, "suppression:picker-fixture.exe")
-    })?;
-    select(
-        automation,
-        settings,
-        process,
-        "add-exclusion",
-        Selection::File(&selected),
-    )?;
-    wait("selected exclusion marks its inclusion inactive", || {
-        Ok(automation
-            .text(settings, process, "suppression:picker-fixture.exe")?
-            .filter(|text| text.contains("inactive")))
+    select(automation, settings, process, Selection::File(&selected))?;
+    let choice = automation_id::dialog_choice("picker-fixture.exe");
+    wait("browsed file becomes a chosen dialog entry", || {
+        automation.toggled(settings, process, &choice)
     })?;
     require(
-        saved(directory)? == original,
-        "picker selection saved the draft",
+        automation.toggled(settings, process, &choice)? == Some(true),
+        "browsed file is not chosen",
     )?;
-    automation.invoke(settings, process, "discard")?;
-    wait("Discard removes selected entries", || {
-        Ok((automation
-            .text(settings, process, "suppression:picker-fixture.exe")?
-            .is_none()
+    require(
+        saved(directory)? == original,
+        "the open dialog changed the saved configuration",
+    )?;
+    confirm_dialog(automation, settings, process)?;
+    let entry = automation_id::suppression_entry(0);
+    wait("Add writes the browsed suppression entry", || {
+        Ok((saved(directory)?
+            .suppression
+            .iter()
+            .map(|entry| entry.executable.as_str())
+            .eq(["picker-fixture.exe"])
             && automation
-                .text(settings, process, "exclusion:picker-fixture.exe")?
-                .is_none())
+                .enabled(settings, process, &automation_id::remove(&entry))?
+                .is_some())
         .then_some(()))
     })?;
+    exclude_and_remove(automation, settings, process, directory, &selected)
+}
+
+fn exclude_and_remove(
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+    directory: &Path,
+    selected: &Path,
+) -> io::Result<()> {
+    let choice = automation_id::dialog_choice("picker-fixture.exe");
+    open_dialog(automation, settings, process, automation_id::ADD_EXCLUSION)?;
+    select(automation, settings, process, Selection::File(selected))?;
+    wait("browsed exclusion is chosen", || {
+        Ok(automation
+            .toggled(settings, process, &choice)?
+            .filter(|chosen| *chosen))
+    })?;
+    confirm_dialog(automation, settings, process)?;
+    wait("Add writes the browsed exclusion", || {
+        Ok(saved(directory)?
+            .exclusions
+            .iter()
+            .map(|entry| entry.executable.as_str())
+            .eq(["picker-fixture.exe"])
+            .then_some(()))
+    })?;
+    automation.invoke(settings, process, automation_id::EXCLUSIONS_EXPAND)?;
+    wait("fixed exclusions are listed", || {
+        let names = automation.names(settings, process)?;
+        Ok(["applicationframehost.exe", "circadia.exe"]
+            .iter()
+            .all(|fixed| names.iter().any(|name| name.eq_ignore_ascii_case(fixed)))
+            .then_some(()))
+    })?;
+    for entry in [
+        automation_id::exclusion_entry(0),
+        automation_id::suppression_entry(0),
+    ] {
+        let remove = automation_id::remove(&entry);
+        wait("entry offers Remove", || {
+            automation.enabled(settings, process, &remove)
+        })?;
+        automation.invoke(settings, process, &remove)?;
+        wait("Remove applies", || {
+            Ok(automation
+                .enabled(settings, process, &remove)?
+                .is_none()
+                .then_some(()))
+        })?;
+    }
+    wait("removals are written", || {
+        let saved = saved(directory)?;
+        Ok((saved.suppression.is_empty() && saved.exclusions.is_empty()).then_some(()))
+    })?;
+    show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     report(
-        "PASS: owned executable picker cancellation, fixed-name rejection, normalized filename selection, exclusion precedence, and Discard without persistence",
+        "PASS: Browse in the Add app and Add exclusion dialogs: owned picker cancellation, fixed-name rejection, normalized filename choice, written additions, fixed exclusions, and written removals",
     );
     Ok(())
+}
+
+fn open_dialog(
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+    command: &str,
+) -> io::Result<()> {
+    wait("dialog command available", || {
+        Ok(automation
+            .enabled(settings, process, command)?
+            .filter(|enabled| *enabled))
+    })?;
+    automation.invoke(settings, process, command)?;
+    wait("Add dialog opens", || {
+        automation.enabled(settings, process, automation_id::DIALOG_BROWSE)
+    })?;
+    Ok(())
+}
+
+fn confirm_dialog(automation: &Automation, settings: &HWND, process: u32) -> io::Result<()> {
+    crate::lifecycle::wait("enabled Add command", || {
+        Ok(automation
+            .dialog_button(settings, process, DialogButton::Primary)?
+            .then_some(()))
+    })?;
+    wait("Add dialog closes", || {
+        Ok(automation
+            .enabled(settings, process, automation_id::DIALOG_BROWSE)?
+            .is_none()
+            .then_some(()))
+    })
 }
 
 fn select(
     automation: &Automation,
     settings: &HWND,
     process: u32,
-    action: &str,
     selection: Selection<'_>,
 ) -> io::Result<()> {
-    automation.invoke(settings, process, action)?;
+    automation.invoke(settings, process, automation_id::DIALOG_BROWSE)?;
     let dialog = wait("owned executable picker", || {
-        window(process, "Add application to Circadia", true)
+        window(process, &text()?.picker_title, true)
     })?;
     let result = (|| {
         require(
@@ -236,16 +282,16 @@ fn select(
     })();
     let mut observed = None;
     let result = result.and_then(|()| {
-        wait("picker returns to editable settings", || {
-            let open = window(process, "Add application to Circadia", true)?.is_some();
-            let enabled = automation.enabled(settings, process, "wake")?;
-            observed = Some((open, enabled));
-            Ok((!open && enabled == Some(true)).then_some(()))
+        wait("picker returns to the Add dialog", || {
+            let open = window(process, &text()?.picker_title, true)?.is_some();
+            let browse = automation.enabled(settings, process, automation_id::DIALOG_BROWSE)?;
+            observed = Some((open, browse));
+            Ok((!open && browse == Some(true)).then_some(()))
         })
     });
     if result.is_err() {
         report(&format!(
-            "Picker return state (dialog open, Wake enabled): {observed:?}"
+            "Picker return state (picker open, Browse enabled): {observed:?}"
         ));
         drop(automation.close(&dialog, process));
     }
@@ -275,11 +321,16 @@ fn navigate(automation: &Automation, dialog: &HWND, process: u32, folder: &Path)
         Ok((actual == destination).then_some(()))
     })?;
     confirm(automation, dialog, process)?;
-    let expected = format!("Address: {folder}");
+    // The address bar's name is Windows text in the interface language
+    // followed by the folder path.
     wait("picker navigated to the fixture directory", || {
         for element in automation.elements(dialog, process)? {
             // SAFETY: The binding owns the returned accessible name.
-            if unsafe { element.CurrentName() }.map_err(io::Error::other)? == expected {
+            if unsafe { element.CurrentName() }
+                .map_err(io::Error::other)?
+                .to_string()
+                .ends_with(folder)
+            {
                 return Ok(Some(()));
             }
         }
@@ -302,9 +353,10 @@ fn filename_value(
         if control != UIA_EditControlTypeId {
             continue;
         }
-        // SAFETY: The live interface returns an owned accessible name.
-        let name = unsafe { element.CurrentName() }.map_err(io::Error::other)?;
-        if name != "File name:" && name != "File name" {
+        // The common file dialog's filename editor keeps its control ID 1148
+        // as its automation identifier in every interface language.
+        // SAFETY: The live interface returns an owned automation identifier.
+        if unsafe { element.CurrentAutomationId() }.map_err(io::Error::other)? != "1148" {
             continue;
         }
         // SAFETY: The requested interface matches the value pattern ID.
@@ -356,12 +408,6 @@ fn confirm(automation: &Automation, dialog: &HWND, process: u32) -> io::Result<(
     let button = dialog.GetDlgItem(1).map_err(io::Error::other)?;
     let pattern: IUIAutomationInvokePattern = wait("picker Open button", || {
         let element = automation.root(&button, process)?;
-        // SAFETY: The live interface returns an owned accessible name.
-        let name = unsafe { element.CurrentName() }.map_err(io::Error::other)?;
-        require(
-            name == "Open",
-            "picker confirmation control is not the Open button",
-        )?;
         // SAFETY: The requested interface matches the invoke pattern ID.
         unsafe { element.GetCurrentPatternAs(UIA_InvokePatternId) }
             .map(Some)

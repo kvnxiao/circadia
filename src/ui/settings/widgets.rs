@@ -1,5 +1,6 @@
 use super::problems::FeatureMessage;
 use super::problems::Severity;
+use crate::automation_id;
 use std::sync::Arc;
 use windows_reactor::AutomationLiveSetting;
 use windows_reactor::Border;
@@ -243,7 +244,7 @@ pub(super) fn feature_row(
     };
     let action = message.retry.map(|label| {
         Button::new()
-            .automation_id(format!("{name}-retry"))
+            .automation_id(automation_id::retry(name))
             .is_enabled(retry_enabled)
             .on_click(retry)
             .content(label)
@@ -251,9 +252,13 @@ pub(super) fn feature_row(
     });
     nested_row(
         glyph,
-        vec![body(message.text).into()],
+        vec![
+            body(message.text)
+                .automation_id(automation_id::message(name))
+                .into(),
+        ],
         action,
-        &format!("{name}-message"),
+        &automation_id::row(name),
     )
 }
 

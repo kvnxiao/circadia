@@ -9,6 +9,7 @@ use crate::Mark;
 use crate::SchedulingState;
 use crate::Source;
 use crate::Unusable;
+use crate::automation_id;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
@@ -142,7 +143,7 @@ pub(super) fn banners(
     let mut banners = Vec::new();
     if let Some(error) = model.error {
         banners.push(Banner {
-            id: "banner-configuration-error",
+            id: automation_id::BANNER_CONFIGURATION_ERROR,
             severity: InfoBarSeverity::Error,
             title: text!(text, "banner-error-title"),
             message: text!(
@@ -166,7 +167,7 @@ pub(super) fn banners(
     }
     if model.paused {
         banners.push(Banner {
-            id: "banner-paused",
+            id: automation_id::BANNER_PAUSED,
             severity: InfoBarSeverity::Error,
             title: text!(text, "banner-paused-title"),
             message: text!(text, "banner-paused-message"),
@@ -177,7 +178,7 @@ pub(super) fn banners(
     }
     if let Some(failure) = model.write_error {
         banners.push(Banner {
-            id: "banner-write-failed",
+            id: automation_id::BANNER_WRITE_FAILED,
             severity: InfoBarSeverity::Error,
             title: text!(text, "banner-write-title"),
             message: with_code(text, text!(text, "banner-write-message"), failure),
@@ -188,7 +189,7 @@ pub(super) fn banners(
     }
     if let Some(problem_kind) = model.restore {
         banners.push(Banner {
-            id: "banner-restored",
+            id: automation_id::BANNER_RESTORED,
             severity: InfoBarSeverity::Warning,
             title: text!(text, "banner-restored-title"),
             message: text!(
@@ -204,7 +205,7 @@ pub(super) fn banners(
     banners.extend(native);
     if !model.report.unknown.is_empty() {
         banners.push(Banner {
-            id: "banner-unknown-keys",
+            id: automation_id::BANNER_UNKNOWN_KEYS,
             severity: InfoBarSeverity::Warning,
             title: text!(text, "banner-unknown-title"),
             message: text!(
@@ -219,7 +220,7 @@ pub(super) fn banners(
     }
     if let Some(failure) = model.backup_error {
         banners.push(Banner {
-            id: "banner-backup-failed",
+            id: automation_id::BANNER_BACKUP_FAILED,
             severity: InfoBarSeverity::Error,
             title: text!(text, "banner-backup-title"),
             message: with_code(text, text!(text, "banner-backup-message"), failure),
@@ -235,7 +236,7 @@ pub(super) fn banners(
 
 fn crash(model: &Model, text: &Text) -> Option<Banner> {
     model.crash.as_ref().map(|_| Banner {
-        id: "banner-crash",
+        id: automation_id::BANNER_CRASH,
         severity: InfoBarSeverity::Informational,
         title: text!(text, "banner-crash-title"),
         message: text!(text, "banner-crash-message"),
@@ -250,7 +251,7 @@ fn crash(model: &Model, text: &Text) -> Option<Banner> {
 
 fn control_unavailable(model: &Model, text: &Text) -> Option<Banner> {
     (model.management.is_on() && model.scheduling == SchedulingState::Stopped).then(|| Banner {
-        id: "banner-schedule",
+        id: automation_id::BANNER_SCHEDULE,
         severity: InfoBarSeverity::Error,
         title: text!(text, "banner-schedule-title"),
         message: text!(text, "banner-schedule-message"),
@@ -302,7 +303,7 @@ fn native(model: &Model, text: &Text) -> Option<Banner> {
         lines.push(text!(text, "banner-native-retry-unavailable"));
     }
     Some(Banner {
-        id: "banner-native",
+        id: automation_id::BANNER_NATIVE,
         severity: InfoBarSeverity::Error,
         title,
         message: lines.join("\n"),
@@ -338,7 +339,7 @@ fn other_pages(
     ));
     let pages: BTreeSet<Page> = problems.iter().map(|(field, _)| page(*field)).collect();
     Some(Banner {
-        id: "banner-invalid-fields",
+        id: automation_id::BANNER_INVALID_FIELDS,
         severity: InfoBarSeverity::Error,
         title: text!(text, "banner-invalid-title", count = problems.len()),
         message: lines.join("\n"),

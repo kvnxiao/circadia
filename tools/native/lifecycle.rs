@@ -3,13 +3,16 @@ use crate::tray;
 use circadia::ConfigInput;
 use circadia::ConfigStore;
 use circadia::InstanceClaim;
+use circadia::InterfaceText;
+use circadia::automation_id;
+use std::ffi::OsString;
 use std::io;
-use std::io::Write;
 use std::os::windows::io::AsHandle;
 use std::os::windows::io::BorrowedHandle;
 use std::path::Path;
 use std::process::Child;
 use std::process::Command;
+use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -27,6 +30,55 @@ use winsafe::HWND;
 
 pub(super) const WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 
+static LANGUAGE: OnceLock<Option<String>> = OnceLock::new();
+static TEXT: OnceLock<InterfaceText> = OnceLock::new();
+
+pub(super) fn arguments(
+    mut arguments: impl Iterator<Item = OsString>,
+) -> io::Result<Vec<OsString>> {
+    let mut remaining = Vec::new();
+    let mut language = None;
+    while let Some(argument) = arguments.next() {
+        if argument == "--language" && language.is_none() {
+            language = Some(
+                arguments
+                    .next()
+                    .and_then(|tag| tag.into_string().ok())
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "--language requires a language tag",
+                        )
+                    })?,
+            );
+        } else {
+            remaining.push(argument);
+        }
+    }
+    let text = InterfaceText::load(language.as_deref().unwrap_or("en-US"))?;
+    require(
+        LANGUAGE.set(language).is_ok() && TEXT.set(text).is_ok(),
+        "harness arguments were already read",
+    )?;
+    Ok(remaining)
+}
+
+pub(super) fn language() -> Option<&'static str> {
+    LANGUAGE.get().and_then(Option::as_deref)
+}
+
+pub(super) fn text() -> io::Result<&'static InterfaceText> {
+    TEXT.get()
+        .ok_or_else(|| io::Error::other("harness arguments were not read"))
+}
+
+pub(super) fn require_english() -> io::Result<()> {
+    require(
+        language().is_none(),
+        "--language applies only to checks that launch circadia.exe",
+    )
+}
+
 #[derive(Clone, Copy)]
 enum ExplorerTest {
     Preserve,
@@ -34,31 +86,21 @@ enum ExplorerTest {
     Settings,
 }
 
-pub(super) fn run() -> io::Result<()> {
+pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     winsafe::SetProcessDPIAware().map_err(io::Error::other)?;
-    let mut arguments = std::env::args_os().skip(1);
-    let mut executable = arguments.next().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "usage: native-lifecycle [--restart-explorer | --settings] CIRCADIA_EXE",
-        )
-    })?;
-    let restart_explorer = executable == "--restart-explorer";
-    let settings = executable == "--settings";
-    if restart_explorer || settings {
-        executable = arguments.next().ok_or_else(|| {
-            io::Error::new(
+    let (explorer, executable) = match arguments {
+        [option, executable] if option == "--restart-explorer" => {
+            (ExplorerTest::Restart, executable)
+        }
+        [option, executable] if option == "--settings" => (ExplorerTest::Settings, executable),
+        [executable] => (ExplorerTest::Preserve, executable),
+        _ => {
+            return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "expected an executable path after the check option",
-            )
-        })?;
-    }
-    if arguments.next().is_some() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "expected one executable path",
-        ));
-    }
+                "usage: native-lifecycle [--language TAG] [--restart-explorer | --settings] CIRCADIA_EXE",
+            ));
+        }
+    };
     let executable = fs_err::canonicalize(executable)?;
     match InstanceClaim::acquire()? {
         InstanceClaim::Primary(_claim) => {}
@@ -77,19 +119,17 @@ pub(super) fn run() -> io::Result<()> {
         let directory = tempfile::Builder::new()
             .prefix("circadia-native-lifecycle-")
             .tempdir()?;
+        let test = match explorer {
+            ExplorerTest::Restart if !minimized => ExplorerTest::Preserve,
+            test => test,
+        };
         let result = exercise(
             &executable,
             directory.path(),
             &automation,
             &native,
             minimized,
-            if restart_explorer && minimized {
-                ExplorerTest::Restart
-            } else if settings {
-                ExplorerTest::Settings
-            } else {
-                ExplorerTest::Preserve
-            },
+            test,
         );
         if let Err(error) = result {
             report(&format!(
@@ -100,12 +140,22 @@ pub(super) fn run() -> io::Result<()> {
         }
     }
     report(
-        "PASS: both startup preferences, second invocation, close/reopen, external replacement, manual suppression, Quit, and synthetic session-end cleanup.",
+        "PASS: both startup preferences, tray activation, second invocation, close/reopen, manual suppression, Quit, and synthetic session-end cleanup.",
     );
     report(
         "No OS sleep, sign-out, or shutdown was invoked. Registry readback does not verify visible display output.",
     );
     Ok(())
+}
+
+pub(super) fn seed(directory: &Path, input: &ConfigInput) -> io::Result<()> {
+    let saved = ConfigStore::new(directory)
+        .save(&input.clone().validate().map_err(io::Error::other)?)
+        .map_err(io::Error::other)?;
+    match saved.backup_error {
+        Some(error) => Err(io::Error::other(error)),
+        None => Ok(()),
+    }
 }
 
 fn exercise(
@@ -119,15 +169,7 @@ fn exercise(
     report(&format!(
         "Starting application with start_minimized={minimized}"
     ));
-    let config = input(3400, minimized)
-        .validate()
-        .map_err(io::Error::other)?;
-    let saved = ConfigStore::new(directory)
-        .save(&config)
-        .map_err(io::Error::other)?;
-    if let Some(error) = saved.backup_error {
-        return Err(io::Error::other(error));
-    }
+    seed(directory, &input(3400, minimized))?;
     let mut application = Process::start(executable, directory)?;
     let process = application.child.id();
     let receiver = wait("application receiver", || {
@@ -136,13 +178,11 @@ fn exercise(
     wait_temperature(native, 3400)?;
     if minimized {
         require(
-            window(process, "Circadia", true)?.is_none(),
+            settings_window(process)?.is_none(),
             "minimized startup opened settings",
         )?;
     } else {
-        wait("initial settings window", || {
-            window(process, "Circadia", true)
-        })?;
+        wait("initial settings window", || settings_window(process))?;
     }
     check_reconciliation(native, &receiver)?;
     if minimized {
@@ -167,7 +207,7 @@ fn exercise(
         Ok((!settings.IsIconic()).then_some(()))
     })?;
     require(
-        window(process, "Circadia", true)?.as_ref() == Some(&settings),
+        settings_window(process)?.as_ref() == Some(&settings),
         "second launch replaced the existing settings window",
     )?;
     require(
@@ -186,24 +226,9 @@ fn exercise(
     };
 
     close_settings(automation, &settings, process)?;
-    replace(directory, &input(3600, minimized))?;
-    wait_temperature(native, 3600)?;
     let settings = open_settings(executable, directory, automation, process)?;
-    replace(directory, &input(3800, minimized))?;
-    wait(
-        "external configuration accepted while settings is open",
-        || {
-            let backup = fs_err::read_to_string(ConfigStore::new(directory).backup_path())?;
-            let accepted: ConfigInput = toml::from_str(&backup).map_err(io::Error::other)?;
-            Ok((accepted.daytime_kelvin == 3800).then_some(()))
-        },
-    )?;
-    wait_temperature(native, 3600)?;
     close_settings(automation, &settings, process)?;
-    wait_temperature(native, 3800)?;
-    report(
-        "PASS: external replacements reload while closed and preserve the open draft until closure",
-    );
+    report("PASS: settings closes and reopens in the original process");
 
     request_checked_exit(
         executable, directory, automation, native, process, minimized, explorer,
@@ -236,10 +261,7 @@ fn request_checked_exit(
     if let Some(settings) = &settings
         && minimized
     {
-        wait("Quit control", || {
-            automation.text(settings, process, "quit")
-        })?;
-        automation.invoke(settings, process, "quit")?;
+        quit(automation, settings, process)?;
     } else {
         let receiver = window(process, "Circadia event receiver", false)?
             .ok_or_else(|| io::Error::other("application event receiver is missing"))?;
@@ -247,6 +269,34 @@ fn request_checked_exit(
         verify_off(native)?;
         report("PASS: synthetic confirmed session end completes native cleanup before returning");
     }
+    Ok(())
+}
+
+pub(super) fn quit(automation: &Automation, settings: &HWND, process: u32) -> io::Result<()> {
+    show_page(automation, settings, process, automation_id::NAV_GENERAL)?;
+    automation.invoke(settings, process, automation_id::ABOUT_QUIT)
+}
+
+pub(super) fn show_page(
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+    navigation: &str,
+) -> io::Result<()> {
+    let content = match navigation {
+        automation_id::NAV_SCHEDULE => automation_id::MANAGE,
+        automation_id::NAV_APPS => automation_id::ADD_EXCLUSION,
+        automation_id::NAV_TRANSITIONS => automation_id::RATE_NUMBER,
+        automation_id::NAV_GENERAL => automation_id::ABOUT_QUIT,
+        _ => return Err(io::Error::other(format!("unknown page {navigation}"))),
+    };
+    crate::automation::wait("navigation item", || {
+        automation.enabled(settings, process, navigation)
+    })?;
+    automation.select(settings, process, navigation)?;
+    crate::automation::wait(&format!("{navigation} content"), || {
+        automation.enabled(settings, process, content)
+    })?;
     Ok(())
 }
 
@@ -300,30 +350,28 @@ fn check_explorer(automation: &Automation, native: &Nightlight, process: u32) ->
 }
 
 fn check_tray(automation: &Automation, process: u32) -> io::Result<()> {
+    let text = text()?;
     tray::show_overflow(automation)?;
-    let icon = wait("exactly one Shell tray icon", || tray::icon(automation))?;
-    tray::click(&icon)?;
-    let settings = wait("Shell tray activation", || {
-        window(process, "Circadia", true)
+    let icon = wait("exactly one Shell tray icon", || {
+        tray::icon(automation, &text.tooltip_prefix)
     })?;
+    tray::click(&icon)?;
+    let settings = wait("Shell tray activation", || settings_window(process))?;
     wait("Shell activation foreground", || {
         Ok((HWND::GetForegroundWindow().as_ref() == Some(&settings)).then_some(()))
     })?;
     close_settings(automation, &settings, process)?;
     report("PASS: actual Shell tray activation opens settings in the original process");
-    tray::show_overflow(automation)?;
-    let icon = wait("tray icon for context menu", || tray::icon(automation))?;
-    tray::open_menu(&icon)?;
-    let settings_item = wait("tray Settings menu item", || {
-        tray::menu_item(automation, process, "Settings")
-    })?;
-    tray::click(&settings_item)?;
-    let settings = wait("tray menu activation", || window(process, "Circadia", true))?;
+    let menu = tray::open(automation, process)?;
+    tray::click(menu.settings(text)?)?;
+    let settings = wait("tray menu activation", || settings_window(process))?;
     wait("tray menu activation foreground", || {
         Ok((HWND::GetForegroundWindow().as_ref() == Some(&settings)).then_some(()))
     })?;
     close_settings(automation, &settings, process)?;
-    report("PASS: actual tray context menu opens settings in the original process");
+    report(
+        "PASS: the tray menu shows the catalog's labels in order, and its settings item opens settings in the original process",
+    );
     Ok(())
 }
 
@@ -334,6 +382,7 @@ fn input(kelvin: i64, minimized: bool) -> ConfigInput {
         sleep_kelvin: kelvin,
         ordinary_fade_ms: 100,
         start_minimized: minimized,
+        manage_night_light: true,
         ..ConfigInput::default()
     }
 }
@@ -345,9 +394,14 @@ fn check_cancelled_session(
     receiver: &HWND,
     process: u32,
 ) -> io::Result<()> {
-    automation.invoke(settings, process, "manual-suppression")?;
+    let text = text()?;
+    automation.invoke(settings, process, automation_id::MANUAL_SUPPRESSION)?;
     wait_temperature(native, 6500).inspect_err(|_| {
-        for id in ["control-status", "manual-suppression", "error-details"] {
+        for id in [
+            automation_id::PANE_STATUS,
+            automation_id::MANUAL_SUPPRESSION,
+            automation_id::BANNER_NATIVE,
+        ] {
             report(&format!(
                 "{id}: {:?}",
                 automation.text(settings, process, id)
@@ -367,22 +421,12 @@ fn check_cancelled_session(
     wait_temperature(native, 6500)?;
     wait("manual stop label", || {
         Ok(automation
-            .text(settings, process, "manual-suppression")?
-            .filter(|text| text == "Stop manual suppression"))
+            .text(settings, process, automation_id::MANUAL_SUPPRESSION)?
+            .filter(|label| *label == text.manual_stop))
     })?;
-    automation.invoke(settings, process, "manual-suppression")?;
+    automation.invoke(settings, process, automation_id::MANUAL_SUPPRESSION)?;
     wait_temperature(native, 3400)?;
     report("PASS: synthetic session query/cancellation preserves control and manual commands");
-    Ok(())
-}
-
-pub(super) fn replace(directory: &Path, input: &ConfigInput) -> io::Result<()> {
-    let text = toml::to_string(input).map_err(io::Error::other)?;
-    let mut file = tempfile::NamedTempFile::new_in(directory)?;
-    file.write_all(text.as_bytes())?;
-    file.flush()?;
-    file.persist(ConfigStore::new(directory).primary_path())
-        .map_err(|error| io::Error::other(error.error))?;
     Ok(())
 }
 
@@ -390,26 +434,28 @@ fn activate(executable: &Path, directory: &Path) -> io::Result<()> {
     Process::start(executable, directory)?.wait_exit()
 }
 
-fn open_settings(
+pub(super) fn open_settings(
     executable: &Path,
     directory: &Path,
     automation: &Automation,
     process: u32,
 ) -> io::Result<HWND> {
     activate(executable, directory)?;
-    let settings = wait("activated settings", || window(process, "Circadia", true))?;
+    let settings = wait("activated settings", || settings_window(process))?;
     wait("settings controls", || {
-        automation.text(&settings, process, "manual-suppression")
+        automation.text(&settings, process, automation_id::MANUAL_SUPPRESSION)
     })?;
     Ok(settings)
 }
 
-fn close_settings(automation: &Automation, window: &HWND, process: u32) -> io::Result<()> {
+pub(super) fn close_settings(
+    automation: &Automation,
+    window: &HWND,
+    process: u32,
+) -> io::Result<()> {
     automation.close(window, process)?;
     wait("settings closure", || {
-        Ok(self::window(process, "Circadia", true)?
-            .is_none()
-            .then_some(()))
+        Ok(settings_window(process)?.is_none().then_some(()))
     })
 }
 
@@ -438,7 +484,7 @@ pub(super) fn wait_temperature(native: &Nightlight, kelvin: i16) -> io::Result<(
     })
 }
 
-fn verify_off(native: &Nightlight) -> io::Result<()> {
+pub(super) fn verify_off(native: &Nightlight) -> io::Result<()> {
     let settings = native.read_settings().map_err(io::Error::other)?;
     let state = native.read_state().map_err(io::Error::other)?;
     require(
@@ -457,6 +503,10 @@ fn native_revision(
         state.modified(),
         state.last_transition(),
     ))
+}
+
+pub(super) fn settings_window(process: u32) -> io::Result<Option<HWND>> {
+    window(process, &text()?.app_name, true)
 }
 
 pub(super) fn window(process: u32, title: &str, visible: bool) -> io::Result<Option<HWND>> {
@@ -586,11 +636,13 @@ impl Process {
     }
 
     pub(super) fn start(executable: &Path, directory: &Path) -> io::Result<Self> {
+        let mut command = Command::new(executable);
+        command.arg("--data-dir").arg(directory);
+        if let Some(language) = language() {
+            command.arg("--language").arg(language);
+        }
         Ok(Self {
-            child: Command::new(executable)
-                .arg("--data-dir")
-                .arg(directory)
-                .spawn()?,
+            child: command.spawn()?,
             foreground_fixture: false,
         })
     }
@@ -655,6 +707,8 @@ pub(super) fn report(message: &str) {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+
     #[test]
     fn empty_window_title_does_not_inherit_a_previous_windows_error() {
         let empty = windows_window::Window::new("")
@@ -683,6 +737,23 @@ mod tests {
                 "2026-10-25T08:00:01.000001Z  WARN circadia::diagnostics: failure operation=location category=access_denied code=5",
                 "2026-10-25T08:00:03.000001Z ERROR circadia::ui: panic",
             ]
+        );
+    }
+
+    #[test]
+    fn language_option_is_removed_from_the_check_arguments() {
+        let arguments = ["--settings", "--language", "qps-Ploc", "circadia.exe"]
+            .into_iter()
+            .map(OsString::from);
+        let remaining = super::arguments(arguments).expect("arguments parse");
+        assert_eq!(remaining, ["--settings", "circadia.exe"]);
+        assert_eq!(super::language(), Some("qps-Ploc"));
+        assert!(
+            super::text()
+                .expect("pseudo-locale text")
+                .tray_settings
+                .starts_with('['),
+            "pseudo-locale tray text is bracketed"
         );
     }
 }

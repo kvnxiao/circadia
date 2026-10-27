@@ -3,10 +3,12 @@ use crate::automation::wait;
 use crate::lifecycle::Process;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
-use crate::lifecycle::window;
+use crate::lifecycle::settings_window;
+use crate::lifecycle::show_page;
 use circadia::ConfigInput;
-use circadia::ConfigStore;
 use circadia::InstanceClaim;
+use circadia::automation_id;
+use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use winsafe::HKEY;
@@ -17,14 +19,13 @@ use winsafe::co;
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const APPROVED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
 
-pub(super) fn run() -> io::Result<()> {
-    let executable = std::env::args_os().nth(2).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "expected Circadia executable")
-    })?;
-    require(
-        std::env::args_os().count() == 3,
-        "expected one executable path",
-    )?;
+pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
+    let [_, executable] = arguments else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "expected one executable path",
+        ));
+    };
     match InstanceClaim::acquire()? {
         InstanceClaim::Primary(_claim) => {}
         InstanceClaim::Existing(_) => {
@@ -43,7 +44,7 @@ pub(super) fn run() -> io::Result<()> {
     check_failed_registration(&executable, &long_directory, &automation)?;
     registry.cleanup()?;
     report(
-        "PASS: explicit startup Save/Discard, Windows-disabled state, unrelated Save, retry, removal, and close-with-Save failure",
+        "PASS: Start at sign-in registers and removes its command at once, reports Windows-disabled startup, preserves Windows approval, and keeps the saved preference when registration fails",
     );
     report(
         "Windows-disabled state was injected into this fixture's approval record. No sign-out or sign-in was invoked.",
@@ -56,36 +57,20 @@ fn start(
     directory: &Path,
     automation: &Automation,
 ) -> io::Result<(Process, HWND)> {
-    let config = ConfigInput {
-        daytime_kelvin: 3400,
-        middle_kelvin: 3400,
-        sleep_kelvin: 3400,
-        start_minimized: false,
-        ..ConfigInput::default()
-    }
-    .validate()
-    .map_err(io::Error::other)?;
-    let saved = ConfigStore::new(directory)
-        .save(&config)
-        .map_err(io::Error::other)?;
-    if let Some(error) = saved.backup_error {
-        return Err(io::Error::other(error));
-    }
-    let application = Process::start(executable, directory)?;
-    report("CHECK: waiting for editable startup settings");
-    let process = application.id();
-    let settings = wait("startup settings window", || {
-        window(process, "Circadia", true)
-    })?;
-    wait("editable startup settings", || {
-        Ok(automation
-            .enabled(&settings, process, "wake")?
-            .filter(|enabled| *enabled))
-    })?;
-    require(
-        automation.enabled(&settings, process, "start-at-sign-in")? == Some(true),
-        "Start at sign-in control is missing or disabled",
+    crate::lifecycle::seed(
+        directory,
+        &ConfigInput {
+            start_minimized: false,
+            ..ConfigInput::default()
+        },
     )?;
+    let application = Process::start(executable, directory)?;
+    report("CHECK: waiting for startup settings");
+    let process = application.id();
+    let settings = wait("startup settings window", || settings_window(process))?;
+    crate::settings::editable(automation, &settings, process)?;
+    show_page(automation, &settings, process, automation_id::NAV_GENERAL)?;
+    editable(automation, &settings, process)?;
     Ok((application, settings))
 }
 
@@ -97,96 +82,97 @@ fn exercise(
 ) -> io::Result<()> {
     let (mut application, settings) = start(executable, directory, automation)?;
     let process = application.id();
-    report("CHECK: startup draft and Discard");
+    report("CHECK: opening settings does not register startup");
     require(
         read(RUN)?.is_none(),
         "opening settings created startup registration",
     )?;
-    automation.toggle(&settings, process, "start-at-sign-in")?;
-    wait("startup draft changes", || {
-        Ok(automation
-            .text(&settings, process, "draft-status")?
-            .filter(|text| text == "Unsaved changes"))
+    report("CHECK: turning on Start at sign-in registers at once");
+    automation.toggle(&settings, process, automation_id::SIGN_IN)?;
+    wait("startup command registered", || read(RUN))?;
+    wait("startup preference written", || {
+        Ok(crate::settings::saved(directory)?
+            .start_at_sign_in
+            .then_some(()))
     })?;
-    require(
-        read(RUN)?.is_none(),
-        "editing startup registered before Save",
-    )?;
-    automation.invoke(&settings, process, "discard")?;
-    wait("startup draft discarded", || {
-        Ok(automation
-            .text(&settings, process, "draft-status")?
-            .filter(|text| text == "No unsaved changes"))
-    })?;
-    editable(automation, &settings, process)?;
-    require(read(RUN)?.is_none(), "Discard registered startup")?;
-    report("CHECK: saving startup opt-in");
-    automation.toggle(&settings, process, "start-at-sign-in")?;
-    save(automation, &settings, process)?;
-    wait_status(automation, &settings, process, "Windows startup: Enabled.")?;
-    require(
-        crate::settings::saved(directory)?.start_at_sign_in,
-        "startup preference was not saved",
-    )?;
     let command = registered_command(executable, directory)?;
-    registry.approval(3)?;
-    report("CHECK: reading Windows-disabled startup state");
-    automation.invoke(&settings, process, "refresh-startup")?;
-    wait_status(
-        automation,
-        &settings,
-        process,
-        "Windows startup: Disabled by Windows.",
+    require(
+        message(automation, &settings, process)?.is_none(),
+        "successful registration shows a message",
     )?;
-    report("CHECK: unrelated Save preserves Windows-disabled startup");
-    automation.set_value(&settings, process, "bedtime", "22:00")?;
-    save(automation, &settings, process)?;
-    RegistryFixture::require_disabled(&command)?;
-    report("CHECK: explicit retry preserves Windows-disabled startup");
-    automation.invoke(&settings, process, "retry-startup")?;
-    wait("Windows startup instructions after explicit retry", || {
-        Ok(automation
-            .text(&settings, process, "startup-error")?
-            .filter(|text| text.contains("Windows Settings > Apps > Startup")))
+    registry.approval(3)?;
+    report("CHECK: reopening settings reads Windows-disabled startup");
+    let settings = reopen(executable, directory, automation, &settings, process)?;
+    wait("Windows-disabled startup message", || {
+        message(automation, &settings, process)
     })?;
+    require(
+        automation
+            .enabled(
+                &settings,
+                process,
+                &automation_id::retry(automation_id::SIGN_IN),
+            )?
+            .is_none(),
+        "the Windows-disabled warning offers Retry",
+    )?;
+    require(
+        automation.toggled(&settings, process, automation_id::SIGN_IN)? == Some(false),
+        "Windows-disabled startup shows the switch on",
+    )?;
+    report("CHECK: turning the switch on again preserves Windows-disabled approval");
+    automation.toggle(&settings, process, automation_id::SIGN_IN)?;
+    std::thread::sleep(std::time::Duration::from_millis(500));
     RegistryFixture::require_disabled(&command)?;
     registry.approval(2)?;
-    report("CHECK: reading enabled startup and clearing the failed retry");
-    automation.invoke(&settings, process, "refresh-startup")?;
-    wait_status(automation, &settings, process, "Windows startup: Enabled.")?;
-    wait(
-        "startup Refresh clears resolved registration failure",
-        || {
-            Ok(automation
-                .text(&settings, process, "startup-error")?
-                .filter(String::is_empty))
-        },
-    )?;
-    close_with_unrelated_save(automation, &settings, process)?;
-    Process::start(executable, directory)?.wait_exit()?;
-    let settings = wait("startup settings reopened", || {
-        window(process, "Circadia", true)
+    report("CHECK: reopening settings reads enabled startup");
+    let settings = reopen(executable, directory, automation, &settings, process)?;
+    wait("enabled startup clears the message", || {
+        Ok(message(automation, &settings, process)?
+            .is_none()
+            .then_some(()))
     })?;
-    editable(automation, &settings, process)?;
-    report("CHECK: removing startup registration");
-    automation.toggle(&settings, process, "start-at-sign-in")?;
-    save(automation, &settings, process)?;
-    wait_status(
-        automation,
-        &settings,
-        process,
-        "Windows startup: Not registered.",
-    )?;
     require(
-        read(RUN)?.is_none(),
-        "disabling startup did not remove its command",
+        automation.toggled(&settings, process, automation_id::SIGN_IN)? == Some(true),
+        "enabled startup shows the switch off",
     )?;
-    automation.invoke(&settings, process, "quit")?;
+    report("CHECK: turning off Start at sign-in removes registration at once");
+    automation.toggle(&settings, process, automation_id::SIGN_IN)?;
+    wait("startup command removed", || {
+        Ok(read(RUN)?.is_none().then_some(()))
+    })?;
+    wait("disabled preference written", || {
+        Ok((!crate::settings::saved(directory)?.start_at_sign_in).then_some(()))
+    })?;
+    crate::lifecycle::quit(automation, &settings, process)?;
     application.wait_exit()?;
     report(
-        "PASS: startup changes require explicit Save; Windows approval is preserved through unrelated Save and explicit retry",
+        "PASS: startup registration follows the switch at once, and Windows approval is read when settings opens and is never changed",
     );
     Ok(())
+}
+
+fn reopen(
+    executable: &Path,
+    directory: &Path,
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+) -> io::Result<HWND> {
+    crate::lifecycle::close_settings(automation, settings, process)?;
+    Process::start(executable, directory)?.wait_exit()?;
+    let settings = wait("startup settings reopened", || settings_window(process))?;
+    show_page(automation, &settings, process, automation_id::NAV_GENERAL)?;
+    editable(automation, &settings, process)?;
+    Ok(settings)
+}
+
+fn message(automation: &Automation, settings: &HWND, process: u32) -> io::Result<Option<String>> {
+    automation.text(
+        settings,
+        process,
+        &automation_id::message(automation_id::SIGN_IN),
+    )
 }
 
 fn registered_command(executable: &Path, directory: &Path) -> io::Result<String> {
@@ -206,121 +192,54 @@ fn registered_command(executable: &Path, directory: &Path) -> io::Result<String>
     Ok(command)
 }
 
-fn close_with_unrelated_save(
-    automation: &Automation,
-    settings: &HWND,
-    process: u32,
-) -> io::Result<()> {
-    automation.set_value(settings, process, "bedtime", "21:30")?;
-    wait("unrelated draft ready to close", || {
-        Ok(automation
-            .text(settings, process, "draft-status")?
-            .filter(|text| text == "Unsaved changes"))
-    })?;
-    automation.close(settings, process)?;
-    crate::lifecycle::wait("unrelated Save close choice", || {
-        Ok(automation
-            .dialog_button(settings, process, "Save")?
-            .then_some(()))
-    })?;
-    wait("unrelated close-with-Save after startup recovery", || {
-        Ok(window(process, "Circadia", true)?.is_none().then_some(()))
-    })?;
-    report(
-        "PASS: Refresh clears the resolved startup error and unrelated close-with-Save closes settings",
-    );
-    Ok(())
-}
-
 fn check_failed_registration(
     executable: &Path,
     directory: &Path,
     automation: &Automation,
 ) -> io::Result<()> {
-    report("CHECK: close-with-Save registration failure");
+    report("CHECK: a startup command over Windows' length limit");
     let (mut application, settings) = start(executable, directory, automation)?;
     let process = application.id();
-    automation.set_value(&settings, process, "bedtime", "21:00")?;
-    automation.toggle(&settings, process, "start-at-sign-in")?;
-    automation.close(&settings, process)?;
-    crate::lifecycle::wait("Save close choice", || {
-        Ok(automation
-            .dialog_button(&settings, process, "Save")?
-            .then_some(()))
-    })?;
-    wait("configuration saved despite startup failure", || {
-        let saved = crate::settings::saved(directory)?;
-        Ok((saved.start_at_sign_in && saved.bedtime == "21:00").then_some(()))
-    })?;
-    wait("startup command length error", || {
-        Ok(automation
-            .text(&settings, process, "startup-error")?
-            .filter(|text| text.contains("260-character limit")))
-    })?;
-    require(
-        window(process, "Circadia", true)?.as_ref() == Some(&settings),
-        "startup registration failure closed settings",
+    automation.toggle(&settings, process, automation_id::SIGN_IN)?;
+    wait(
+        "preference written despite the registration failure",
+        || {
+            Ok(crate::settings::saved(directory)?
+                .start_at_sign_in
+                .then_some(()))
+        },
     )?;
+    let retry = automation_id::retry(automation_id::SIGN_IN);
+    wait("registration failure offers Retry", || {
+        automation.enabled(&settings, process, &retry)
+    })?;
     require(
         read(RUN)?.is_none(),
         "failed startup registration wrote a command",
     )?;
-    automation.invoke(&settings, process, "retry-startup")?;
-    wait("failed startup retry remains visible", || {
-        Ok(automation
-            .text(&settings, process, "startup-error")?
-            .filter(|text| text.contains("260-character limit")))
+    automation.invoke(&settings, process, &retry)?;
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    wait("failed retry remains visible", || {
+        automation.enabled(&settings, process, &retry)
     })?;
-    automation.toggle(&settings, process, "start-at-sign-in")?;
-    save(automation, &settings, process)?;
-    wait_status(
-        automation,
-        &settings,
-        process,
-        "Windows startup: Not registered.",
+    require(read(RUN)?.is_none(), "failed startup retry wrote a command")?;
+    require(
+        automation.toggled(&settings, process, automation_id::SIGN_IN)? == Some(false),
+        "failed registration shows the switch on",
     )?;
-    automation.invoke(&settings, process, "quit")?;
+    crate::lifecycle::quit(automation, &settings, process)?;
     application.wait_exit()?;
     report(
-        "PASS: registration failure preserves the successful configuration Save and keeps settings open",
+        "PASS: a failed registration keeps the written preference, shows the switch off with the error and Retry, and writes no command",
     );
     Ok(())
 }
 
 fn editable(automation: &Automation, settings: &HWND, process: u32) -> io::Result<()> {
-    wait("startup fields editable", || {
+    wait("startup switch editable", || {
         Ok(automation
-            .enabled(settings, process, "start-at-sign-in")?
+            .enabled(settings, process, automation_id::SIGN_IN)?
             .filter(|enabled| *enabled))
-    })?;
-    Ok(())
-}
-
-fn save(automation: &Automation, settings: &HWND, process: u32) -> io::Result<()> {
-    wait("startup draft ready to save", || {
-        Ok(automation
-            .text(settings, process, "draft-status")?
-            .filter(|text| text == "Unsaved changes"))
-    })?;
-    automation.invoke(settings, process, "save")?;
-    wait("startup Save completed", || {
-        Ok(automation
-            .text(settings, process, "draft-status")?
-            .filter(|text| text == "No unsaved changes"))
-    })?;
-    editable(automation, settings, process)
-}
-
-fn wait_status(
-    automation: &Automation,
-    settings: &HWND,
-    process: u32,
-    prefix: &str,
-) -> io::Result<()> {
-    wait(prefix, || {
-        Ok(automation
-            .text(settings, process, "startup-status")?
-            .filter(|text| text.starts_with(prefix)))
     })?;
     Ok(())
 }
