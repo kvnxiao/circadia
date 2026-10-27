@@ -270,7 +270,7 @@ impl IconRequests {
     }
 }
 
-fn display_name(model: &Model, executable: &str) -> String {
+pub(super) fn display_name(model: &Model, executable: &str) -> String {
     model
         .names
         .get(executable)

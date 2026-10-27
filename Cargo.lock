@@ -130,6 +130,8 @@ dependencies = [
  "win-nightlight-lib",
  "win-nightlight-watch",
  "windows",
+ "windows-canvas",
+ "windows-composition",
  "windows-core 0.62.2",
  "windows-future 0.3.2",
  "windows-reactor",
@@ -1435,7 +1437,18 @@ dependencies = [
  "windows-collections 0.3.2",
  "windows-core 0.62.2",
  "windows-future 0.3.2",
- "windows-numerics",
+ "windows-numerics 0.3.1",
+]
+
+[[package]]
+name = "windows-canvas"
+version = "0.100.0"
+source = "git+https://github.com/microsoft/windows-rs?rev=0496ec19116f1dac690daf31fcb96769118d9bac#0496ec19116f1dac690daf31fcb96769118d9bac"
+dependencies = [
+ "windows-composition",
+ "windows-core 0.100.0",
+ "windows-numerics 0.100.0",
+ "windows-reactor",
 ]
 
 [[package]]
@@ -1453,6 +1466,17 @@ version = "0.100.0"
 source = "git+https://github.com/microsoft/windows-rs?rev=0496ec19116f1dac690daf31fcb96769118d9bac#0496ec19116f1dac690daf31fcb96769118d9bac"
 dependencies = [
  "windows-core 0.100.0",
+]
+
+[[package]]
+name = "windows-composition"
+version = "0.100.0"
+source = "git+https://github.com/microsoft/windows-rs?rev=0496ec19116f1dac690daf31fcb96769118d9bac#0496ec19116f1dac690daf31fcb96769118d9bac"
+dependencies = [
+ "windows-collections 0.100.0",
+ "windows-core 0.100.0",
+ "windows-numerics 0.100.0",
+ "windows-time",
 ]
 
 [[package]]
@@ -1546,6 +1570,14 @@ checksum = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26"
 dependencies = [
  "windows-core 0.62.2",
  "windows-link 0.2.1",
+]
+
+[[package]]
+name = "windows-numerics"
+version = "0.100.0"
+source = "git+https://github.com/microsoft/windows-rs?rev=0496ec19116f1dac690daf31fcb96769118d9bac#0496ec19116f1dac690daf31fcb96769118d9bac"
+dependencies = [
+ "windows-core 0.100.0",
 ]
 
 [[package]]

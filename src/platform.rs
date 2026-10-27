@@ -1,4 +1,5 @@
 pub(crate) mod clock;
+pub(crate) mod contrast;
 pub(crate) mod event_log;
 pub(crate) mod events;
 pub(crate) mod file_info;

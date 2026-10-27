@@ -393,6 +393,7 @@ struct Desktop {
     settings_open: bool,
     directory: PathBuf,
     zone: Option<ZoneIdentity>,
+    contrast: Option<crate::platform::contrast::ContrastColors>,
     resume: ResumeEpoch,
     taskbar: Option<ShellIdentity>,
     taskbar_epoch: u64,
@@ -464,10 +465,16 @@ impl Application for Desktop {
 
     fn view(&self, input: &Input, context: &ApplicationViewContext<Self>) -> ApplicationView {
         let configuration = self.configuration.borrow();
-        let lines = status::lines(
+        let control = self
+            .snapshot
+            .as_deref()
+            .map(|snapshot| status::Control::new(snapshot, std::time::Instant::now()));
+        let line = status::status_line(
             &input.text,
-            self.snapshot.as_deref(),
-            status::Saving::new(&configuration),
+            &input.regional_format,
+            control.as_ref(),
+            status::Stored::new(&configuration),
+            jiff::Timestamp::now(),
         );
         let manual = self.manual_command();
         let mut names: std::collections::BTreeMap<String, String> = configuration
@@ -494,7 +501,7 @@ impl Application for Desktop {
             &configuration,
             self.snapshot.as_deref(),
             self.retrying(),
-            lines.first().cloned().unwrap_or_default(),
+            line.clone(),
             &names,
         );
         ApplicationView::new()
@@ -506,6 +513,7 @@ impl Application for Desktop {
                     model: Rc::new(model),
                     icons: self.icons.view(),
                     sign_in: self.sign_in.status(),
+                    contrast: self.contrast,
                     activation: self.settings_activation,
                     exiting: self.exiting,
                     opened: context.message(Message::Opened),
@@ -518,7 +526,7 @@ impl Application for Desktop {
             .notify_icon(
                 "tray",
                 NotifyIcon::new(input.icon.clone())
-                    .tooltip(status::tooltip(&input.text, &lines))
+                    .tooltip(status::tooltip(&input.text, &line))
                     .on_activate(context.callback(|_| Message::Open))
                     .menu(Menu::new(items, context.callback(Message::Menu))),
             )
@@ -548,6 +556,7 @@ impl Desktop {
             settings_open: false,
             directory,
             zone: ZoneIdentity::current().ok(),
+            contrast: settings::contrast_colors(),
             resume: ResumeEpoch::default(),
             taskbar: None,
             taskbar_epoch: 0,
@@ -906,6 +915,14 @@ impl Desktop {
                 }
                 Ok(_receipt) => {}
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                // The controller stops admitting commands only when exit was
+                // requested or its worker ended, and both paths report their
+                // own cause. Session end stops it before this component
+                // learns of the exit.
+                Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
+                    self.pending.clear();
+                    break;
+                }
                 Err(error) => {
                     tracing::warn!(%error, "controller command rejected");
                     self.pending.clear();
@@ -966,6 +983,7 @@ impl Desktop {
                 self.queue(ControllerCommand::Recompute(Recompute::Clock));
             }
             DesktopEvent::SettingsChanged => {
+                self.contrast = settings::contrast_colors();
                 let current = ZoneIdentity::current().ok();
                 if current.is_none() || current != self.zone {
                     self.zone = current;
@@ -1020,7 +1038,16 @@ impl Desktop {
             return;
         };
         match session.client.snapshot() {
-            Ok(snapshot) => self.snapshot = snapshot,
+            Ok(snapshot) => {
+                let latest = session
+                    .client
+                    .calculations()
+                    .latest()
+                    .inspect_err(|error| tracing::warn!(%error, "reading the latest calculation"))
+                    .ok()
+                    .flatten();
+                self.snapshot = snapshot.map(|snapshot| status::with_latest(snapshot, latest));
+            }
             Err(error) => tracing::warn!(%error, "reading the controller snapshot"),
         }
         if self.pending.len() < COMMAND_QUEUE_CAPACITY && session.focus_pending.replace(false) {

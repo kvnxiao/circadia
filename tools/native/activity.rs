@@ -8,7 +8,6 @@ use circadia::ActivityMeasurement;
 use circadia::ActivityWait;
 use circadia::CommandOutcome;
 use circadia::ConfigInput;
-use circadia::ConfigStore;
 use circadia::ControllerCommand;
 use circadia::Foreground;
 use circadia::GraphMeasurement;
@@ -21,7 +20,6 @@ use circadia::WindowsZone;
 use jiff::Timestamp;
 use jiff::civil::Time;
 use std::io;
-use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -40,14 +38,15 @@ pub(super) fn run() -> io::Result<()> {
     let capture = activity.clone();
     let input = ConfigInput {
         start_minimized: true,
+        manage_night_light: true,
         daytime_kelvin: 3400,
         middle_kelvin: 3400,
         sleep_kelvin: 3400,
         ordinary_fade_ms: 100,
         ..ConfigInput::default()
     };
-    let result = crate::graph::desktop_check(input, &[], move |native, directory| {
-        let result = exercise(&capture, native, directory, quick);
+    let result = crate::graph::desktop_check(input, &[], move |native, _directory| {
+        let result = exercise(&capture, native, quick);
         for (index, call) in native.native_calls()?.iter().enumerate() {
             report(&format!(
                 "SIMULATED-NATIVE {index} {:?} temperature={:?} failure={:?} resulting={:?}",
@@ -69,7 +68,6 @@ pub(super) fn run() -> io::Result<()> {
 fn exercise(
     activity: &ActivityMeasurement,
     native: &GraphMeasurement,
-    directory: &Path,
     quick: bool,
 ) -> io::Result<()> {
     wait("constant-output controller ready", || {
@@ -108,6 +106,7 @@ fn exercise(
     command(activity, ControllerCommand::Recompute(Recompute::Clock))?;
     let mut input = ConfigInput {
         start_minimized: true,
+        manage_night_light: true,
         ordinary_fade_ms: 100,
         focus_delay_ms: 0,
         wake: "07:00".into(),
@@ -118,7 +117,7 @@ fn exercise(
         scheduled_transition_minutes: 60,
         ..ConfigInput::default()
     };
-    configure(activity, directory, &input)?;
+    configure(activity, &input)?;
     time = advance(activity, shifted(time, Duration::from_millis(100))?)?.now;
     wait_temperature(native, 6500)?;
     transition(activity, native, start, &mut time)?;
@@ -135,14 +134,14 @@ fn exercise(
         "activity-game.exe",
         "activity-game.exe",
     )];
-    configure(activity, directory, &input)?;
+    configure(activity, &input)?;
     time = advance(activity, shifted(time, Duration::from_millis(100))?)?.now;
     wait_temperature(native, 6500)?;
     automatic(activity, native, &mut time)?;
     activity.mark("controlled-manual-suppression-start");
     manual(activity, native, &mut time)?;
     activity.mark("controlled-manual-suppression-end");
-    recovery(activity, native, directory, &mut time)?;
+    recovery(activity, native, &mut time)?;
     report(
         "PASS: real-time idle observations and controlled-clock transition, suppression, date, and manual-expiry traces. Controlled cases do not establish Windows clock or game-event delivery.",
     );
@@ -463,37 +462,14 @@ fn manual(
         deadline == time.output.elapsed + Duration::from_secs(3600),
         "manual suppression did not schedule one hour",
     )?;
-    let ticks = activity
-        .records()?
-        .iter()
-        .filter(|record| matches!(record.event, ActivityEvent::SettingsTick))
-        .count();
-    wait("visible countdown ticks", || {
-        Ok((activity
-            .records()?
-            .iter()
-            .filter(|record| matches!(record.event, ActivityEvent::SettingsTick))
-            .count()
-            >= ticks + 2)
-            .then_some(()))
-    })?;
+    open_settings_idle(activity, &automation, &settings)?;
     automation.close(&settings, process)?;
     wait("settings closed with manual suppression", || {
         Ok(window(process, "Circadia", true)?.is_none().then_some(()))
     })?;
     quiet_wait(activity)?;
-    let mark = activity.records()?.len();
     let calls = native.native_calls()?.len();
-    std::thread::sleep(Duration::from_secs(3));
-    require(
-        !activity.records()?.iter().skip(mark).any(|record| {
-            matches!(
-                record.event,
-                ActivityEvent::SettingsTick | ActivityEvent::SettingsView
-            )
-        }),
-        "hidden settings updated its graph or countdown",
-    )?;
+    closed_settings_idle(activity)?;
     require(
         native.native_calls()?.len() == calls,
         "hidden suppression caused native work",
@@ -520,24 +496,86 @@ fn manual(
     *time = advance(activity, shifted(*time, Duration::from_millis(100))?)?.now;
     wait_temperature(native, 2400)?;
     report(
-        "PASS: visible countdown ticked; closing Settings stopped its recurring UI work; controlled manual expiry remained active until exactly one hour and restored 2400 K.",
+        "PASS: open Settings updated its graph indicator once per whole minute; closing Settings stopped its recurring UI work; controlled manual expiry remained active until exactly one hour and restored 2400 K.",
     );
     Ok(())
 }
 
-fn configure(
+fn settings_updates(activity: &ActivityMeasurement, mark: usize) -> io::Result<(usize, usize)> {
+    let records = activity.records()?;
+    let slice = records
+        .get(mark..)
+        .ok_or_else(|| io::Error::other("activity capture shrank"))?;
+    let count = |event: fn(&ActivityEvent) -> bool| {
+        slice.iter().filter(|record| event(&record.event)).count()
+    };
+    Ok((
+        count(|event| matches!(event, ActivityEvent::SettingsTick)),
+        count(|event| matches!(event, ActivityEvent::SettingsView)),
+    ))
+}
+
+fn until_next_minute(margin: Duration) -> io::Result<Duration> {
+    let into = Duration::from_millis(
+        u64::try_from(Timestamp::now().as_millisecond().rem_euclid(60_000))
+            .map_err(io::Error::other)?,
+    );
+    Ok(Duration::from_secs(60).saturating_sub(into) + margin)
+}
+
+// The graph's time indicator is the only timer on an idle Schedule page and
+// fires at each whole minute, so an observation that crosses one boundary
+// must see exactly one tick.
+fn open_settings_idle(
     activity: &ActivityMeasurement,
-    directory: &Path,
-    input: &ConfigInput,
+    automation: &Automation,
+    settings: &winsafe::HWND,
 ) -> io::Result<()> {
-    let config = input.clone().validate().map_err(io::Error::other)?;
-    let result = ConfigStore::new(directory)
-        .save(&config)
-        .map_err(io::Error::other)?;
+    std::thread::sleep(until_next_minute(Duration::from_secs(2))?);
+    let mark = activity.records()?.len();
+    let began = Instant::now();
+    let observed = until_next_minute(Duration::from_secs(2))?;
+    std::thread::sleep(observed);
+    let (ticks, views) = settings_updates(activity, mark)?;
     require(
-        result.backup_error.is_none(),
-        "activity configuration backup failed",
+        automation
+            .text(settings, std::process::id(), "status-sentence")?
+            .is_some(),
+        "the open Settings window does not show the Schedule page",
     )?;
+    require(
+        ticks == 1,
+        &format!("open idle Settings ticked {ticks} times across one minute boundary"),
+    )?;
+    require(
+        views <= 2,
+        &format!("open idle Settings rebuilt its view {views} times across one minute boundary"),
+    )?;
+    report(&format!(
+        "PASS: open idle Settings over {:.3}s: graph indicator ticks {ticks}; view updates {views}",
+        began.elapsed().as_secs_f64()
+    ));
+    Ok(())
+}
+
+fn closed_settings_idle(activity: &ActivityMeasurement) -> io::Result<()> {
+    let mark = activity.records()?.len();
+    let began = Instant::now();
+    std::thread::sleep(until_next_minute(Duration::from_secs(2))?);
+    let (ticks, views) = settings_updates(activity, mark)?;
+    require(
+        ticks == 0 && views == 0,
+        &format!("hidden Settings updated {ticks} ticks and {views} views"),
+    )?;
+    report(&format!(
+        "PASS: closed Settings over {:.3}s across a minute boundary: ticks 0; view updates 0",
+        began.elapsed().as_secs_f64()
+    ));
+    Ok(())
+}
+
+fn configure(activity: &ActivityMeasurement, input: &ConfigInput) -> io::Result<()> {
+    let config = input.clone().validate().map_err(io::Error::other)?;
     command(
         activity,
         ControllerCommand::Configure {
@@ -561,7 +599,6 @@ fn configure(
 fn recovery(
     activity: &ActivityMeasurement,
     native: &GraphMeasurement,
-    directory: &Path,
     time: &mut RuntimeTime,
 ) -> io::Result<()> {
     activity.mark("controlled-recovery-start");
@@ -570,10 +607,19 @@ fn recovery(
         daytime_kelvin: 2500,
         middle_kelvin: 2500,
         sleep_kelvin: 2500,
+        manage_night_light: true,
         ordinary_fade_ms: 100,
         ..ConfigInput::default()
     };
-    configure(activity, directory, &input)?;
+    configure(activity, &input)?;
+    let step = wait("first fade step toward the recovery temperature", || {
+        Ok(latest_wait(activity)?.1.output)
+    })?;
+    *time = advance(
+        activity,
+        shifted(*time, step.saturating_sub(time.output.elapsed))?,
+    )?
+    .now;
     for delay in [100, 200, 400, 800, 800] {
         let waiting = wait("native recovery deadline selected", || {
             let waiting = latest_wait(activity)?.1;

@@ -117,7 +117,8 @@ Example status sentences:
 | State | Sentence |
 | :-- | :-- |
 | Before the next change | "Next: 2400 K by 11:00 PM at bedtime, warming from 10:00 PM." It says "cooling" when the next target is higher. |
-| No change before the next target | "Holding until 11:00 PM." |
+| No transition before the next target that changes the temperature | "Holding until 11:00 PM." The sentence skips a target that does not change the temperature. |
+| No later target in the graph changes the temperature | "Your schedule is at 3400 K." |
 | During a scheduled transition | "Reaches 2400 K by 11:00 PM (bedtime)." |
 | Preview playing | "Previewing 3:15 AM. Your schedule resumes when it ends." While suppression is active, the second sentence is "Suppression resumes when the preview ends." |
 | Manual suppression | "Showing 6500 K until 10:42 PM. Your schedule is at 3400 K." |

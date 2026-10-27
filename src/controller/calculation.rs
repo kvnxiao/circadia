@@ -1,12 +1,15 @@
 use crate::ActivityInterval;
 use crate::Config;
 use crate::Curve;
+use crate::EventKind;
+use crate::Gridline;
 use crate::Playback;
 use crate::Schedule;
 use crate::ScheduleError;
 use crate::TimeInterval;
 use crate::WindowsZone;
 use crate::graph_interval;
+use crate::gridlines;
 use crate::solar_today;
 use jiff::SignedDuration;
 use jiff::Timestamp;
@@ -45,6 +48,10 @@ pub struct CalculationRequest {
 pub struct CalculatedSchedule {
     /// Complete generated curve, including interpolation neighbors.
     pub curve: Arc<Curve>,
+    /// Selected Wake, Sunrise, Sunset, and Bedtime targets of the curve.
+    pub events: Vec<LocalEvent>,
+    /// Local clock hours divisible by three across all graph views.
+    pub gridlines: Vec<Gridline>,
     /// Bounds for which solar and clock inputs were evaluated.
     pub valid: TimeInterval,
     /// Current Wake-minus-four-hours graph interval.
@@ -61,6 +68,18 @@ pub struct CalculatedSchedule {
     pub conflicts: Vec<SolarConflict>,
     /// Today's selected solar targets, or none when their calculation failed.
     pub today: Option<SolarToday>,
+}
+
+/// Give a selected schedule target with its clock in the calculation's Windows
+/// time zone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocalEvent {
+    /// Event that the target belongs to.
+    pub kind: EventKind,
+    /// Actual instant before minimum-spacing merges.
+    pub instant: Timestamp,
+    /// Local date and clock of the instant.
+    pub local: DateTime,
 }
 
 /// Give the selected Sunrise and Sunset targets of the activity interval that
@@ -355,6 +374,13 @@ fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, Schedul
         graph_end = view.end;
         views.push(view);
     }
+    let gridlines = gridlines(
+        &mut zone,
+        TimeInterval {
+            start: graph.start,
+            end: graph_end,
+        },
+    )?;
     let padding = SignedDuration::from_millis(request.config.input().ordinary_fade_ms);
     let end = graph_end.max(next_date).checked_add(padding)?;
     let valid = TimeInterval {
@@ -386,8 +412,21 @@ fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, Schedul
         }),
         Err(_) => None,
     };
+    let events = schedule
+        .events
+        .iter()
+        .map(|event| {
+            Ok(LocalEvent {
+                kind: event.kind,
+                instant: event.instant,
+                local: zone.local(event.instant)?,
+            })
+        })
+        .collect::<Result<_, ScheduleError>>()?;
     Ok(CalculatedSchedule {
         curve: Arc::new(schedule.curve),
+        events,
+        gridlines,
         valid,
         graph,
         views,

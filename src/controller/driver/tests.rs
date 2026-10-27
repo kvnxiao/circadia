@@ -202,6 +202,8 @@ fn calculation(revision: u64, request: CalculationRequest, kelvin: u16) -> Arc<C
         request,
         result: Ok(CalculatedSchedule {
             curve,
+            events: Vec::new(),
+            gridlines: Vec::new(),
             valid,
             graph: valid,
             views: vec![valid],
@@ -1155,6 +1157,8 @@ fn previewing_3000_k() -> Fixture {
                 request,
                 result: Ok(CalculatedSchedule {
                     curve,
+                    events: Vec::new(),
+                    gridlines: Vec::new(),
                     valid,
                     graph: valid,
                     views: vec![valid],

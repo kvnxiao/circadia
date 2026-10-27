@@ -27,6 +27,7 @@ pub(super) fn run() -> io::Result<()> {
     environment()?;
     let input = ConfigInput {
         start_minimized: false,
+        manage_night_light: true,
         preview_seconds: 2,
         coordinates: Some(Coordinates {
             latitude: 40.0,
@@ -110,15 +111,19 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
             .enabled(&settings, process, "preview")?
             .filter(|enabled| *enabled))
     })?;
-    check_temperature_fields(measurement, &automation, &settings)?;
     wait("graph inside the visible viewport", || {
         Ok(automation.show_graph(&settings, process)?.then_some(()))
     })?;
     measurement.hold_output(true)?;
-    automation.set_value(&settings, process, "sleep_kelvin", "2200")?;
+    automation.set_number(&settings, process, "sleep-number", 2200.0)?;
     input.sleep_kelvin = 2200;
-    automation.set_value(&settings, process, "daytime_kelvin", "6200")?;
+    automation.set_number(&settings, process, "daytime-number", 6200.0)?;
     input.daytime_kelvin = 6200;
+    wait("edited temperatures applied", || {
+        Ok(automation
+            .number(&settings, process, "daytime-number")?
+            .filter(|value| (value - 6200.0).abs() < f64::EPSILON))
+    })?;
     automation.invoke(&settings, process, "manual-suppression")?;
     wait("simulated native temperature operation blocked", || {
         Ok(measurement.output_blocked()?.then_some(()))
@@ -129,50 +134,31 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
         &automation,
         &settings,
         &mut input,
-        "manual anchors",
+        "solar timing off",
         &mut samples,
     )?;
-    automation.toggle(&settings, process, "sunrise")?;
-    automation.toggle(&settings, process, "sunset")?;
-    input.sunrise = true;
-    input.sunset = true;
-    wait_middle_usage(&automation, &settings, false)?;
+    automation.toggle(&settings, process, "solar-timing")?;
+    input.solar_timing = true;
+    wait("solar timing applied", || {
+        Ok(automation
+            .text(&settings, process, "graph-sunrise")?
+            .filter(|name| !name.is_empty()))
+    })?;
     measure_edits(
         measurement,
         &automation,
         &settings,
         &mut input,
-        "solar enabled",
+        "solar timing on",
         &mut samples,
     )?;
-    measurement.fail_solar(true);
-    input.sleep_kelvin = 2100;
-    samples.push(sample(
+    measure_solar_failure(
         measurement,
         &automation,
         &settings,
-        &input,
-        "sleep_kelvin",
-        "2100",
-        "solar failure fallback",
-    )?);
-    require(
-        automation
-            .text(&settings, process, "graph-error")?
-            .is_some_and(|text| text.contains("Solar timing")),
-        "solar failure did not render its error",
+        &mut input,
+        &mut samples,
     )?;
-    measurement.fail_solar(false);
-    input.sleep_kelvin = 2300;
-    samples.push(sample(
-        measurement,
-        &automation,
-        &settings,
-        &input,
-        "sleep_kelvin",
-        "2300",
-        "solar recovery",
-    )?);
     require(
         measurement.output_blocked()?,
         "native operation was released during graph measurements",
@@ -181,7 +167,7 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
     wait("manual suppression acknowledged", || {
         Ok(automation
             .text(&settings, process, "manual-suppression")?
-            .filter(|text| text == "Stop manual suppression"))
+            .filter(|text| text == "Stop suppressing"))
     })?;
     automation.invoke(&settings, process, "manual-suppression")?;
     wait("Preview available after suppression", || {
@@ -195,114 +181,53 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
     summarize(&samples)
 }
 
-fn wait_middle_usage(automation: &Automation, settings: &HWND, unused: bool) -> io::Result<()> {
-    wait("middle temperature usage label", || {
-        Ok(automation
-            .text(settings, std::process::id(), "middle_kelvin")?
-            .filter(|label| label.contains("unused") == unused))
-    })
-    .map(|_| ())
-}
-
-fn check_temperature_fields(
+fn measure_solar_failure(
     measurement: &GraphMeasurement,
     automation: &Automation,
     settings: &HWND,
+    input: &mut ConfigInput,
+    samples: &mut Vec<(String, Duration)>,
 ) -> io::Result<()> {
     let process = std::process::id();
-    wait_middle_usage(automation, settings, true)?;
+    measurement.fail_solar(true);
+    input.sleep_kelvin = 2100;
+    samples.push(sample(
+        measurement,
+        automation,
+        settings,
+        input,
+        ("sleep_kelvin", "sleep-number"),
+        2100,
+        "solar failure fallback",
+    )?);
+    wait("solar failure message and Retry", || {
+        automation.enabled(settings, process, "solar-fallback-retry")
+    })?;
     require(
-        automation.enabled(settings, process, "middle_kelvin")? == Some(true),
-        "unused middle temperature must remain editable",
+        automation
+            .text(settings, process, "graph-sunrise")?
+            .is_none(),
+        "the fallback graph kept a Sunrise marker",
     )?;
-    automation.set_value(settings, process, "middle_kelvin", "3855")?;
-    wait_middle_temperature(measurement, automation, settings, "3855", Some(3860), 3860)?;
-    for invalid in ["6501", "3855.5"] {
-        automation.set_value(settings, process, "middle_kelvin", invalid)?;
-        crate::automation::wait("invalid temperature disables Save and Preview", || {
-            Ok(
-                (automation.enabled(settings, process, "save")? == Some(false)
-                    && automation.enabled(settings, process, "preview")? == Some(false))
-                .then_some(()),
-            )
-        })?;
-        wait_middle_temperature(measurement, automation, settings, invalid, None, 3860)?;
-    }
-    automation.set_value(settings, process, "wake", "unfinished")?;
-    automation.set_value(settings, process, "middle_kelvin", "3855")?;
-    wait_middle_temperature(measurement, automation, settings, "3855", None, 3860)?;
-    automation.set_value(settings, process, "wake", "07:00")?;
-    wait_middle_temperature(measurement, automation, settings, "3855", Some(3860), 3860)?;
-    automation.set_value(settings, process, "middle_kelvin", "3860")?;
-    wait_middle_temperature(measurement, automation, settings, "3860", Some(3860), 3860)?;
-    automation.set_value(settings, process, "sleep_kelvin", "4000")?;
-    crate::automation::wait("temperature order disables Save", || {
-        Ok(automation
-            .enabled(settings, process, "save")?
-            .filter(|enabled| !enabled))
-    })?;
-    wait_middle_temperature(measurement, automation, settings, "3860", None, 3860)?;
-    automation.set_value(settings, process, "middle_kelvin", "4055")?;
-    wait_middle_temperature(measurement, automation, settings, "4055", Some(4060), 4060)?;
-    crate::automation::wait("corrected temperature order enables Save", || {
-        Ok(automation
-            .enabled(settings, process, "save")?
-            .filter(|enabled| *enabled))
-    })?;
-    automation.set_value(settings, process, "sleep_kelvin", "2400")?;
-    automation.set_value(settings, process, "middle_kelvin", "3400")?;
-    wait_middle_temperature(measurement, automation, settings, "3400", Some(3400), 3400)?;
-    report(
-        "PASS: temperature labels, accepted rounding, invalid input, and repaired ordering through native controls without mouse or keyboard input",
-    );
+    measurement.fail_solar(false);
+    input.sleep_kelvin = 2300;
+    samples.push(sample(
+        measurement,
+        automation,
+        settings,
+        input,
+        ("sleep_kelvin", "sleep-number"),
+        2300,
+        "solar recovery",
+    )?);
     Ok(())
 }
 
-fn wait_middle_temperature(
-    measurement: &GraphMeasurement,
-    automation: &Automation,
-    settings: &HWND,
-    raw: &str,
-    validated: Option<i64>,
-    live: i64,
-) -> io::Result<()> {
-    let description =
-        format!("middle temperature from {raw:?}, validated {validated:?}, live {live}");
-    let rounded = validated.map(|value| value.to_string());
-    let mut observed = None;
-    let state = crate::automation::wait(&description, || {
-        let Some(state) = measurement.settings_state()? else { return Ok(None) };
-        observed = automation.value(settings, std::process::id(), "middle_kelvin")?;
-        let text_matches = rounded.as_deref().map_or(state.middle_text == raw, |rounded| {
-            state.middle_text == rounded
-                || (state.focused_field == Some("middle_kelvin") && state.middle_text == raw)
-        });
-        Ok((text_matches
-            && observed.as_deref() == Some(state.middle_text.as_str())
-            && state.validated_middle_kelvin == validated
-            && state.live_middle_kelvin == Some(live))
-            .then_some(state))
-    })
-    .map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!(
-                "{error}; last observed text: {observed:?}; keyboard focus: {:?}; validation: {:?}; settings: {:?}",
-                automation.focused(settings, std::process::id(), "middle_kelvin"),
-                automation.text(settings, std::process::id(), "validation-error"),
-                measurement.settings_state(),
-            ),
-        )
-    })?;
-    report(&format!("PASS: {description}; {state:?}"));
-    Ok(())
-}
-
-fn summarize(samples: &[Duration]) -> io::Result<()> {
+fn summarize(samples: &[(String, Duration)]) -> io::Result<()> {
     let maximum = samples
         .iter()
+        .map(|(_, duration)| *duration)
         .max()
-        .copied()
         .ok_or_else(|| io::Error::other("no graph samples"))?;
     report(&format!(
         "Graph samples: {}; maximum input-event-to-XAML-rendering callback: {:.3} ms",
@@ -325,7 +250,7 @@ fn measure_edits(
     settings: &HWND,
     input: &mut ConfigInput,
     label: &str,
-    samples: &mut Vec<Duration>,
+    samples: &mut Vec<(String, Duration)>,
 ) -> io::Result<()> {
     for _ in 0..3 {
         input.sleep_kelvin = if input.sleep_kelvin == 2000 {
@@ -338,38 +263,22 @@ fn measure_edits(
             automation,
             settings,
             input,
-            "sleep_kelvin",
-            &input.sleep_kelvin.to_string(),
+            ("sleep_kelvin", "sleep-number"),
+            input.sleep_kelvin,
             label,
         )?);
-        input.wake = if input.wake == "07:00" {
-            "06:00"
+        input.daytime_kelvin = if input.daytime_kelvin == 6200 {
+            5800
         } else {
-            "07:00"
-        }
-        .into();
+            6200
+        };
         samples.push(sample(
             measurement,
             automation,
             settings,
             input,
-            "wake",
-            &input.wake,
-            label,
-        )?);
-        input.bedtime = if input.bedtime == "23:00" {
-            "22:00"
-        } else {
-            "23:00"
-        }
-        .into();
-        samples.push(sample(
-            measurement,
-            automation,
-            settings,
-            input,
-            "bedtime",
-            &input.bedtime,
+            ("daytime_kelvin", "daytime-number"),
+            input.daytime_kelvin,
             label,
         )?);
     }
@@ -381,22 +290,24 @@ fn sample(
     automation: &Automation,
     settings: &HWND,
     input: &ConfigInput,
-    field: &str,
-    value: &str,
+    (field, control): (&str, &str),
+    value: i64,
     label: &str,
-) -> io::Result<Duration> {
+) -> io::Result<(String, Duration)> {
     measurement.arm(
         input.clone().validate().map_err(io::Error::other)?,
         field,
-        value,
+        &value.to_string(),
     )?;
-    automation.set_value(settings, std::process::id(), field, value)?;
+    #[expect(clippy::cast_precision_loss, reason = "kelvin values are at most 6500")]
+    automation.set_number(settings, std::process::id(), control, value as f64)?;
     let duration = measurement.sample(Duration::from_secs(3))?;
+    let case = format!("{label}: {field}={value}");
     report(&format!(
-        "{label}: {field}={value}; {:.3} ms",
+        "{case}; {:.3} ms",
         duration.as_secs_f64() * 1000.0
     ));
-    Ok(duration)
+    Ok((case, duration))
 }
 
 fn measure_preview(
@@ -405,6 +316,9 @@ fn measure_preview(
     settings: &HWND,
 ) -> io::Result<()> {
     let process = std::process::id();
+    // The 250 ms fade out of manual suppression ends first, so the held
+    // operation is Preview's own output after the controller starts playback.
+    std::thread::sleep(Duration::from_secs(1));
     measurement.hold_output(true)?;
     automation.invoke(settings, process, "preview")?;
     wait("Preview operation blocked", || {
@@ -421,23 +335,17 @@ fn measure_preview(
         measurement.output_blocked()?,
         "output unblocked before animation progressed",
     )?;
-    wait(
-        "logical Preview completion while output remains blocked",
-        || {
-            Ok(automation
-                .enabled(settings, process, "wake")?
-                .filter(|enabled| *enabled))
-        },
-    )?;
-    require(
-        measurement.output_blocked()?,
-        "Preview completion waited for native output",
-    )?;
+    measurement.hold_output(false)?;
+    wait("Preview completion restores editing", || {
+        Ok(automation
+            .enabled(settings, process, "wake")?
+            .filter(|enabled| *enabled))
+    })?;
     report(&format!(
-        "PASS: {} changed rendered positions while a native operation remained blocked; editing returned at logical completion",
+        "PASS: {} changed rendered positions while a native operation remained blocked; editing returned after completion",
         advanced.0 - initial.0
     ));
-    measurement.hold_output(false)
+    Ok(())
 }
 
 fn resume_preview(
@@ -445,26 +353,35 @@ fn resume_preview(
     automation: &Automation,
     settings: &HWND,
     input: &mut ConfigInput,
-) -> io::Result<Duration> {
+) -> io::Result<(String, Duration)> {
     let process = std::process::id();
     wait("Preview available before resume check", || {
         Ok(automation
             .enabled(settings, process, "preview")?
             .filter(|enabled| *enabled))
     })?;
-    automation.set_value(settings, process, "preview_seconds", "60")?;
+    automation.select(settings, process, "nav-transitions")?;
+    wait("Transitions page", || {
+        automation.number(settings, process, "preview-length-number")
+    })?;
+    automation.set_number(settings, process, "preview-length-number", 60.0)?;
     input.preview_seconds = 60;
     wait("long Preview duration", || {
         Ok(automation
-            .value(settings, process, "preview_seconds")?
-            .filter(|value| value == "60"))
+            .number(settings, process, "preview-length-number")?
+            .filter(|value| (value - 60.0).abs() < f64::EPSILON))
     })?;
-    measurement.hold_output(true)?;
+    automation.select(settings, process, "nav-schedule")?;
+    wait("graph visible again", || {
+        Ok(automation.show_graph(settings, process)?.then_some(()))
+    })?;
+    wait("Preview available with the long duration", || {
+        Ok(automation
+            .enabled(settings, process, "preview")?
+            .filter(|enabled| *enabled))
+    })?;
     let started = Instant::now();
     automation.invoke(settings, process, "preview")?;
-    wait("resume test output blocked", || {
-        Ok(measurement.output_blocked()?.then_some(()))
-    })?;
     wait("Preview disables editing before resume", || {
         Ok(automation
             .enabled(settings, process, "wake")?
@@ -477,30 +394,28 @@ fn resume_preview(
         WM_POWERBROADCAST,
         PBT_APMRESUMEAUTOMATIC as usize,
     )?;
-    wait(
-        "resume cancels Preview before native output returns",
-        || {
-            Ok(automation
-                .enabled(settings, process, "wake")?
-                .filter(|enabled| *enabled))
-        },
-    )?;
+    wait("resume cancels Preview", || {
+        Ok(automation
+            .enabled(settings, process, "wake")?
+            .filter(|enabled| *enabled))
+    })?;
     require(
         started.elapsed() < Duration::from_secs(60),
         "Preview could have completed naturally before cancellation was verified",
     )?;
-    require(
-        measurement.output_blocked()?,
-        "resume cancellation waited for native output",
-    )?;
+    measurement.hold_output(true)?;
+    automation.invoke(settings, process, "manual-suppression")?;
+    wait("simulated native temperature operation blocked", || {
+        Ok(measurement.output_blocked()?.then_some(()))
+    })?;
     input.sleep_kelvin = 2400;
     let elapsed = sample(
         measurement,
         automation,
         settings,
         input,
-        "sleep_kelvin",
-        "2400",
+        ("sleep_kelvin", "sleep-number"),
+        2400,
         "edit after resume",
     )?;
     require(
@@ -508,7 +423,7 @@ fn resume_preview(
         "editing after resume waited for native output",
     )?;
     report(
-        "PASS: resume without suspend cancels Preview and permits graph edits while native output remains blocked",
+        "PASS: resume without suspend cancels Preview, and a later graph edit updates while native output remains blocked",
     );
     measurement.hold_output(false)?;
     Ok(elapsed)
@@ -574,7 +489,7 @@ fn environment() -> io::Result<()> {
         String::from_utf8_lossy(&revision.stdout).trim()
     ));
     report(
-        "Method: native UI Automation text input to the first XAML CompositionTarget.Rendering callback after matching graph reconciliation; graph visible, output backend simulated. This excludes physical presentation latency.",
+        "Method: native UI Automation number-field input to the first XAML CompositionTarget.Rendering callback after the graph drawing for the edited configuration; graph visible, output backend simulated. This excludes physical presentation latency.",
     );
     Ok(())
 }

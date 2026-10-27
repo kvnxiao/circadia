@@ -17,16 +17,20 @@ pub use curve::Curve;
 pub use curve::Segment;
 pub use curve::Target;
 pub use generated::ActivityInterval;
+pub use generated::EventKind;
 pub use generated::Schedule;
+pub use generated::ScheduleEvent;
 pub use generated::solar_today;
 pub use solar::SolarCrossings;
 pub use solar::SolarSelection;
 pub use solar::calculate_solar;
 pub use solar::select_solar;
 pub use view::GraphSegment;
+pub use view::Gridline;
 pub use view::Playback;
 pub use view::TimeInterval;
 pub use view::graph_interval;
+pub use view::gridlines;
 
 /// Report failed Windows clock conversion or schedule calculation.
 #[derive(Debug, Error)]

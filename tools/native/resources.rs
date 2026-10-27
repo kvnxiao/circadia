@@ -79,6 +79,7 @@ fn exercise(executable: &Path, directory: &Path, quick: bool) -> io::Result<()> 
         middle_kelvin: 3400,
         sleep_kelvin: 3400,
         start_minimized: true,
+        manage_night_light: true,
         ..ConfigInput::default()
     };
     save(directory, &input)?;
@@ -188,6 +189,7 @@ fn preview(
         scheduled_transition_minutes: 240,
         preview_seconds: 60,
         start_minimized: false,
+        manage_night_light: true,
         ..ConfigInput::default()
     };
     save(directory, &input)?;
@@ -223,6 +225,11 @@ fn preview(
         "Preview ended before resource sampling completed",
     )?;
     automation.invoke(&settings, process, "preview")?;
+    wait("Preview stopped before shutdown", || {
+        Ok(automation
+            .enabled(&settings, process, "wake")?
+            .filter(|value| *value))
+    })?;
     shutdown(&mut application, native)
 }
 
@@ -247,6 +254,7 @@ fn scheduled(
         bedtime: clock((wake + 720).rem_euclid(1440)),
         scheduled_transition_minutes: 1,
         start_minimized: true,
+        manage_night_light: true,
         ..ConfigInput::default()
     };
     save(directory, &input)?;
@@ -306,6 +314,7 @@ fn fades(
         sleep_kelvin: 2400,
         ordinary_fade_ms: 10_000,
         start_minimized: false,
+        manage_night_light: true,
         ..ConfigInput::default()
     };
     save(directory, &input)?;

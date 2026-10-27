@@ -63,6 +63,46 @@ pub fn graph_interval(
     Ok(TimeInterval { start, end })
 }
 
+/// Mark a local clock hour that is a multiple of three inside graph views.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Gridline {
+    /// Actual instant of the local clock hour.
+    pub instant: Timestamp,
+    /// Local clock hour from 0 through 21.
+    pub hour: i8,
+}
+
+/// List the local clock hours divisible by three strictly inside `interval`.
+///
+/// - A clock hour that a daylight-saving change skips has no gridline; a
+///   repeated one uses its first occurrence.
+///
+/// # Errors
+///
+/// Report failed Windows date or clock conversion.
+pub fn gridlines(
+    zone: &mut WindowsZone,
+    interval: TimeInterval,
+) -> Result<Vec<Gridline>, ScheduleError> {
+    let mut date = zone.local(interval.start)?.date();
+    let last = zone.local(interval.end)?.date();
+    let mut lines: Vec<Gridline> = Vec::new();
+    while date <= last {
+        for hour in (0..24).step_by(3) {
+            let instant = zone.boundary(date.to_datetime(Time::new(hour, 0, 0, 0)?))?;
+            if interval.start < instant
+                && instant < interval.end
+                && zone.local(instant)?.hour() == hour
+                && lines.last().is_none_or(|line| line.instant < instant)
+            {
+                lines.push(Gridline { instant, hour });
+            }
+        }
+        date = date.tomorrow()?;
+    }
+    Ok(lines)
+}
+
 impl Playback {
     /// Capture the next matching local clock and the configured playback
     /// duration.

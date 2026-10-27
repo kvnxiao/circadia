@@ -179,7 +179,7 @@ impl Curve {
 }
 
 impl Segment {
-    fn rounded(self, instant: Timestamp) -> Result<u16, ScheduleError> {
+    pub(crate) fn rounded(self, instant: Timestamp) -> Result<u16, ScheduleError> {
         let span = self.end.as_nanosecond() - self.start.as_nanosecond();
         let elapsed = instant.as_nanosecond() - self.start.as_nanosecond();
         let weighted =

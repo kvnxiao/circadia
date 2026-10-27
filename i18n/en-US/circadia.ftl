@@ -21,29 +21,105 @@ tray-quit = Quit Circadia
 tooltip = Circadia: { $status }
 
 status-starting = Starting Circadia.
-status-configuration-error = Configuration requires correction; management is stopped.
+status-configuration-error = Settings could not be read; Night Light is not managed.
+status-not-managing = Not managing Night Light.
 status-control-unavailable = Control is unavailable; starting suppression is disabled.
-status-output-unavailable = Night Light output is unavailable.
-status-output-unavailable-suppressed = Output is unavailable; suppression is requested.
-status-schedule-retained = The schedule is unavailable; its last temperature is retained.
-status-backup-restored = Configuration was restored from its backup.
+status-output-unavailable = Output is unavailable.
+status-output-unavailable-suppressed = Output is unavailable; suppression is requested, not applied.
+status-schedule-retained = The schedule is unavailable; using its last temperature, { $kelvin }.
+status-backup-restored = Settings were restored from a backup.
 status-observation-failed = Control continues without change observation.
-status-suppression-active =
-    { $solar ->
-        [fallback] Suppression is active. Solar timing failed; using Wake and Bedtime.
-       *[available] Suppression is active.
-    }
-status-preview-playing =
-    { $solar ->
-        [fallback] Preview is playing. Solar timing failed; using Wake and Bedtime.
-       *[available] Preview is playing.
-    }
-status-schedule-active =
-    { $solar ->
-        [fallback] Schedule control is active. Solar timing failed; using Wake and Bedtime.
-       *[available] Schedule control is active.
+status-managing =
+    { $state ->
+        [preview] Previewing · { $kelvin }
+        [suppressed] Suppressed · { $kelvin }
+       *[schedule] Managing Night Light · { $kelvin }
+    }{ $solar ->
+        [fallback] {" "}· Wake and Bedtime only
+       *[available] {""}
     }
 status-calculating = Calculating the schedule.
+
+phase-name =
+    { $phase ->
+        [not-managing] Not managing
+        [preview] Preview
+        [suppressed] Suppressed
+        [morning] Morning
+        [daytime] Daytime
+        [evening] Evening
+       *[bedtime] Bedtime
+    }
+phase-shifting =
+    { $phase ->
+        [morning] Shifting to morning
+        [daytime] Shifting to daytime
+        [evening] Shifting to evening
+       *[bedtime] Shifting to bedtime
+    }
+event-name =
+    { $event ->
+        [wake] Wake
+        [sunrise] Sunrise
+        [sunset] Sunset
+       *[bedtime] Bedtime
+    }
+graph-event =
+    { $event ->
+        [wake] Wake
+        [sunrise] Sunrise
+        [sunset] Sunset
+       *[bedtime] Bedtime
+    } { $time }
+graph-name = Color temperature from { $clock } today to { $clock } tomorrow
+event-off = Off
+event-not-used = Not used
+event-unavailable = Unavailable
+event-fallback = Wake and Bedtime only
+event-pending = Calculating…
+output-off = Off
+output-unknown = —
+sentence-not-managing = Windows controls Night Light. Turn on management to follow this schedule.
+sentence-preview =
+    Previewing { $time }. { $resumes ->
+        [suppression] Suppression resumes when the preview ends.
+       *[schedule] Your schedule resumes when it ends.
+    }
+sentence-manual = Showing { $kelvin } until { $time }.
+sentence-manual-active = Showing { $kelvin } for 1 hour.
+sentence-automatic = Showing { $kelvin } while { $app } is focused.
+sentence-automatic-unknown = Showing { $kelvin } while a listed app is focused.
+sentence-schedule-at = Your schedule is at { $kelvin }.
+sentence-control-unavailable = Control is unavailable until Windows provides the time zone, so Suppress for 1 hour is disabled.
+sentence-retained = The schedule is unavailable, so Circadia uses its last scheduled temperature, { $kelvin }.
+sentence-reaching =
+    Reaches { $kelvin } by { $time } ({ $event ->
+        [wake] wake
+        [sunrise] sunrise
+        [sunset] sunset
+       *[bedtime] bedtime
+    }).
+sentence-next =
+    Next: { $kelvin } by { $time } at { $event ->
+        [wake] wake
+        [sunrise] sunrise
+        [sunset] sunset
+       *[bedtime] bedtime
+    }, { $direction ->
+        [warming] warming
+       *[cooling] cooling
+    } from { $start }.
+sentence-holding = Holding until { $time }.
+phase-art-not-managing = Not managing Night Light
+phase-art-manual = Suppressed for 1 hour
+phase-art-automatic = Suppressed while an app is focused
+phase-art-shifting =
+    { $phase ->
+        [morning] Morning
+        [daytime] Daytime
+        [evening] Evening
+       *[bedtime] Bedtime
+    }, shifting, { $percent }% there
 
 language-name = English
 app-name = Circadia
@@ -371,6 +447,8 @@ banner-invalid-note =
        *[automatic] Circadia keeps using your last valid settings until this is fixed. Everything else is saved automatically.
     }
 nav-invalid = { $page }, has an invalid value
+banner-schedule-title = Night Light control is unavailable
+banner-schedule-message = Circadia can't read the Windows time zone and has no earlier scheduled temperature to use, so it doesn't change Night Light. Suppress for 1 hour is unavailable until Circadia can read the time zone.
 banner-native-output-title = Circadia can't control Night Light
 banner-native-observation-title = Circadia can't watch Night Light for changes
 banner-native-off-title = Circadia couldn't finish turning Night Light off

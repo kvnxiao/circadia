@@ -1,6 +1,9 @@
 mod apps;
 pub(super) mod general;
+mod graph;
 mod location;
+mod palette;
+mod phase;
 mod problems;
 mod schedule;
 mod time_picker;
@@ -11,6 +14,7 @@ use super::configuration::Configuration;
 use super::configuration::ConfigurationError;
 use super::configuration::FileProblem;
 use super::icon_cache::AppIcons;
+use super::status;
 use crate::Config;
 use crate::ControllerSnapshot;
 use crate::Coordinates;
@@ -42,6 +46,7 @@ use windows_reactor::AutomationLiveSetting;
 use windows_reactor::Border;
 use windows_reactor::Button;
 use windows_reactor::Callback;
+use windows_reactor::ColorScheme;
 use windows_reactor::Component;
 use windows_reactor::ComponentContext;
 use windows_reactor::ComponentTimer;
@@ -150,6 +155,28 @@ pub(super) struct Model {
     names: BTreeMap<String, String>,
     today: Option<crate::SolarToday>,
     solar: schedule::SolarStatus,
+    calculation: Option<Calculation>,
+    last_scheduled: Option<u16>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct Calculation(Arc<crate::CalculationResult>);
+
+impl PartialEq for Calculation {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Calculation {
+    pub(super) fn schedule(&self) -> Option<&crate::CalculatedSchedule> {
+        self.0.result.as_ref().ok()
+    }
+
+    #[cfg(feature = "graph-measurement")]
+    pub(super) fn config(&self) -> &Config {
+        &self.0.request.config
+    }
 }
 
 impl Model {
@@ -215,6 +242,33 @@ impl Model {
                 .and_then(|calculation| calculation.result.as_ref().ok())
                 .and_then(|schedule| schedule.today),
             solar: snapshot.map(schedule::SolarStatus::new).unwrap_or_default(),
+            calculation: snapshot
+                .and_then(|snapshot| snapshot.calculation.clone())
+                .map(Calculation),
+            last_scheduled: snapshot
+                .and_then(|snapshot| snapshot.accepted.as_ref())
+                .and_then(crate::ConfigLayer::last_scheduled),
+        }
+    }
+
+    fn control(&self, now: std::time::Instant) -> status::Control<'_> {
+        let output_failed = self.management.is_on() && problems::output_failed(self);
+        status::Control {
+            management: self.management,
+            scheduling: self.scheduling,
+            suppression: self.suppression,
+            preview_active: self.preview_active,
+            playback: self
+                .playing
+                .as_ref()
+                .and_then(|playing| playing.instant(now)),
+            schedule: self.calculation.as_ref().and_then(Calculation::schedule),
+            last_scheduled: self.last_scheduled,
+            output_failed,
+            observation_failed: self
+                .native_errors
+                .iter()
+                .any(|(operation, _)| *operation == DiagnosticOperation::Observation),
         }
     }
 
@@ -271,6 +325,7 @@ pub(super) struct Input {
     pub(super) model: Rc<Model>,
     pub(super) icons: Rc<AppIcons>,
     pub(super) sign_in: general::SignInStatus,
+    pub(super) contrast: Option<crate::platform::contrast::ContrastColors>,
     pub(super) activation: u64,
     pub(super) exiting: bool,
     pub(super) opened: Callback<()>,
@@ -287,6 +342,7 @@ impl PartialEq for Input {
             && self.model == other.model
             && Rc::ptr_eq(&self.icons, &other.icons)
             && self.sign_in == other.sign_in
+            && self.contrast == other.contrast
             && self.activation == other.activation
             && self.exiting == other.exiting
             && self.opened == other.opened
@@ -377,6 +433,7 @@ pub(super) enum Message {
     Command(Command),
     Tick,
     Minute,
+    Indicator,
     Visibility(Visibility),
     OpenDialog(Field),
     DialogClosed(ContentDialogResult),
@@ -394,6 +451,7 @@ pub(super) enum Message {
     Location(location::Event),
     CoordinateText(schedule::Axis, String),
     CoordinateCommit(schedule::Axis),
+    Scheme(ColorScheme),
 }
 
 #[derive(Debug, Default)]
@@ -410,6 +468,7 @@ pub(super) struct Settings {
     timer: Option<ComponentTimer>,
     tick: Option<ComponentTimer>,
     minute: Option<ComponentTimer>,
+    indicator: Option<ComponentTimer>,
     visibility: Visibility,
     dpi: u32,
     icon_requests: apps::IconRequests,
@@ -420,9 +479,25 @@ pub(super) struct Settings {
     expanded: Expanded,
     location: location::Location,
     coordinate_drafts: schedule::CoordinateDrafts,
+    scheme: ColorScheme,
+    graph: Option<Calculation>,
+    graphics: graph::Graphics,
+    #[cfg(feature = "graph-measurement")]
+    _rendering: Option<windows_reactor::LiveRenderingSubscription>,
+}
+
+pub(super) fn contrast_colors() -> Option<crate::platform::contrast::ContrastColors> {
+    crate::platform::contrast::contrast_colors()
+        .inspect_err(|error| tracing::warn!(%error, "reading the contrast theme"))
+        .ok()
+        .flatten()
 }
 
 impl Settings {
+    fn palette(&self) -> palette::Palette {
+        palette::Palette::new(palette::Theme::new(self.scheme, self.input.contrast))
+    }
+
     fn edit(&mut self, edits: Vec<(Field, FieldValue)>, context: &ComponentContext<Self>) {
         #[cfg(feature = "graph-measurement")]
         for (field, value) in &edits {
@@ -460,16 +535,39 @@ impl Settings {
     // Preview playback text and progress follow the playback clock between
     // controller snapshots, which arrive only when output changes.
     fn animate(&mut self, context: &ComponentContext<Self>) {
-        if self.page != Page::Schedule || self.input.model.playing.is_none() {
+        if !schedule::playback_shown(self.page, &self.input.model, self.visibility) {
             self.tick = None;
         } else if self.tick.is_none() {
             self.tick =
                 Some(context.set_local_timeout(Duration::from_millis(100), || Message::Tick));
         }
+        match schedule::indicator_delay(
+            self.page,
+            &self.input.model,
+            self.visibility,
+            Timestamp::now(),
+        ) {
+            None => self.indicator = None,
+            Some(delay) if self.indicator.is_none() => {
+                self.indicator = Some(context.set_local_timeout(delay, || Message::Indicator));
+            }
+            Some(_) => {}
+        }
         if !apps::relative_times_shown(self.page, &self.input.model, self.visibility) {
             self.minute = None;
         } else if self.minute.is_none() {
             self.minute = Some(context.set_local_timeout(apps::MINUTE, || Message::Minute));
+        }
+    }
+
+    fn timer_elapsed(&mut self, message: &Message) {
+        #[cfg(feature = "graph-measurement")]
+        crate::activity::record(crate::ActivityEvent::SettingsTick);
+        match message {
+            Message::Tick => self.tick = None,
+            Message::Indicator => self.indicator = None,
+            Message::Minute => self.minute = None,
+            _ => {}
         }
     }
 
@@ -595,16 +693,38 @@ impl Settings {
             .into()
     }
 
-    fn pane_header(&self) -> View {
+    fn schedule(&self) -> Option<&crate::CalculatedSchedule> {
+        self.graph.as_ref().and_then(Calculation::schedule)
+    }
+
+    fn phase(&self) -> status::Phase {
+        let mut control = self.input.model.control(std::time::Instant::now());
+        control.schedule = control.schedule.or_else(|| self.schedule());
+        control.phase(Timestamp::now())
+    }
+
+    fn pane_header(&self, palette: &palette::Palette) -> View {
         let text = &self.input.text;
-        StackPanel::new()
-            .spacing(2.0)
+        let phase = self.phase();
+        Grid::new()
+            .columns([GridLength::Auto, GridLength::STAR])
+            .column_spacing(14.0)
             .margin(Thickness::new(4.0, 4.0, 4.0, 18.0))
             .children((
-                widgets::strong(text!(text, "app-name")),
-                widgets::caption(&self.input.model.status)
-                    .automation_id("pane-status")
-                    .automation_live_setting(AutomationLiveSetting::Polite),
+                phase::view(&phase, phase.art_name(text), palette, 60.0, "pane-art"),
+                StackPanel::new()
+                    .grid_column(1)
+                    .spacing(2.0)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .children((
+                        widgets::strong(text!(text, "app-name")),
+                        widgets::caption(&self.input.model.status)
+                            .foreground(palette.secondary)
+                            .automation_id("pane-status")
+                            .automation_live_setting(schedule::status_live(
+                                self.input.model.preview_active,
+                            )),
+                    )),
             ))
             .into()
     }
@@ -752,21 +872,36 @@ impl Settings {
         let editable = self.input.model.editable();
         let mut controls: Vec<View> = Vec::new();
         if slider {
-            controls.push(
-                Slider::new()
-                    .width(220.0)
-                    .minimum(minimum)
-                    .maximum(maximum)
-                    .step_frequency(step)
-                    .value(value)
-                    .is_enabled(editable)
-                    .automation_id(format!("{id}-slider"))
-                    .automation_name(title)
-                    .on_value_changed(
-                        context.callback(move |value| Message::Number(field, Some(value))),
-                    )
-                    .into(),
+            let control = Slider::new()
+                .width(220.0)
+                .minimum(minimum)
+                .maximum(maximum)
+                .step_frequency(step)
+                .value(value)
+                .is_enabled(editable)
+                .automation_id(format!("{id}-slider"))
+                .automation_name(title)
+                .on_value_changed(
+                    context.callback(move |value| Message::Number(field, Some(value))),
+                );
+            let kelvin = matches!(
+                field,
+                Field::DaytimeKelvin | Field::MiddleKelvin | Field::SleepKelvin
             );
+            controls.push(if kelvin && self.palette().contrast().is_none() {
+                StackPanel::new()
+                    .width(220.0)
+                    .children((
+                        control,
+                        Border::new()
+                            .height(4.0)
+                            .margin(Thickness::new(0.0, -6.0, 0.0, 0.0))
+                            .content(graph::surface(graph::Drawing::Strip, &self.graphics)),
+                    ))
+                    .into()
+            } else {
+                control.into()
+            });
         }
         controls.push(
             NumberBox::new()
@@ -828,6 +963,7 @@ impl Component for Settings {
             timer: None,
             tick: None,
             minute: None,
+            indicator: None,
             visibility: Visibility::Shown,
             dpi: 96,
             icon_requests: apps::IconRequests::default(),
@@ -838,6 +974,11 @@ impl Component for Settings {
             expanded: Expanded::default(),
             location: location::Location::default(),
             coordinate_drafts: schedule::CoordinateDrafts::default(),
+            scheme: ColorScheme::Dark,
+            graph: graph::retained(None, input.model.calculation.as_ref()),
+            graphics: graph::Graphics::default(),
+            #[cfg(feature = "graph-measurement")]
+            _rendering: super::measurement::subscribe(),
         };
         settings.animate(context);
         settings.request_icons();
@@ -849,6 +990,7 @@ impl Component for Settings {
         self.coordinate_drafts
             .follow(&self.input.model, &input.model, &input.region);
         self.input = input.clone();
+        self.graph = graph::retained(self.graph.take(), input.model.calculation.as_ref());
         if input.exiting {
             let _closed = context.close_window();
             return;
@@ -915,9 +1057,11 @@ impl Component for Settings {
                 self.input.command.call(Command::OpenFolder(Folder::Data));
             }
             Message::Command(command) => self.input.command.call(command),
-            Message::Tick => self.tick = None,
-            Message::Minute => self.minute = None,
+            message @ (Message::Tick | Message::Indicator | Message::Minute) => {
+                self.timer_elapsed(&message);
+            }
             Message::Visibility(visibility) => self.visibility = visibility,
+            Message::Scheme(scheme) => self.scheme = scheme,
             Message::OpenDialog(list) => self.dialog = Some(apps::AddDialog::new(list)),
             Message::DialogClosed(result) => self.dialog_closed(result),
             Message::Choose(executable, checked) => {
@@ -973,6 +1117,7 @@ impl Component for Settings {
                 .client_size(1200.0, 1000.0),
         );
         context.on_window_placement(context.callback(|_| Message::Placed));
+        context.on_color_scheme(context.callback(Message::Scheme));
         let mut children: Vec<View> = vec![
             widgets::title(self.page.label(&text))
                 .margin(Thickness::new(0.0, 4.0, 0.0, 20.0))
@@ -1001,7 +1146,7 @@ impl Component for Settings {
             .always_show_header(false)
             .open_pane_length(300.0)
             .is_pane_open(true)
-            .pane_header(self.pane_header())
+            .pane_header(self.pane_header(&self.palette()))
             .keyed_menu_items(
                 Page::ALL
                     .into_iter()
