@@ -2,9 +2,13 @@ use super::Command;
 use super::Message;
 use super::Model;
 use super::NumberControls;
+use super::Page;
 use super::Settings;
+use super::Visibility;
 use super::apps;
+use super::graph;
 use super::location;
+use super::palette::Palette;
 use super::problems;
 use super::problems::FeatureMessage;
 use super::problems::Feedback;
@@ -31,8 +35,10 @@ use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
 use crate::solar_timing_enabled;
+use crate::ui::status;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 use windows_reactor::AutomationLiveSetting;
 use windows_reactor::Border;
@@ -192,7 +198,7 @@ impl Playing {
         (elapsed / self.playback.duration().as_secs_f64()).min(1.0)
     }
 
-    fn instant(&self, now: Instant) -> Option<jiff::Timestamp> {
+    pub(super) fn instant(&self, now: Instant) -> Option<jiff::Timestamp> {
         self.playback
             .at(now.saturating_duration_since(self.started))
             .ok()
@@ -275,26 +281,80 @@ pub(super) fn preview_view(
     }
 }
 
-fn status_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
+pub(super) fn playback_shown(page: Page, model: &Model, visibility: Visibility) -> bool {
+    visibility == Visibility::Shown && page == Page::Schedule && model.playing.is_some()
+}
+
+// The time indicator moves at each whole minute, under one effective pixel at
+// the graph's width.
+pub(super) fn indicator_delay(
+    page: Page,
+    model: &Model,
+    visibility: Visibility,
+    now: jiff::Timestamp,
+) -> Option<Duration> {
+    let shown = visibility == Visibility::Shown
+        && page == Page::Schedule
+        && model.playing.is_none()
+        && model.calculation.is_some();
+    let minute = 60_000;
+    let into = u64::try_from(now.as_millisecond().rem_euclid(minute)).ok()?;
+    shown.then(|| Duration::from_millis(60_000 - into))
+}
+
+fn graph_view(settings: &Settings, palette: &Palette) -> Option<View> {
     let (text, region, model) = (
         &settings.input.text,
         &settings.input.region,
         &settings.input.model,
     );
-    let manual = apps::manual_view(model, text, region);
-    let header = Grid::new()
-        .columns([GridLength::STAR, GridLength::Auto])
-        .column_spacing(20.0)
-        .margin(Thickness::new(20.0, 20.0, 20.0, 12.0))
-        .children((
-            widgets::caption(&manual.description)
-                .vertical_alignment(VerticalAlignment::Center)
-                .automation_id("status-manual")
-                .automation_live_setting(AutomationLiveSetting::Polite),
-            Border::new()
-                .grid_column(1)
-                .content(apps::manual_button(manual, context)),
-        ));
+    let calculation = settings.graph.as_ref()?;
+    let schedule = calculation.schedule()?;
+    let instant = model
+        .playing
+        .as_ref()
+        .and_then(|playing| playing.instant(Instant::now()))
+        .unwrap_or_else(jiff::Timestamp::now);
+    let layout = graph::layout(schedule, instant, palette.contrast().is_some())?;
+    let surface = graph::surface(
+        graph::Drawing::Graph {
+            calculation: calculation.clone(),
+            view: layout.view,
+            palette: *palette,
+        },
+        &settings.graphics,
+    );
+    let start = (model.config().wake_minutes() + 20 * 60) % (24 * 60);
+    let clock = problems::clock(region, start);
+    let chip = |event: &crate::LocalEvent| {
+        text!(
+            text,
+            "graph-event",
+            event = graph::event_key(event.kind),
+            time = problems::clock(region, local_minute(event.local))
+        )
+    };
+    let hour = |hour: i8| {
+        region
+            .format_hour(u16::try_from(hour).unwrap_or_default())
+            .unwrap_or_else(|_| hour.to_string())
+    };
+    Some(graph::plot(graph::Plot {
+        layout: &layout,
+        surface,
+        palette,
+        name: text!(text, "graph-name", clock = clock.as_str()),
+        chip: &chip,
+        hour: &hour,
+    }))
+}
+
+fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
+    let (text, region, model) = (
+        &settings.input.text,
+        &settings.input.region,
+        &settings.input.model,
+    );
     let preview = preview_view(model, text, region, Instant::now());
     let (glyph, label, command) = if preview.playing {
         (
@@ -339,7 +399,7 @@ fn status_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 .into(),
         );
     }
-    let footer = Border::new()
+    Border::new()
         .border_brush(ThemeBrush::CardStroke)
         .border_thickness(Thickness::new(0.0, 1.0, 0.0, 0.0))
         .padding(Thickness::new(20.0, 12.0, 20.0, 12.0))
@@ -368,13 +428,353 @@ fn status_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                                 )),
                         ),
                 )),
+        )
+        .into()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SummaryColumn {
+    pub(super) id: &'static str,
+    pub(super) name: String,
+    pub(super) time: String,
+    pub(super) temperature: String,
+    pub(super) used: bool,
+}
+
+pub(super) fn event_summary(
+    model: &Model,
+    text: &Text,
+    region: &RegionalFormat,
+) -> [SummaryColumn; 4] {
+    let config = model.config();
+    let input = config.input();
+    let column =
+        |id: &'static str, (time, temperature): (String, String), used: bool| SummaryColumn {
+            id,
+            name: text!(text, "event-name", event = id),
+            time,
+            temperature,
+            used,
+        };
+    let kelvin = |value: i64| problems::kelvin(region, value);
+    let solar = |enabled: bool, time: Option<jiff::civil::DateTime>, value: i64| {
+        let off = || (text!(text, "event-off"), text!(text, "event-not-used"));
+        if !enabled {
+            (off(), false)
+        } else if model.solar.failed {
+            (
+                (
+                    text!(text, "event-unavailable"),
+                    text!(text, "event-fallback"),
+                ),
+                false,
+            )
+        } else if let Some(time) = time {
+            (
+                (problems::clock(region, local_minute(time)), kelvin(value)),
+                true,
+            )
+        } else if model.today.is_some() {
+            (off(), false)
+        } else {
+            ((text!(text, "event-pending"), String::new()), false)
+        }
+    };
+    let (sunrise, sunrise_used) = solar(
+        config.sunrise_enabled(),
+        model.today.and_then(|today| today.sunrise),
+        input.daytime_kelvin,
+    );
+    let (sunset, sunset_used) = solar(
+        config.sunset_enabled(),
+        model.today.and_then(|today| today.sunset),
+        input.middle_kelvin,
+    );
+    let wake = if sunrise_used {
+        input.middle_kelvin
+    } else {
+        input.daytime_kelvin
+    };
+    [
+        column(
+            "wake",
+            (problems::clock(region, config.wake_minutes()), kelvin(wake)),
+            true,
+        ),
+        column("sunrise", sunrise, sunrise_used),
+        column("sunset", sunset, sunset_used),
+        column(
+            "bedtime",
+            (
+                problems::clock(region, config.bedtime_minutes()),
+                kelvin(input.sleep_kelvin),
+            ),
+            true,
+        ),
+    ]
+}
+
+fn suppressed_sentence(
+    model: &Model,
+    text: &Text,
+    region: &RegionalFormat,
+    control: &status::Control<'_>,
+    current: jiff::Timestamp,
+) -> Option<String> {
+    let kelvin = problems::kelvin(region, 6500);
+    let first = if control.suppression.manual() {
+        model.manual_end.map_or_else(
+            || text!(text, "sentence-manual-active", kelvin = kelvin.as_str()),
+            |minute| {
+                text!(
+                    text,
+                    "sentence-manual",
+                    kelvin = kelvin.as_str(),
+                    time = problems::clock(region, minute)
+                )
+            },
+        )
+    } else if control.suppression.automatic {
+        let app = model
+            .recent
+            .iter()
+            .find(|recent| recent.focus_ended.is_none())
+            .map(|recent| apps::display_name(model, &recent.executable));
+        app.map_or_else(
+            || text!(text, "sentence-automatic-unknown", kelvin = kelvin.as_str()),
+            |app| {
+                text!(
+                    text,
+                    "sentence-automatic",
+                    kelvin = kelvin.as_str(),
+                    app = app
+                )
+            },
+        )
+    } else {
+        return None;
+    };
+    let scheduled = control
+        .schedule
+        .and_then(|schedule| status::scheduled_kelvin(schedule, current))
+        .map(|value| {
+            text!(
+                text,
+                "sentence-schedule-at",
+                kelvin = problems::kelvin(region, i64::from(value))
+            )
+        });
+    Some(scheduled.map_or_else(|| first.clone(), |scheduled| format!("{first} {scheduled}")))
+}
+
+pub(super) fn status_sentence(
+    model: &Model,
+    text: &Text,
+    region: &RegionalFormat,
+    control: &status::Control<'_>,
+    current: jiff::Timestamp,
+) -> String {
+    let kelvin = |value: u16| problems::kelvin(region, i64::from(value));
+    let clock = |time: jiff::civil::DateTime| problems::clock(region, local_minute(time));
+    if !model.management.is_on() {
+        return text!(text, "sentence-not-managing");
+    }
+    if control.preview_active {
+        let time = control
+            .playback
+            .and_then(super::local_minute)
+            .map(|minute| problems::clock(region, minute))
+            .unwrap_or_default();
+        let resumes = if control.suppression.active() {
+            "suppression"
+        } else {
+            "schedule"
+        };
+        return text!(text, "sentence-preview", time = time, resumes = resumes);
+    }
+    match (model.scheduling, model.last_scheduled) {
+        (SchedulingState::Stopped, _) | (SchedulingState::Retained, None) => {
+            return text!(text, "sentence-control-unavailable");
+        }
+        (SchedulingState::Retained, Some(value)) => {
+            return text!(text, "sentence-retained", kelvin = kelvin(value));
+        }
+        _ => {}
+    }
+    if let Some(sentence) = suppressed_sentence(model, text, region, control, current) {
+        return sentence;
+    }
+    let Some(schedule) = control.schedule else {
+        return text!(text, "status-calculating");
+    };
+    if let Some(status::Position::Shifting {
+        event,
+        local,
+        kelvin: to,
+        ..
+    }) = status::position(schedule, current)
+    {
+        return text!(
+            text,
+            "sentence-reaching",
+            kelvin = kelvin(to),
+            time = clock(local),
+            event = graph::event_key(event)
         );
+    }
+    let Some(next) = status::next_change(schedule, current) else {
+        return status::scheduled_kelvin(schedule, current).map_or_else(
+            || text!(text, "status-calculating"),
+            |value| text!(text, "sentence-schedule-at", kelvin = kelvin(value)),
+        );
+    };
+    next.from.map_or_else(
+        || text!(text, "sentence-holding", time = clock(next.local)),
+        |from| {
+            text!(
+                text,
+                "sentence-next",
+                kelvin = kelvin(next.kelvin),
+                time = clock(next.local),
+                event = graph::event_key(next.event),
+                direction = if next.warming { "warming" } else { "cooling" },
+                start = clock(from)
+            )
+        },
+    )
+}
+
+fn summary_view(settings: &Settings, palette: &Palette) -> View {
+    let columns = event_summary(
+        &settings.input.model,
+        &settings.input.text,
+        &settings.input.region,
+    );
+    let contrast = palette.contrast();
+    Grid::new()
+        .columns([GridLength::STAR; 4])
+        .column_spacing(8.0)
+        .margin(Thickness::new(20.0, 16.0, 20.0, 18.0))
+        .children(
+            columns
+                .into_iter()
+                .zip(0..)
+                .map(|(column, index)| {
+                    let gray = contrast
+                        .filter(|_| !column.used)
+                        .map(|colors| colors.gray_text);
+                    let time = widgets::strong(&column.time)
+                        .automation_id(format!("summary-{}-time", column.id));
+                    StackPanel::new()
+                        .grid_column(index)
+                        .opacity(if column.used || contrast.is_some() {
+                            1.0
+                        } else {
+                            0.5
+                        })
+                        .automation_id(format!("summary-{}", column.id))
+                        .children((
+                            widgets::caption(&column.name)
+                                .foreground(gray.unwrap_or(palette.secondary)),
+                            match gray {
+                                Some(gray) => time.foreground(gray),
+                                None => time,
+                            },
+                            widgets::caption(&column.temperature)
+                                .foreground(gray.unwrap_or(palette.secondary)),
+                        ))
+                        .into()
+                })
+                .collect::<Vec<View>>(),
+        )
+        .into()
+}
+
+// The Preview status changes on every frame, so it stays outside the live
+// region like the Preview detail.
+pub(super) fn status_live(preview_active: bool) -> AutomationLiveSetting {
+    if preview_active {
+        AutomationLiveSetting::Off
+    } else {
+        AutomationLiveSetting::Polite
+    }
+}
+
+fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
+    let (text, region, model) = (
+        &settings.input.text,
+        &settings.input.region,
+        &settings.input.model,
+    );
+    let palette = settings.palette();
+    let mut control = model.control(Instant::now());
+    control.schedule = control.schedule.or_else(|| settings.schedule());
+    let current = jiff::Timestamp::now();
+    let phase = control.phase(current);
+    let temperature = if model.management.is_on() {
+        control.kelvin(current).map_or_else(
+            || text!(text, "output-unknown"),
+            |value| problems::kelvin(region, i64::from(value)),
+        )
+    } else {
+        text!(text, "output-off")
+    };
+    let live = status_live(control.preview_active);
+    Grid::new()
+        .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+        .column_spacing(20.0)
+        .margin(Thickness::new(20.0, 20.0, 20.0, 12.0))
+        .children((
+            super::phase::view(&phase, phase.art_name(text), &palette, 64.0, "status-art"),
+            StackPanel::new()
+                .grid_column(1)
+                .spacing(2.0)
+                .vertical_alignment(VerticalAlignment::Center)
+                .children((
+                    StackPanel::new()
+                        .orientation(Orientation::Horizontal)
+                        .spacing(12.0)
+                        .children((
+                            widgets::title(temperature).automation_id("status-temperature"),
+                            Border::new()
+                                .vertical_alignment(VerticalAlignment::Center)
+                                .content(widgets::pill(phase.label(text))),
+                        )),
+                    widgets::body(status_sentence(model, text, region, &control, current))
+                        .foreground(palette.secondary)
+                        .automation_id("status-sentence")
+                        .automation_live_setting(live),
+                )),
+            Border::new()
+                .grid_column(2)
+                .vertical_alignment(VerticalAlignment::Top)
+                .content(apps::manual_button(
+                    apps::manual_view(model, text, region),
+                    context,
+                )),
+        ))
+        .into()
+}
+
+fn status_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
+    let palette = settings.palette();
     Border::new()
         .background(ThemeBrush::CardBackground)
         .border_brush(ThemeBrush::CardStroke)
         .border_thickness(1.0)
         .corner_radius(8.0)
-        .content(StackPanel::new().children((header, footer)))
+        .content(
+            StackPanel::new().children(
+                [status_header(settings, context)]
+                    .into_iter()
+                    .chain(graph_view(settings, &palette))
+                    .chain([
+                        summary_view(settings, &palette),
+                        preview_footer(settings, context),
+                    ])
+                    .collect::<Vec<View>>(),
+            ),
+        )
         .into()
 }
 

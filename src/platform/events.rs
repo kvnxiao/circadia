@@ -22,6 +22,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_POWERBROADCAST;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_QUERYENDSESSION;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_SETTINGCHANGE;
+use windows_sys::Win32::UI::WindowsAndMessaging::WM_SYSCOLORCHANGE;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_TIMECHANGE;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_WTSSESSION_CHANGE;
 use windows_sys::Win32::UI::WindowsAndMessaging::WTS_SESSION_LOCK;
@@ -39,7 +40,8 @@ pub enum DesktopEvent {
     WorkerChanged,
     /// Reevaluate the changed system clock.
     ClockChanged,
-    /// Compare Windows time-zone settings before requesting recalculation.
+    /// Reread the contrast theme and compare Windows time-zone settings before
+    /// requesting recalculation.
     SettingsChanged,
     /// Stop Preview for a locked user session.
     SessionLocked,
@@ -220,7 +222,7 @@ fn event(message: u32, wparam: usize, taskbar: u32) -> Option<DesktopEvent> {
         ACTIVATE_SETTINGS => Some(DesktopEvent::Activate),
         WORKER_CHANGED => Some(DesktopEvent::WorkerChanged),
         WM_TIMECHANGE => Some(DesktopEvent::ClockChanged),
-        WM_SETTINGCHANGE => Some(DesktopEvent::SettingsChanged),
+        WM_SETTINGCHANGE | WM_SYSCOLORCHANGE => Some(DesktopEvent::SettingsChanged),
         WM_WTSSESSION_CHANGE => match u32::try_from(wparam).ok()? {
             WTS_SESSION_LOCK => Some(DesktopEvent::SessionLocked),
             WTS_SESSION_UNLOCK => Some(DesktopEvent::SessionUnlocked),
@@ -343,6 +345,7 @@ mod tests {
         .expect("hidden lifecycle window");
         send(&window, ACTIVATE_SETTINGS, 0);
         send(&window, WM_TIMECHANGE, 0);
+        send(&window, WM_SYSCOLORCHANGE, 0);
         send(&window, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK as usize);
         send(&window, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK as usize);
         send(&window, WM_POWERBROADCAST, PBT_APMSUSPEND as usize);
@@ -358,6 +361,7 @@ mod tests {
             [
                 DesktopEvent::Activate,
                 DesktopEvent::ClockChanged,
+                DesktopEvent::SettingsChanged,
                 DesktopEvent::SessionLocked,
                 DesktopEvent::SessionUnlocked,
                 DesktopEvent::Suspend,

@@ -91,6 +91,8 @@ pub use controller::ControllerWorker;
 #[cfg(windows)]
 pub use controller::ExitKind;
 #[cfg(windows)]
+pub use controller::LocalEvent;
+#[cfg(windows)]
 pub use controller::ManagementState;
 #[cfg(windows)]
 pub use controller::NativeCycle;
@@ -183,13 +185,19 @@ pub use schedule::AnchorKind;
 #[cfg(windows)]
 pub use schedule::Curve;
 #[cfg(windows)]
+pub use schedule::EventKind;
+#[cfg(windows)]
 pub use schedule::GraphSegment;
+#[cfg(windows)]
+pub use schedule::Gridline;
 #[cfg(windows)]
 pub use schedule::Playback;
 #[cfg(windows)]
 pub use schedule::Schedule;
 #[cfg(windows)]
 pub use schedule::ScheduleError;
+#[cfg(windows)]
+pub use schedule::ScheduleEvent;
 #[cfg(windows)]
 pub use schedule::Segment;
 #[cfg(windows)]
@@ -204,6 +212,8 @@ pub use schedule::TimeInterval;
 pub use schedule::calculate_solar;
 #[cfg(windows)]
 pub use schedule::graph_interval;
+#[cfg(windows)]
+pub use schedule::gridlines;
 #[cfg(windows)]
 pub use schedule::resolve_anchors;
 #[cfg(windows)]

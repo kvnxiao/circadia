@@ -3,11 +3,15 @@ date: 2026-10-22
 questions:
   - How can a separate harness measure the release application's CPU, memory, and context switches?
   - What limits apply to sampled thread counters and the Windows metadata layout?
+  - How long does the redesigned settings window take to show a schedule edit in its graph?
+  - How much CPU, memory, and background activity does the redesigned settings window add while open, and what remains after it closes?
 observed-in:
   - Microsoft Windows API and MS-TSTS documentation retrieved 2026-10-22
   - windows-sys 0.61.2 WindowsProgramming and Wdk SystemInformation bindings
   - Circadia measure-resources quick check on Windows 11 x64 build 26300.9711
-recheck-when: Windows versions, target architecture, metadata bindings, sampling intervals, or measurement scenarios change.
+  - Circadia measure-graph on Windows 11 x64 build 26300.9711 (UBR 0x25EF), 2026-10-27, windows-rs 0496ec1
+  - Circadia measure-resources and measure-activity on Windows 11 x64 build 26300 (UBR 0x25EF), 2026-10-27, Rust 1.99.0, windows-rs 0496ec1
+recheck-when: Windows versions, target architecture, metadata bindings, sampling intervals, measurement scenarios, the graph renderer, or the settings window change.
 ---
 
 # Application resource measurement
@@ -45,3 +49,41 @@ The metadata interpretation is verified on the recorded x64 host. Other supporte
 ## Machine metadata
 
 The harness records attached display modes before sampling. Microsoft's `EnumDisplayDevicesW` contract ends enumeration when the call returns false; it does not define an extended `GetLastError` result. The harness treats that return as completion and requires at least one attached display. [EnumDisplayDevicesW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumdisplaydevicesw).
+
+## Graph update latency in the redesigned window
+
+**Measured on 2026-10-27:** `just measure-graph` ran the release application with the `graph-measurement` feature, its bundled Windows App SDK runtime, isolated configuration with management on, and the simulated Night Light backend. The base revision was `00e55ff` with the status-and-graph working-tree changes. The reference machine was an AMD Ryzen 7 9800X3D (16 logical processors) on Windows 11 x64 build 26300 (update build revision 0x25EF), with a 2560 by 1440 primary display at 480 Hz and settings at 96 DPI in a 1216 by 1008 pixel window.
+
+Each sample runs from the settings component's receipt of a number-field commit, sent through the UI Automation range value pattern, to the first XAML `CompositionTarget.Rendering` callback after the graph's composition surface drew the edited configuration. It excludes the time until the display shows the frame. A simulated temperature operation was held blocked during the edits, so the graph followed the calculation thread's result before the controller applied it.
+
+| Input cases | Samples | Range |
+| :-- | --: | :-- |
+| Sleep and Daytime temperatures, solar timing off | 6 | 11.5 to 13.3 ms |
+| Sleep and Daytime temperatures, solar timing on (Sunrise and Sunset at latitude 40, longitude -74) | 6 | 12.5 to 16.2 ms |
+| Sleep temperature with an injected solar calculation failure (Wake/Bedtime-only fallback) | 1 | 14.8 ms |
+| Sleep temperature after solar calculation recovers | 1 | 13.1 ms |
+| Sleep temperature after a resume notification cancelled a 60-second Preview | 1 | 14.0 ms |
+
+All 15 samples were within the 100 ms bound that REQ-display-generated-curve sets for graph updates; the maximum was 16.2 ms. A two-second Preview moved the graph's current-time marker through 8 rendered positions while a simulated temperature operation stayed blocked. The run did not measure Wake or Bedtime edits, because their time picker has no UI Automation value pattern; their schedule calculation follows the same path as the temperature edits.
+
+## Resource use and settings activity in the redesigned window
+
+**Measured on 2026-10-27:** `just measure-resources` ran the ordinary release build (Rust 1.99.0, optimized with line tables) with its bundled Windows App SDK runtime, base revision `00e55ff` with the status-and-graph working-tree changes. The machine was the one described in the previous section, with 95.7 GiB of physical memory and an NVIDIA GeForce RTX 5090 driving the 2560 by 1440, 480 Hz display; settings used 96 DPI in a 1216 by 1008 pixel window. Each configuration had management on and solar timing off; the idle schedule kept a constant 3400 K. The run changed live Night Light and ended with Night Light off and its preview state cleared, and the application log had no warning or error record.
+
+CPU percentages divide process CPU seconds by sampled seconds and by 16 logical processors. Memory cells show median / peak in MiB. The table lists live threads only for the idle scenarios, which compare settings closed, open, and closed again.
+
+| Scenario | Sampled seconds | CPU seconds | CPU % | Working set MiB | Private MiB | Sampled context switches | Live threads at the end |
+| :-- | --: | --: | --: | --: | --: | --: | --: |
+| Idle, settings initially closed | 600.000 | 0.250 | 0.0026 | 68.5 / 68.7 | 120.5 / 120.7 | 56,547 | 27 |
+| Idle, settings open | 60.000 | 0.078 | 0.0081 | 143.3 / 143.9 | 201.3 / 201.4 | 16,995 | 118 |
+| Idle, settings closed again | 60.000 | 0.047 | 0.0049 | 136.9 / 138.6 | 176.6 / 194.3 | 11,326 | 63 |
+| Preview, settings open | 45.000 | 14.641 | 2.0334 | 149.8 / 178.6 | 209.8 / 239.3 | 133,248 | |
+| One-minute scheduled transition, settings closed | 45.000 | 0.000 | 0.0000 | 68.4 / 68.5 | 120.4 / 120.5 | 6,317 | |
+| Fade into manual suppression, settings open | 8.000 | 0.641 | 0.5005 | 202.3 / 202.3 | 259.9 / 259.9 | 5,838 | |
+| Fade out of manual suppression, settings open | 8.000 | 0.609 | 0.4761 | 202.8 / 202.8 | 260.5 / 260.5 | 5,384 | |
+
+An earlier full run on the same build completed every scenario but failed its log check: the harness sent the session-end message immediately after clicking Stop, and the application logged a warning when it submitted the Stop command to the stopped controller. The harness now waits until the settings controls are editable again before it sends the session-end message. That run's idle memory and context-switch values agree with the table within 4%. Its Preview sample used 5.078 CPU seconds (0.7053%) and 39,308 context switches, so Preview CPU varied by a factor of about 3 between the two runs; this measurement does not identify the cause.
+
+`just measure-activity` ran the same source with the `graph-measurement` instrumentation and the simulated Night Light backend. Its 600-second idle observation with settings closed recorded no foreground event, foreground query, date recomputation, native call, settings timer tick, or settings view update, so it established a ten-minute interval without focus changes or date boundaries. With manual suppression active, the open settings window on the Schedule page recorded exactly 1 timer tick and 1 view update during 60.03 seconds that crossed one minute boundary; the tick is the graph's current-time marker. After settings closed, 59.93 seconds across the next minute boundary recorded no tick or view update. The controlled transition, automatic suppression, manual-expiry, and native-recovery phases also passed. The `graph-measurement` build also registers a XAML `CompositionTarget.Rendering` callback for its graph samples while settings is open, so that build runs a callback on every frame; the activity trace records settings timer ticks and view updates, not those callbacks.
+
+**Inference:** in the ordinary build, the open window does not wake Circadia's UI code on every frame. That build registers no rendering callback, and its open window had 16,995 sampled context switches per minute, about 283 per second over 118 threads, which is below the display's 480 Hz frame rate. That rate exceeds the closed-again rate of about 189 per second; the activity trace attributes none of the difference to Circadia's settings timers or view updates, so the remainder comes from Windows App SDK, XAML, and graphics threads in the process. These counters do not identify those threads. Closing settings released about 25 MiB of private memory from the open-window median, and 36 more threads remained than before settings first opened; one open and close cycle does not establish whether memory grows over repeated cycles.

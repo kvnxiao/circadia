@@ -459,3 +459,33 @@ fn retry_is_disabled_while_an_earlier_retry_is_unprocessed() {
     model.retrying = true;
     assert!(!native_banner(&fixture, &model).enabled);
 }
+
+#[test]
+fn a_time_zone_failure_without_a_last_temperature_shows_retry_on_every_page() {
+    let fixture = Fixture::new();
+    let (_configuration, mut model) = native_model(&fixture, ManagementState::On, &[]);
+    model.scheduling = SchedulingState::Stopped;
+    for page in Page::ALL {
+        let page_banners = banners(&model, &fixture.text, &fixture.region, page);
+        let [banner] = page_banners.as_slice() else {
+            panic!("one banner on {page:?}, got {page_banners:?}");
+        };
+        assert_eq!(banner.id, "banner-schedule");
+        assert_eq!(banner.severity, InfoBarSeverity::Error);
+        assert!(!banner.closable);
+        assert!(banner.enabled);
+        assert_eq!(banner.actions, [(Action::RetryNative, "Retry".to_owned())]);
+    }
+    model.retrying = true;
+    assert!(!banners(&model, &fixture.text, &fixture.region, Page::Schedule)[0].enabled);
+    model.scheduling = SchedulingState::Retained;
+    assert_eq!(
+        ids(&banners(
+            &model,
+            &fixture.text,
+            &fixture.region,
+            Page::Schedule
+        )),
+        Vec::<&str>::new()
+    );
+}

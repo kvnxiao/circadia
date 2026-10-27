@@ -2,7 +2,7 @@
 
 These checks run the built Circadia executable on the Windows desktop and inspect it through UI Automation. Some change live Windows Night Light; others replace it with a simulated Night Light backend. Run them from the repository root on an interactive Windows 11 x64 desktop with an English Windows Shell. Install the development tools listed in the [project README](../README.md). Live native checks are separate from `just check`. The lifecycle, settings, and Explorer checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, shutdown, deployment, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
 
-The harness has not been updated for the current settings window. It still checks an earlier window that had Save, Discard, a close prompt, Preview controls, a graph, the executable lists, location and startup controls, and reloading of external configuration changes. The current window arranges Preview, the executable lists, and the location and startup controls differently and has no Save, Discard, close prompt, graph, or reloading of external configuration changes. Recipes that operate those controls or replace the configuration file while Circadia runs fail, and each section below describes the checks as written for the earlier window.
+The [graph rendering](#graph-rendering), [worker activity](#worker-activity-and-idle-behavior), and [CPU and memory](#cpu-and-memory) recipes drive the current settings window. Each starts Circadia with `manage_night_light = true` in its configuration file, which Circadia reads at startup, so Circadia controls Night Light without first asking the user to allow it. The other recipes have not been updated. They still check an earlier window that had Save, Discard, a close prompt, the executable lists, location and startup controls, and reloading of external configuration changes. The current window arranges the executable lists and the location and startup controls differently and has no Save, Discard, close prompt, or reloading of external configuration changes. Recipes that operate those controls or replace the configuration file while Circadia runs fail, and their sections below describe the checks as written for the earlier window.
 
 ## Application lifecycle
 
@@ -144,15 +144,19 @@ Close any running Circadia instance, then run:
 just measure-graph
 ```
 
-The recipe builds an optimized application with its bundled runtime and measurement instrumentation. It opens the real settings window with isolated configuration and a simulated Night Light backend. It changes settings through UI Automation and scrolls the graph into view. It does not change Windows Night Light.
+The recipe builds an optimized application with its bundled runtime and measurement instrumentation. It opens the real settings window with isolated configuration and a simulated Night Light backend. It sets the temperature number fields through their UI Automation range-value pattern, selects pages through the selection pattern of the navigation items, and scrolls the graph into view. It does not change Windows Night Light.
 
-Each sample starts when Reactor delivers the matching native text-change event. It ends at the first XAML `CompositionTarget.Rendering` callback after the UI applies the graph calculated from that edit. The graph must be visible. This measures application rendering readiness, not physical display presentation or visible Night Light response.
+Each sample starts when settings applies the edit of a number field. It ends at the first XAML `CompositionTarget.Rendering` callback after settings draws the graph surface from a calculation of the edited configuration. The graph must be visible. This measures application rendering readiness, not physical display presentation or visible Night Light response.
 
-The tool records 21 graph-latency samples. Eighteen change the Sleep temperature, Wake clock, or Bedtime clock, split evenly between disabled solar timing and enabled Sunrise/Sunset targets. Two more Sleep-temperature edits test solar calculation failure and recovery. The last edit follows the resume check below. The tool fails if any sample exceeds 100 ms. A simulated temperature operation remains blocked during those edits.
+The tool records 15 graph-latency samples:
 
-Separate form checks verify that Morning/Evening is labeled unused when both solar inputs are off. They also check rounding to the nearest 10 K, with ties toward higher kelvin, rejection of invalid input, and correction of edits that violate Daytime >= Morning/Evening >= Sleep.
+- Twelve alternate Sleep and Daytime temperature edits, six with solar timing off and six with Sunrise and Sunset targets.
+- Two Sleep-temperature edits test solar calculation failure and recovery. The failure case also requires the Retry button on the Follow sunrise and sunset card and no Sunrise label on the graph.
+- The last edit follows the resume check below.
 
-A separate two-second Preview must advance through rendered graph positions and return to editable settings while another output operation remains blocked. The resume check starts a 60-second Preview and sends a synthetic resume notification without a preceding suspend notification. Editing must become available within the harness's 20-second timeout, and a Sleep-temperature edit must update the graph while output remains blocked. This checks cancellation before playback could finish naturally; it does not put Windows to sleep or verify hardware resume delivery.
+The tool fails if any sample exceeds 100 ms. A simulated temperature operation for manual suppression remains blocked during the first 14 edits, so these samples show that the graph does not wait for Night Light output. Wake and Bedtime edits are not measured, because the time picker does not expose a UI Automation value pattern.
+
+A two-second Preview must advance through at least eight rendered graph positions while its own output operation remains blocked; editing returns after the harness releases the operation. The resume check sets the Preview length to 60 seconds on the Transitions page, starts Preview, and sends a synthetic resume notification without a preceding suspend notification. Editing must become available within the harness's 20-second timeout, before playback could finish naturally. A Sleep-temperature edit then must update the graph while a manual-suppression output operation remains blocked. Output is not blocked during the resume notification, because settings becomes editable only after the controller thread, which writes Night Light, reports the end of Preview, and it reports that only after a blocked operation returns. This check does not put Windows to sleep or verify hardware resume delivery.
 
 The tool prints the processor, logical processor count, Windows build, primary display mode, settings DPI, build profile, source revision, and individual results. Uncommitted source changes are included in the build.
 
@@ -212,7 +216,7 @@ Close any running Circadia instance, then run:
 just measure-activity
 ```
 
-The recipe runs the complete release application with a simulated Night Light backend and isolated configuration. It records worker wakeups, foreground events and queries, temperature-curve evaluations, schedule calculation requests, native work, selected deadlines, and updates to the settings window. It does not change Windows Night Light or the Windows clock. Ordinary application builds exclude the instrumentation.
+The recipe runs the complete release application with a simulated Night Light backend and isolated configuration. The harness sends later configurations to the controller thread as `Configure` commands, the same messages that settings edits send; it does not write them to the configuration file. It records worker wakeups, foreground events and queries, temperature-curve evaluations, schedule calculation requests, native work, selected deadlines, and updates to the settings window. It does not change Windows Night Light or the Windows clock. Ordinary application builds exclude the instrumentation.
 
 The first phase observes constant 3400 K output for ten minutes with settings closed, using real clocks and Windows waits. Any native call or update to the settings window fails the check. Foreground queries and deadline wakeups must correspond to foreground or date events. A strict stable-focus result additionally requires no foreground changes or date boundary during the observation. Desktop activity can prevent that result; the tool prints the event counts and reports the limitation.
 
@@ -220,12 +224,12 @@ Later phases use controlled application clocks and explicit worker wakeups. They
 
 - A one-hour 6500 K to 2400 K transition emits exactly 410 distinct 10 K steps at independently calculated deadlines.
 - Automatic suppression removes underlying temperature deadlines while preserving one date-boundary recalculation.
-- Closing settings stops its countdown updates while manual suppression still expires after exactly one hour.
+- With manual suppression active, the open settings window on the Schedule page updates only for the graph's current-time marker, once per whole minute. An observation across one minute boundary must record exactly one timer tick and at most two view updates. After settings closes, an observation across the next minute boundary must record none, and manual suppression still expires after exactly one hour.
 - Persistent native read failures use 100, 200, 400, and then 800 ms retry delays. Successful recovery stops retries.
 
-These phases verify controller deadline selection and handling, not Windows timeout delivery or foreground events from actual games. The manual-suppression phase opens and closes settings through UI Automation without mouse or keyboard input; the window can take focus. The tool prints the raw activity and simulated-operation traces after exit. Capture overflow fails the check.
+These phases verify controller deadline selection and handling, not Windows timeout delivery or foreground events from actual games. The manual-suppression phase waits for minute boundaries of the real clock, so it takes up to about three minutes. It opens and closes settings through UI Automation without mouse or keyboard input; the window can take focus. The tool prints the raw activity and simulated-operation traces after exit. Capture overflow fails the check.
 
-Use `just measure-activity --quick` to shorten the real idle observation to two seconds. It runs the same controlled phases but cannot establish ten-minute idleness. This instrumentation run does not replace the ordinary-build resource measurements below.
+Use `just measure-activity --quick` to shorten the real idle observation to two seconds. It runs the same controlled phases, including the minute-boundary observations, but cannot establish ten-minute idleness. This instrumentation run does not replace the ordinary-build resource measurements below.
 
 ## CPU and memory
 

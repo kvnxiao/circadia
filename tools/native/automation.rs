@@ -27,22 +27,71 @@ impl Automation {
     #[cfg(feature = "graph-measurement")]
     #[expect(
         unsafe_code,
-        reason = "read keyboard focus from an owned UI Automation control"
+        reason = "read a number control through its UI Automation range value pattern"
     )]
-    pub(super) fn focused(
+    pub(super) fn number(
         &self,
         window: &winsafe::HWND,
         process: u32,
         id: &str,
-    ) -> io::Result<Option<bool>> {
+    ) -> io::Result<Option<f64>> {
+        use windows::Win32::UI::Accessibility::IUIAutomationRangeValuePattern;
+        use windows::Win32::UI::Accessibility::UIA_RangeValuePatternId;
         self.find(window, process, id)?
             .map(|element| {
-                // SAFETY: The element belongs to the process-checked window.
-                unsafe { element.CurrentHasKeyboardFocus() }
-                    .map(windows::core::BOOL::as_bool)
-                    .map_err(io::Error::other)
+                // SAFETY: The pattern identifier matches the requested
+                // interface.
+                let pattern: IUIAutomationRangeValuePattern =
+                    unsafe { element.GetCurrentPatternAs(UIA_RangeValuePatternId) }
+                        .map_err(io::Error::other)?;
+                // SAFETY: The live pattern returns a scalar.
+                unsafe { pattern.CurrentValue() }.map_err(io::Error::other)
             })
             .transpose()
+    }
+
+    #[cfg(feature = "graph-measurement")]
+    #[expect(
+        unsafe_code,
+        reason = "select a navigation item in the owned settings window"
+    )]
+    pub(super) fn select(&self, window: &winsafe::HWND, process: u32, id: &str) -> io::Result<()> {
+        use windows::Win32::UI::Accessibility::IUIAutomationSelectionItemPattern;
+        use windows::Win32::UI::Accessibility::UIA_SelectionItemPatternId;
+        let element = self
+            .find(window, process, id)?
+            .ok_or_else(|| io::Error::other(format!("control {id} is absent")))?;
+        // SAFETY: The pattern identifier matches the requested interface.
+        let pattern: IUIAutomationSelectionItemPattern =
+            unsafe { element.GetCurrentPatternAs(UIA_SelectionItemPatternId) }
+                .map_err(io::Error::other)?;
+        // SAFETY: The live pattern has no borrowed inputs or output pointers.
+        unsafe { pattern.Select() }.map_err(io::Error::other)
+    }
+
+    #[cfg(feature = "graph-measurement")]
+    #[expect(
+        unsafe_code,
+        reason = "commit a number control through its UI Automation range value pattern"
+    )]
+    pub(super) fn set_number(
+        &self,
+        window: &winsafe::HWND,
+        process: u32,
+        id: &str,
+        value: f64,
+    ) -> io::Result<()> {
+        use windows::Win32::UI::Accessibility::IUIAutomationRangeValuePattern;
+        use windows::Win32::UI::Accessibility::UIA_RangeValuePatternId;
+        let element = self
+            .find(window, process, id)?
+            .ok_or_else(|| io::Error::other(format!("control {id} is absent")))?;
+        // SAFETY: The pattern identifier matches the requested interface.
+        let pattern: IUIAutomationRangeValuePattern =
+            unsafe { element.GetCurrentPatternAs(UIA_RangeValuePatternId) }
+                .map_err(io::Error::other)?;
+        // SAFETY: The live pattern takes a scalar.
+        unsafe { pattern.SetValue(value) }.map_err(io::Error::other)
     }
 
     #[expect(
@@ -72,7 +121,7 @@ impl Automation {
     pub(super) fn show_graph(&self, window: &winsafe::HWND, process: u32) -> io::Result<bool> {
         use windows::Win32::UI::Accessibility::IUIAutomationScrollPattern;
         use windows::Win32::UI::Accessibility::UIA_ScrollPatternId;
-        let Some(graph) = self.find(window, process, "schedule-graph")? else {
+        let Some(graph) = self.find(window, process, "graph")? else {
             return Err(io::Error::other(
                 "generated graph has no UI Automation element",
             ));
@@ -90,7 +139,7 @@ impl Automation {
         if bounds.top >= viewport.top
             && bounds.bottom <= viewport.bottom
             && bounds.bottom > bounds.top
-            && f64::from(bounds.bottom - bounds.top) >= f64::from(bounds.right - bounds.left) * 0.35
+            && bounds.right > bounds.left
         {
             return Ok(true);
         }

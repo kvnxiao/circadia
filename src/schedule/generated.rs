@@ -24,12 +24,36 @@ pub struct ActivityInterval {
     pub bedtime: Timestamp,
 }
 
+/// Name the schedule event that a selected target reaches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventKind {
+    /// The configured Wake clock.
+    Wake,
+    /// A selected Sunrise target.
+    Sunrise,
+    /// A selected Sunset target.
+    Sunset,
+    /// The configured Bedtime clock.
+    Bedtime,
+}
+
+/// Place one selected schedule target at its actual instant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScheduleEvent {
+    /// Event that the target belongs to.
+    pub kind: EventKind,
+    /// Actual instant before minimum-spacing merges.
+    pub instant: Timestamp,
+}
+
 /// Supply one calculated curve and its solar warnings to output and graph
 /// callers.
 #[derive(Debug)]
 pub struct Schedule {
     /// Curve valid over the requested interval, with interpolation neighbors.
     pub curve: Curve,
+    /// Selected targets in chronological order, including omitted merges.
+    pub events: Vec<ScheduleEvent>,
     /// Activity intervals whose solar order was unusable.
     pub conflicts: Vec<ActivityInterval>,
     /// Calculation error when the curve uses only Wake and Bedtime.
@@ -65,6 +89,10 @@ impl Schedule {
     }
 }
 
+fn event(kind: EventKind, instant: Timestamp) -> ScheduleEvent {
+    ScheduleEvent { kind, instant }
+}
+
 fn from_anchors(
     config: &Config,
     anchors: &[Anchor],
@@ -85,9 +113,17 @@ fn from_anchors(
             },
         })
         .collect();
+    let manual_events: Vec<_> = anchors
+        .iter()
+        .map(|anchor| match anchor.kind {
+            AnchorKind::Wake => event(EventKind::Wake, anchor.instant),
+            AnchorKind::Bedtime => event(EventKind::Bedtime, anchor.instant),
+        })
+        .collect();
     if !config.sunrise_enabled() && !config.sunset_enabled() {
         return Ok(Schedule {
             curve: Curve::new(manual, duration)?,
+            events: manual_events,
             conflicts: Vec::new(),
             solar_error: None,
         });
@@ -97,6 +133,7 @@ fn from_anchors(
         .coordinates
         .ok_or_else(ScheduleError::curve)?;
     let mut selected = manual.clone();
+    let mut events = manual_events.clone();
     let mut conflicts = Vec::new();
     let maximum = SignedDuration::from_secs(i64::from(duration) * 60);
     for (index, (wake, bedtime)) in anchors.iter().zip(anchors.iter().skip(1)).enumerate() {
@@ -117,6 +154,7 @@ fn from_anchors(
             Err(error) => {
                 return Ok(Schedule {
                     curve: Curve::new(manual, duration)?,
+                    events: manual_events,
                     conflicts: Vec::new(),
                     solar_error: Some(error),
                 });
@@ -141,16 +179,20 @@ fn from_anchors(
                 instant: sunrise,
                 kelvin: daytime,
             });
+            events.push(event(EventKind::Sunrise, sunrise));
         }
         if let Some(sunset) = selection.sunset {
             selected.push(Target {
                 instant: sunset,
                 kelvin: middle,
             });
+            events.push(event(EventKind::Sunset, sunset));
         }
     }
+    events.sort_by_key(|event| event.instant);
     Ok(Schedule {
         curve: Curve::new(selected, duration)?,
+        events,
         conflicts,
         solar_error: None,
     })

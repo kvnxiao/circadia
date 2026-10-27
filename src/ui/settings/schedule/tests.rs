@@ -657,6 +657,8 @@ fn calculated(
         },
         result: Ok(crate::CalculatedSchedule {
             curve: Arc::new(curve),
+            events: Vec::new(),
+            gridlines: Vec::new(),
             valid: graph,
             graph,
             views: vec![
@@ -815,4 +817,308 @@ fn a_partial_position_stays_editable_after_solar_timing_is_turned_off() {
     assert!(model.errors.contains_key(&Field::Coordinates));
     assert!(!solar_options_enabled(&model));
     assert!(coordinates_enabled(&model));
+}
+
+#[test]
+fn minimized_settings_stop_the_graph_indicator_and_the_preview_tick() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = Configuration::load(directory.path(), "circadia.exe");
+    let mut snapshot = calculated(None, Vec::new());
+    let mut zone = crate::WindowsZone::named("UTC", false).expect("UTC rules");
+    let playback = crate::Playback::capture(
+        &Config::default(),
+        &mut zone,
+        "2026-10-27T12:00:00Z".parse().expect("UTC instant"),
+    )
+    .expect("captured playback");
+    let model = Model::new(
+        &configuration,
+        Some(&snapshot),
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    );
+    let now: jiff::Timestamp = "2026-10-27T12:00:15.250Z".parse().expect("UTC instant");
+    assert_eq!(
+        indicator_delay(Page::Schedule, &model, Visibility::Shown, now),
+        Some(Duration::from_millis(44_750))
+    );
+    assert_eq!(
+        indicator_delay(Page::Schedule, &model, Visibility::Minimized, now),
+        None
+    );
+    assert_eq!(
+        indicator_delay(Page::Transitions, &model, Visibility::Shown, now),
+        None
+    );
+    assert!(!playback_shown(Page::Schedule, &model, Visibility::Shown));
+    snapshot.preview = Some(crate::RunningPreview {
+        playback: Arc::new(playback),
+        start: Duration::ZERO,
+        end: Duration::from_secs(10),
+    });
+    snapshot.preview_active = true;
+    let playing = Model::new(
+        &configuration,
+        Some(&snapshot),
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    );
+    assert!(playback_shown(Page::Schedule, &playing, Visibility::Shown));
+    assert!(!playback_shown(
+        Page::Schedule,
+        &playing,
+        Visibility::Minimized
+    ));
+    assert!(!playback_shown(Page::General, &playing, Visibility::Shown));
+    assert_eq!(
+        indicator_delay(Page::Schedule, &playing, Visibility::Shown, now),
+        None
+    );
+}
+
+fn scheduled(input: ConfigInput) -> ControllerSnapshot {
+    let config = input.validate().expect("valid schedule fixture");
+    let mut snapshot = calculated(None, Vec::new());
+    let mut zone = crate::WindowsZone::named("UTC", false).expect("UTC rules");
+    let graph = crate::TimeInterval {
+        start: "2026-10-27T03:00:00Z".parse().expect("UTC instant"),
+        end: "2026-10-28T03:00:00Z".parse().expect("UTC instant"),
+    };
+    let schedule = crate::Schedule::calculate(&config, &mut zone, graph.start, graph.end)
+        .expect("schedule fixture");
+    let mut result = Arc::into_inner(snapshot.calculation.take().expect("calculation"))
+        .expect("unshared calculation");
+    let calculated = result.result.as_mut().expect("calculated schedule");
+    calculated.curve = Arc::new(schedule.curve);
+    calculated.events = schedule
+        .events
+        .iter()
+        .map(|event| crate::LocalEvent {
+            kind: event.kind,
+            instant: event.instant,
+            local: jiff::tz::Offset::UTC.to_datetime(event.instant),
+        })
+        .collect();
+    snapshot.calculation = Some(Arc::new(result));
+    snapshot
+}
+
+fn sentence(model: &Model, current: &str) -> String {
+    plain(&status_sentence(
+        model,
+        &english(),
+        &region(),
+        &model.control(Instant::now()),
+        current.parse().expect("UTC instant"),
+    ))
+}
+
+fn snapshot_model(configuration: &Configuration, snapshot: &ControllerSnapshot) -> Model {
+    Model::new(
+        configuration,
+        Some(snapshot),
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    )
+}
+
+fn summary(model: &Model) -> Vec<(String, String, String, bool)> {
+    event_summary(model, &english(), &region())
+        .into_iter()
+        .map(|column| {
+            (
+                plain(&column.name),
+                plain(&column.time),
+                plain(&column.temperature).replace('\u{a0}', " "),
+                column.used,
+            )
+        })
+        .collect()
+}
+
+fn column(name: &str, time: &str, temperature: &str, used: bool) -> (String, String, String, bool) {
+    (
+        name.to_owned(),
+        time.to_owned(),
+        temperature.to_owned(),
+        used,
+    )
+}
+
+#[test]
+fn a_solar_failure_marks_sunrise_and_sunset_unavailable_and_the_status_line_names_the_fallback() {
+    let (_directory, configuration, mut desktop) = coordinate_desktop(Some(NEW_YORK));
+    desktop.edit(vec![(Field::SolarTiming, FieldValue::Switch(true))]);
+    let mut snapshot = calculated(Some(crate::ScheduleError::curve()), Vec::new());
+    snapshot.scheduling = crate::SchedulingState::SolarFallback;
+    let model = snapshot_model(&configuration.borrow(), &snapshot);
+    assert_eq!(
+        summary(&model),
+        [
+            column("Wake", "7:00 AM", "6500 K", true),
+            column("Sunrise", "Unavailable", "Wake and Bedtime only", false),
+            column("Sunset", "Unavailable", "Wake and Bedtime only", false),
+            column("Bedtime", "11:00 PM", "2400 K", true),
+        ]
+    );
+    let line = status::status_line(
+        &english(),
+        &region(),
+        Some(&model.control(Instant::now())),
+        status::Stored::new(&configuration.borrow()),
+        "2026-10-27T12:00:00Z".parse().expect("UTC instant"),
+    );
+    assert_eq!(
+        plain(&line).replace('\u{a0}', " "),
+        "Managing Night Light · 6500 K · Wake and Bedtime only"
+    );
+}
+
+#[test]
+fn the_summary_shows_todays_times_in_the_regional_format_with_each_temperature() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = managed_configuration(&directory);
+    assert_eq!(
+        summary(&managing(&configuration)),
+        [
+            column("Wake", "7:00 AM", "6500 K", true),
+            column("Sunrise", "Off", "Not used", false),
+            column("Sunset", "Off", "Not used", false),
+            column("Bedtime", "11:00 PM", "2400 K", true),
+        ]
+    );
+    let (_directory, configuration, mut desktop) = coordinate_desktop(Some(NEW_YORK));
+    desktop.edit(vec![(Field::SolarTiming, FieldValue::Switch(true))]);
+    let mut model = current(&configuration);
+    model.today = Some(crate::SolarToday {
+        sunrise: Some(local(7, 16)),
+        sunset: Some(local(18, 6)),
+    });
+    assert_eq!(
+        summary(&model),
+        [
+            column("Wake", "7:00 AM", "3400 K", true),
+            column("Sunrise", "7:16 AM", "6500 K", true),
+            column("Sunset", "6:06 PM", "3400 K", true),
+            column("Bedtime", "11:00 PM", "2400 K", true),
+        ]
+    );
+    model.today = Some(crate::SolarToday {
+        sunrise: None,
+        sunset: Some(local(18, 6)),
+    });
+    assert_eq!(
+        summary(&model)[..2],
+        [
+            column("Wake", "7:00 AM", "6500 K", true),
+            column("Sunrise", "Off", "Not used", false),
+        ]
+    );
+}
+
+#[test]
+fn at_2100_the_sentence_names_the_bedtime_target_and_when_warming_starts() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = managed_configuration(&directory);
+    let model = snapshot_model(&configuration, &scheduled(ConfigInput::default()));
+    assert_eq!(
+        sentence(&model, "2026-10-27T21:00:00Z").replace('\u{a0}', " "),
+        "Next: 2400 K by 11:00 PM at bedtime, warming from 10:00 PM."
+    );
+    assert_eq!(
+        sentence(&model, "2026-10-27T22:15:00Z").replace('\u{a0}', " "),
+        "Reaches 2400 K by 11:00 PM (bedtime)."
+    );
+}
+
+#[test]
+fn equal_levels_state_the_schedule_temperature_instead_of_an_event() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = managed_configuration(&directory);
+    let model = snapshot_model(
+        &configuration,
+        &scheduled(ConfigInput {
+            daytime_kelvin: 3400,
+            middle_kelvin: 3400,
+            sleep_kelvin: 3400,
+            ..ConfigInput::default()
+        }),
+    );
+    assert_eq!(
+        sentence(&model, "2026-10-27T13:00:00Z").replace('\u{a0}', " "),
+        "Your schedule is at 3400 K."
+    );
+}
+
+#[test]
+fn a_sunset_that_keeps_the_daytime_temperature_is_skipped_for_bedtime() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = managed_configuration(&directory);
+    let model = snapshot_model(
+        &configuration,
+        &scheduled(ConfigInput {
+            solar_timing: true,
+            middle_kelvin: 6500,
+            coordinates: Some(Coordinates {
+                latitude: 51.5,
+                longitude: 0.0,
+            }),
+            ..ConfigInput::default()
+        }),
+    );
+    assert_eq!(
+        sentence(&model, "2026-10-27T13:00:00Z").replace('\u{a0}', " "),
+        "Next: 2400 K by 11:00 PM at bedtime, warming from 10:00 PM."
+    );
+}
+
+#[test]
+fn a_time_zone_failure_says_whether_the_last_temperature_is_in_use() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = managed_configuration(&directory);
+    let mut model = snapshot_model(&configuration, &scheduled(ConfigInput::default()));
+    model.scheduling = crate::SchedulingState::Retained;
+    model.last_scheduled = Some(3400);
+    assert_eq!(
+        sentence(&model, "2026-10-27T21:00:00Z").replace('\u{a0}', " "),
+        "The schedule is unavailable, so Circadia uses its last scheduled temperature, 3400 K."
+    );
+    assert!(apps::manual_view(&model, &english(), &region()).enabled);
+    model.scheduling = crate::SchedulingState::Stopped;
+    model.last_scheduled = None;
+    assert_eq!(
+        sentence(&model, "2026-10-27T21:00:00Z"),
+        "Control is unavailable until Windows provides the time zone, so Suppress for 1 hour is disabled."
+    );
+    assert!(!apps::manual_view(&model, &english(), &region()).enabled);
+}
+
+#[test]
+fn suppression_and_management_off_explain_the_output() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = managed_configuration(&directory);
+    let mut snapshot = scheduled(ConfigInput::default());
+    snapshot.suppression.automatic = true;
+    snapshot.recent = vec![crate::RecentApp {
+        executable: "game.exe".to_owned(),
+        path: std::path::PathBuf::from(r"C:\Games\game.exe"),
+        focus_ended: None,
+        title: None,
+        included: true,
+        condition: String::new(),
+        excluded: false,
+    }];
+    let mut model = snapshot_model(&configuration, &snapshot);
+    assert_eq!(
+        sentence(&model, "2026-10-27T21:00:00Z").replace('\u{a0}', " "),
+        "Showing 6500 K while game.exe is focused. Your schedule is at 6500 K."
+    );
+    model.management = ManagementState::Off;
+    assert_eq!(
+        sentence(&model, "2026-10-27T21:00:00Z"),
+        "Windows controls Night Light. Turn on management to follow this schedule."
+    );
 }

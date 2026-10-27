@@ -58,6 +58,8 @@ fn result(revision: u64, request: CalculationRequest, kelvin: u16) -> Arc<Calcul
         request,
         result: Ok(CalculatedSchedule {
             curve,
+            events: Vec::new(),
+            gridlines: Vec::new(),
             valid,
             graph: valid,
             views: vec![valid],

@@ -1,26 +1,44 @@
+use crate::CalculatedSchedule;
+use crate::CalculationPurpose;
+use crate::CalculationResult;
 use crate::ControllerSnapshot;
 use crate::DiagnosticOperation;
+use crate::EventKind;
+use crate::LocalEvent;
 use crate::ManagementState;
 use crate::ManualCommand;
 use crate::SchedulingState;
+use crate::Segment;
 use crate::SuppressionState;
 use crate::l10n::Text;
 use crate::l10n::text;
+use crate::platform::nls::RegionalFormat;
 use crate::ui::configuration::Configuration;
 use crate::ui::configuration::Toggles;
+use jiff::SignedDuration;
+use jiff::Timestamp;
+use jiff::civil::DateTime;
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::Instant;
 use windows_reactor::MenuItem;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct Saving {
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent condition of the status table"
+)]
+pub(super) struct Stored {
+    pub(super) error: bool,
     pub(super) paused: bool,
     pub(super) failed: bool,
     pub(super) restored: bool,
 }
 
-impl Saving {
+impl Stored {
     pub(super) fn new(configuration: &Configuration) -> Self {
         Self {
+            error: configuration.accepted().is_none(),
             paused: configuration.paused(),
             failed: configuration.write_error().is_some(),
             restored: configuration.restore().is_some(),
@@ -28,12 +46,435 @@ impl Saving {
     }
 }
 
-pub(super) fn tooltip(text: &Text, lines: &[String]) -> String {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TimeOfDay {
+    Morning,
+    Daytime,
+    Evening,
+    Bedtime,
+}
+
+impl TimeOfDay {
+    pub(super) fn key(self) -> &'static str {
+        match self {
+            Self::Morning => "morning",
+            Self::Daytime => "daytime",
+            Self::Evening => "evening",
+            Self::Bedtime => "bedtime",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Picture {
+    NotManaging,
+    Phase(TimeOfDay),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Badge {
+    Timer,
+    AppWindow,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PhaseName {
+    NotManaging,
+    Preview,
+    Suppressed,
+    Shifting(TimeOfDay),
+    Current(TimeOfDay),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Phase {
+    pub(super) name: PhaseName,
+    pub(super) picture: Picture,
+    pub(super) badge: Option<Badge>,
+    pub(super) progress: Option<f64>,
+}
+
+impl Phase {
+    pub(super) fn label(&self, text: &Text) -> String {
+        match self.name {
+            PhaseName::NotManaging => text!(text, "phase-name", phase = "not-managing"),
+            PhaseName::Preview => text!(text, "phase-name", phase = "preview"),
+            PhaseName::Suppressed => text!(text, "phase-name", phase = "suppressed"),
+            PhaseName::Shifting(to) => text!(text, "phase-shifting", phase = to.key()),
+            PhaseName::Current(phase) => text!(text, "phase-name", phase = phase.key()),
+        }
+    }
+
+    pub(super) fn art_name(&self, text: &Text) -> String {
+        match (self.picture, self.badge, self.progress) {
+            (Picture::NotManaging, ..) => text!(text, "phase-art-not-managing"),
+            (_, Some(Badge::Timer), _) => text!(text, "phase-art-manual"),
+            (_, Some(Badge::AppWindow), _) => text!(text, "phase-art-automatic"),
+            (Picture::Phase(phase), None, Some(progress)) => text!(
+                text,
+                "phase-art-shifting",
+                phase = phase.key(),
+                percent = percent(progress)
+            ),
+            (Picture::Phase(phase), None, None) => text!(text, "phase-name", phase = phase.key()),
+        }
+    }
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "progress is clamped to 0 through 1 before scaling to a percentage"
+)]
+fn percent(progress: f64) -> u8 {
+    (progress.clamp(0.0, 1.0) * 100.0).round() as u8
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Position {
+    Steady(TimeOfDay),
+    Shifting {
+        event: EventKind,
+        to: TimeOfDay,
+        progress: f64,
+        local: DateTime,
+        kelvin: u16,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct NextChange {
+    pub(super) event: EventKind,
+    pub(super) local: DateTime,
+    pub(super) kelvin: u16,
+    pub(super) from: Option<DateTime>,
+    pub(super) warming: bool,
+}
+
+pub(super) fn next_change(schedule: &CalculatedSchedule, at: Timestamp) -> Option<NextChange> {
+    let now = scheduled_kelvin(schedule, at)?;
+    schedule
+        .events
+        .iter()
+        .filter(|event| event.instant > at)
+        .find_map(|event| {
+            let kelvin = scheduled_kelvin(schedule, event.instant)?;
+            let ramp = schedule.curve.segments().iter().find(|segment| {
+                segment.start >= at && segment.start < event.instant && segment.from != segment.to
+            });
+            (ramp.is_some() || kelvin != now).then(|| NextChange {
+                event: event.kind,
+                local: event.local,
+                kelvin,
+                from: ramp.and_then(|segment| {
+                    event
+                        .local
+                        .checked_sub(event.instant.duration_since(segment.start))
+                        .ok()
+                }),
+                warming: kelvin < now,
+            })
+        })
+}
+
+fn segment(schedule: &CalculatedSchedule, at: Timestamp) -> Option<&Segment> {
+    schedule
+        .curve
+        .segments()
+        .iter()
+        .find(|segment| segment.start <= at && at < segment.end)
+}
+
+// The controller's curve lookups record activity measurements, so settings
+// reads the segments directly.
+pub(super) fn segment_at(schedule: &CalculatedSchedule, at: Timestamp) -> Option<&Segment> {
+    schedule
+        .curve
+        .segments()
+        .iter()
+        .find(|segment| segment.start <= at && at <= segment.end)
+}
+
+pub(super) fn scheduled_kelvin(schedule: &CalculatedSchedule, at: Timestamp) -> Option<u16> {
+    segment_at(schedule, at).and_then(|segment| segment.rounded(at).ok())
+}
+
+// A merged target keeps the earlier instant with the later event's
+// temperature, so the event a segment reaches is the last one in that minute.
+fn reached(events: &[LocalEvent], at: Timestamp) -> Option<usize> {
+    let merge = at.checked_add(SignedDuration::from_secs(60)).ok()?;
+    events
+        .iter()
+        .rposition(|event| at <= event.instant && event.instant < merge)
+}
+
+fn starts(events: &[LocalEvent], index: usize) -> Option<TimeOfDay> {
+    let event = events.get(index)?;
+    Some(match event.kind {
+        EventKind::Wake => {
+            let sunrise = events
+                .iter()
+                .skip(index + 1)
+                .take_while(|next| next.kind != EventKind::Wake && next.kind != EventKind::Bedtime)
+                .any(|next| next.kind == EventKind::Sunrise);
+            if sunrise {
+                TimeOfDay::Morning
+            } else {
+                TimeOfDay::Daytime
+            }
+        }
+        EventKind::Sunrise => TimeOfDay::Daytime,
+        EventKind::Sunset => TimeOfDay::Evening,
+        EventKind::Bedtime => TimeOfDay::Bedtime,
+    })
+}
+
+pub(super) fn position(schedule: &CalculatedSchedule, at: Timestamp) -> Option<Position> {
+    let events = &schedule.events;
+    if let Some(segment) = segment(schedule, at).filter(|segment| segment.from != segment.to) {
+        let index = reached(events, segment.end)?;
+        let event = events.get(index)?;
+        let span = segment.end.duration_since(segment.start).as_secs_f64();
+        return Some(Position::Shifting {
+            event: event.kind,
+            to: starts(events, index)?,
+            progress: at.duration_since(segment.start).as_secs_f64() / span,
+            local: event.local,
+            kelvin: segment.to,
+        });
+    }
+    let index = events.iter().rposition(|event| event.instant <= at)?;
+    starts(events, index).map(Position::Steady)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Control<'a> {
+    pub(super) management: ManagementState,
+    pub(super) scheduling: SchedulingState,
+    pub(super) suppression: SuppressionState,
+    pub(super) preview_active: bool,
+    pub(super) playback: Option<Timestamp>,
+    pub(super) schedule: Option<&'a CalculatedSchedule>,
+    pub(super) last_scheduled: Option<u16>,
+    pub(super) output_failed: bool,
+    pub(super) observation_failed: bool,
+}
+
+impl<'a> Control<'a> {
+    pub(super) fn new(snapshot: &'a ControllerSnapshot, now: Instant) -> Self {
+        let managing = snapshot.management.is_on();
+        Self {
+            management: snapshot.management,
+            scheduling: snapshot.scheduling,
+            suppression: snapshot.suppression,
+            preview_active: snapshot.preview_active,
+            playback: snapshot.preview.as_ref().and_then(|preview| {
+                let started = snapshot.origin.checked_add(preview.start)?;
+                preview
+                    .playback
+                    .at(now.saturating_duration_since(started))
+                    .ok()
+            }),
+            schedule: snapshot
+                .calculation
+                .as_ref()
+                .and_then(|calculation| calculation.result.as_ref().ok()),
+            last_scheduled: snapshot
+                .accepted
+                .as_ref()
+                .and_then(crate::ConfigLayer::last_scheduled),
+            output_failed: managing
+                && snapshot
+                    .native_errors
+                    .keys()
+                    .any(|operation| *operation != DiagnosticOperation::Observation),
+            observation_failed: snapshot
+                .native_errors
+                .contains_key(&DiagnosticOperation::Observation),
+        }
+    }
+
+    pub(super) fn kelvin(&self, current: Timestamp) -> Option<u16> {
+        if self.preview_active {
+            return scheduled_kelvin(self.schedule?, self.playback?);
+        }
+        if self.suppression.active() {
+            return Some(6500);
+        }
+        match self.scheduling {
+            SchedulingState::Retained => self.last_scheduled,
+            SchedulingState::Available | SchedulingState::SolarFallback => {
+                scheduled_kelvin(self.schedule?, current)
+            }
+            SchedulingState::Waiting | SchedulingState::Evaluating | SchedulingState::Stopped => {
+                None
+            }
+        }
+    }
+
+    pub(super) fn phase(&self, current: Timestamp) -> Phase {
+        let suppressed = |badge| Phase {
+            name: PhaseName::Suppressed,
+            picture: Picture::Phase(TimeOfDay::Daytime),
+            badge: Some(badge),
+            progress: None,
+        };
+        if !self.management.is_on() {
+            return Phase {
+                name: PhaseName::NotManaging,
+                picture: Picture::NotManaging,
+                badge: None,
+                progress: None,
+            };
+        }
+        if !self.preview_active {
+            if self.suppression.manual() {
+                return suppressed(Badge::Timer);
+            }
+            if self.suppression.automatic {
+                return suppressed(Badge::AppWindow);
+            }
+        }
+        let at = self
+            .playback
+            .filter(|_| self.preview_active)
+            .unwrap_or(current);
+        let (picture, progress, name) =
+            match self.schedule.and_then(|schedule| position(schedule, at)) {
+                Some(Position::Shifting { to, progress, .. }) => {
+                    (to, Some(progress), PhaseName::Shifting(to))
+                }
+                Some(Position::Steady(phase)) => (phase, None, PhaseName::Current(phase)),
+                None => (
+                    TimeOfDay::Daytime,
+                    None,
+                    PhaseName::Current(TimeOfDay::Daytime),
+                ),
+            };
+        Phase {
+            name: if self.preview_active {
+                PhaseName::Preview
+            } else {
+                name
+            },
+            picture: Picture::Phase(picture),
+            badge: None,
+            progress,
+        }
+    }
+}
+
+// The calculation thread publishes each result before the controller, which can
+// wait on a native call, applies it; the graph shows the newer result.
+pub(super) fn with_latest(
+    snapshot: Arc<ControllerSnapshot>,
+    latest: Option<Arc<CalculationResult>>,
+) -> Arc<ControllerSnapshot> {
+    let current = snapshot
+        .calculation
+        .as_ref()
+        .map(|calculation| calculation.revision);
+    match latest {
+        Some(latest)
+            if !snapshot.preview_active
+                && latest.request.purpose == CalculationPurpose::Schedule
+                && current.is_none_or(|current| latest.revision > current) =>
+        {
+            Arc::new(ControllerSnapshot {
+                calculation: Some(latest),
+                ..(*snapshot).clone()
+            })
+        }
+        _ => snapshot,
+    }
+}
+
+pub(super) fn kelvin_text(region: &RegionalFormat, kelvin: u16) -> String {
+    region
+        .format_kelvin(kelvin)
+        .unwrap_or_else(|_| format!("{kelvin} K"))
+}
+
+pub(super) fn status_line(
+    text: &Text,
+    region: &RegionalFormat,
+    control: Option<&Control<'_>>,
+    stored: Stored,
+    current: Timestamp,
+) -> String {
+    if stored.error {
+        return text!(text, "status-configuration-error");
+    }
+    let Some(control) = control else {
+        return text!(text, "status-starting");
+    };
+    if !control.management.is_on() {
+        return text!(text, "status-not-managing");
+    }
+    if control.scheduling == SchedulingState::Stopped {
+        return text!(text, "status-control-unavailable");
+    }
+    if control.output_failed {
+        return if control.suppression.active() {
+            text!(text, "status-output-unavailable-suppressed")
+        } else {
+            text!(text, "status-output-unavailable")
+        };
+    }
+    if control.scheduling == SchedulingState::Retained {
+        return control.last_scheduled.map_or_else(
+            || text!(text, "status-control-unavailable"),
+            |value| {
+                text!(
+                    text,
+                    "status-schedule-retained",
+                    kelvin = kelvin_text(region, value)
+                )
+            },
+        );
+    }
+    if stored.paused {
+        return text!(text, "status-saving-paused");
+    }
+    if stored.failed {
+        return text!(text, "status-write-failed");
+    }
+    if stored.restored {
+        return text!(text, "status-backup-restored");
+    }
+    let running = matches!(
+        control.scheduling,
+        SchedulingState::Available | SchedulingState::SolarFallback
+    );
+    if running && control.observation_failed {
+        return text!(text, "status-observation-failed");
+    }
+    let Some(value) = control.kelvin(current).filter(|_| running) else {
+        return text!(text, "status-calculating");
+    };
+    let state = if control.preview_active {
+        "preview"
+    } else if control.suppression.active() {
+        "suppressed"
+    } else {
+        "schedule"
+    };
+    let solar = if control.scheduling == SchedulingState::SolarFallback {
+        "fallback"
+    } else {
+        "available"
+    };
     text!(
         text,
-        "tooltip",
-        status = lines.first().map_or("", String::as_str)
+        "status-managing",
+        state = state,
+        solar = solar,
+        kelvin = kelvin_text(region, value)
     )
+}
+
+pub(super) fn tooltip(text: &Text, status: &str) -> String {
+    text!(text, "tooltip", status = status)
 }
 
 pub(super) fn manual_label(text: &Text, manual: ManualCommand) -> String {
@@ -124,83 +565,6 @@ pub(super) fn menu_items(
     items
 }
 
-pub(super) fn lines(
-    text: &Text,
-    snapshot: Option<&ControllerSnapshot>,
-    saving: Saving,
-) -> Vec<String> {
-    let Some(snapshot) = snapshot else {
-        return vec![text!(text, "status-starting")];
-    };
-    let mut lines = Vec::new();
-    let managing = snapshot.management.is_on();
-    let output_failed = managing
-        && snapshot
-            .native_errors
-            .keys()
-            .any(|operation| *operation != DiagnosticOperation::Observation);
-    let suppressed = snapshot.suppression.manual() || snapshot.suppression.automatic;
-    if snapshot.accepted.is_none() {
-        lines.push(text!(text, "status-configuration-error"));
-    }
-    if snapshot.scheduling == SchedulingState::Stopped {
-        lines.push(text!(text, "status-control-unavailable"));
-    }
-    if output_failed {
-        lines.push(if suppressed {
-            text!(text, "status-output-unavailable-suppressed")
-        } else {
-            text!(text, "status-output-unavailable")
-        });
-    }
-    if snapshot.scheduling == SchedulingState::Retained {
-        lines.push(text!(text, "status-schedule-retained"));
-    }
-    if saving.paused {
-        lines.push(text!(text, "status-saving-paused"));
-    }
-    if saving.failed {
-        lines.push(text!(text, "status-write-failed"));
-    }
-    if saving.restored {
-        lines.push(text!(text, "status-backup-restored"));
-    }
-    if !output_failed
-        && matches!(
-            snapshot.scheduling,
-            SchedulingState::Available | SchedulingState::SolarFallback | SchedulingState::Retained
-        )
-        && snapshot
-            .native_errors
-            .contains_key(&DiagnosticOperation::Observation)
-    {
-        lines.push(text!(text, "status-observation-failed"));
-    }
-    if !output_failed
-        && matches!(
-            snapshot.scheduling,
-            SchedulingState::Available | SchedulingState::SolarFallback
-        )
-    {
-        let solar = if snapshot.scheduling == SchedulingState::SolarFallback {
-            "fallback"
-        } else {
-            "available"
-        };
-        lines.push(if suppressed {
-            text!(text, "status-suppression-active", solar = solar)
-        } else if snapshot.preview_active {
-            text!(text, "status-preview-playing", solar = solar)
-        } else {
-            text!(text, "status-schedule-active", solar = solar)
-        });
-    }
-    if lines.is_empty() {
-        lines.push(text!(text, "status-calculating"));
-    }
-    lines
-}
-
 pub(super) fn manual_available(
     management: ManagementState,
     scheduling: SchedulingState,
@@ -235,90 +599,390 @@ mod tests {
         Text::load(&LanguageTag::english()).expect("English catalog loads")
     }
 
-    fn restored() -> Saving {
-        Saving {
-            restored: true,
-            ..Saving::default()
+    fn region() -> RegionalFormat {
+        RegionalFormat::capture("en-US").expect("Windows resolves en-US")
+    }
+
+    fn at(text: &str) -> Timestamp {
+        text.parse().expect("UTC instant")
+    }
+
+    fn calculated(input: ConfigInput) -> CalculatedSchedule {
+        let config = input.validate().expect("valid schedule fixture");
+        let mut zone = crate::WindowsZone::named("UTC", false).expect("UTC rules");
+        let graph = crate::TimeInterval {
+            start: at("2026-10-27T03:00:00Z"),
+            end: at("2026-10-28T03:00:00Z"),
+        };
+        let schedule = crate::Schedule::calculate(&config, &mut zone, graph.start, graph.end)
+            .expect("schedule fixture");
+        CalculatedSchedule {
+            curve: Arc::new(schedule.curve),
+            events: schedule
+                .events
+                .iter()
+                .map(|event| LocalEvent {
+                    kind: event.kind,
+                    instant: event.instant,
+                    local: jiff::tz::Offset::UTC.to_datetime(event.instant),
+                })
+                .collect(),
+            gridlines: Vec::new(),
+            valid: graph,
+            graph,
+            views: vec![graph],
+            preview: None,
+            next_date: graph.end,
+            solar_error: None,
+            conflicts: Vec::new(),
+            today: None,
         }
     }
 
-    fn savings() -> Vec<Saving> {
-        [false, true]
-            .into_iter()
-            .flat_map(|paused| {
-                [false, true].into_iter().flat_map(move |failed| {
-                    [false, true].map(|restored| Saving {
-                        paused,
-                        failed,
-                        restored,
-                    })
-                })
-            })
-            .collect()
+    fn control(schedule: &CalculatedSchedule) -> Control<'_> {
+        Control {
+            management: ManagementState::On,
+            scheduling: SchedulingState::Available,
+            suppression: SuppressionState::default(),
+            preview_active: false,
+            playback: None,
+            schedule: Some(schedule),
+            last_scheduled: None,
+            output_failed: false,
+            observation_failed: false,
+        }
+    }
+
+    fn line(control: &Control<'_>, stored: Stored, current: &str) -> String {
+        plain(&status_line(
+            &english(),
+            &region(),
+            Some(control),
+            stored,
+            at(current),
+        ))
     }
 
     #[test]
-    fn paused_saving_precedes_a_failed_write_and_a_restored_backup() {
-        let state = snapshot(ConfigInput::default());
+    fn management_off_shows_not_managing_with_the_not_managing_art() {
+        let schedule = calculated(ConfigInput::default());
+        let control = Control {
+            management: ManagementState::Off,
+            ..control(&schedule)
+        };
+        let phase = control.phase(at("2026-10-27T13:00:00Z"));
+        assert_eq!(phase.name, PhaseName::NotManaging);
+        assert_eq!(phase.picture, Picture::NotManaging);
+        assert_eq!(phase.badge, None);
+        assert_eq!(plain(&phase.label(&english())), "Not managing");
+    }
+
+    #[test]
+    fn preview_at_2330_during_manual_suppression_shows_preview_with_the_bedtime_art() {
+        let schedule = calculated(ConfigInput::default());
+        let control = Control {
+            preview_active: true,
+            playback: Some(at("2026-10-27T23:30:00Z")),
+            suppression: SuppressionState {
+                automatic: false,
+                manual_deadline: Some(Duration::from_hours(1)),
+            },
+            ..control(&schedule)
+        };
+        let phase = control.phase(at("2026-10-27T13:00:00Z"));
         assert_eq!(
-            lines(
-                &english(),
-                Some(&state),
-                Saving {
-                    paused: true,
-                    failed: true,
-                    restored: true,
-                }
-            )
-            .get(..3),
-            Some(
-                &[
-                    "Some settings are invalid; changes are not saved until they are fixed."
-                        .to_owned(),
-                    "Changes are running but not saved.".to_owned(),
-                    "Configuration was restored from its backup.".to_owned(),
-                ][..]
-            )
+            phase,
+            Phase {
+                name: PhaseName::Preview,
+                picture: Picture::Phase(TimeOfDay::Bedtime),
+                badge: None,
+                progress: None,
+            }
+        );
+        assert_eq!(plain(&phase.label(&english())), "Preview");
+    }
+
+    #[test_case(SuppressionState { automatic: false, manual_deadline: Some(Duration::from_hours(1)) }, Badge::Timer, "Suppressed for 1 hour"; "manual")]
+    #[test_case(SuppressionState { automatic: true, manual_deadline: None }, Badge::AppWindow, "Suppressed while an app is focused"; "automatic")]
+    fn suppression_shows_the_daytime_art_with_its_source_badge(
+        suppression: SuppressionState,
+        badge: Badge,
+        name: &str,
+    ) {
+        let schedule = calculated(ConfigInput::default());
+        let control = Control {
+            suppression,
+            ..control(&schedule)
+        };
+        let phase = control.phase(at("2026-10-27T23:30:00Z"));
+        assert_eq!(phase.name, PhaseName::Suppressed);
+        assert_eq!(phase.picture, Picture::Phase(TimeOfDay::Daytime));
+        assert_eq!(phase.badge, Some(badge));
+        assert_eq!(plain(&phase.art_name(&english())), name);
+    }
+
+    #[test]
+    fn thirty_minutes_into_the_bedtime_transition_is_shifting_to_bedtime_halfway() {
+        let schedule = calculated(ConfigInput::default());
+        let phase = control(&schedule).phase(at("2026-10-27T22:30:00Z"));
+        assert_eq!(phase.name, PhaseName::Shifting(TimeOfDay::Bedtime));
+        assert_eq!(phase.picture, Picture::Phase(TimeOfDay::Bedtime));
+        assert_eq!(phase.progress, Some(0.5));
+        assert_eq!(plain(&phase.label(&english())), "Shifting to bedtime");
+        assert_eq!(
+            plain(&phase.art_name(&english())),
+            "Bedtime, shifting, 50% there"
         );
     }
 
-    fn snapshot(input: ConfigInput) -> ControllerSnapshot {
-        let config = input.validate().expect("valid settings fixture");
-        ControllerSnapshot {
-            accepted: Some(crate::ConfigLayer::new(config)),
-            scheduling: SchedulingState::Available,
-            management: crate::ManagementState::On,
-            preview: None,
-            origin: std::time::Instant::now(),
-            calculation: None,
-            preview_active: false,
+    #[test]
+    fn one_pm_without_a_sunrise_target_is_daytime() {
+        let schedule = calculated(ConfigInput::default());
+        let phase = control(&schedule).phase(at("2026-10-27T13:00:00Z"));
+        assert_eq!(phase.name, PhaseName::Current(TimeOfDay::Daytime));
+        assert_eq!(phase.picture, Picture::Phase(TimeOfDay::Daytime));
+        assert_eq!(phase.progress, None);
+    }
+
+    #[test]
+    fn wake_before_a_sunrise_target_starts_morning() {
+        let mut schedule = calculated(ConfigInput::default());
+        let sunrise = LocalEvent {
+            kind: EventKind::Sunrise,
+            instant: at("2026-10-27T08:00:00Z"),
+            local: jiff::civil::date(2026, 10, 27).at(8, 0, 0, 0),
+        };
+        let index = schedule
+            .events
+            .iter()
+            .position(|event| event.instant > sunrise.instant)
+            .expect("a later event");
+        schedule.events.insert(index, sunrise);
+        assert_eq!(
+            position(&schedule, at("2026-10-27T07:30:00Z")),
+            Some(Position::Steady(TimeOfDay::Morning))
+        );
+        assert_eq!(
+            position(&schedule, at("2026-10-27T09:00:00Z")),
+            Some(Position::Steady(TimeOfDay::Daytime))
+        );
+    }
+
+    fn result(revision: u64, purpose: crate::CalculationPurpose) -> Arc<CalculationResult> {
+        Arc::new(CalculationResult {
+            revision,
+            request: crate::CalculationRequest {
+                config: crate::Config::default(),
+                at: at("2026-10-27T03:00:00Z"),
+                purpose,
+            },
+            result: Ok(calculated(ConfigInput::default())),
+        })
+    }
+
+    #[test]
+    fn a_newer_schedule_result_reaches_the_graph_before_the_controller_applies_it() {
+        let mut state = snapshot(ConfigInput::default());
+        state.calculation = Some(result(3, CalculationPurpose::Schedule));
+        let state = Arc::new(state);
+        let revision = |snapshot: &ControllerSnapshot| {
+            snapshot
+                .calculation
+                .as_ref()
+                .map(|calculation| calculation.revision)
+        };
+        let newer = with_latest(
+            Arc::clone(&state),
+            Some(result(4, CalculationPurpose::Schedule)),
+        );
+        assert_eq!(revision(&newer), Some(4));
+        for (latest, preview_active) in [
+            (Some(result(2, CalculationPurpose::Schedule)), false),
+            (Some(result(5, CalculationPurpose::Preview)), false),
+            (Some(result(5, CalculationPurpose::Schedule)), true),
+            (None, false),
+        ] {
+            let mut current = (*state).clone();
+            current.preview_active = preview_active;
+            let kept = with_latest(Arc::new(current), latest);
+            assert_eq!(revision(&kept), Some(3));
+        }
+    }
+
+    #[test]
+    fn a_configuration_error_outranks_management_off() {
+        let schedule = calculated(ConfigInput::default());
+        let control = Control {
+            management: ManagementState::Off,
+            ..control(&schedule)
+        };
+        let error = Stored {
+            error: true,
+            ..Stored::default()
+        };
+        assert_eq!(
+            line(&control, error, "2026-10-27T13:00:00Z"),
+            "Settings could not be read; Night Light is not managed."
+        );
+        assert_eq!(
+            line(&control, Stored::default(), "2026-10-27T13:00:00Z"),
+            "Not managing Night Light."
+        );
+    }
+
+    #[test]
+    fn paused_saving_outranks_a_write_failure() {
+        let schedule = calculated(ConfigInput::default());
+        let stored = Stored {
+            paused: true,
+            failed: true,
+            restored: true,
+            ..Stored::default()
+        };
+        assert_eq!(
+            line(&control(&schedule), stored, "2026-10-27T13:00:00Z"),
+            "Some settings are invalid; changes are not saved until they are fixed."
+        );
+    }
+
+    #[test]
+    fn a_write_failure_shows_only_when_no_earlier_condition_applies() {
+        let schedule = calculated(ConfigInput::default());
+        let failed = Stored {
+            failed: true,
+            restored: true,
+            ..Stored::default()
+        };
+        assert_eq!(
+            line(&control(&schedule), failed, "2026-10-27T13:00:00Z"),
+            "Changes are running but not saved."
+        );
+        let output = Control {
+            output_failed: true,
+            ..control(&schedule)
+        };
+        assert_eq!(
+            line(&output, failed, "2026-10-27T13:00:00Z"),
+            "Output is unavailable."
+        );
+    }
+
+    #[test]
+    fn a_restored_backup_shows_its_line_until_its_banner_is_dismissed() {
+        let directory = tempfile::tempdir().expect("temporary data folder");
+        let backup = toml::to_string(&ConfigInput::default()).expect("serialized backup");
+        fs_err::write(directory.path().join("config.backup.toml"), backup).expect("backup");
+        let mut configuration = Configuration::load(directory.path(), "circadia.exe");
+        let schedule = calculated(ConfigInput::default());
+        assert_eq!(
+            line(
+                &control(&schedule),
+                Stored::new(&configuration),
+                "2026-10-27T13:00:00Z"
+            ),
+            "Settings were restored from a backup."
+        );
+        let observation = Control {
+            observation_failed: true,
+            ..control(&schedule)
+        };
+        assert_eq!(
+            line(
+                &observation,
+                Stored::new(&configuration),
+                "2026-10-27T13:00:00Z"
+            ),
+            "Settings were restored from a backup."
+        );
+        configuration.dismiss_restore();
+        assert_eq!(
+            line(
+                &control(&schedule),
+                Stored::new(&configuration),
+                "2026-10-27T13:00:00Z"
+            ),
+            "Managing Night Light · 6500 K"
+        );
+    }
+
+    #[test]
+    fn the_normal_line_names_the_current_temperature_and_its_source() {
+        let schedule = calculated(ConfigInput::default());
+        let noon = "2026-10-27T13:00:00Z";
+        assert_eq!(
+            line(
+                &control(&schedule),
+                Stored::default(),
+                "2026-10-27T23:30:00Z"
+            ),
+            "Managing Night Light · 2400 K"
+        );
+        let preview = Control {
+            preview_active: true,
+            playback: Some(at("2026-10-27T22:30:00Z")),
+            ..control(&schedule)
+        };
+        assert_eq!(
+            line(&preview, Stored::default(), noon),
+            "Previewing · 4450 K"
+        );
+        let suppressed = Control {
             suppression: SuppressionState {
-                automatic: false,
+                automatic: true,
                 manual_deadline: None,
             },
-            recent: Vec::new(),
-            command: None,
-            native_errors: BTreeMap::new(),
-            configured_revision: 0,
-            control_error: None,
-            stopped: false,
-        }
+            ..control(&schedule)
+        };
+        assert_eq!(
+            line(&suppressed, Stored::default(), "2026-10-27T23:30:00Z"),
+            "Suppressed · 6500 K"
+        );
+        let fallback = Control {
+            scheduling: SchedulingState::SolarFallback,
+            ..control(&schedule)
+        };
+        assert_eq!(
+            line(&fallback, Stored::default(), noon),
+            "Managing Night Light · 6500 K · Wake and Bedtime only"
+        );
+    }
+
+    #[test]
+    fn a_retained_temperature_outranks_failed_observation() {
+        let schedule = calculated(ConfigInput::default());
+        let retained = Control {
+            scheduling: SchedulingState::Retained,
+            last_scheduled: Some(3400),
+            observation_failed: true,
+            ..control(&schedule)
+        };
+        assert_eq!(
+            line(&retained, Stored::default(), "2026-10-27T13:00:00Z"),
+            "The schedule is unavailable; using its last temperature, 3400 K."
+        );
+        let observing = Control {
+            observation_failed: true,
+            ..control(&schedule)
+        };
+        assert_eq!(
+            line(&observing, Stored::default(), "2026-10-27T13:00:00Z"),
+            "Control continues without change observation."
+        );
     }
 
     #[test_case(SchedulingState::Waiting; "waiting for configuration")]
     #[test_case(SchedulingState::Evaluating; "initial calculation")]
     #[test_case(SchedulingState::Stopped; "unavailable time zone")]
     fn observation_failure_does_not_claim_control_is_running(state: SchedulingState) {
-        let mut snapshot = snapshot(ConfigInput::default());
-        snapshot.scheduling = state;
-        snapshot.native_errors.insert(
-            DiagnosticOperation::Observation,
-            Arc::new(NativeFailure::injected(DiagnosticOperation::Observation)),
-        );
-        assert!(
-            !lines(&english(), Some(&snapshot), Saving::default())
-                .iter()
-                .any(|line| line == "Control continues without change observation.")
+        let schedule = calculated(ConfigInput::default());
+        let control = Control {
+            scheduling: state,
+            observation_failed: true,
+            ..control(&schedule)
+        };
+        assert_ne!(
+            line(&control, Stored::default(), "2026-10-27T13:00:00Z"),
+            "Control continues without change observation."
         );
     }
 
@@ -332,52 +996,43 @@ mod tests {
                 DiagnosticOperation::NativeActivationWrite,
             )),
         );
-        assert!(
-            !lines(&english(), Some(&state), Saving::default())
-                .iter()
-                .any(|line| line == "Night Light output is unavailable.")
+        let control = Control::new(&state, Instant::now());
+        assert!(!control.output_failed);
+        assert_eq!(
+            line(&control, Stored::default(), "2026-10-27T13:00:00Z"),
+            "Not managing Night Light."
         );
     }
 
-    #[test]
-    fn native_failure_describes_requested_suppression_before_restore_notice() {
-        let mut state = snapshot(ConfigInput::default());
-        state.suppression.manual_deadline = Some(Duration::from_hours(1));
-        state.native_errors.insert(
-            DiagnosticOperation::TemperatureWrite,
-            Arc::new(NativeFailure::injected(
-                DiagnosticOperation::TemperatureWrite,
-            )),
-        );
-        assert_eq!(
-            lines(&english(), Some(&state), restored()),
-            [
-                "Output is unavailable; suppression is requested.",
-                "Configuration was restored from its backup.",
-            ]
-        );
-        assert!(manual_available(
-            state.management,
-            state.scheduling,
-            state.suppression
-        ));
-    }
-
-    #[test]
-    fn retained_schedule_precedes_observation_failure() {
-        let mut state = snapshot(ConfigInput::default());
-        state.scheduling = SchedulingState::Retained;
-        state.native_errors.insert(
-            DiagnosticOperation::Observation,
-            Arc::new(NativeFailure::injected(DiagnosticOperation::Observation)),
-        );
-        assert_eq!(
-            lines(&english(), Some(&state), Saving::default()),
-            [
-                "The schedule is unavailable; its last temperature is retained.",
-                "Control continues without change observation.",
-            ]
-        );
+    fn snapshot(input: ConfigInput) -> ControllerSnapshot {
+        let config = input.validate().expect("valid settings fixture");
+        ControllerSnapshot {
+            accepted: Some(crate::ConfigLayer::new(config)),
+            scheduling: SchedulingState::Available,
+            management: crate::ManagementState::On,
+            preview: None,
+            origin: std::time::Instant::now(),
+            calculation: Some(Arc::new(crate::CalculationResult {
+                revision: 1,
+                request: crate::CalculationRequest {
+                    config: crate::Config::default(),
+                    at: at("2026-10-27T03:00:00Z"),
+                    purpose: crate::CalculationPurpose::Schedule,
+                },
+                result: Ok(calculated(ConfigInput::default())),
+            })),
+            preview_active: false,
+            suppression: SuppressionState {
+                automatic: false,
+                manual_deadline: None,
+            },
+            recent: Vec::new(),
+            command: None,
+            native_errors: BTreeMap::new(),
+            configured_revision: 0,
+            control_error: None,
+            stopped: false,
+        }
     }
 
     #[test]
@@ -495,18 +1150,36 @@ mod tests {
         let states = expand(&states, &[false, true], |state, preview_active| {
             state.preview_active = preview_active;
         });
-        assert_eq!(states.len(), 2 * 6 * 4 * 3 * 2);
+        let states = expand(
+            &states,
+            &[crate::ManagementState::On, crate::ManagementState::Off],
+            |state, management| state.management = management,
+        );
+        assert_eq!(states.len(), 2 * 6 * 4 * 3 * 2 * 2);
+        let region = region();
+        let stored: Vec<Stored> = (0..16_u8)
+            .map(|bits| Stored {
+                error: bits & 1 != 0,
+                paused: bits & 2 != 0,
+                failed: bits & 4 != 0,
+                restored: bits & 8 != 0,
+            })
+            .collect();
+        let noon = at("2026-10-27T13:00:00Z");
         for language in [LanguageTag::english(), LanguageTag::pseudo()] {
             let text = Text::load(&language).expect("catalog loads");
-            let tooltips = states
+            let mut tooltips = vec![tooltip(
+                &text,
+                &status_line(&text, &region, None, Stored::default(), noon),
+            )];
+            let pairs = states
                 .iter()
-                .flat_map(|state| {
-                    savings()
-                        .into_iter()
-                        .map(|saving| tooltip(&text, &lines(&text, Some(state), saving)))
-                        .collect::<Vec<_>>()
-                })
-                .chain([tooltip(&text, &lines(&text, None, Saving::default()))]);
+                .flat_map(|state| stored.iter().map(move |stored| (state, *stored)));
+            for (state, stored) in pairs {
+                let control = Control::new(state, Instant::now());
+                let line = status_line(&text, &region, Some(&control), stored, noon);
+                tooltips.push(tooltip(&text, &line));
+            }
             for tooltip in tooltips {
                 assert!(
                     tooltip.encode_utf16().count() < 128,
@@ -530,7 +1203,9 @@ mod tests {
     }
 
     fn plain(label: &str) -> String {
-        label.replace(['\u{2068}', '\u{2069}'], "")
+        label
+            .replace(['\u{2068}', '\u{2069}'], "")
+            .replace('\u{a0}', " ")
     }
 
     fn labels(items: &[MenuItem]) -> Vec<(String, String, bool)> {

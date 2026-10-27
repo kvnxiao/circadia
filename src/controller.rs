@@ -16,6 +16,7 @@ pub use calculation::CalculationPurpose;
 pub use calculation::CalculationRequest;
 pub use calculation::CalculationResult;
 pub use calculation::CalculationWorker;
+pub use calculation::LocalEvent;
 pub use calculation::SolarConflict;
 pub use calculation::SolarToday;
 pub use driver::NativeCycle;

@@ -6,6 +6,7 @@ use crate::Field;
 use crate::FieldErrorKind;
 use crate::FieldValue;
 use crate::Mark;
+use crate::SchedulingState;
 use crate::Source;
 use crate::Unusable;
 use crate::l10n::Text;
@@ -156,6 +157,7 @@ pub(super) fn banners(
             enabled: true,
         });
     }
+    banners.extend(control_unavailable(model, text));
     let mut native = native(model, text);
     if model.management.is_on() && output_failed(model) {
         banners.extend(native.take());
@@ -228,7 +230,19 @@ pub(super) fn banners(
     banners
 }
 
-fn output_failed(model: &Model) -> bool {
+fn control_unavailable(model: &Model, text: &Text) -> Option<Banner> {
+    (model.management.is_on() && model.scheduling == SchedulingState::Stopped).then(|| Banner {
+        id: "banner-schedule",
+        severity: InfoBarSeverity::Error,
+        title: text!(text, "banner-schedule-title"),
+        message: text!(text, "banner-schedule-message"),
+        actions: vec![(Action::RetryNative, text!(text, "action-retry"))],
+        closable: false,
+        enabled: !model.retrying,
+    })
+}
+
+pub(super) fn output_failed(model: &Model) -> bool {
     model
         .native_errors
         .iter()

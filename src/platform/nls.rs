@@ -93,6 +93,26 @@ pub(crate) struct RegionalFormat {
     negative_order: u32,
 }
 
+// Removes the minute field and the separator before it outside quoted text;
+// GetTimeFormatEx's TIME_NOMINUTESORSECONDS flag also drops the day period
+// marker from an explicit pattern.
+fn without_minutes(pattern: &str) -> String {
+    let mut result = String::new();
+    let mut quoted = false;
+    for character in pattern.chars() {
+        if character == '\'' {
+            quoted = !quoted;
+        } else if !quoted && character == 'm' {
+            if result.ends_with([':', '.']) {
+                result.pop();
+            }
+            continue;
+        }
+        result.push(character);
+    }
+    result
+}
+
 impl RegionalFormat {
     // Formatting uses only the captured fields instead of the user's current
     // settings, so a regional change applies at the next launch.
@@ -156,7 +176,6 @@ impl RegionalFormat {
         self.time.split('\'').step_by(2).collect()
     }
 
-    #[expect(unsafe_code, reason = "format a local SYSTEMTIME with NLS")]
     pub(crate) fn format_clock(&self, minutes: u16) -> io::Result<String> {
         if minutes >= 24 * 60 {
             return Err(io::Error::new(
@@ -164,12 +183,24 @@ impl RegionalFormat {
                 "a clock time is less than 24 hours after midnight",
             ));
         }
+        self.format_with(&self.time, minutes)
+    }
+
+    pub(crate) fn format_hour(&self, hour: u16) -> io::Result<String> {
+        if self.clock_layout() == ClockLayout::TwentyFourHour {
+            return self.format_clock(hour.saturating_mul(60));
+        }
+        self.format_with(&without_minutes(&self.time), hour.saturating_mul(60))
+    }
+
+    #[expect(unsafe_code, reason = "format a local SYSTEMTIME with NLS")]
+    fn format_with(&self, pattern: &str, minutes: u16) -> io::Result<String> {
         let time = SYSTEMTIME {
             wHour: minutes / 60,
             wMinute: minutes % 60,
             ..SYSTEMTIME::default()
         };
-        let pattern: Vec<u16> = self.time.encode_utf16().chain(Some(0)).collect();
+        let pattern: Vec<u16> = pattern.encode_utf16().chain(Some(0)).collect();
         // SAFETY: The locale is null or NUL-terminated, the time and pattern
         // outlive the call, and the buffer is writable for `length` UTF-16
         // units.
@@ -383,6 +414,15 @@ mod tests {
 
         assert_eq!(format.format_clock(1350).expect("clock formats"), expected);
         assert_eq!(format.clock_layout(), layout);
+    }
+
+    #[test_case("en-US", [(6, "6 AM"), (12, "12 PM"), (0, "12 AM"), (21, "9 PM")]; "twelve hour")]
+    #[test_case("de-DE", [(6, "06:00"), (12, "12:00"), (0, "00:00"), (21, "21:00")]; "twenty-four hour")]
+    fn graph_hours_follow_the_captured_time_format(locale: &str, expected: [(u16, &str); 4]) {
+        let format = format(locale);
+        for (hour, label) in expected {
+            assert_eq!(format.format_hour(hour).expect("hour formats"), label);
+        }
     }
 
     #[test]
