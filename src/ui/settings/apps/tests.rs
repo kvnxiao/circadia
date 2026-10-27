@@ -460,16 +460,22 @@ fn adding_to_a_marked_list_clears_its_mark_and_ends_the_pause() {
 }
 
 #[test]
-fn relative_times_update_only_while_the_app_page_shows_recent_apps() {
+fn relative_times_update_only_while_the_shown_app_page_has_recent_apps() {
     let fixture = Fixture::new(None);
     let model = fixture.model(vec![recent_app("game.exe", None)]);
-    assert!(relative_times_shown(Page::Apps, &model));
+    assert!(relative_times_shown(Page::Apps, &model, Visibility::Shown));
+    assert!(!relative_times_shown(
+        Page::Apps,
+        &model,
+        Visibility::Minimized
+    ));
     for page in [Page::Schedule, Page::Transitions, Page::General] {
-        assert!(!relative_times_shown(page, &model));
+        assert!(!relative_times_shown(page, &model, Visibility::Shown));
     }
     assert!(!relative_times_shown(
         Page::Apps,
-        &fixture.model(Vec::new())
+        &fixture.model(Vec::new()),
+        Visibility::Shown
     ));
     assert_eq!(MINUTE, Duration::from_secs(60));
 }
