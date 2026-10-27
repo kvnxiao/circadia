@@ -90,13 +90,13 @@ pub fn select_solar(
         .rises
         .iter()
         .copied()
-        .filter(|instant| config.input().sunrise && wake <= *instant && *instant < bedtime)
+        .filter(|instant| config.sunrise_enabled() && wake <= *instant && *instant < bedtime)
         .min();
     let sunsets: Vec<_> = crossings
         .sets
         .iter()
         .copied()
-        .filter(|instant| config.input().sunset && wake < *instant && *instant < bedtime)
+        .filter(|instant| config.sunset_enabled() && wake < *instant && *instant < bedtime)
         .collect();
     if let Some(sunrise) = sunrise
         && !sunsets.is_empty()
@@ -141,6 +141,7 @@ mod tests {
 
     fn solar_config(sunrise: bool) -> Config {
         ConfigInput {
+            solar_timing: true,
             sunrise,
             sunset: true,
             coordinates: Some(Coordinates {

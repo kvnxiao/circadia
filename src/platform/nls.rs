@@ -93,13 +93,6 @@ pub(crate) struct RegionalFormat {
     negative_order: u32,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the redesigned settings window is the first caller of the formatting functions"
-    )
-)]
 impl RegionalFormat {
     // Formatting uses only the captured fields instead of the user's current
     // settings, so a regional change applies at the next launch.

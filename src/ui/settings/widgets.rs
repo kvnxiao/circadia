@@ -1,6 +1,11 @@
+use super::problems::FeatureMessage;
+use super::problems::Severity;
 use std::sync::Arc;
 use windows_reactor::AutomationLiveSetting;
 use windows_reactor::Border;
+use windows_reactor::Button;
+use windows_reactor::ButtonStyle;
+use windows_reactor::Callback;
 use windows_reactor::EncodedImage;
 use windows_reactor::FontIcon;
 use windows_reactor::FontWeight;
@@ -138,13 +143,68 @@ pub(super) fn pill(text: impl AsRef<str>) -> View {
         .into()
 }
 
-pub(super) fn nested_row(glyph: FontIcon, text: Vec<View>, action: Option<View>, id: &str) -> View {
+pub(super) fn nested(id: &str) -> Border {
     Border::new()
         .min_height(56.0)
         .padding(Thickness::new(52.0, 10.0, 16.0, 10.0))
         .border_brush(ThemeBrush::CardStroke)
         .border_thickness(Thickness::new(0.0, 1.0, 0.0, 0.0))
         .automation_id(id)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Expansion {
+    Collapsed,
+    Expanded,
+    Held,
+}
+
+impl Expansion {
+    pub(super) fn chosen(expanded: bool) -> Self {
+        if expanded {
+            Self::Expanded
+        } else {
+            Self::Collapsed
+        }
+    }
+
+    pub(super) fn held_when(self, held: bool) -> Self {
+        if held { Self::Held } else { self }
+    }
+
+    pub(super) fn expanded(self) -> bool {
+        self != Self::Collapsed
+    }
+}
+
+pub(super) fn expand_button(
+    expansion: Expansion,
+    name: String,
+    id: &str,
+    on_click: Callback<()>,
+) -> View {
+    Button::new()
+        .style(ButtonStyle::Subtle)
+        .width(32.0)
+        .height(32.0)
+        .is_enabled(expansion != Expansion::Held)
+        .automation_id(id)
+        .automation_name(name)
+        .on_click(on_click)
+        .content(
+            FontIcon::new()
+                .glyph(if expansion.expanded() {
+                    "\u{E70E}"
+                } else {
+                    "\u{E70D}"
+                })
+                .font_size(12.0),
+        )
+        .into()
+}
+
+pub(super) fn nested_row(glyph: FontIcon, text: Vec<View>, action: Option<View>, id: &str) -> View {
+    nested(id)
         .automation_live_setting(AutomationLiveSetting::Assertive)
         .content(
             Grid::new()
@@ -167,6 +227,34 @@ pub(super) fn nested_row(glyph: FontIcon, text: Vec<View>, action: Option<View>,
                 )),
         )
         .into()
+}
+
+pub(super) fn feature_row(
+    message: FeatureMessage,
+    name: &str,
+    retry_enabled: bool,
+    retry: Callback<()>,
+) -> View {
+    let glyph = match message.severity {
+        Severity::Error => FontIcon::new()
+            .glyph("\u{EB90}")
+            .foreground(ThemeBrush::SystemCritical),
+        Severity::Warning => FontIcon::new().glyph("\u{E7BA}"),
+    };
+    let action = message.retry.map(|label| {
+        Button::new()
+            .automation_id(format!("{name}-retry"))
+            .is_enabled(retry_enabled)
+            .on_click(retry)
+            .content(label)
+            .into()
+    });
+    nested_row(
+        glyph,
+        vec![body(message.text).into()],
+        action,
+        &format!("{name}-message"),
+    )
 }
 
 pub(super) fn group(cards: Vec<View>) -> View {

@@ -35,6 +35,19 @@ pub(super) struct Banner {
     pub(super) enabled: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Severity {
+    Error,
+    Warning,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct FeatureMessage {
+    pub(super) severity: Severity,
+    pub(super) text: String,
+    pub(super) retry: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Feedback {
     Error(String),
@@ -48,8 +61,10 @@ pub(super) fn page(field: Field) -> Page {
         | Field::DaytimeKelvin
         | Field::MiddleKelvin
         | Field::SleepKelvin
+        | Field::SolarTiming
         | Field::Sunrise
         | Field::Sunset
+        | Field::UseWindowsLocation
         | Field::Coordinates
         | Field::ManageNightLight => Page::Schedule,
         Field::Suppression | Field::Exclusions | Field::FocusDelayMs => Page::Apps,
@@ -459,9 +474,9 @@ fn error_message(
         FieldErrorKind::CoordinatesRequired => {
             text!(text, "error-coordinates-required", field = field_name)
         }
+        FieldErrorKind::Coordinates => text!(text, "error-coordinates"),
         FieldErrorKind::WrongType
         | FieldErrorKind::Clock
-        | FieldErrorKind::Coordinates
         | FieldErrorKind::Executable
         | FieldErrorKind::AlreadyListed
         | FieldErrorKind::FixedExclusion

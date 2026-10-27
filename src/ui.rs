@@ -398,6 +398,8 @@ struct Desktop {
     taskbar_epoch: u64,
     registration: Box<dyn Registrar>,
     sign_in: SignIn,
+    location_log: crate::DiagnosticLog,
+    held_location: Option<crate::Coordinates>,
 }
 
 impl Application for Desktop {
@@ -551,15 +553,59 @@ impl Desktop {
             taskbar_epoch: 0,
             registration,
             sign_in: SignIn::default(),
+            location_log: crate::DiagnosticLog::default(),
+            held_location: None,
         }
     }
 
     fn settings_closed(&mut self) {
         self.set_settings_open(false);
         if !self.exiting {
+            // Closing settings ends Preview, so a position held for playback
+            // applies now.
+            self.apply_location();
             self.configuration.borrow_mut().write();
         }
         self.prune_icons();
+    }
+
+    fn located(&mut self, result: Result<crate::Coordinates, crate::DiagnosticFailure>) {
+        if !self.settings_open {
+            return;
+        }
+        match result {
+            Ok(coordinates) => {
+                self.location_log
+                    .recovered(crate::DiagnosticOperation::Location);
+                self.held_location = Some(coordinates);
+                self.release_location();
+            }
+            Err(failure) => self
+                .location_log
+                .failure(crate::DiagnosticOperation::Location, failure),
+        }
+    }
+
+    fn release_location(&mut self) {
+        if !self
+            .snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.preview_active)
+        {
+            self.apply_location();
+        }
+    }
+
+    fn apply_location(&mut self) {
+        let Some(coordinates) = self.held_location.take() else {
+            return;
+        };
+        let changed = self.configuration.borrow_mut().edit(vec![(
+            Field::Coordinates,
+            FieldValue::Coordinates(Some(coordinates)),
+        )]);
+        self.configuration.borrow_mut().write();
+        self.configure(changed);
     }
 
     fn set_settings_open(&mut self, open: bool) {
@@ -674,6 +720,7 @@ impl Desktop {
                 self.configure(changed);
             }
             settings::Command::Icons(executables) => self.request_icons(&executables),
+            settings::Command::Located(result) => self.located(result),
             settings::Command::Browsed(file) => {
                 if let Some(file_info) = &mut self.file_info {
                     file_info.request(&file.executable, &file.path);
@@ -993,6 +1040,7 @@ impl Desktop {
         }
         self.request_names();
         self.receive_files();
+        self.release_location();
     }
 
     fn begin_exit(&mut self) {

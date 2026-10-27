@@ -178,7 +178,7 @@ pub fn is_fixed_exclusion(executable: &str, running_executable: &str) -> bool {
 #[serde(deny_unknown_fields)]
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "the file format has five independent user switches"
+    reason = "the file format has seven independent user switches"
 )]
 pub struct ConfigInput {
     /// Configuration file format version; validation sets the current one.
@@ -203,11 +203,16 @@ pub struct ConfigInput {
     pub output_rate_hz: i64,
     /// Compressed Preview duration in whole seconds.
     pub preview_seconds: i64,
-    /// Whether Sunrise is an optional schedule input.
+    /// Whether the selected solar inputs shape the schedule.
+    pub solar_timing: bool,
+    /// Whether Sunrise is selected; it applies only while solar timing is on.
     pub sunrise: bool,
-    /// Whether Sunset is an optional schedule input.
+    /// Whether Sunset is selected; it applies only while solar timing is on.
     pub sunset: bool,
-    /// Saved coordinates; unnecessary when both solar inputs are off.
+    /// Whether opening settings requests the Windows position for the
+    /// coordinates.
+    pub use_windows_location: bool,
+    /// Saved coordinates; required only while solar timing is enabled.
     pub coordinates: Option<Coordinates>,
     /// Entries included in automatic suppression.
     pub suppression: Vec<AppEntry>,
@@ -239,8 +244,10 @@ impl Default for ConfigInput {
             focus_delay_ms: 250,
             output_rate_hz: 60,
             preview_seconds: 10,
-            sunrise: false,
-            sunset: false,
+            solar_timing: false,
+            sunrise: true,
+            sunset: true,
+            use_windows_location: false,
             coordinates: None,
             suppression: Vec::new(),
             exclusions: Vec::new(),
@@ -308,10 +315,14 @@ pub enum Field {
     OutputRateHz,
     /// The Preview duration.
     PreviewSeconds,
+    /// The solar timing switch.
+    SolarTiming,
     /// The Sunrise input.
     Sunrise,
     /// The Sunset input.
     Sunset,
+    /// Use my Windows location.
+    UseWindowsLocation,
     /// The saved coordinates.
     Coordinates,
     /// The suppression list.
@@ -341,7 +352,7 @@ pub struct NumberRange {
 
 impl Field {
     /// Every field in file order.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 21] = [
         Self::Wake,
         Self::Bedtime,
         Self::DaytimeKelvin,
@@ -352,8 +363,10 @@ impl Field {
         Self::FocusDelayMs,
         Self::OutputRateHz,
         Self::PreviewSeconds,
+        Self::SolarTiming,
         Self::Sunrise,
         Self::Sunset,
+        Self::UseWindowsLocation,
         Self::Coordinates,
         Self::Suppression,
         Self::Exclusions,
@@ -376,8 +389,10 @@ impl Field {
             Self::FocusDelayMs => "focus_delay_ms",
             Self::OutputRateHz => "output_rate_hz",
             Self::PreviewSeconds => "preview_seconds",
+            Self::SolarTiming => "solar_timing",
             Self::Sunrise => "sunrise",
             Self::Sunset => "sunset",
+            Self::UseWindowsLocation => "use_windows_location",
             Self::Coordinates => "coordinates",
             Self::Suppression => "suppression",
             Self::Exclusions => "exclusions",
@@ -469,7 +484,7 @@ pub enum FieldErrorKind {
         /// The other field's value.
         other_kelvin: i64,
     },
-    /// Sunrise or Sunset is selected without coordinates.
+    /// Solar timing is enabled without coordinates.
     CoordinatesRequired,
     /// The value is valid alone, but other values of its group conflict, so
     /// loading replaced the whole group.
@@ -615,9 +630,10 @@ fn candidate(current: &Config, field: Field, value: &FieldValue) -> Result<Confi
     })
 }
 
-/// Report whether Morning and evening is used by the schedule.
+/// Report whether solar timing is enabled: the switch is on and at least one
+/// solar input is selected, so Morning and evening is used by the schedule.
 pub fn solar_timing_enabled(config: &Config) -> bool {
-    config.input.sunrise || config.input.sunset
+    config.input.solar_enabled()
 }
 
 impl ConfigInput {
@@ -680,8 +696,12 @@ impl ConfigInput {
         match (field, value) {
             (Field::Wake, FieldValue::Clock(minutes)) => self.wake = format_clock(minutes),
             (Field::Bedtime, FieldValue::Clock(minutes)) => self.bedtime = format_clock(minutes),
+            (Field::SolarTiming, FieldValue::Switch(value)) => self.solar_timing = value,
             (Field::Sunrise, FieldValue::Switch(value)) => self.sunrise = value,
             (Field::Sunset, FieldValue::Switch(value)) => self.sunset = value,
+            (Field::UseWindowsLocation, FieldValue::Switch(value)) => {
+                self.use_windows_location = value;
+            }
             (Field::StartAtSignIn, FieldValue::Switch(value)) => self.start_at_sign_in = value,
             (Field::StartMinimized, FieldValue::Switch(value)) => self.start_minimized = value,
             (Field::ManageNightLight, FieldValue::Switch(value)) => {
@@ -731,8 +751,10 @@ impl ConfigInput {
         match field {
             Field::Wake => FieldValue::Clock(parse_clock(&self.wake).unwrap_or_default()),
             Field::Bedtime => FieldValue::Clock(parse_clock(&self.bedtime).unwrap_or_default()),
+            Field::SolarTiming => FieldValue::Switch(self.solar_timing),
             Field::Sunrise => FieldValue::Switch(self.sunrise),
             Field::Sunset => FieldValue::Switch(self.sunset),
+            Field::UseWindowsLocation => FieldValue::Switch(self.use_windows_location),
             Field::StartAtSignIn => FieldValue::Switch(self.start_at_sign_in),
             Field::StartMinimized => FieldValue::Switch(self.start_minimized),
             Field::ManageNightLight => FieldValue::Switch(self.manage_night_light),
@@ -742,6 +764,10 @@ impl ConfigInput {
             Field::InterfaceLanguage => FieldValue::Language(self.interface_language.clone()),
             _ => FieldValue::Number(self.number(field).unwrap_or_default()),
         }
+    }
+
+    fn solar_enabled(&self) -> bool {
+        self.solar_timing && (self.sunrise || self.sunset)
     }
 
     fn normalize_temperatures(&mut self) {
@@ -822,8 +848,8 @@ fn consistency(field: Field, input: &ConfigInput) -> Result<(), FieldErrorKind> 
         }
         Field::MiddleKelvin if middle < sleep => Err(lower(middle, Field::SleepKelvin, sleep)),
         Field::SleepKelvin if sleep > middle => Err(higher(sleep, Field::MiddleKelvin, middle)),
-        Field::Sunrise | Field::Sunset | Field::Coordinates
-            if (input.sunrise || input.sunset) && input.coordinates.is_none() =>
+        Field::SolarTiming | Field::Sunrise | Field::Sunset | Field::Coordinates
+            if input.solar_enabled() && input.coordinates.is_none() =>
         {
             Err(FieldErrorKind::CoordinatesRequired)
         }
@@ -850,6 +876,18 @@ impl Config {
     /// Return one field's accepted value.
     pub fn value(&self, field: Field) -> FieldValue {
         self.input.value(field)
+    }
+
+    /// Report whether the schedule uses Sunrise: solar timing is enabled and
+    /// Sunrise is selected.
+    pub fn sunrise_enabled(&self) -> bool {
+        self.input.solar_enabled() && self.input.sunrise
+    }
+
+    /// Report whether the schedule uses Sunset: solar timing is enabled and
+    /// Sunset is selected.
+    pub fn sunset_enabled(&self) -> bool {
+        self.input.solar_enabled() && self.input.sunset
     }
 
     /// Classify a window by its executable file name and title under fixed
@@ -989,8 +1027,8 @@ impl Config {
             && left.middle_kelvin == right.middle_kelvin
             && left.sleep_kelvin == right.sleep_kelvin
             && left.scheduled_transition_minutes == right.scheduled_transition_minutes
-            && left.sunrise == right.sunrise
-            && left.sunset == right.sunset
+            && self.sunrise_enabled() == other.sunrise_enabled()
+            && self.sunset_enabled() == other.sunset_enabled()
             && left.coordinates == right.coordinates
     }
 }
@@ -1101,7 +1139,12 @@ const GROUPS: [&[Field]; 3] = [
         Field::SleepKelvin,
     ],
     &[Field::Wake, Field::Bedtime],
-    &[Field::Sunrise, Field::Sunset, Field::Coordinates],
+    &[
+        Field::SolarTiming,
+        Field::Sunrise,
+        Field::Sunset,
+        Field::Coordinates,
+    ],
 ];
 
 /// Load a configuration file field by field.
@@ -1148,7 +1191,7 @@ pub fn load(file: &str, backup: Option<&str>) -> Result<(Config, LoadReport), Un
     }
     let conflicts = replace_inconsistent_groups(&mut input, &backup_value, &mut sources);
     let config = input.validate().unwrap_or_default();
-    let solar_selected = config.input.sunrise || config.input.sunset;
+    let solar_enabled = solar_timing_enabled(&config);
     let mut report = LoadReport {
         unknown: decoded.unknown,
         missing_entry_keys: decoded.missing_entry_keys,
@@ -1161,7 +1204,7 @@ pub fn load(file: &str, backup: Option<&str>) -> Result<(Config, LoadReport), Un
             Some((Ok(value), _)) if *value != config.value(field) => conflicts.get(&field).copied(),
             Some((Ok(_), _)) => None,
             None => {
-                if field != Field::Coordinates || solar_selected {
+                if field != Field::Coordinates || solar_enabled {
                     report.missing.insert(field, source);
                 }
                 None
@@ -1420,7 +1463,8 @@ mod tests {
         assert_eq!(input.focus_delay_ms, 250);
         assert_eq!(input.output_rate_hz, 60);
         assert_eq!(input.preview_seconds, 10);
-        assert!(!input.sunrise && !input.sunset && !input.start_at_sign_in);
+        assert!(!input.solar_timing && !input.use_windows_location);
+        assert!(input.sunrise && input.sunset && !input.start_at_sign_in);
         assert!(input.start_minimized);
         assert!(!input.manage_night_light);
         assert!(input.coordinates.is_none());
@@ -1532,18 +1576,66 @@ mod tests {
         assert_eq!(errors.get(&Field::Wake), Some(&FieldErrorKind::WrongType));
     }
 
-    #[test]
-    fn solar_timing_requires_a_selected_solar_input() {
-        assert!(!solar_timing_enabled(&Config::default()));
-        let sunset = config(ConfigInput {
-            sunset: true,
-            coordinates: Some(Coordinates {
-                latitude: 40.0,
-                longitude: -74.0,
-            }),
+    const NEW_YORK: Coordinates = Coordinates {
+        latitude: 40.7128,
+        longitude: -74.006,
+    };
+
+    fn solar(edit: impl FnOnce(&mut ConfigInput)) -> Config {
+        let mut input = ConfigInput {
+            solar_timing: true,
+            coordinates: Some(NEW_YORK),
             ..ConfigInput::default()
+        };
+        edit(&mut input);
+        config(input)
+    }
+
+    #[test]
+    fn solar_timing_requires_the_switch_and_a_selected_input() {
+        assert!(!solar_timing_enabled(&Config::default()));
+        let off = solar(|input| input.solar_timing = false);
+        assert!(!solar_timing_enabled(&off));
+        assert!(!off.sunrise_enabled() && !off.sunset_enabled());
+        let deselected = solar(|input| {
+            input.sunrise = false;
+            input.sunset = false;
         });
+        assert!(!solar_timing_enabled(&deselected));
+        let sunset = solar(|input| input.sunrise = false);
         assert!(solar_timing_enabled(&sunset));
+        assert!(!sunset.sunrise_enabled() && sunset.sunset_enabled());
+    }
+
+    #[test]
+    fn turning_the_solar_switch_off_and_on_keeps_the_input_selections() {
+        let sunrise_only = solar(|input| input.sunset = false);
+        let (off, errors) = apply_inputs(
+            &sunrise_only,
+            &inputs(&[(Field::SolarTiming, FieldValue::Switch(false))]),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(!off.input().solar_timing);
+        assert!(off.input().sunrise && !off.input().sunset);
+        let (on, errors) = apply_inputs(
+            &off,
+            &inputs(&[(Field::SolarTiming, FieldValue::Switch(true))]),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(on, sunrise_only);
+    }
+
+    #[test]
+    fn turning_solar_timing_on_without_coordinates_conflicts() {
+        let (config, errors) = apply_inputs(
+            &Config::default(),
+            &inputs(&[(Field::SolarTiming, FieldValue::Switch(true))]),
+        );
+        assert_eq!(config, Config::default());
+        assert_eq!(
+            errors,
+            BTreeMap::from([(Field::SolarTiming, FieldErrorKind::CoordinatesRequired)])
+        );
     }
 
     #[test_case("00:00", 0)]
@@ -1670,18 +1762,20 @@ mod tests {
     }
 
     #[test]
-    fn requires_coordinates_for_either_solar_switch() {
-        for input in [
-            ConfigInput {
-                sunrise: true,
-                ..ConfigInput::default()
-            },
-            ConfigInput {
-                sunset: true,
-                ..ConfigInput::default()
-            },
+    fn requires_coordinates_only_while_solar_timing_is_enabled() {
+        for (solar_timing, sunrise, sunset, valid) in [
+            (true, true, false, false),
+            (true, false, true, false),
+            (true, false, false, true),
+            (false, true, true, true),
         ] {
-            assert!(input.validate().is_err());
+            let input = ConfigInput {
+                solar_timing,
+                sunrise,
+                sunset,
+                ..ConfigInput::default()
+            };
+            assert_eq!(input.validate().is_ok(), valid);
         }
     }
 
@@ -1693,7 +1787,7 @@ mod tests {
     #[test_case(0.0, f64::INFINITY, false)]
     fn validates_solar_coordinates(latitude: f64, longitude: f64, valid: bool) {
         let input = ConfigInput {
-            sunrise: true,
+            solar_timing: true,
             coordinates: Some(Coordinates {
                 latitude,
                 longitude,
@@ -2083,14 +2177,76 @@ mod tests {
     }
 
     #[test]
-    fn coordinates_are_not_missing_while_both_solar_inputs_are_off() {
+    fn coordinates_are_not_missing_while_the_solar_switch_is_off() {
         let file = file(|table| {
-            set(table, "sunrise", false);
-            set(table, "sunset", false);
+            set(table, "solar_timing", false);
+            set(table, "sunrise", true);
+            set(table, "sunset", true);
             table.remove("coordinates");
         });
-        let (_, report) = load(&file, None).expect("usable file");
+        let (config, report) = load(&file, None).expect("usable file");
+        assert_eq!(config, Config::default());
         assert_eq!(report, LoadReport::default());
+    }
+
+    fn solar_without_coordinates() -> String {
+        file(|table| {
+            set(table, "solar_timing", true);
+            set(table, "sunrise", true);
+            set(table, "sunset", true);
+            table.remove("coordinates");
+        })
+    }
+
+    #[test]
+    fn solar_timing_without_coordinates_or_a_backup_uses_the_solar_defaults() {
+        let (config, report) = load(&solar_without_coordinates(), None).expect("usable file");
+        let input = config.input();
+        assert!(!input.solar_timing && input.sunrise && input.sunset);
+        assert_eq!(input.coordinates, None);
+        assert_eq!(
+            report.marks,
+            BTreeMap::from([(
+                Field::SolarTiming,
+                mark("true", FieldErrorKind::CoordinatesRequired, Source::Default)
+            )])
+        );
+        assert!(report.missing.is_empty(), "{:?}", report.missing);
+    }
+
+    #[test]
+    fn solar_timing_without_coordinates_takes_the_backup_coordinates() {
+        let mut coordinates = toml::Table::new();
+        coordinates.insert("latitude".into(), NEW_YORK.latitude.into());
+        coordinates.insert("longitude".into(), NEW_YORK.longitude.into());
+        let backup = file(|table| set(table, "coordinates", coordinates));
+        let (config, report) =
+            load(&solar_without_coordinates(), Some(&backup)).expect("usable file");
+        assert!(config.input().solar_timing);
+        assert_eq!(config.input().coordinates, Some(NEW_YORK));
+        assert!(report.marks.is_empty(), "{:?}", report.marks);
+        assert_eq!(
+            report.missing,
+            BTreeMap::from([(Field::Coordinates, Source::Backup)])
+        );
+    }
+
+    #[test]
+    fn a_file_without_the_solar_switches_loads_them_off_and_reports_them_missing() {
+        let file = file(|table| {
+            table.remove("solar_timing");
+            table.remove("use_windows_location");
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert_eq!(config, Config::default());
+        assert!(report.marks.is_empty());
+        assert_eq!(
+            report.missing,
+            BTreeMap::from([
+                (Field::SolarTiming, Source::Default),
+                (Field::UseWindowsLocation, Source::Default),
+            ])
+        );
     }
 
     #[test]

@@ -209,6 +209,7 @@ fn calculation(revision: u64, request: CalculationRequest, kelvin: u16) -> Arc<C
             next_date: valid.end,
             solar_error: None,
             conflicts: Vec::new(),
+            today: None,
         }),
     })
 }
@@ -1161,6 +1162,7 @@ fn previewing_3000_k() -> Fixture {
                     next_date: valid.end,
                     solar_error: None,
                     conflicts: Vec::new(),
+                    today: None,
                 }),
             }),
             at(100),

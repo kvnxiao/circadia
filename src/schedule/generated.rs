@@ -5,6 +5,7 @@ use crate::Coordinates;
 use crate::Curve;
 use crate::ScheduleError;
 use crate::SolarCrossings;
+use crate::SolarSelection;
 use crate::Target;
 use crate::TimeInterval;
 use crate::WindowsZone;
@@ -84,7 +85,7 @@ fn from_anchors(
             },
         })
         .collect();
-    if !config.input().sunrise && !config.input().sunset {
+    if !config.sunrise_enabled() && !config.sunset_enabled() {
         return Ok(Schedule {
             curve: Curve::new(manual, duration)?,
             conflicts: Vec::new(),
@@ -155,6 +156,49 @@ fn from_anchors(
     })
 }
 
+/// Select the Sunrise and Sunset targets of the activity interval whose Wake
+/// falls on the local date of `at`.
+///
+/// - A disabled, naturally absent, or conflicting event is absent from the
+///   selection, as it is from the curve.
+///
+/// # Errors
+///
+/// Report failed Windows date conversion or solar calculation.
+pub fn solar_today(
+    config: &Config,
+    zone: &mut WindowsZone,
+    at: Timestamp,
+) -> Result<SolarSelection, ScheduleError> {
+    if !config.sunrise_enabled() && !config.sunset_enabled() {
+        return Ok(SolarSelection::default());
+    }
+    let coordinates = config
+        .input()
+        .coordinates
+        .ok_or_else(ScheduleError::curve)?;
+    let today = zone.local(at)?.date();
+    let anchors = resolve_anchors(config, zone, today, today.tomorrow()?)?;
+    let interval = anchors
+        .iter()
+        .zip(anchors.iter().skip(1))
+        .find(|(wake, bedtime)| {
+            wake.kind == AnchorKind::Wake
+                && bedtime.kind == AnchorKind::Bedtime
+                && wake.nominal.date() == today
+        });
+    let Some((wake, bedtime)) = interval else {
+        return Ok(SolarSelection::default());
+    };
+    let crossings = calculate_solar(coordinates, wake.instant, bedtime.instant)?;
+    Ok(select_solar(
+        config,
+        &crossings,
+        wake.instant,
+        bedtime.instant,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,6 +227,7 @@ mod tests {
 
     fn config() -> Config {
         ConfigInput {
+            solar_timing: true,
             sunrise: true,
             sunset: true,
             coordinates: Some(Coordinates {
@@ -254,6 +299,22 @@ mod tests {
         );
     }
 
+    fn kelvins(schedule: &Schedule) -> Vec<u16> {
+        schedule
+            .curve
+            .targets()
+            .iter()
+            .map(|target| target.kelvin)
+            .collect()
+    }
+
+    fn crossings() -> SolarCrossings {
+        SolarCrossings {
+            rises: vec!["2026-10-22T08:00:00Z".parse().expect("rise")],
+            sets: vec!["2026-10-22T18:13:00Z".parse().expect("set")],
+        }
+    }
+
     #[test]
     fn disabled_solar_never_calls_the_calculator() {
         let mut calls = 0;
@@ -264,6 +325,107 @@ mod tests {
         .expect("manual schedule");
         assert_eq!(calls, 0);
         assert!(schedule.solar_error.is_none());
+        assert_eq!(kelvins(&schedule), [2400, 6500, 2400, 6500]);
+    }
+
+    #[test]
+    fn selected_inputs_without_the_switch_add_no_solar_targets() {
+        let defaults = Config::default();
+        assert!(defaults.input().sunrise && defaults.input().sunset);
+        let coordinates = ConfigInput {
+            coordinates: config().input().coordinates,
+            ..ConfigInput::default()
+        }
+        .validate()
+        .expect("coordinates with solar timing off");
+        let schedule = from_anchors(&coordinates, &anchors(), requested(), |_, _, _| {
+            Ok(crossings())
+        })
+        .expect("manual schedule");
+        assert_eq!(kelvins(&schedule), [2400, 6500, 2400, 6500]);
+    }
+
+    #[test]
+    fn a_deselected_sunset_leaves_only_the_sunrise_target() {
+        let sunrise_only = ConfigInput {
+            sunset: false,
+            ..config().input().clone()
+        }
+        .validate()
+        .expect("sunrise only");
+        let schedule = from_anchors(&sunrise_only, &anchors(), requested(), |_, _, _| {
+            Ok(crossings())
+        })
+        .expect("schedule");
+        assert_eq!(kelvins(&schedule), [2400, 3400, 6500, 2400, 6500]);
+        assert!(
+            schedule
+                .curve
+                .targets()
+                .iter()
+                .any(|target| target.instant == "2026-10-22T08:00:00Z".parse().expect("rise"))
+        );
+    }
+
+    fn utc(text: &str) -> Timestamp {
+        text.parse().expect("UTC instant")
+    }
+
+    fn today(config: &Config, at: &str) -> SolarSelection {
+        let mut zone = WindowsZone::named("UTC", false).expect("UTC zone");
+        solar_today(config, &mut zone, utc(at)).expect("today's solar targets")
+    }
+
+    fn early_wake(edit: impl FnOnce(&mut ConfigInput)) -> Config {
+        let mut input = ConfigInput {
+            wake: "05:00".into(),
+            ..config().input().clone()
+        };
+        edit(&mut input);
+        input.validate().expect("solar configuration")
+    }
+
+    #[test]
+    fn todays_targets_come_from_the_activity_interval_that_starts_today() {
+        let selection = today(&early_wake(|_| {}), "2026-03-20T02:00:00Z");
+        let near = |instant: Option<Timestamp>, expected: &str| {
+            let instant = instant.expect("selected event");
+            instant.duration_since(utc(expected)).abs() < SignedDuration::from_mins(15)
+        };
+        assert!(
+            near(selection.sunrise, "2026-03-20T06:04:00Z"),
+            "{selection:?}"
+        );
+        assert!(
+            near(selection.sunset, "2026-03-20T18:10:00Z"),
+            "{selection:?}"
+        );
+        assert!(!selection.conflict);
+    }
+
+    #[test]
+    fn todays_disabled_or_absent_targets_are_none() {
+        let sunset_only = today(
+            &early_wake(|input| input.sunrise = false),
+            "2026-03-20T12:00:00Z",
+        );
+        assert_eq!(sunset_only.sunrise, None);
+        assert!(sunset_only.sunset.is_some());
+        let off = today(
+            &early_wake(|input| input.solar_timing = false),
+            "2026-03-20T12:00:00Z",
+        );
+        assert_eq!(off, SolarSelection::default());
+        let polar = early_wake(|input| {
+            input.coordinates = Some(Coordinates {
+                latitude: 69.6492,
+                longitude: 18.9553,
+            });
+        });
+        assert_eq!(
+            today(&polar, "2026-12-21T12:00:00Z"),
+            SolarSelection::default()
+        );
     }
 
     #[test_case("2026-06-21"; "polar day")]

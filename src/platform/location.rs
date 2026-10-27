@@ -1,5 +1,6 @@
 use crate::Coordinates;
-use std::io;
+use crate::DiagnosticCategory;
+use crate::DiagnosticFailure;
 use windows::Devices::Geolocation::GeolocationAccessStatus;
 use windows::Devices::Geolocation::Geolocator;
 use windows::Devices::Geolocation::Geoposition;
@@ -11,37 +12,37 @@ use windows_future::IAsyncOperation;
 pub(crate) struct Request(IAsyncInfo);
 
 impl Request {
-    pub(crate) fn access(completed: impl Fn(io::Result<()>) + Send + 'static) -> io::Result<Self> {
+    pub(crate) fn access(
+        completed: impl Fn(Result<(), DiagnosticFailure>) + Send + 'static,
+    ) -> Result<Option<Self>, DiagnosticFailure> {
         let foreground =
             winsafe::HWND::GetForegroundWindow().map(|window| window.GetWindowThreadProcessId());
         if foreground != Some((winsafe::GetCurrentThreadId(), std::process::id())) {
-            return Err(io::Error::other(
-                "focus settings before requesting location",
-            ));
+            return Ok(None);
         }
-        let operation = Geolocator::RequestAccessAsync().map_err(io::Error::other)?;
-        let request = Self(operation.cast().map_err(io::Error::other)?);
+        let operation = Geolocator::RequestAccessAsync().map_err(|error| failure(&error))?;
+        let request = Self(operation.cast().map_err(|error| failure(&error))?);
         operation
             .SetCompleted(&AsyncOperationCompletedHandler::new(move |operation, _| {
                 let result = operation
                     .ok()
                     .and_then(IAsyncOperation::GetResults)
-                    .map_err(io::Error::other)
+                    .map_err(|error| failure(&error))
                     .and_then(access_result);
                 completed(result);
                 Ok(())
             }))
-            .map_err(io::Error::other)?;
-        Ok(request)
+            .map_err(|error| failure(&error))?;
+        Ok(Some(request))
     }
 
     pub(crate) fn position(
-        completed: impl Fn(io::Result<Coordinates>) + Send + 'static,
-    ) -> io::Result<Self> {
+        completed: impl Fn(Result<Coordinates, DiagnosticFailure>) + Send + 'static,
+    ) -> Result<Self, DiagnosticFailure> {
         let operation = Geolocator::new()
             .and_then(|locator| locator.GetGeopositionAsync())
-            .map_err(io::Error::other)?;
-        let request = Self(operation.cast().map_err(io::Error::other)?);
+            .map_err(|error| failure(&error))?;
+        let request = Self(operation.cast().map_err(|error| failure(&error))?);
         operation
             .SetCompleted(&AsyncOperationCompletedHandler::<Geoposition>::new(
                 move |operation, _| {
@@ -55,12 +56,12 @@ impl Request {
                             latitude: position.Latitude,
                             longitude: position.Longitude,
                         })
-                        .map_err(io::Error::other);
+                        .map_err(|error| failure(&error));
                     completed(result);
                     Ok(())
                 },
             ))
-            .map_err(io::Error::other)?;
+            .map_err(|error| failure(&error))?;
         Ok(request)
     }
 }
@@ -71,16 +72,36 @@ impl Drop for Request {
     }
 }
 
-fn access_result(access: GeolocationAccessStatus) -> io::Result<()> {
-    match access {
-        GeolocationAccessStatus::Allowed => Ok(()),
-        GeolocationAccessStatus::Denied => Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "Windows denied location access; enter coordinates manually or check Windows location privacy settings",
-        )),
-        _ => Err(io::Error::other(
-            "Windows could not grant location access; enter coordinates manually",
-        )),
+fn access_result(access: GeolocationAccessStatus) -> Result<(), DiagnosticFailure> {
+    let category = match access {
+        GeolocationAccessStatus::Allowed => return Ok(()),
+        GeolocationAccessStatus::Denied => DiagnosticCategory::AccessDenied,
+        _ => DiagnosticCategory::Windows,
+    };
+    Err(DiagnosticFailure {
+        category,
+        code: None,
+    })
+}
+
+// A stopped or disabled Geolocation service fails the position request with
+// the service-disabled error rather than an access denial.
+fn failure(error: &windows::core::Error) -> DiagnosticFailure {
+    let code = error.code();
+    let category = if code.0 == windows_sys::Win32::Foundation::E_ACCESSDENIED {
+        DiagnosticCategory::AccessDenied
+    } else if code
+        == windows::core::HRESULT::from_win32(
+            windows_sys::Win32::Foundation::ERROR_SERVICE_DISABLED,
+        )
+    {
+        DiagnosticCategory::Unavailable
+    } else {
+        DiagnosticCategory::Windows
+    };
+    DiagnosticFailure {
+        category,
+        code: Some(code.0),
     }
 }
 
@@ -123,12 +144,32 @@ mod tests {
     }
 
     #[test_case(GeolocationAccessStatus::Allowed, None)]
-    #[test_case(GeolocationAccessStatus::Denied, Some(io::ErrorKind::PermissionDenied))]
-    #[test_case(GeolocationAccessStatus::Unspecified, Some(io::ErrorKind::Other))]
-    fn permission_outcomes(access: GeolocationAccessStatus, expected: Option<io::ErrorKind>) {
+    #[test_case(
+        GeolocationAccessStatus::Denied,
+        Some(DiagnosticCategory::AccessDenied)
+    )]
+    #[test_case(
+        GeolocationAccessStatus::Unspecified,
+        Some(DiagnosticCategory::Windows)
+    )]
+    fn permission_outcomes(access: GeolocationAccessStatus, expected: Option<DiagnosticCategory>) {
         assert_eq!(
-            access_result(access).err().map(|error| error.kind()),
+            access_result(access).err().map(|failure| failure.category),
             expected
+        );
+    }
+
+    #[test_case(0x8007_0005_u32, DiagnosticCategory::AccessDenied; "access denied")]
+    #[test_case(0x8007_0422_u32, DiagnosticCategory::Unavailable; "service disabled")]
+    #[test_case(0x8000_4005_u32, DiagnosticCategory::Windows; "unspecified failure")]
+    fn position_failures_keep_their_code(code: u32, category: DiagnosticCategory) {
+        let code = windows::core::HRESULT(code.cast_signed());
+        assert_eq!(
+            failure(&windows::core::Error::from_hresult(code)),
+            DiagnosticFailure {
+                category,
+                code: Some(code.0),
+            }
         );
     }
 
