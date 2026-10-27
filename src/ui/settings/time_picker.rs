@@ -1,3 +1,4 @@
+use crate::automation_id;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::ClockLayout;
@@ -259,10 +260,19 @@ impl TimePicker {
         let selected = index(self.layout.parts(self.selection.draft), segment);
         let order = rows(values.len(), anchor);
         let text = &self.input.text;
-        let (name, suffix) = match segment {
-            Segment::Hour => (text!(text, "picker-hour"), "hour"),
-            Segment::Minute => (text!(text, "picker-minute"), "minute"),
-            Segment::Period => (text!(text, "picker-period"), "period"),
+        let (name, id) = match segment {
+            Segment::Hour => (
+                text!(text, "picker-hour"),
+                automation_id::hour(self.input.id),
+            ),
+            Segment::Minute => (
+                text!(text, "picker-minute"),
+                automation_id::minute(self.input.id),
+            ),
+            Segment::Period => (
+                text!(text, "picker-period"),
+                automation_id::period(self.input.id),
+            ),
         };
         let items = order.iter().map(|&value| {
             let label = values.get(value).cloned().unwrap_or_default();
@@ -283,7 +293,7 @@ impl TimePicker {
             }))
             .height(36.0 * VISIBLE_ROWS as f64)
             .width(72.0)
-            .automation_id(format!("{}-{suffix}", self.input.id))
+            .automation_id(id)
             .automation_name(name)
             .into()
     }
@@ -313,14 +323,14 @@ impl TimePicker {
                 .children((
                     Button::new()
                         .horizontal_alignment(HorizontalAlignment::Stretch)
-                        .automation_id(format!("{}-accept", self.input.id))
+                        .automation_id(automation_id::accept(self.input.id))
                         .automation_name(text!(text, "picker-accept"))
                         .on_click(context.message(Message::Accept))
                         .content(FontIcon::new().glyph("\u{E8FB}").font_size(16.0)),
                     Button::new()
                         .grid_column(1)
                         .horizontal_alignment(HorizontalAlignment::Stretch)
-                        .automation_id(format!("{}-cancel", self.input.id))
+                        .automation_id(automation_id::cancel(self.input.id))
                         .automation_name(text!(text, "picker-cancel"))
                         .on_click(context.message(Message::Cancel))
                         .content(FontIcon::new().glyph("\u{E711}").font_size(16.0)),

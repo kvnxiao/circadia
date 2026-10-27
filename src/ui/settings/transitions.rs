@@ -5,6 +5,7 @@ use super::widgets;
 use super::widgets::Row;
 use crate::Config;
 use crate::Field;
+use crate::automation_id;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
@@ -102,10 +103,10 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 text!(text, "transition-length-description"),
                 NumberControls {
                     field: Field::ScheduledTransitionMinutes,
-                    id: "transition",
+                    number: automation_id::TRANSITION_NUMBER,
+                    slider: Some(automation_id::TRANSITION_SLIDER),
                     title: &transition,
                     unit: text!(text, "minutes-unit"),
-                    slider: true,
                 },
                 context,
             ),
@@ -123,10 +124,10 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             ),
             NumberControls {
                 field: Field::OrdinaryFadeMs,
-                id: "fade",
+                number: automation_id::FADE_NUMBER,
+                slider: None,
                 title: &fade,
                 unit: text!(text, "milliseconds-unit"),
-                slider: false,
             },
             context,
         )),
@@ -137,10 +138,10 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             text!(text, "preview-length-description"),
             NumberControls {
                 field: Field::PreviewSeconds,
-                id: "preview-length",
+                number: automation_id::PREVIEW_LENGTH_NUMBER,
+                slider: Some(automation_id::PREVIEW_LENGTH_SLIDER),
                 title: &preview,
                 unit: text!(text, "seconds-unit"),
-                slider: true,
             },
             context,
         )),
@@ -156,10 +157,10 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             ),
             NumberControls {
                 field: Field::OutputRateHz,
-                id: "rate",
+                number: automation_id::RATE_NUMBER,
+                slider: None,
                 title: &rate,
                 unit: text!(text, "hertz-unit"),
-                slider: false,
             },
             context,
         )),
@@ -240,7 +241,7 @@ fn example_view(example: Example) -> View {
         .children((
             Grid::new()
                 .height(PLOT_HEIGHT)
-                .automation_id("transition-example")
+                .automation_id(automation_id::TRANSITION_EXAMPLE)
                 .children((
                     Border::new()
                         .corner_radius(4.0)
@@ -265,20 +266,20 @@ fn example_view(example: Example) -> View {
                 at(
                     ramp,
                     label(example.start_label, short)
-                        .automation_id("transition-example-start")
+                        .automation_id(automation_id::TRANSITION_EXAMPLE_START)
                         .into(),
                 ),
                 at(
                     sunset,
                     label(example.sunset_label, false)
                         .font_weight(FontWeight::SEMI_BOLD)
-                        .automation_id("transition-example-sunset")
+                        .automation_id(automation_id::TRANSITION_EXAMPLE_SUNSET)
                         .into(),
                 ),
             )),
             widgets::caption(example.caption)
                 .margin(Thickness::new(0.0, 4.0, 0.0, 0.0))
-                .automation_id("transition-example-caption"),
+                .automation_id(automation_id::TRANSITION_EXAMPLE_CAPTION),
         ))
         .into()
 }

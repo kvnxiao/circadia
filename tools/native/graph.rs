@@ -2,6 +2,7 @@ use crate::automation::Automation;
 use crate::lifecycle::native_message;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
+use crate::lifecycle::settings_window;
 use crate::lifecycle::wait;
 use crate::lifecycle::window;
 use circadia::ConfigInput;
@@ -9,6 +10,8 @@ use circadia::ConfigStore;
 use circadia::Coordinates;
 use circadia::GraphMeasurement;
 use circadia::SimulatedNativeFault;
+use circadia::automation_id;
+use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use std::process::Command;
@@ -19,11 +22,12 @@ use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_POWERBROADCAST;
 use winsafe::HWND;
 
-pub(super) fn run() -> io::Result<()> {
+pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     require(
-        std::env::args_os().len() == 2,
+        arguments.len() == 1,
         "usage: native-lifecycle --measure-graph",
     )?;
+    crate::lifecycle::require_english()?;
     environment()?;
     let input = ConfigInput {
         start_minimized: false,
@@ -96,9 +100,7 @@ pub(super) fn desktop_check(
 fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Result<()> {
     let automation = Automation::new()?;
     let process = std::process::id();
-    let settings = wait("measurement settings window", || {
-        window(process, "Circadia", true)
-    })?;
+    let settings = wait("measurement settings window", || settings_window(process))?;
     let rectangle = settings.GetWindowRect().map_err(io::Error::other)?;
     report(&format!(
         "Settings DPI: {}; window: {} x {}",
@@ -108,23 +110,23 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
     ));
     wait("initial generated schedule", || {
         Ok(automation
-            .enabled(&settings, process, "preview")?
+            .enabled(&settings, process, automation_id::PREVIEW)?
             .filter(|enabled| *enabled))
     })?;
     wait("graph inside the visible viewport", || {
         Ok(automation.show_graph(&settings, process)?.then_some(()))
     })?;
     measurement.hold_output(true)?;
-    automation.set_number(&settings, process, "sleep-number", 2200.0)?;
+    automation.set_number(&settings, process, automation_id::SLEEP_NUMBER, 2200.0)?;
     input.sleep_kelvin = 2200;
-    automation.set_number(&settings, process, "daytime-number", 6200.0)?;
+    automation.set_number(&settings, process, automation_id::DAYTIME_NUMBER, 6200.0)?;
     input.daytime_kelvin = 6200;
     wait("edited temperatures applied", || {
         Ok(automation
-            .number(&settings, process, "daytime-number")?
+            .number(&settings, process, automation_id::DAYTIME_NUMBER)?
             .filter(|value| (value - 6200.0).abs() < f64::EPSILON))
     })?;
-    automation.invoke(&settings, process, "manual-suppression")?;
+    automation.invoke(&settings, process, automation_id::MANUAL_SUPPRESSION)?;
     wait("simulated native temperature operation blocked", || {
         Ok(measurement.output_blocked()?.then_some(()))
     })?;
@@ -137,11 +139,15 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
         "solar timing off",
         &mut samples,
     )?;
-    automation.toggle(&settings, process, "solar-timing")?;
+    automation.toggle(&settings, process, automation_id::SOLAR_TIMING)?;
     input.solar_timing = true;
     wait("solar timing applied", || {
         Ok(automation
-            .text(&settings, process, "graph-sunrise")?
+            .text(
+                &settings,
+                process,
+                &automation_id::graph_event(automation_id::SUNRISE),
+            )?
             .filter(|name| !name.is_empty()))
     })?;
     measure_edits(
@@ -164,15 +170,16 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
         "native operation was released during graph measurements",
     )?;
     measurement.hold_output(false)?;
+    let text = crate::lifecycle::text()?;
     wait("manual suppression acknowledged", || {
         Ok(automation
-            .text(&settings, process, "manual-suppression")?
-            .filter(|text| text == "Stop suppressing"))
+            .text(&settings, process, automation_id::MANUAL_SUPPRESSION)?
+            .filter(|label| *label == text.manual_stop))
     })?;
-    automation.invoke(&settings, process, "manual-suppression")?;
+    automation.invoke(&settings, process, automation_id::MANUAL_SUPPRESSION)?;
     wait("Preview available after suppression", || {
         Ok(automation
-            .enabled(&settings, process, "preview")?
+            .enabled(&settings, process, automation_id::PREVIEW)?
             .filter(|enabled| *enabled))
     })?;
     measure_preview(measurement, &automation, &settings)?;
@@ -196,16 +203,24 @@ fn measure_solar_failure(
         automation,
         settings,
         input,
-        ("sleep_kelvin", "sleep-number"),
+        ("sleep_kelvin", automation_id::SLEEP_NUMBER),
         2100,
         "solar failure fallback",
     )?);
     wait("solar failure message and Retry", || {
-        automation.enabled(settings, process, "solar-fallback-retry")
+        automation.enabled(
+            settings,
+            process,
+            &automation_id::retry(automation_id::SOLAR_FALLBACK),
+        )
     })?;
     require(
         automation
-            .text(settings, process, "graph-sunrise")?
+            .text(
+                settings,
+                process,
+                &automation_id::graph_event(automation_id::SUNRISE),
+            )?
             .is_none(),
         "the fallback graph kept a Sunrise marker",
     )?;
@@ -216,7 +231,7 @@ fn measure_solar_failure(
         automation,
         settings,
         input,
-        ("sleep_kelvin", "sleep-number"),
+        ("sleep_kelvin", automation_id::SLEEP_NUMBER),
         2300,
         "solar recovery",
     )?);
@@ -263,7 +278,7 @@ fn measure_edits(
             automation,
             settings,
             input,
-            ("sleep_kelvin", "sleep-number"),
+            ("sleep_kelvin", automation_id::SLEEP_NUMBER),
             input.sleep_kelvin,
             label,
         )?);
@@ -277,7 +292,7 @@ fn measure_edits(
             automation,
             settings,
             input,
-            ("daytime_kelvin", "daytime-number"),
+            ("daytime_kelvin", automation_id::DAYTIME_NUMBER),
             input.daytime_kelvin,
             label,
         )?);
@@ -320,7 +335,7 @@ fn measure_preview(
     // operation is Preview's own output after the controller starts playback.
     std::thread::sleep(Duration::from_secs(1));
     measurement.hold_output(true)?;
-    automation.invoke(settings, process, "preview")?;
+    automation.invoke(settings, process, automation_id::PREVIEW)?;
     wait("Preview operation blocked", || {
         Ok(measurement.output_blocked()?.then_some(()))
     })?;
@@ -338,7 +353,7 @@ fn measure_preview(
     measurement.hold_output(false)?;
     wait("Preview completion restores editing", || {
         Ok(automation
-            .enabled(settings, process, "wake")?
+            .enabled(settings, process, automation_id::WAKE)?
             .filter(|enabled| *enabled))
     })?;
     report(&format!(
@@ -357,34 +372,39 @@ fn resume_preview(
     let process = std::process::id();
     wait("Preview available before resume check", || {
         Ok(automation
-            .enabled(settings, process, "preview")?
+            .enabled(settings, process, automation_id::PREVIEW)?
             .filter(|enabled| *enabled))
     })?;
-    automation.select(settings, process, "nav-transitions")?;
+    automation.select(settings, process, automation_id::NAV_TRANSITIONS)?;
     wait("Transitions page", || {
-        automation.number(settings, process, "preview-length-number")
+        automation.number(settings, process, automation_id::PREVIEW_LENGTH_NUMBER)
     })?;
-    automation.set_number(settings, process, "preview-length-number", 60.0)?;
+    automation.set_number(
+        settings,
+        process,
+        automation_id::PREVIEW_LENGTH_NUMBER,
+        60.0,
+    )?;
     input.preview_seconds = 60;
     wait("long Preview duration", || {
         Ok(automation
-            .number(settings, process, "preview-length-number")?
+            .number(settings, process, automation_id::PREVIEW_LENGTH_NUMBER)?
             .filter(|value| (value - 60.0).abs() < f64::EPSILON))
     })?;
-    automation.select(settings, process, "nav-schedule")?;
+    automation.select(settings, process, automation_id::NAV_SCHEDULE)?;
     wait("graph visible again", || {
         Ok(automation.show_graph(settings, process)?.then_some(()))
     })?;
     wait("Preview available with the long duration", || {
         Ok(automation
-            .enabled(settings, process, "preview")?
+            .enabled(settings, process, automation_id::PREVIEW)?
             .filter(|enabled| *enabled))
     })?;
     let started = Instant::now();
-    automation.invoke(settings, process, "preview")?;
+    automation.invoke(settings, process, automation_id::PREVIEW)?;
     wait("Preview disables editing before resume", || {
         Ok(automation
-            .enabled(settings, process, "wake")?
+            .enabled(settings, process, automation_id::WAKE)?
             .filter(|enabled| !*enabled))
     })?;
     let receiver = window(process, "Circadia event receiver", false)?
@@ -396,7 +416,7 @@ fn resume_preview(
     )?;
     wait("resume cancels Preview", || {
         Ok(automation
-            .enabled(settings, process, "wake")?
+            .enabled(settings, process, automation_id::WAKE)?
             .filter(|enabled| *enabled))
     })?;
     require(
@@ -404,7 +424,7 @@ fn resume_preview(
         "Preview could have completed naturally before cancellation was verified",
     )?;
     measurement.hold_output(true)?;
-    automation.invoke(settings, process, "manual-suppression")?;
+    automation.invoke(settings, process, automation_id::MANUAL_SUPPRESSION)?;
     wait("simulated native temperature operation blocked", || {
         Ok(measurement.output_blocked()?.then_some(()))
     })?;
@@ -414,7 +434,7 @@ fn resume_preview(
         automation,
         settings,
         input,
-        ("sleep_kelvin", "sleep-number"),
+        ("sleep_kelvin", automation_id::SLEEP_NUMBER),
         2400,
         "edit after resume",
     )?;

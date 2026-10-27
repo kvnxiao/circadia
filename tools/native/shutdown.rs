@@ -4,11 +4,15 @@ use crate::lifecycle::Process;
 use crate::lifecycle::native_message;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
+use crate::lifecycle::settings_window;
+use crate::lifecycle::show_page;
+use crate::lifecycle::verify_off;
 use crate::lifecycle::wait_temperature;
 use crate::lifecycle::window;
 use circadia::ConfigInput;
-use circadia::ConfigStore;
 use circadia::InstanceClaim;
+use circadia::automation_id;
+use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use win_nightlight_lib::Nightlight;
@@ -20,17 +24,16 @@ enum ExitCase {
     QuitDialog,
     SessionEndOpening,
     SessionEndPicker,
-    QuitPicker,
+    SessionEndFlyout,
 }
 
-pub(super) fn run() -> io::Result<()> {
-    let executable = std::env::args_os().nth(2).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "expected Circadia executable")
-    })?;
-    require(
-        std::env::args_os().count() == 3,
-        "expected one executable path",
-    )?;
+pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
+    let [_, executable] = arguments else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "expected one executable path",
+        ));
+    };
     match InstanceClaim::acquire()? {
         InstanceClaim::Primary(_claim) => {}
         InstanceClaim::Existing(_) => {
@@ -41,15 +44,24 @@ pub(super) fn run() -> io::Result<()> {
     let directory = tempfile::Builder::new()
         .prefix("circadia-native-shutdown-")
         .tempdir()?;
-    let result = [
+    let failed: Vec<ExitCase> = [
         ExitCase::SessionEndDialog,
         ExitCase::QuitDialog,
         ExitCase::SessionEndOpening,
         ExitCase::SessionEndPicker,
-        ExitCase::QuitPicker,
+        ExitCase::SessionEndFlyout,
     ]
     .into_iter()
-    .try_for_each(|case| exercise(&executable, directory.path(), case));
+    .filter(|case| {
+        exercise(&executable, directory.path(), *case)
+            .inspect_err(|error| report(&format!("FAIL: {case:?}: {error}")))
+            .is_err()
+    })
+    .collect();
+    let result = require(
+        failed.is_empty(),
+        &format!("shutdown cases failed: {failed:?}"),
+    );
     if result.is_err() {
         report(&format!(
             "Retained shutdown fixture: {}",
@@ -60,38 +72,36 @@ pub(super) fn run() -> io::Result<()> {
 }
 
 fn exercise(executable: &Path, directory: &Path, case: ExitCase) -> io::Result<()> {
-    let config = ConfigInput {
-        daytime_kelvin: 3400,
-        middle_kelvin: 3400,
-        sleep_kelvin: 3400,
-        start_minimized: false,
-        ..ConfigInput::default()
-    }
-    .validate()
-    .map_err(io::Error::other)?;
-    let saved = ConfigStore::new(directory)
-        .save(&config)
-        .map_err(io::Error::other)?;
-    if let Some(error) = saved.backup_error {
-        return Err(io::Error::other(error));
-    }
+    crate::lifecycle::seed(
+        directory,
+        &ConfigInput {
+            daytime_kelvin: 3400,
+            middle_kelvin: 3400,
+            sleep_kelvin: 3400,
+            start_minimized: false,
+            manage_night_light: true,
+            ..ConfigInput::default()
+        },
+    )?;
     let automation = Automation::new()?;
     let native = Nightlight::new();
     native.read_settings().map_err(io::Error::other)?;
     let mut application = Process::start(executable, directory)?;
     let process = application.id();
     report(&format!("CHECK: {case:?} in owned process {process}"));
-    let settings = wait("shutdown settings window", || {
-        window(process, "Circadia", true)
-    })?;
+    let settings = wait("shutdown settings window", || settings_window(process))?;
     if !matches!(case, ExitCase::SessionEndOpening) {
         open_dialog(&automation, &native, &settings, process, case)?;
     }
     match case {
-        ExitCase::QuitDialog | ExitCase::QuitPicker => {
-            automation.invoke(&settings, process, "quit")?;
+        ExitCase::QuitDialog => {
+            let menu = crate::tray::open(&automation, process)?;
+            crate::tray::click(menu.quit(crate::lifecycle::text()?)?)?;
         }
-        ExitCase::SessionEndDialog | ExitCase::SessionEndOpening | ExitCase::SessionEndPicker => {
+        ExitCase::SessionEndDialog
+        | ExitCase::SessionEndOpening
+        | ExitCase::SessionEndPicker
+        | ExitCase::SessionEndFlyout => {
             let receiver = window(process, "Circadia event receiver", false)?
                 .ok_or_else(|| io::Error::other("application event receiver is missing"))?;
             native_message(&receiver, WM_ENDSESSION, 1)?;
@@ -100,12 +110,14 @@ fn exercise(executable: &Path, directory: &Path, case: ExitCase) -> io::Result<(
     }
     application.wait_exit()?;
     verify_off(&native)?;
-    require(
-        crate::settings::saved(directory)?.bedtime == "23:00",
-        "exit saved an unconfirmed draft",
-    )?;
+    if !matches!(case, ExitCase::SessionEndOpening) {
+        require(
+            crate::settings::saved(directory)?.sleep_kelvin == 3000,
+            "exit lost the edit made before the dialog opened",
+        )?;
+    }
     report(&format!(
-        "PASS: {case:?} exits cleanly, clears Night Light, and does not save the draft"
+        "PASS: {case:?} exits cleanly, clears Night Light, and keeps the written edit"
     ));
     Ok(())
 }
@@ -117,45 +129,27 @@ fn open_dialog(
     process: u32,
     case: ExitCase,
 ) -> io::Result<()> {
-    wait("editable shutdown settings", || {
-        Ok(automation
-            .enabled(settings, process, "bedtime")?
-            .filter(|enabled| *enabled))
-    })?;
+    crate::settings::editable(automation, settings, process)?;
     wait_temperature(native, 3400)?;
-    automation.set_value(settings, process, "bedtime", "22:00")?;
-    wait("unsaved shutdown draft", || {
-        Ok(automation
-            .text(settings, process, "draft-status")?
-            .filter(|text| text == "Unsaved changes"))
-    })?;
-    if matches!(case, ExitCase::SessionEndPicker | ExitCase::QuitPicker) {
-        automation.invoke(settings, process, "add-suppression")?;
-        wait("open executable picker", || {
-            window(process, "Add application to Circadia", true)
+    automation.set_number(settings, process, automation_id::SLEEP_NUMBER, 3000.0)?;
+    if matches!(case, ExitCase::SessionEndFlyout) {
+        automation.invoke(settings, process, automation_id::WAKE)?;
+        let accept = automation_id::accept(automation_id::WAKE);
+        wait("open Wake time flyout", || {
+            automation.enabled(settings, process, &accept)
         })?;
-    } else {
-        automation.close(settings, process)?;
-        wait("open settings close dialog", || {
-            Ok(automation
-                .text(settings, process, "CloseButton")?
-                .filter(|text| text == "Keep Editing"))
+        return Ok(());
+    }
+    show_page(automation, settings, process, automation_id::NAV_APPS)?;
+    automation.invoke(settings, process, automation_id::ADD_APP)?;
+    wait("open Add app dialog", || {
+        automation.enabled(settings, process, automation_id::DIALOG_BROWSE)
+    })?;
+    if matches!(case, ExitCase::SessionEndPicker) {
+        automation.invoke(settings, process, automation_id::DIALOG_BROWSE)?;
+        wait("open executable picker", || {
+            window(process, &crate::lifecycle::text()?.picker_title, true)
         })?;
     }
-    Ok(())
-}
-
-fn verify_off(native: &Nightlight) -> io::Result<()> {
-    require(
-        !native
-            .read_settings()
-            .map_err(io::Error::other)?
-            .is_previewing(),
-        "session end left native preview active",
-    )?;
-    require(
-        !native.read_state().map_err(io::Error::other)?.is_active(),
-        "session end did not turn Night Light off",
-    )?;
     Ok(())
 }

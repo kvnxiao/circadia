@@ -5,14 +5,17 @@ use crate::lifecycle::native_message;
 use crate::lifecycle::read_log;
 use crate::lifecycle::report;
 use crate::lifecycle::require;
+use crate::lifecycle::settings_window;
+use crate::lifecycle::show_page;
 use crate::lifecycle::wait_temperature;
 use crate::lifecycle::window;
 use circadia::ConfigInput;
-use circadia::ConfigStore;
 use circadia::InstanceClaim;
 use circadia::OutputMeasurement;
 use circadia::WindowsZone;
+use circadia::automation_id;
 use jiff::Timestamp;
+use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use std::time::Duration;
@@ -21,11 +24,12 @@ use win_nightlight_lib::Nightlight;
 use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
 use winsafe::HWND;
 
-pub(super) fn run() -> io::Result<()> {
+pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     require(
-        std::env::args_os().len() == 2,
+        arguments.len() == 1,
         "usage: native-lifecycle --measure-output",
     )?;
+    crate::lifecycle::require_english()?;
     require(
         !cfg!(debug_assertions),
         "output measurements require a release build",
@@ -54,28 +58,39 @@ pub(super) fn run() -> io::Result<()> {
 }
 
 fn run_application(directory: &Path) -> io::Result<()> {
-    let input = ConfigInput {
-        daytime_kelvin: 2400,
-        middle_kelvin: 2400,
-        sleep_kelvin: 2400,
-        ordinary_fade_ms: 10_000,
-        start_minimized: false,
-        ..ConfigInput::default()
-    };
-    let saved = ConfigStore::new(directory)
-        .save(&input.validate().map_err(io::Error::other)?)
+    let mut zone = WindowsZone::current().map_err(io::Error::other)?;
+    let now = Timestamp::now();
+    let local = zone.local(now).map_err(io::Error::other)?;
+    // The one-minute transition before Wake starts at least 30 s after seeding,
+    // so startup's 10 s fade reaches 2400 K first.
+    let lead = if local.second() < 30 { 120 } else { 180 };
+    let wake = Timestamp::from_second(now.as_second() + lead - i64::from(local.second()))
         .map_err(io::Error::other)?;
-    if let Some(error) = saved.backup_error {
-        return Err(io::Error::other(error));
-    }
+    let target = zone.local(wake).map_err(io::Error::other)?;
+    let minutes = i64::from(target.hour()) * 60 + i64::from(target.minute());
+    crate::lifecycle::seed(
+        directory,
+        &ConfigInput {
+            wake: clock(minutes),
+            bedtime: clock(minutes + 720),
+            scheduled_transition_minutes: 1,
+            daytime_kelvin: 6200,
+            middle_kelvin: 2400,
+            sleep_kelvin: 2400,
+            ordinary_fade_ms: 10_000,
+            output_rate_hz: 60,
+            start_minimized: true,
+            manage_night_light: true,
+            ..ConfigInput::default()
+        },
+    )?;
     let measurement = OutputMeasurement::default();
     let driver = measurement.clone();
-    let data_directory = directory.to_owned();
     let thread = std::thread::Builder::new()
         .name("circadia-output-input".into())
         .spawn(move || {
             driver.wait_ready()?;
-            let result = exercise(&driver, &data_directory);
+            let result = exercise(&driver, wake);
             let closed =
                 window(std::process::id(), "Circadia event receiver", false).and_then(|receiver| {
                     receiver.map_or(Ok(()), |receiver| {
@@ -120,13 +135,18 @@ fn run_application(directory: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn exercise(measurement: &OutputMeasurement, directory: &Path) -> io::Result<()> {
-    let automation = Automation::new()?;
+fn exercise(measurement: &OutputMeasurement, wake: Timestamp) -> io::Result<()> {
     let native = Nightlight::new();
+    scheduled(measurement, &native, wake)?;
+    match InstanceClaim::acquire()? {
+        InstanceClaim::Existing(existing) => existing.activate()?,
+        InstanceClaim::Primary(_) => {
+            return Err(io::Error::other("measurement instance is missing"));
+        }
+    }
+    let automation = Automation::new()?;
     let process = std::process::id();
-    let settings = wait("output measurement settings", || {
-        window(process, "Circadia", true)
-    })?;
+    let settings = wait("output measurement settings", || settings_window(process))?;
     let rectangle = settings.GetWindowRect().map_err(io::Error::other)?;
     report(&format!(
         "Settings DPI: {}; window: {} x {}",
@@ -135,27 +155,37 @@ fn exercise(measurement: &OutputMeasurement, directory: &Path) -> io::Result<()>
         rectangle.bottom - rectangle.top
     ));
     editable(&automation, &settings)?;
+    automation.set_number(&settings, process, automation_id::DAYTIME_NUMBER, 2400.0)?;
     wait_temperature(&native, 2400)?;
     for (rate, duration) in [
-        (1, 10_000),
-        (60, 10_000),
-        (240, 10_000),
-        (60, 500),
-        (240, 500),
+        (1.0, 10_000.0),
+        (60.0, 10_000.0),
+        (240.0, 10_000.0),
+        (60.0, 500.0),
+        (240.0, 500.0),
     ] {
-        automation.set_value(&settings, process, "output_rate_hz", &rate.to_string())?;
-        automation.set_value(
+        show_page(
+            &automation,
             &settings,
             process,
-            "ordinary_fade_ms",
-            &duration.to_string(),
+            automation_id::NAV_TRANSITIONS,
         )?;
-        editable(&automation, &settings)?;
+        automation.set_number(&settings, process, automation_id::RATE_NUMBER, rate)?;
+        automation.set_number(&settings, process, automation_id::FADE_NUMBER, duration)?;
+        wait("fade settings applied", || {
+            Ok(
+                (automation.number(&settings, process, automation_id::RATE_NUMBER)? == Some(rate)
+                    && automation.number(&settings, process, automation_id::FADE_NUMBER)?
+                        == Some(duration))
+                .then_some(()),
+            )
+        })?;
+        show_page(&automation, &settings, process, automation_id::NAV_SCHEDULE)?;
         for (direction, kelvin) in [("suppression-start", 6500), ("suppression-stop", 2400)] {
             let label = format!("{direction}-{rate}Hz-{duration}ms");
             report(&format!("Measuring {label}"));
             measurement.mark(&label)?;
-            automation.invoke(&settings, process, "manual-suppression")?;
+            automation.invoke(&settings, process, automation_id::MANUAL_SUPPRESSION)?;
             wait("native fade started", || {
                 Ok(native
                     .read_settings()
@@ -169,14 +199,13 @@ fn exercise(measurement: &OutputMeasurement, directory: &Path) -> io::Result<()>
             ));
         }
     }
-    preview(measurement, &automation, &settings, &native)?;
-    scheduled(measurement, &automation, &settings, &native, directory)
+    preview(measurement, &automation, &settings, &native)
 }
 
 fn editable(automation: &Automation, settings: &HWND) -> io::Result<()> {
     wait("output settings ready", || {
         Ok(automation
-            .enabled(settings, std::process::id(), "preview")?
+            .enabled(settings, std::process::id(), automation_id::PREVIEW)?
             .filter(|value| *value))
     })
     .map(|_| ())
@@ -189,29 +218,41 @@ fn preview(
     native: &Nightlight,
 ) -> io::Result<()> {
     let process = std::process::id();
-    let mut zone = WindowsZone::current().map_err(io::Error::other)?;
-    let local = zone.local(Timestamp::now()).map_err(io::Error::other)?;
-    let wake = (i64::from(local.hour()) * 60 + i64::from(local.minute()) + 300).rem_euclid(1440);
-    for (field, value) in [
-        ("wake", clock(wake)),
-        ("bedtime", clock(wake + 720)),
-        ("scheduled_transition_minutes", "240".into()),
-        ("daytime_kelvin", "6200".into()),
-        ("middle_kelvin", "3400".into()),
-        ("preview_seconds", "10".into()),
-    ] {
-        automation.set_value(settings, process, field, &value)?;
-    }
+    automation.set_number(settings, process, automation_id::DAYTIME_NUMBER, 6200.0)?;
+    automation.set_number(settings, process, automation_id::MIDDLE_NUMBER, 3400.0)?;
+    show_page(
+        automation,
+        settings,
+        process,
+        automation_id::NAV_TRANSITIONS,
+    )?;
+    automation.set_number(settings, process, automation_id::TRANSITION_NUMBER, 240.0)?;
+    automation.set_number(
+        settings,
+        process,
+        automation_id::PREVIEW_LENGTH_NUMBER,
+        10.0,
+    )?;
+    wait("Preview settings applied", || {
+        Ok(
+            (automation.number(settings, process, automation_id::TRANSITION_NUMBER)?
+                == Some(240.0)
+                && automation.number(settings, process, automation_id::PREVIEW_LENGTH_NUMBER)?
+                    == Some(10.0))
+            .then_some(()),
+        )
+    })?;
+    show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     editable(automation, settings)?;
-    wait_temperature(native, 2400)?;
+    wait_temperature(native, 6200)?;
     measurement.mark("preview-240Hz-10s")?;
     report(
         "Measuring 10-second live Preview at 240 Hz, 2400-6200 K, four-hour scheduled transitions",
     );
-    automation.invoke(settings, process, "preview")?;
+    automation.invoke(settings, process, automation_id::PREVIEW)?;
     wait("Preview disables editing", || {
         Ok(automation
-            .enabled(settings, process, "wake")?
+            .enabled(settings, process, automation_id::WAKE)?
             .filter(|value| !*value))
     })?;
     wait("Preview changes native temperature", || {
@@ -219,68 +260,35 @@ fn preview(
             .read_settings()
             .map_err(io::Error::other)?
             .color_temperature();
-        Ok(value.filter(|value| *value > 2400))
+        Ok(value.filter(|value| *value < 6200))
     })?;
     wait("Preview restores editing", || {
         Ok(automation
-            .enabled(settings, process, "wake")?
+            .enabled(settings, process, automation_id::WAKE)?
             .filter(|value| *value))
     })?;
-    wait_temperature(native, 2400)?;
-    report("Verified natural Preview completion restores 2400 K and clears native preview");
+    wait_temperature(native, 6200)?;
+    report("Verified natural Preview completion restores 6200 K and clears native preview");
     Ok(())
 }
 
 fn scheduled(
     measurement: &OutputMeasurement,
-    automation: &Automation,
-    settings: &HWND,
     native: &Nightlight,
-    directory: &Path,
+    wake: Timestamp,
 ) -> io::Result<()> {
-    let process = std::process::id();
-    let mut zone = WindowsZone::current().map_err(io::Error::other)?;
-    let now = Timestamp::now();
-    let local = zone.local(now).map_err(io::Error::other)?;
-    let end = Timestamp::from_second(now.as_second() + i64::from(120 - local.second()))
-        .map_err(io::Error::other)?;
-    let target = zone.local(end).map_err(io::Error::other)?;
-    let wake = i64::from(target.hour()) * 60 + i64::from(target.minute());
-    for (field, value) in [
-        ("scheduled_transition_minutes", "1".into()),
-        ("wake", clock(wake)),
-        ("bedtime", clock(wake + 720)),
-        ("output_rate_hz", "60".into()),
-    ] {
-        automation.set_value(settings, process, field, &value)?;
-    }
-    editable(automation, settings)?;
-    automation.invoke(settings, process, "save")?;
-    wait("scheduled configuration saved", || {
-        let saved = crate::settings::saved(directory)?;
-        Ok((saved.wake == clock(wake)
-            && saved.bedtime == clock(wake + 720)
-            && saved.scheduled_transition_minutes == 1
-            && saved.output_rate_hz == 60)
-            .then_some(()))
-    })?;
-    wait("Save command completed", || {
-        Ok(automation
-            .text(settings, process, "draft-status")?
-            .filter(|value| value == "No unsaved changes"))
-    })?;
-    automation.close(settings, process)?;
-    wait("settings closed during scheduled measurement", || {
-        Ok(window(process, "Circadia", true)?.is_none().then_some(()))
-    })?;
+    require(
+        settings_window(std::process::id())?.is_none(),
+        "settings opened during the scheduled measurement",
+    )?;
     wait_temperature(native, 2400)?;
     measurement.mark("scheduled-60Hz-1min")?;
     let remaining =
-        Duration::try_from(end.duration_since(Timestamp::now())).map_err(io::Error::other)?;
+        Duration::try_from(wake.duration_since(Timestamp::now())).map_err(io::Error::other)?;
     let endpoint = Instant::now() + remaining;
     measurement.scheduled_endpoint(endpoint, 6200)?;
     report(&format!(
-        "Measuring one-minute 2400-6200 K scheduled transition ending {end}, Settings closed"
+        "Measuring one-minute 2400-6200 K scheduled transition ending {wake}, Settings closed"
     ));
     crate::lifecycle::wait_until(
         "scheduled endpoint",

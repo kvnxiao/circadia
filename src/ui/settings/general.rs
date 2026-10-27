@@ -16,6 +16,7 @@ use crate::DiagnosticLog;
 use crate::DiagnosticOperation;
 use crate::Field;
 use crate::FieldValue;
+use crate::automation_id;
 use crate::l10n::Text;
 use crate::l10n::WINDOWS;
 use crate::l10n::text;
@@ -288,7 +289,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         Field::StartMinimized,
                         settings.input.model.value(Field::StartMinimized)
                             == FieldValue::Switch(true),
-                        ("start-minimized", &minimized),
+                        (automation_id::START_MINIMIZED, &minimized),
                         context,
                     ),
                 ))
@@ -316,7 +317,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 text!(text, "settings-file-title"),
                 text!(text, "settings-file-description"),
                 Folder::Data,
-                "open-settings-folder",
+                automation_id::OPEN_SETTINGS_FOLDER,
                 context,
             ),
             folder_card(
@@ -325,7 +326,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 text!(text, "logs-title"),
                 text!(text, "logs-description"),
                 Folder::Logs,
-                "open-logs-folder",
+                automation_id::OPEN_LOGS_FOLDER,
                 context,
             ),
         ]),
@@ -384,7 +385,7 @@ fn about_card(text: &Text, context: &ViewContext<'_, Settings>) -> View {
             )
             .controls(vec![
                 Button::new()
-                    .automation_id("about-quit")
+                    .automation_id(automation_id::ABOUT_QUIT)
                     .on_click(context.message(Message::Command(Command::Quit)))
                     .content(text!(text, "action-quit"))
                     .into(),
@@ -435,7 +436,7 @@ fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
                 settings,
                 Field::StartAtSignIn,
                 view.on,
-                ("sign-in", &title),
+                (automation_id::SIGN_IN, &title),
                 context,
             ),
         ))
@@ -444,7 +445,7 @@ fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
     if let Some(message) = view.message {
         rows.push(widgets::feature_row(
             message,
-            "sign-in",
+            automation_id::SIGN_IN,
             settings.input.model.editable(),
             context.message(Message::Command(Command::RetrySignIn)),
         ));
@@ -464,7 +465,7 @@ fn language_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
         .items_source(options.iter().map(|(_, label)| label.as_str()))
         .selected_index(selected)
         .is_enabled(model.editable())
-        .automation_id("language")
+        .automation_id(automation_id::LANGUAGE)
         .automation_name(&title)
         .on_selection_changed(context.callback(Message::Language))
         .into();
@@ -484,12 +485,12 @@ fn language_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
             ],
             Some(
                 Button::new()
-                    .automation_id("restart-quit")
+                    .automation_id(automation_id::RESTART_QUIT)
                     .on_click(context.message(Message::Command(Command::Quit)))
                     .content(prompt.action)
                     .into(),
             ),
-            "restart-prompt",
+            automation_id::RESTART_PROMPT,
         ));
     }
     widgets::card(StackPanel::new().children(rows))

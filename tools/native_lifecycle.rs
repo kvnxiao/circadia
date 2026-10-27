@@ -47,88 +47,48 @@ mod shutdown;
 #[path = "native/startup.rs"]
 mod startup;
 #[cfg(windows)]
+#[path = "native/translation.rs"]
+mod translation;
+#[cfg(windows)]
 #[path = "native/tray.rs"]
 mod tray;
 
 #[cfg(windows)]
 fn main() -> std::io::Result<()> {
-    if std::env::args_os()
-        .nth(1)
-        .is_some_and(|value| value == "--deployment")
-    {
-        return deployment::run();
-    }
-    #[cfg(feature = "graph-measurement")]
-    if std::env::args_os()
-        .nth(1)
-        .is_some_and(|value| value == "--measure-activity")
-    {
-        return activity::run();
-    }
-    #[cfg(feature = "output-measurement")]
-    if std::env::args_os()
-        .nth(1)
-        .is_some_and(|value| value == "--measure-output")
-    {
-        return output::run();
-    }
-    if std::env::args_os()
-        .nth(1)
-        .is_some_and(|value| value == "--measure-resources")
-    {
-        return resources::run();
-    }
-    if std::env::args_os()
-        .nth(1)
-        .is_some_and(|value| value == "--foreground-fixture")
-    {
-        if std::env::args_os().count() != 2 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "foreground fixture does not accept arguments",
-            ));
+    let arguments = lifecycle::arguments(std::env::args_os().skip(1))?;
+    let mode = arguments.first().and_then(|mode| mode.to_str());
+    match mode {
+        Some("--deployment") => deployment::run(&arguments),
+        #[cfg(feature = "graph-measurement")]
+        Some("--measure-activity") => activity::run(&arguments),
+        #[cfg(feature = "output-measurement")]
+        Some("--measure-output") => output::run(&arguments),
+        Some("--measure-resources") => resources::run(&arguments),
+        Some("--foreground-fixture") => {
+            if arguments.len() != 1 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "foreground fixture does not accept arguments",
+                ));
+            }
+            let fixture = windows_window::Window::new("Circadia foreground fixture")
+                .size(360, 180)
+                .create()
+                .map_err(std::io::Error::other)?;
+            windows_window::run();
+            drop(fixture);
+            Ok(())
         }
-        let fixture = windows_window::Window::new("Circadia foreground fixture")
-            .size(360, 180)
-            .create()
-            .map_err(std::io::Error::other)?;
-        windows_window::run();
-        drop(fixture);
-        return Ok(());
+        #[cfg(feature = "graph-measurement")]
+        Some("--native-recovery") => recovery::run(&arguments),
+        #[cfg(feature = "graph-measurement")]
+        Some("--measure-graph") => graph::run(&arguments),
+        Some("--startup") => startup::run(&arguments),
+        Some("--picker") => picker::run(&arguments),
+        Some("--modal-shutdown") => shutdown::run(&arguments),
+        Some("--translation") => translation::run(&arguments),
+        _ => lifecycle::run(&arguments),
     }
-    #[cfg(feature = "graph-measurement")]
-    if std::env::args_os()
-        .nth(1)
-        .is_some_and(|value| value == "--native-recovery")
-    {
-        return recovery::run();
-    }
-    #[cfg(feature = "graph-measurement")]
-    if std::env::args_os()
-        .nth(1)
-        .is_some_and(|value| value == "--measure-graph")
-    {
-        return graph::run();
-    }
-    if std::env::args_os()
-        .nth(1)
-        .is_some_and(|value| value == "--startup")
-    {
-        return startup::run();
-    }
-    if std::env::args_os()
-        .nth(1)
-        .is_some_and(|value| value == "--picker")
-    {
-        return picker::run();
-    }
-    if std::env::args_os()
-        .nth(1)
-        .is_some_and(|value| value == "--modal-shutdown")
-    {
-        return shutdown::run();
-    }
-    lifecycle::run()
 }
 
 #[cfg(not(windows))]

@@ -31,7 +31,11 @@ pub(crate) fn cancel() -> io::Result<()> {
     dialog.Close(cancelled).map_err(io::Error::other)
 }
 
-pub(crate) fn executable(window: &WindowHandle<'_>) -> io::Result<Option<(String, PathBuf)>> {
+pub(crate) fn executable(
+    window: &WindowHandle<'_>,
+    title: &str,
+    file_types: &str,
+) -> io::Result<Option<(String, PathBuf)>> {
     let mut parent = None;
     winsafe::EnumThreadWindows(winsafe::GetCurrentThreadId(), |candidate| {
         if candidate.ptr() == window.as_raw() {
@@ -56,11 +60,9 @@ pub(crate) fn executable(window: &WindowHandle<'_>) -> io::Result<Option<(String
                 | co::FOS::DONTADDTORECENT,
         )
         .map_err(io::Error::other)?;
+    dialog.SetTitle(title).map_err(io::Error::other)?;
     dialog
-        .SetTitle("Add application to Circadia")
-        .map_err(io::Error::other)?;
-    dialog
-        .SetFileTypes(&[("Applications (*.exe)", "*.exe")])
+        .SetFileTypes(&[(file_types, "*.exe")])
         .map_err(io::Error::other)?;
     ACTIVE.with_borrow_mut(|active| {
         if active.is_some() {

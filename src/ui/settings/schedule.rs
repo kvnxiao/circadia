@@ -31,6 +31,7 @@ use crate::Playback;
 use crate::SchedulingState;
 use crate::SolarConflict;
 use crate::TimeInterval;
+use crate::automation_id;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
@@ -97,12 +98,10 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         widgets::group(vec![
             widgets::card(
                 Row::new("\u{E823}", text!(text, "wake-title"), wake_description)
-                    .controls(
-                        settings.with_feedback(
-                            Field::Wake,
-                            picker(settings, Field::Wake, "wake", context),
-                        ),
-                    )
+                    .controls(settings.with_feedback(
+                        Field::Wake,
+                        picker(settings, Field::Wake, automation_id::WAKE, context),
+                    ))
                     .view(),
             ),
             widgets::card(
@@ -113,7 +112,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 )
                 .controls(settings.with_feedback(
                     Field::Bedtime,
-                    picker(settings, Field::Bedtime, "bedtime", context),
+                    picker(settings, Field::Bedtime, automation_id::BEDTIME, context),
                 ))
                 .view(),
             ),
@@ -131,7 +130,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             .horizontal_alignment(HorizontalAlignment::Right)
             .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
             .is_enabled(settings.input.model.editable())
-            .automation_id("restore-colors")
+            .automation_id(automation_id::RESTORE_COLORS)
             .on_click(context.message(Message::Edit(recommended_colors())))
             .content(text!(text, "restore-colors"))
             .into(),
@@ -369,14 +368,14 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
     // every frame and stays outside the live region.
     let mut line: Vec<View> = vec![
         widgets::caption(&preview.caption)
-            .automation_id("preview-state")
+            .automation_id(automation_id::PREVIEW_STATE)
             .automation_live_setting(AutomationLiveSetting::Polite)
             .into(),
     ];
     if let Some(detail) = &preview.detail {
         line.push(
             widgets::caption(detail)
-                .automation_id("preview-detail")
+                .automation_id(automation_id::PREVIEW_DETAIL)
                 .into(),
         );
     }
@@ -395,7 +394,7 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
                 .value(progress)
                 .height(3.0)
                 .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
-                .automation_id("preview-progress")
+                .automation_id(automation_id::PREVIEW_PROGRESS)
                 .into(),
         );
     }
@@ -415,7 +414,7 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
                         .grid_column(1)
                         .min_width(112.0)
                         .is_enabled(preview.enabled)
-                        .automation_id("preview")
+                        .automation_id(automation_id::PREVIEW)
                         .automation_name(&label)
                         .on_click(context.message(Message::Command(command)))
                         .content(
@@ -664,7 +663,7 @@ fn summary_view(settings: &Settings, palette: &Palette) -> View {
                         .filter(|_| !column.used)
                         .map(|colors| colors.gray_text);
                     let time = widgets::strong(&column.time)
-                        .automation_id(format!("summary-{}-time", column.id));
+                        .automation_id(automation_id::summary_time(column.id));
                     StackPanel::new()
                         .grid_column(index)
                         .opacity(if column.used || contrast.is_some() {
@@ -672,7 +671,7 @@ fn summary_view(settings: &Settings, palette: &Palette) -> View {
                         } else {
                             0.5
                         })
-                        .automation_id(format!("summary-{}", column.id))
+                        .automation_id(automation_id::summary(column.id))
                         .children((
                             widgets::caption(&column.name)
                                 .foreground(gray.unwrap_or(palette.secondary)),
@@ -725,7 +724,13 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
         .column_spacing(20.0)
         .margin(Thickness::new(20.0, 20.0, 20.0, 12.0))
         .children((
-            super::phase::view(&phase, phase.art_name(text), &palette, 64.0, "status-art"),
+            super::phase::view(
+                &phase,
+                phase.art_name(text),
+                &palette,
+                64.0,
+                automation_id::STATUS_ART,
+            ),
             StackPanel::new()
                 .grid_column(1)
                 .spacing(2.0)
@@ -735,14 +740,15 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
                         .orientation(Orientation::Horizontal)
                         .spacing(12.0)
                         .children((
-                            widgets::title(temperature).automation_id("status-temperature"),
+                            widgets::title(temperature)
+                                .automation_id(automation_id::STATUS_TEMPERATURE),
                             Border::new()
                                 .vertical_alignment(VerticalAlignment::Center)
                                 .content(widgets::pill(phase.label(text))),
                         )),
                     widgets::body(status_sentence(model, text, region, &control, current))
                         .foreground(palette.secondary)
-                        .automation_id("status-sentence")
+                        .automation_id(automation_id::STATUS_SENTENCE)
                         .automation_live_setting(live),
                 )),
             Border::new()
@@ -786,7 +792,7 @@ fn management_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         Row::new("\u{EA18}", title.clone(), text!(text, "manage-description"))
             .detail(view.change.map(|line| {
                 widgets::caption(line)
-                    .automation_id("manage-change")
+                    .automation_id(automation_id::MANAGE_CHANGE)
                     .automation_live_setting(windows_reactor::AutomationLiveSetting::Polite)
                     .into()
             }))
@@ -796,7 +802,7 @@ fn management_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                     ToggleSwitch::new()
                         .is_on(view.on)
                         .is_enabled(view.enabled)
-                        .automation_id("manage")
+                        .automation_id(automation_id::MANAGE)
                         .automation_name(title)
                         .on_toggled(context.callback(Message::Manage))
                         .into(),
@@ -881,32 +887,32 @@ fn temperature_card(
     context: &ViewContext<'_, Settings>,
 ) -> View {
     let text = &settings.input.text;
-    let (title, description, id) = match field {
+    let (title, description) = match field {
         Field::DaytimeKelvin if config.sunrise_enabled() => (
             text!(text, "color-daytime"),
             text!(text, "color-daytime-description"),
-            "daytime",
         ),
         Field::DaytimeKelvin => (
             text!(text, "color-daytime"),
             text!(text, "color-daytime-description-wake"),
-            "daytime",
         ),
         Field::MiddleKelvin if unused(config, field) => (
             text!(text, "color-middle"),
             text!(text, "color-middle-description-unused"),
-            "middle",
         ),
         Field::MiddleKelvin => (
             text!(text, "color-middle"),
             text!(text, "color-middle-description"),
-            "middle",
         ),
         _ => (
             text!(text, "color-bedtime"),
             text!(text, "color-bedtime-description"),
-            "sleep",
         ),
+    };
+    let (slider, number) = match field {
+        Field::DaytimeKelvin => (automation_id::DAYTIME_SLIDER, automation_id::DAYTIME_NUMBER),
+        Field::MiddleKelvin => (automation_id::MIDDLE_SLIDER, automation_id::MIDDLE_NUMBER),
+        _ => (automation_id::SLEEP_SLIDER, automation_id::SLEEP_NUMBER),
     };
     let mut heading: Vec<View> = vec![widgets::body(&title).into()];
     if unused(config, field) {
@@ -938,10 +944,10 @@ fn temperature_card(
                                 settings.number_controls(
                                     NumberControls {
                                         field,
-                                        id,
+                                        number,
+                                        slider: Some(slider),
                                         title: &title,
                                         unit: text!(text, "kelvin-unit"),
-                                        slider: true,
                                     },
                                     context,
                                 ),
@@ -1027,7 +1033,7 @@ pub(super) fn solar_messages(
     let mut messages = Vec::new();
     if model.solar.failed {
         messages.push((
-            "solar-fallback".to_owned(),
+            automation_id::SOLAR_FALLBACK.to_owned(),
             FeatureMessage {
                 severity: Severity::Warning,
                 text: text!(text, "solar-fallback"),
@@ -1043,7 +1049,7 @@ pub(super) fn solar_messages(
             .enumerate()
             .map(|(index, conflict)| {
                 (
-                    format!("solar-conflict-{index}"),
+                    automation_id::solar_conflict(index),
                     FeatureMessage {
                         severity: Severity::Warning,
                         text: text!(
@@ -1059,7 +1065,7 @@ pub(super) fn solar_messages(
     );
     if let Some(failure) = location {
         messages.push((
-            "location".to_owned(),
+            automation_id::LOCATION.to_owned(),
             FeatureMessage {
                 severity: Severity::Error,
                 text: location::failure_message(text, failure),
@@ -1105,8 +1111,8 @@ impl Axis {
 
     fn id(self) -> &'static str {
         match self {
-            Self::Latitude => "latitude",
-            Self::Longitude => "longitude",
+            Self::Latitude => automation_id::LATITUDE,
+            Self::Longitude => automation_id::LONGITUDE,
         }
     }
 
@@ -1277,7 +1283,7 @@ fn with_solar_feedback(settings: &Settings, field: Field, content: View) -> View
         field,
     )
     .map(|feedback| {
-        let id = format!("{}-message", field.key());
+        let id = automation_id::field_message(field);
         match feedback {
             Feedback::Error(message) => widgets::field_error(message, &id),
             Feedback::Note(message) => widgets::field_note(message, &id),
@@ -1299,7 +1305,11 @@ fn solar_check(
     (checked, enabled): (bool, bool),
     context: &ViewContext<'_, Settings>,
 ) -> View {
-    let id = field.key();
+    let id = if field == Field::Sunrise {
+        automation_id::SUNRISE
+    } else {
+        automation_id::SUNSET
+    };
     let mut lines: Vec<View> = vec![
         widgets::body(&label).into(),
         widgets::caption(description).into(),
@@ -1312,7 +1322,7 @@ fn solar_check(
     ) {
         lines.push(
             widgets::caption(today)
-                .automation_id(format!("{id}-today"))
+                .automation_id(automation_id::today(id))
                 .into(),
         );
     }
@@ -1342,7 +1352,7 @@ fn solar_check(
                 ))
                 .into(),
         ),
-        &format!("{id}-row"),
+        &automation_id::row(id),
     )
 }
 
@@ -1362,7 +1372,7 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
     if settings.location.requesting() {
         lines.push(
             widgets::caption(text!(text, "location-requesting"))
-                .automation_id("location-requesting")
+                .automation_id(automation_id::LOCATION_REQUESTING)
                 .automation_live_setting(AutomationLiveSetting::Polite)
                 .into(),
         );
@@ -1384,13 +1394,13 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
                         .is_on(on)
                         .is_enabled(solar_options_enabled(model))
                         .vertical_alignment(VerticalAlignment::Center)
-                        .automation_id("use-windows-location")
+                        .automation_id(automation_id::USE_WINDOWS_LOCATION)
                         .automation_name(title)
                         .on_toggled(context.callback(Message::WindowsLocation)),
                 ))
                 .into(),
         ),
-        "use-windows-location-row",
+        &automation_id::row(automation_id::USE_WINDOWS_LOCATION),
     )
 }
 
@@ -1476,7 +1486,7 @@ fn coordinates_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 ))
                 .into(),
         ),
-        "coordinates-row",
+        automation_id::COORDINATES_ROW,
     )
 }
 
@@ -1503,7 +1513,7 @@ fn solar_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View 
                     ToggleSwitch::new()
                         .is_on(switch(model, Field::SolarTiming))
                         .is_enabled(model.editable())
-                        .automation_id("solar-timing")
+                        .automation_id(automation_id::SOLAR_TIMING)
                         .automation_name(&title)
                         .on_toggled(context.callback(|on| {
                             Message::Edit(vec![(Field::SolarTiming, FieldValue::Switch(on))])
@@ -1511,7 +1521,7 @@ fn solar_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View 
                     widgets::expand_button(
                         expansion,
                         expand_name,
-                        "solar-expand",
+                        automation_id::SOLAR_EXPAND,
                         context.message(Message::SolarExpand(!expanded)),
                     ),
                 ))

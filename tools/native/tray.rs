@@ -1,4 +1,6 @@
 use crate::automation::Automation;
+use crate::lifecycle::require;
+use circadia::InterfaceText;
 use std::io;
 use windows::Win32::UI::Accessibility::IUIAutomationElement;
 use windows::Win32::UI::Accessibility::UIA_ButtonControlTypeId;
@@ -16,7 +18,10 @@ const OVERFLOW_WINDOWS: [&str; 2] = [
     "NotifyIconOverflowWindow",
 ];
 
-pub(super) fn icon(automation: &Automation) -> io::Result<Option<IUIAutomationElement>> {
+pub(super) fn icon(
+    automation: &Automation,
+    tooltip_prefix: &str,
+) -> io::Result<Option<IUIAutomationElement>> {
     let shell = HWND::GetShellWindow()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Windows Shell is unavailable"))?;
     let process = shell.GetWindowThreadProcessId().1;
@@ -29,7 +34,7 @@ pub(super) fn icon(automation: &Automation) -> io::Result<Option<IUIAutomationEl
             continue;
         }
         for element in automation.elements(&window, process)? {
-            if is_icon(&element)? {
+            if is_icon(&element, tooltip_prefix)? {
                 icons.push(element);
             }
         }
@@ -43,7 +48,7 @@ pub(super) fn icon(automation: &Automation) -> io::Result<Option<IUIAutomationEl
 }
 
 #[expect(unsafe_code, reason = "inspect Shell-owned notification buttons")]
-fn is_icon(element: &IUIAutomationElement) -> io::Result<bool> {
+fn is_icon(element: &IUIAutomationElement, tooltip_prefix: &str) -> io::Result<bool> {
     // SAFETY: The element is live in the initialized apartment.
     let control = unsafe { element.CurrentControlType() }.map_err(io::Error::other)?;
     if control != UIA_ButtonControlTypeId {
@@ -51,7 +56,7 @@ fn is_icon(element: &IUIAutomationElement) -> io::Result<bool> {
     }
     // SAFETY: The binding returns an owned BSTR from the live element.
     let name = unsafe { element.CurrentName() }.map_err(io::Error::other)?;
-    Ok(name.to_string().starts_with("Circadia:"))
+    Ok(name.to_string().starts_with(tooltip_prefix))
 }
 
 #[expect(unsafe_code, reason = "invoke only the Shell's hidden-icons control")]
@@ -78,7 +83,7 @@ pub(super) fn show_overflow(automation: &Automation) -> io::Result<()> {
             return click(&element);
         }
     }
-    if icon(automation)?.is_some() {
+    if icon(automation, &crate::lifecycle::text()?.tooltip_prefix)?.is_some() {
         return Ok(());
     }
     Err(io::Error::new(
@@ -173,15 +178,72 @@ pub(super) fn open_menu(element: &IUIAutomationElement) -> io::Result<()> {
     }
 }
 
+// Reactor's tray menu items expose only their text, so the checks find each
+// item by its position: settings, manual suppression, the caption, up to three
+// recent apps, and Quit.
+pub(super) struct Menu(Vec<(IUIAutomationElement, String)>);
+
+impl Menu {
+    fn item(&self, position: usize, label: &str) -> io::Result<&IUIAutomationElement> {
+        let (element, actual) = self
+            .0
+            .get(position)
+            .ok_or_else(|| io::Error::other(format!("tray menu has no item {position}")))?;
+        require(
+            actual == label,
+            &format!("tray menu item {position} reads {actual:?}, expected {label:?}"),
+        )?;
+        Ok(element)
+    }
+
+    pub(super) fn settings(&self, text: &InterfaceText) -> io::Result<&IUIAutomationElement> {
+        self.check(text)?;
+        self.item(0, &text.tray_settings)
+    }
+
+    pub(super) fn quit(&self, text: &InterfaceText) -> io::Result<&IUIAutomationElement> {
+        self.check(text)?;
+        self.item(self.0.len().saturating_sub(1), &text.tray_quit)
+    }
+
+    fn check(&self, text: &InterfaceText) -> io::Result<()> {
+        require(
+            (4..=7).contains(&self.0.len()),
+            &format!("tray menu has {} items", self.0.len()),
+        )?;
+        let manual = self
+            .0
+            .get(1)
+            .map(|(_, label)| label.as_str())
+            .unwrap_or_default();
+        require(
+            manual == text.manual_start || manual == text.manual_stop,
+            &format!("tray manual suppression item reads {manual:?}"),
+        )?;
+        self.item(2, &text.tray_caption).map(|_| ())
+    }
+}
+
+pub(super) fn open(automation: &Automation, process: u32) -> io::Result<Menu> {
+    show_overflow(automation)?;
+    let icon = crate::lifecycle::wait("tray icon for context menu", || {
+        icon(automation, &crate::lifecycle::text()?.tooltip_prefix)
+    })?;
+    open_menu(&icon)?;
+    let quit = &crate::lifecycle::text()?.tray_quit;
+    crate::lifecycle::wait("tray menu items through Quit", || {
+        menu_items(automation, process, quit)
+    })
+}
+
 #[expect(
     unsafe_code,
-    reason = "locate a named item in the owned application's popup menu"
+    reason = "list the items of the owned application's popup menu"
 )]
-pub(super) fn menu_item(
-    automation: &Automation,
-    process: u32,
-    name: &str,
-) -> io::Result<Option<IUIAutomationElement>> {
+// The menu appears in more than one host window of the process, and the
+// settings window has its own system menu item, so the items come from one
+// window whose list ends with Quit.
+fn menu_items(automation: &Automation, process: u32, quit: &str) -> io::Result<Option<Menu>> {
     let mut menus = Vec::new();
     winsafe::EnumWindows(|window| {
         if window.GetWindowThreadProcessId().1 == process && window.IsWindowVisible() {
@@ -191,6 +253,7 @@ pub(super) fn menu_item(
     })
     .map_err(io::Error::other)?;
     for menu in menus {
+        let mut items = Vec::new();
         for element in automation.elements(&menu, process)? {
             // SAFETY: The binding owns the scalar result storage.
             if unsafe { element.CurrentControlType() }.map_err(io::Error::other)?
@@ -199,9 +262,11 @@ pub(super) fn menu_item(
                 continue;
             }
             // SAFETY: The live interface returns an owned BSTR.
-            if unsafe { element.CurrentName() }.map_err(io::Error::other)? == name {
-                return Ok(Some(element));
-            }
+            let name = unsafe { element.CurrentName() }.map_err(io::Error::other)?;
+            items.push((element, name.to_string()));
+        }
+        if items.last().is_some_and(|(_, label)| label == quit) {
+            return Ok(Some(Menu(items)));
         }
     }
     Ok(None)
