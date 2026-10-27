@@ -11,8 +11,16 @@ pub(crate) enum PreviousRun {
     Unexplained,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum CrashKind {
+    Panic,
+    Exception,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CrashSummary {
+    pub(crate) kind: CrashKind,
     pub(crate) time: Timestamp,
     pub(crate) description: String,
     pub(crate) module: Option<String>,
@@ -141,6 +149,7 @@ fn previous_run(
         "previous run crashed"
     );
     PreviousRun::Crashed(CrashSummary {
+        kind: CrashKind::Exception,
         time: event.time,
         description: event.code,
         module: Some(event.module),
@@ -179,12 +188,14 @@ fn logged_crash(
         }
         match kind {
             "panic" => Some(CrashSummary {
+                kind: CrashKind::Panic,
                 time,
                 description: quoted_first_line(fields, "message")?,
                 module: None,
                 offset: None,
             }),
             "exception" => Some(CrashSummary {
+                kind: CrashKind::Exception,
                 time,
                 description: field(fields, "code")?.to_owned(),
                 module: field(fields, "module").map(str::to_owned),

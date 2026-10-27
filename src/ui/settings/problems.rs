@@ -20,19 +20,21 @@ use windows_reactor::InfoBarSeverity;
 pub(in crate::ui) enum Action {
     Reset,
     OpenFolder,
+    OpenLogs,
+    Report,
     Retry,
     RetryNative,
     GoTo(Page),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct Banner {
     pub(super) id: &'static str,
     pub(super) severity: InfoBarSeverity,
     pub(super) title: String,
     pub(super) message: String,
     pub(super) actions: Vec<(Action, String)>,
-    pub(super) closable: bool,
+    pub(super) dismiss: Option<super::Command>,
     pub(super) enabled: bool,
 }
 
@@ -153,7 +155,7 @@ pub(super) fn banners(
                 (Action::Reset, text!(text, "action-reset")),
                 (Action::OpenFolder, text!(text, "action-open-folder")),
             ],
-            closable: false,
+            dismiss: None,
             enabled: true,
         });
     }
@@ -169,7 +171,7 @@ pub(super) fn banners(
             title: text!(text, "banner-paused-title"),
             message: text!(text, "banner-paused-message"),
             actions: Vec::new(),
-            closable: false,
+            dismiss: None,
             enabled: true,
         });
     }
@@ -180,7 +182,7 @@ pub(super) fn banners(
             title: text!(text, "banner-write-title"),
             message: with_code(text, text!(text, "banner-write-message"), failure),
             actions: vec![(Action::Retry, text!(text, "action-retry"))],
-            closable: false,
+            dismiss: None,
             enabled: true,
         });
     }
@@ -195,7 +197,7 @@ pub(super) fn banners(
                 problem = problem(text, problem_kind)
             ),
             actions: Vec::new(),
-            closable: true,
+            dismiss: Some(super::Command::DismissRestore),
             enabled: true,
         });
     }
@@ -211,7 +213,7 @@ pub(super) fn banners(
                 keys = model.report.unknown.join(", ")
             ),
             actions: Vec::new(),
-            closable: false,
+            dismiss: None,
             enabled: true,
         });
     }
@@ -222,12 +224,28 @@ pub(super) fn banners(
             title: text!(text, "banner-backup-title"),
             message: with_code(text, text!(text, "banner-backup-message"), failure),
             actions: vec![(Action::Retry, text!(text, "action-retry"))],
-            closable: false,
+            dismiss: None,
             enabled: true,
         });
     }
+    banners.extend(crash(model, text));
     banners.extend(other_pages(model, text, region, page));
     banners
+}
+
+fn crash(model: &Model, text: &Text) -> Option<Banner> {
+    model.crash.as_ref().map(|_| Banner {
+        id: "banner-crash",
+        severity: InfoBarSeverity::Informational,
+        title: text!(text, "banner-crash-title"),
+        message: text!(text, "banner-crash-message"),
+        actions: vec![
+            (Action::OpenLogs, text!(text, "action-open-folder")),
+            (Action::Report, text!(text, "action-report")),
+        ],
+        dismiss: Some(super::Command::DismissCrash),
+        enabled: true,
+    })
 }
 
 fn control_unavailable(model: &Model, text: &Text) -> Option<Banner> {
@@ -237,7 +255,7 @@ fn control_unavailable(model: &Model, text: &Text) -> Option<Banner> {
         title: text!(text, "banner-schedule-title"),
         message: text!(text, "banner-schedule-message"),
         actions: vec![(Action::RetryNative, text!(text, "action-retry"))],
-        closable: false,
+        dismiss: None,
         enabled: !model.retrying,
     })
 }
@@ -289,7 +307,7 @@ fn native(model: &Model, text: &Text) -> Option<Banner> {
         title,
         message: lines.join("\n"),
         actions: vec![(Action::RetryNative, text!(text, "action-retry"))],
-        closable: false,
+        dismiss: None,
         enabled: managing && !model.retrying,
     })
 }
@@ -333,7 +351,7 @@ fn other_pages(
                 )
             })
             .collect(),
-        closable: false,
+        dismiss: None,
         enabled: true,
     })
 }

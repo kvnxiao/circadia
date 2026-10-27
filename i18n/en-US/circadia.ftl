@@ -453,6 +453,31 @@ banner-native-output-title = Circadia can't control Night Light
 banner-native-observation-title = Circadia can't watch Night Light for changes
 banner-native-off-title = Circadia couldn't finish turning Night Light off
 banner-native-retry-unavailable = Retry is available while Circadia manages Night Light.
+banner-crash-title = Circadia closed unexpectedly
+banner-crash-message = An error ended an earlier run of Circadia. The log in the logs folder records what happened. Report the problem on GitHub to help fix it.
+issue-title = Crash: { $summary }
+issue-body =
+    ## Circadia version
+
+    { $version }
+
+    ## Windows build
+
+    { $build }
+
+    ## Crash
+
+    { $summary }, at { $time }
+
+    ## Steps to reproduce
+
+    Describe what you were doing when Circadia closed.
+
+    ## Log
+
+    Attach circadia.log from the logs folder that Open folder in Circadia's crash notice opens. If the folder also has circadia.1.log, attach it too; it has the older records.
+
+    The log can contain personal data, such as coordinates, executable names, file paths, and window titles. Before attaching it, remove anything you do not want to share.
 native-failure = { $operation } failed: { $category }
 native-operation =
     { $operation ->
@@ -475,6 +500,7 @@ native-category =
 
 action-reset = Reset to default settings
 action-open-folder = Open folder
+action-report = Report a problem
 action-retry = Retry
 action-go-to = Go to { $page }
 action-quit = Quit Circadia
