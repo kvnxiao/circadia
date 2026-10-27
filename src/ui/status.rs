@@ -560,6 +560,24 @@ mod tests {
     }
 
     #[test]
+    fn the_tray_menu_shows_recent_apps_as_text_items_without_icons() {
+        let mut state = snapshot(ConfigInput::default());
+        state.recent = vec![recent("cs2.exe")];
+        let items = menu_items(
+            &english(),
+            Some(&state),
+            ManualCommand::Start,
+            Toggles::Available,
+            &BTreeMap::new(),
+        );
+        assert!(
+            items
+                .iter()
+                .all(|item| matches!(item, MenuItem::Item { .. } | MenuItem::Separator { .. }))
+        );
+    }
+
+    #[test]
     fn the_menu_has_its_groups_in_order_with_the_three_most_recent_apps() {
         let mut state = snapshot(ConfigInput::default());
         state.recent = vec![

@@ -7,6 +7,8 @@ use super::Settings;
 use super::Visibility;
 use super::problems;
 use super::widgets;
+use super::widgets::APP_GLYPH;
+use super::widgets::AppIcon;
 use super::widgets::Row;
 use crate::AppEntry;
 use crate::EntryProblem;
@@ -17,8 +19,10 @@ use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
 use crate::ui::file_info::AppFile;
+use crate::ui::icon_cache::AppIcons;
 use crate::ui::status;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::time::Duration;
 use windows_reactor::Border;
 use windows_reactor::Button;
@@ -42,7 +46,6 @@ use windows_reactor::View;
 use windows_reactor::ViewContext;
 
 const SUN_GLYPH: &str = "\u{E706}";
-const APP_GLYPH: &str = "\u{ECAA}";
 const ADD_GLYPH: &str = "\u{E710}";
 const COLLAPSE_GLYPH: &str = "\u{E70E}";
 pub(super) const MINUTE: Duration = Duration::from_mins(1);
@@ -178,6 +181,92 @@ pub(super) fn since(text: &Text, region: &RegionalFormat, elapsed: Duration) -> 
             let days = minutes / 1440;
             text!(text, "recent-days", count = days, days = whole(days))
         }
+    }
+}
+
+pub(super) fn icon_pixels(dpi: u32) -> u16 {
+    let dpi = if dpi == 0 { 96 } else { dpi };
+    u16::try_from((32 * dpi).div_ceil(96)).unwrap_or(u16::MAX)
+}
+
+pub(super) fn icon_for(
+    icons: &AppIcons,
+    running_executable: &str,
+    executable: &str,
+    pixels: u16,
+) -> AppIcon {
+    if executable.eq_ignore_ascii_case(running_executable) {
+        return AppIcon::Circadia;
+    }
+    icons
+        .apps
+        .get(&executable.to_lowercase())
+        .or(icons.generic.as_ref())
+        .map_or(AppIcon::Placeholder, |images| {
+            AppIcon::Image(Arc::clone(images.at(pixels)))
+        })
+}
+
+fn icon(settings: &Settings, executable: &str, size: f64) -> View {
+    icon_for(
+        &settings.input.icons,
+        &settings.input.model.running_executable,
+        executable,
+        icon_pixels(settings.dpi),
+    )
+    .view(size)
+}
+
+fn shown_apps(page: Page, dialog: Option<&AddDialog>, model: &Model) -> BTreeSet<String> {
+    if page != Page::Apps {
+        return BTreeSet::new();
+    }
+    let config = model.config();
+    let listed: Vec<String> = [Field::Suppression, Field::Exclusions]
+        .into_iter()
+        .flat_map(|list| config.entries(list))
+        .filter_map(AppEntry::file_name)
+        .collect();
+    let running = model.running_executable.to_lowercase();
+    model
+        .recent
+        .iter()
+        .map(|recent| recent.executable.clone())
+        .chain(listed)
+        .chain(
+            dialog
+                .into_iter()
+                .flat_map(|dialog| dialog.candidates(model))
+                .map(|file| file.executable),
+        )
+        .filter(|executable| *executable != running)
+        .collect()
+}
+
+#[derive(Debug, Default)]
+pub(super) struct IconRequests {
+    view: Option<(Page, Option<Field>)>,
+    requested: BTreeSet<String>,
+}
+
+impl IconRequests {
+    pub(super) fn due(
+        &mut self,
+        page: Page,
+        dialog: Option<&AddDialog>,
+        model: &Model,
+    ) -> Vec<String> {
+        let view = (page, dialog.map(|dialog| dialog.list));
+        if self.view != Some(view) {
+            self.view = Some(view);
+            self.requested.clear();
+        }
+        let due: Vec<String> = shown_apps(page, dialog, model)
+            .into_iter()
+            .filter(|executable| !self.requested.contains(executable))
+            .collect();
+        self.requested.extend(due.iter().cloned());
+        due
     }
 }
 
@@ -564,14 +653,7 @@ fn glyph_label(glyph: &'static str, label: impl AsRef<str>) -> StackPanel {
         ))
 }
 
-fn app_icon(size: f64) -> FontIcon {
-    FontIcon::new()
-        .glyph(APP_GLYPH)
-        .font_size(size)
-        .vertical_alignment(VerticalAlignment::Center)
-}
-
-fn app_row(name: &str, detail: Vec<View>, controls: Vec<View>, id: String) -> View {
+fn app_row(icon: View, name: &str, detail: Vec<View>, controls: Vec<View>, id: String) -> View {
     Border::new()
         .min_height(60.0)
         .padding(Thickness::new(16.0, 10.0, 16.0, 10.0))
@@ -581,7 +663,7 @@ fn app_row(name: &str, detail: Vec<View>, controls: Vec<View>, id: String) -> Vi
                 .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
                 .column_spacing(16.0)
                 .children((
-                    app_icon(32.0),
+                    icon,
                     StackPanel::new()
                         .grid_column(1)
                         .spacing(2.0)
@@ -711,6 +793,7 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 );
             }
             let row_view = app_row(
+                icon(settings, &row.file.executable, 32.0),
                 &row.name,
                 vec![widgets::caption(&row.detail).into()],
                 controls,
@@ -761,7 +844,8 @@ fn list_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
         .into()
 }
 
-fn entry_card(row: &EntryRow, text: &Text, controls: Vec<View>, id: String) -> View {
+fn entry_card(row: &EntryRow, settings: &Settings, controls: Vec<View>, id: String) -> View {
+    let text = &settings.input.text;
     let mut detail: Vec<View> = vec![widgets::caption(&row.detail).into()];
     if row.inactive {
         detail.push(widgets::caption(text!(text, "entry-inactive")).into());
@@ -779,7 +863,13 @@ fn entry_card(row: &EntryRow, text: &Text, controls: Vec<View>, id: String) -> V
         .border_brush(border)
         .border_thickness(1.0)
         .corner_radius(4.0)
-        .content(app_row(&row.name, detail, controls, id))
+        .content(app_row(
+            icon(settings, &row.executable, 32.0),
+            &row.name,
+            detail,
+            controls,
+            id,
+        ))
         .into()
 }
 
@@ -812,7 +902,7 @@ fn suppression_cards(settings: &Settings, context: &ViewContext<'_, Settings>) -
                 ))),
             );
             let title = title_button(row, Field::Suppression, &id, settings, context);
-            entry_card(row, text, vec![title, remove.into()], id)
+            entry_card(row, settings, vec![title, remove.into()], id)
         })
         .collect();
     vec![widgets::group(cards)]
@@ -865,6 +955,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
     if expanded {
         children.extend(fixed_rows(model, text).into_iter().map(|row| {
             nested_app_row(
+                icon(settings, &row.executable, 32.0),
                 &row.executable,
                 widgets::caption(&row.description).into(),
                 FontIcon::new()
@@ -898,6 +989,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                     ),
                 ));
             nested_app_row(
+                icon(settings, &row.executable, 32.0),
                 &row.name,
                 StackPanel::new().spacing(2.0).children(detail).into(),
                 actions.into(),
@@ -918,7 +1010,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
     widgets::card(StackPanel::new().children(children))
 }
 
-fn nested_app_row(name: &str, detail: View, action: View, id: String) -> View {
+fn nested_app_row(icon: View, name: &str, detail: View, action: View, id: String) -> View {
     Border::new()
         .min_height(56.0)
         .padding(Thickness::new(52.0, 10.0, 16.0, 10.0))
@@ -930,7 +1022,7 @@ fn nested_app_row(name: &str, detail: View, action: View, id: String) -> View {
                 .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
                 .column_spacing(12.0)
                 .children((
-                    app_icon(32.0),
+                    icon,
                     StackPanel::new()
                         .grid_column(1)
                         .spacing(2.0)
@@ -976,7 +1068,7 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
                     .columns([GridLength::Auto, GridLength::STAR])
                     .column_spacing(14.0)
                     .children((
-                        app_icon(28.0),
+                        icon(settings, &row.executable, 28.0),
                         StackPanel::new().grid_column(1).children((
                             widgets::body(&row.name),
                             widgets::caption(&row.executable),

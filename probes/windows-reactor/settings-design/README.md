@@ -15,9 +15,9 @@ This README uses these terms:
 
 ## Dependencies and environment
 
-The crate pins `windows-reactor`, `windows-canvas`, `windows-composition`, and the optional `windows-reactor-setup` helper to `windows-rs` revision `0496ec19116f1dac690daf31fcb96769118d9bac` (2026-10-24), Circadia's reference pin. `Cargo.lock` locks `i18n-embed` 0.16.0, `i18n-embed-fl` 0.10.1, `fluent-pseudo` 0.3.3, `rust-embed` 8.13.0, and `windows-sys` 0.61.2, which provides Windows National Language Support (NLS) formatting, the high-contrast query, and the preferred UI languages. The manifest declares Rust 1.95 as its minimum. `cargo audit` reports one allowed warning: `basic-toml` 0.1.10 is unmaintained (RUSTSEC-2026-0374). `i18n-config` 0.4.8 reads `i18n.toml` with it when the `fl!` and `fluent_language_loader!` macros expand, so it runs only at build time.
+The crate pins `windows-reactor`, `windows-canvas`, `windows-composition`, and the optional `windows-reactor-setup` helper to `windows-rs` revision `0496ec19116f1dac690daf31fcb96769118d9bac` (2026-10-24), Circadia's reference pin. `Cargo.lock` locks `i18n-embed` 0.16.0, `i18n-embed-fl` 0.10.1, `fluent-pseudo` 0.3.3, `rust-embed` 8.13.0, `png` 0.18.1, which encodes the extracted icon, and `windows-sys` 0.61.2, which provides Windows National Language Support (NLS) formatting, the high-contrast query, the preferred UI languages, and icon extraction. The manifest declares Rust 1.95 as its minimum. `cargo audit` reports one allowed warning: `basic-toml` 0.1.10 is unmaintained (RUSTSEC-2026-0374). `i18n-config` 0.4.8 reads `i18n.toml` with it when the `fl!` and `fluent_language_loader!` macros expand, so it runs only at build time.
 
-Use Windows with Rust's MSVC toolchain, the linker and Windows SDK, stable Rust, the Rust 1.95 toolchain for `check-msrv`, nightly rustfmt, `just`, `cargo-audit`, `cargo-machete`, and `jq`. Default builds need an installed Windows App SDK 2.5 runtime; the `self-contained` feature stages private runtime 2.5.1 under `target/`. The build copies the repository's `assets/circadia.ico` beside the executable for the tray icon. The probe compiles the phase art, badge, and app icon SVGs from `assets/` into the executable. Its Fluent catalogs in `i18n/` are embedded in release builds; debug builds, including every measured run, read them from `i18n/` at run time.
+Use Windows with Rust's MSVC toolchain, the linker and Windows SDK, stable Rust, the Rust 1.95 toolchain for `check-msrv`, nightly rustfmt, `just`, `cargo-audit`, `cargo-machete`, and `jq`. Default builds need an installed Windows App SDK 2.5 runtime; the `self-contained` feature stages private runtime 2.5.1 under `target/`. The build copies the probe's `assets/circadia.ico`, the tray icon Circadia used before it generated its icon from `assets/icon/circadia.svg`, beside the executable. The probe compiles the phase art, badge, and app icon SVGs from `assets/` into the executable. Its Fluent catalogs in `i18n/` are embedded in release builds; debug builds, including every measured run, read them from `i18n/` at run time.
 
 ## Fixture and options
 
@@ -27,7 +27,7 @@ The window opens on a fixed schedule:
 - The three temperature levels: Daytime 6500 K, Morning and evening 3400 K, and Sleep 2400 K.
 - A 60-minute transition before each event, and a clock of 22:15, a quarter of the way through the ramp toward Bedtime.
 
-A fifth navigation item, "Probe lab", has the measurements: a graph with a latency readout and buttons that move Bedtime earlier or later to regenerate it, a theme switch, one time picker for each closing strategy (the ways Accept and Cancel try to close the flyout, compared under [Results](#results-on-2026-10-24)), both badge-coloring methods, regional-format output, the pseudo-locale length ratio, a `ToggleSwitch` without supplied labels, and an event log. The executable writes the event log to `<exe>.log` beside itself.
+A fifth navigation item, "Probe lab", has the measurements: `notepad.exe`'s icon extracted at run time and shown through Reactor's in-memory and file image sources (see [Runtime icons](#runtime-icons-on-2026-10-27)), a graph with a latency readout and buttons that move Bedtime earlier or later to regenerate it, a theme switch, one time picker for each closing strategy (the ways Accept and Cancel try to close the flyout, compared under [Results](#results-on-2026-10-24)), both badge-coloring methods, regional-format output, the pseudo-locale length ratio, a `ToggleSwitch` without supplied labels, and an event log. The executable writes the event log to `<exe>.log` and the extracted icons to `lab-icons\notepad-32.png` and `lab-icons\notepad-64.png` beside itself.
 
 Command-line options select the fixture state:
 
@@ -61,7 +61,7 @@ just build
 just build-self-contained
 ```
 
-These commands use default debug builds and do not open windows. The first build downloads the crates and the `windows-rs` repository, `build-self-contained` can download runtime packages, and `cargo audit` updates its advisory database. `check` runs formatting verification, Clippy, the unit tests, rustdoc, the dependency advisory scan, and the unused-dependency check. The unit tests cover the fixture curve, phases, and gridlines against fixed reference values, the kelvin-to-color reference table, clock-pattern parsing, strict regional decimal parsing, NLS output for `en-US` and `de-DE`, argument parsing, and the German catalog's message variables, placeholder order, and per-message English fallback.
+These commands use default debug builds and do not open windows. The first build downloads the crates and the `windows-rs` repository, `build-self-contained` can download runtime packages, and `cargo audit` updates its advisory database. `check` runs formatting verification, Clippy, the unit tests, rustdoc, the dependency advisory scan, and the unused-dependency check. The unit tests cover the fixture curve, phases, and gridlines against fixed reference values, the kelvin-to-color reference table, clock-pattern parsing, strict regional decimal parsing, NLS output for `en-US` and `de-DE`, argument parsing, the German catalog's message variables, placeholder order, and per-message English fallback, and icon extraction: `notepad.exe` yields a PNG of each requested size, `svchost.exe` yields none, and the color-channel and mask conversion.
 
 ## Desktop verification
 
@@ -73,7 +73,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File verify-design.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& .\verify-design.ps1 -Part pickers,tray"
 ```
 
-The parts are `screens` (every page in both themes, scrolled; status, banner, and dialog states; title-bar measurement), `pickers` (each closing strategy in both list orders and both clock formats, plus keyboard use), `renderers` (memory, idle CPU, resize, theme switch, and graph latency per renderer), `localization` (regional output, comma-decimal entry, plurals, placeholder order, isolation marks, the UI-language override, and pseudo-locale screenshots), and `tray`. The script writes `design-results.json`, screenshots, and a copy of the probe log to the ignored `results/` folder, and quits each probe through its Quit command, killing it only if that fails.
+The parts are `screens` (every page in both themes, scrolled; status, banner, and dialog states; title-bar measurement), `pickers` (each closing strategy in both list orders and both clock formats, plus keyboard use), `renderers` (memory, idle CPU, resize, theme switch, and graph latency per renderer), `localization` (regional output, comma-decimal entry, plurals, placeholder order, isolation marks, the UI-language override, and pseudo-locale screenshots), `tray`, and `icons` (the Probe lab's runtime icons captured from the screen and compared with the extracted PNG, before and after recreating the images, deleting their files, and swapping the files' contents). The script writes `design-results.json`, screenshots, and a copy of the probe log to the ignored `results/` folder, or to the folder given with `-Results`, and quits each probe through its Quit command, killing it only if that fails. When the current user's PowerShell execution policy already allows local scripts, such as `RemoteSigned`, run the script without `-ExecutionPolicy Bypass`:
+
+```bash
+powershell.exe -NoProfile -File verify-design.ps1 -Part icons -Results "$(cygpath -w "$PWD/results/icons")"
+```
 
 ## Results on 2026-10-24
 
@@ -124,8 +128,30 @@ The XAML fill shows hairline gaps between its rectangles. Each `windows-canvas` 
 
 **Tray menu.** Reactor shows the tray menu as a WinUI `MenuFlyout` in its own host window, in the Windows 11 menu style. The separators, the disabled "Suppress while focused" caption, the "✓ " prefix, and the disabled excluded app rendered; after "Suppress for 1 hour", the menu read "Stop suppressing" and the status card showed manual suppression.
 
+## Runtime icons on 2026-10-27
+
+Question: which Reactor `Image` source shows an icon that the process produced at run time sharply, and does the source need its file to stay on disk while shown? Circadia's settings show each app's icon at 32 epx and keep PNG copies at 32, 48, and 64 pixels for 100%, 150%, and 200% scaling.
+
+The Probe lab extracts `notepad.exe`'s first icon with `SHDefExtractIconW` at 32 and 64 pixels, converts it with `GetIconInfo` and `GetDIBits` to straight-alpha RGBA, and encodes PNG with the `png` crate. It shows each PNG in a 32 by 32 epx `Image` (`Stretch::Uniform`) on an opaque black `Border`, once through `Image::source_data` (an `EncodedImage` in memory) and once through `Image::source_file` (a `file:` URI of the PNG beside the executable). The `icons` part of the script captured each `Image`'s screen rectangle and compared it with the 32 px PNG composited over black, the PNG color multiplied by its alpha.
+
+`just check` passed with 61 unit tests. Environment: Windows 11 Pro x64 build 26300, 100% scaling (96 DPI, confirmed by `GetDpiForWindow`), dark window theme, Rust 1.99.0, a default debug build using the installed Windows App SDK runtime, and `0496ec1`.
+
+| Image | Screen rectangle | Pixels equal to the 32 px PNG over black |
+| :-- | :-- | --: |
+| 32 px PNG, in-memory data source | 32 by 32 at whole-pixel coordinates | 1024 of 1024 |
+| 32 px PNG, file source | 32 by 32 at whole-pixel coordinates | 1024 of 1024 |
+| 64 px PNG, in-memory data source | 32 by 32 | 336 of 1024; largest channel difference 169 |
+| 64 px PNG, file source | 32 by 32 | 336 of 1024; largest channel difference 169 |
+
+- Both sources show the 32 px PNG pixel for pixel at 100%.
+- The 64 px PNG that WinUI scales down to 32 px differs from the 32 px extraction. The inferred cause is that `notepad.exe`'s icon resource has a separately drawn 32 px image, which `SHDefExtractIconW` selects for a 32 px request. Each display scale therefore needs its own extraction.
+- After the PNG files were deleted and the `Image` elements recreated under new keys, both file-source rows still showed the original icon with every pixel equal. After the files' contents were swapped and the elements recreated, the 32 px file-source row still showed the original 32 px image. The run did not distinguish Reactor's reuse of a live image source with the same URI from WinUI's own URI cache. In either case, a file source does not show a replaced file's new content within a session, so a cache that rewrites a file at the same path would show stale icons. The in-memory source has no file to keep.
+
+Circadia uses the in-memory data source and keeps the 32, 48, and 64 px sizes. The 200% run, which would show whether the 64 px PNG renders pixel for pixel in a 32 epx `Image` at 200% scaling, did not run, because it needs the display scale changed.
+
 ## Remaining gaps
 
+- Runtime icons at 150% and 200% scaling were not captured.
 - Contrast themes, 150% and 200% scaling, and scale changes while open were not exercised. The high-contrast query returned off on the test desktop, so the contrast palette and art did not render.
 - The `--theme system` path, which follows the Windows theme, did not run; every run forced the window theme.
 - Narrator use of the pages, the time picker, and the live regions was not tested.

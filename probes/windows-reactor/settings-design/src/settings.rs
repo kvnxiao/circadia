@@ -248,6 +248,7 @@ pub(crate) enum Message {
     ShiftBedtime(i32),
     Coordinate(usize, Rc<str>),
     ToggleTheme,
+    Icons(lab::IconAction),
 }
 
 #[expect(
@@ -277,6 +278,7 @@ pub(crate) struct Settings {
     status: Status,
     closing: Closing,
     coordinates: [Option<Rc<str>>; 2],
+    icons: lab::LabIcons,
 }
 
 impl Settings {
@@ -699,6 +701,10 @@ impl Component for Settings {
                 None
             }
         };
+        let (icons, icon_events) = lab::LabIcons::load();
+        for event in &icon_events {
+            crate::log::write(event);
+        }
         Self {
             input: input.clone(),
             page: options.page,
@@ -713,7 +719,7 @@ impl Component for Settings {
             contrast,
             latency: Rc::new(Latency::new(context.callback(Message::Latency))),
             last_latency: None,
-            events: Vec::new(),
+            events: icon_events,
             solar_expanded: true,
             excluded_expanded: true,
             language: 0,
@@ -722,6 +728,7 @@ impl Component for Settings {
             status: options.status,
             closing: options.closing,
             coordinates: [None, None],
+            icons,
         }
     }
 
@@ -848,6 +855,10 @@ impl Component for Settings {
                 if let Some(entry) = self.coordinates.get_mut(index) {
                     *entry = Some(text);
                 }
+            }
+            Message::Icons(action) => {
+                let event = self.icons.act(action);
+                self.event(event);
             }
         }
     }

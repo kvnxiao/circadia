@@ -12,11 +12,12 @@ fs-err = "3"
 i18n-embed = { version = "0.16", features = ["fluent-system"] }
 i18n-embed-fl = "0.10"
 num-traits = "0.2"
+png = "0.18"
 rust-embed = "8"
 windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", features = ["composition", "reactor"] }
 windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", default-features = false, features = ["reactor"] }
 windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac" }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 anyhow = "1"

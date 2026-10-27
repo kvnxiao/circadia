@@ -1,5 +1,6 @@
 mod configuration;
 mod file_info;
+mod icon_cache;
 #[cfg(feature = "graph-measurement")]
 pub(crate) mod measurement;
 mod settings;
@@ -35,10 +36,13 @@ use crate::read_foreground;
 use configuration::Configuration;
 use file_info::AppFile;
 use file_info::FileInfoClient;
+use icon_cache::IconCache;
 use settings::general::Registrar;
 use settings::general::SignIn;
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::VecDeque;
 use std::io;
 use std::path::Path;
@@ -376,6 +380,8 @@ fn finish_runtime(
 struct Desktop {
     session: Option<Session>,
     file_info: Option<FileInfoClient>,
+    icons: IconCache,
+    browsed: BTreeMap<String, (PathBuf, Duration)>,
     configuration: Rc<RefCell<Configuration>>,
     startup: Option<Startup>,
     snapshot: Option<Arc<ControllerSnapshot>>,
@@ -496,6 +502,7 @@ impl Application for Desktop {
                     text: Rc::clone(&input.text),
                     region: Rc::clone(&input.regional_format),
                     model: Rc::new(model),
+                    icons: self.icons.view(),
                     sign_in: self.sign_in.status(),
                     activation: self.settings_activation,
                     exiting: self.exiting,
@@ -526,6 +533,8 @@ impl Desktop {
         Self {
             session: None,
             file_info: None,
+            icons: IconCache::load(&directory),
+            browsed: BTreeMap::new(),
             configuration,
             startup,
             snapshot: None,
@@ -550,6 +559,7 @@ impl Desktop {
         if !self.exiting {
             self.configuration.borrow_mut().write();
         }
+        self.prune_icons();
     }
 
     fn set_settings_open(&mut self, open: bool) {
@@ -575,12 +585,11 @@ impl Desktop {
         ) {
             Ok(session) => {
                 let wake = session.wake.clone();
-                self.file_info =
-                    FileInfoClient::spawn(crate::platform::file_info::display_name, move || {
-                        let _notified = wake.notify();
-                    })
-                    .inspect_err(|error| tracing::warn!(%error, "starting the display-name reader"))
-                    .ok();
+                self.file_info = FileInfoClient::spawn(file_info::WindowsFiles, move || {
+                    let _notified = wake.notify();
+                })
+                .inspect_err(|error| tracing::warn!(%error, "starting the file-information reader"))
+                .ok();
                 self.session = Some(session);
                 if self.configuration.borrow().opens_settings_at_launch() {
                     context.show_window("settings");
@@ -664,10 +673,13 @@ impl Desktop {
                 );
                 self.configure(changed);
             }
+            settings::Command::Icons(executables) => self.request_icons(&executables),
             settings::Command::Browsed(file) => {
                 if let Some(file_info) = &mut self.file_info {
                     file_info.request(&file.executable, &file.path);
                 }
+                self.browsed
+                    .insert(file.executable, (file.path, crate::elapsed_since_boot()));
             }
         }
     }
@@ -693,18 +705,46 @@ impl Desktop {
         }
     }
 
-    fn receive_names(&mut self) {
-        let names = self
+    fn receive_files(&mut self) {
+        let received = self
             .file_info
             .as_mut()
             .map(FileInfoClient::receive)
             .unwrap_or_default();
-        for (executable, name) in names {
+        if let Some(images) = received.generic {
+            self.icons.set_generic(images);
+        }
+        let icons_received = !received.icons.is_empty();
+        for (executable, read) in received.icons {
+            self.icons.apply(&executable, read);
+        }
+        if icons_received {
+            self.prune_icons();
+        }
+        for (executable, name) in received.names {
             let changed = self
                 .configuration
                 .borrow_mut()
                 .record_name(&executable, &name);
             self.configure(changed);
+        }
+    }
+
+    fn request_icons(&mut self, executables: &[String]) {
+        let Some(file_info) = &mut self.file_info else {
+            return;
+        };
+        for executable in executables {
+            let recent = self.snapshot.as_ref().and_then(|snapshot| {
+                snapshot
+                    .recent
+                    .iter()
+                    .find(|recent| recent.executable == *executable)
+            });
+            let known = icon_cache::latest_path(recent, self.browsed.get(executable));
+            if let Some(request) = self.icons.request(executable, known) {
+                file_info.request_icon(request);
+            }
         }
     }
 
@@ -757,7 +797,22 @@ impl Desktop {
         if let Some(config) = changed {
             let revision = self.configuration.borrow().revision();
             self.queue(ControllerCommand::Configure { config, revision });
+            self.prune_icons();
         }
+    }
+
+    fn prune_icons(&mut self) {
+        let Some(config) = self.configuration.borrow().accepted().cloned() else {
+            return;
+        };
+        let keep: BTreeSet<String> = [Field::Suppression, Field::Exclusions]
+            .into_iter()
+            .flat_map(|list| config.entries(list))
+            .filter_map(crate::AppEntry::file_name)
+            .chain(recent_executables(self.snapshot.as_deref()).cloned())
+            .chain(self.browsed.keys().filter(|_| self.settings_open).cloned())
+            .collect();
+        self.icons.prune(&keep);
     }
 
     fn queue(&mut self, command: ControllerCommand) {
@@ -912,6 +967,7 @@ impl Desktop {
     }
 
     fn refresh(&mut self) {
+        let previous = self.snapshot.clone();
         let Some(session) = &mut self.session else {
             return;
         };
@@ -931,8 +987,12 @@ impl Desktop {
                 previous,
             });
         }
+        if !recent_executables(previous.as_deref()).eq(recent_executables(self.snapshot.as_deref()))
+        {
+            self.prune_icons();
+        }
         self.request_names();
-        self.receive_names();
+        self.receive_files();
     }
 
     fn begin_exit(&mut self) {
@@ -971,6 +1031,13 @@ impl Desktop {
                 .as_ref()
                 .is_none_or(|session| session.client.is_finished())
     }
+}
+
+fn recent_executables(snapshot: Option<&ControllerSnapshot>) -> impl Iterator<Item = &String> {
+    snapshot
+        .into_iter()
+        .flat_map(|snapshot| &snapshot.recent)
+        .map(|recent| &recent.executable)
 }
 
 #[derive(Default)]
@@ -1576,10 +1643,10 @@ mod tests {
         let opened = std::sync::Mutex::new(opened);
         let name = name.to_owned();
         let client = FileInfoClient::spawn(
-            move |_path| {
+            file_info::Names(move |_path: &Path| {
                 opened.lock().ok()?.recv().ok()?;
                 Some(name.clone())
-            },
+            }),
             || {},
         )
         .expect("file-information worker");
@@ -1599,7 +1666,7 @@ mod tests {
                 "no display name for {executable}"
             );
             std::thread::sleep(Duration::from_millis(10));
-            desktop.receive_names();
+            desktop.receive_files();
         }
     }
 
@@ -1677,8 +1744,11 @@ mod tests {
     fn a_browsed_executable_passes_its_path_and_stores_its_display_name() {
         let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
         desktop.file_info = Some(
-            FileInfoClient::spawn(crate::platform::file_info::display_name, || {})
-                .expect("file-information worker"),
+            FileInfoClient::spawn(
+                file_info::Names(crate::platform::file_info::display_name),
+                || {},
+            )
+            .expect("file-information worker"),
         );
         let notepad = AppFile {
             executable: "notepad.exe".into(),
@@ -1699,10 +1769,10 @@ mod tests {
     fn a_blocked_display_name_read_does_not_delay_a_configure_round_trip() {
         let directory = tempfile::tempdir().expect("temporary data directory");
         let mut file_info = FileInfoClient::spawn(
-            |_path| {
+            file_info::Names(|_path: &Path| {
                 std::thread::sleep(Duration::from_secs(5));
                 None
-            },
+            }),
             || {},
         )
         .expect("file-information worker");
@@ -1739,7 +1809,7 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert_eq!(file_info.receive(), Vec::<(String, String)>::new());
+        assert_eq!(file_info.receive().names, Vec::<(String, String)>::new());
         drop(controller);
     }
 

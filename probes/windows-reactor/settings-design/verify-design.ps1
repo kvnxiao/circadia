@@ -1,8 +1,8 @@
 param(
     [string]$Executable = "$PSScriptRoot\target\debug\circadia-settings-design-probe.exe",
     [string]$Results = "$PSScriptRoot\results",
-    [ValidateSet('screens', 'pickers', 'renderers', 'localization', 'tray')]
-    [string[]]$Part = @('screens', 'pickers', 'renderers', 'localization', 'tray')
+    [ValidateSet('screens', 'pickers', 'renderers', 'localization', 'tray', 'icons')]
+    [string[]]$Part = @('screens', 'pickers', 'renderers', 'localization', 'tray', 'icons')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -660,6 +660,94 @@ function Test-Tray {
     }
 }
 
+function Read-Png([string]$Path) {
+    $stream = [IO.MemoryStream]::new([IO.File]::ReadAllBytes($Path))
+    return [System.Drawing.Bitmap]::new($stream)
+}
+
+function Save-Rect([int]$X, [int]$Y, [int]$Width, [int]$Height, [string]$Name) {
+    $bitmap = New-Object System.Drawing.Bitmap $Width, $Height
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($X, $Y, 0, 0, $bitmap.Size)
+    } finally {
+        $graphics.Dispose()
+    }
+    $bitmap.Save((Join-Path $Results "$Name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    return $bitmap
+}
+
+# The lab draws each icon on opaque black, so the expected screen color is the
+# PNG color multiplied by its alpha.
+function Compare-Icon($Captured, $Expected) {
+    $record = [ordered]@{ pixels = 0; exact = 0; withinOne = 0; maxDifference = 0; nonBlack = 0 }
+    if ($Captured.Width -ne $Expected.Width -or $Captured.Height -ne $Expected.Height) {
+        $record.sizeMismatch = "$($Captured.Width)x$($Captured.Height) against $($Expected.Width)x$($Expected.Height)"
+        return $record
+    }
+    for ($y = 0; $y -lt $Expected.Height; $y++) {
+        for ($x = 0; $x -lt $Expected.Width; $x++) {
+            $source = $Expected.GetPixel($x, $y)
+            $shown = $Captured.GetPixel($x, $y)
+            $difference = 0
+            foreach ($channel in 'R', 'G', 'B') {
+                $wanted = [Math]::Round($source.$channel * $source.A / 255.0)
+                $difference = [Math]::Max($difference, [Math]::Abs($shown.$channel - $wanted))
+            }
+            $record.pixels++
+            if ($difference -eq 0) { $record.exact++ }
+            if ($difference -le 1) { $record.withinOne++ }
+            if ($shown.R + $shown.G + $shown.B -gt 0) { $record.nonBlack++ }
+            $record.maxDifference = [Math]::Max($record.maxDifference, $difference)
+        }
+    }
+    return $record
+}
+
+function Measure-Icons($Window, [string]$Label, $Expected) {
+    $records = [ordered]@{}
+    foreach ($id in 'lab-icon-data-32', 'lab-icon-file-32', 'lab-icon-data-64', 'lab-icon-file-64') {
+        $element = Find-Id $Window $id
+        if (-not $element) { $records[$id] = 'missing'; continue }
+        $rect = $element.Current.BoundingRectangle
+        $bitmap = Save-Rect ([int][Math]::Floor($rect.X)) ([int][Math]::Floor($rect.Y)) $Expected.Width $Expected.Height "icon-$Label-$id"
+        try {
+            $record = Compare-Icon $bitmap $Expected
+        } finally {
+            $bitmap.Dispose()
+        }
+        $record.bounds = "$($rect.X),$($rect.Y) $($rect.Width)x$($rect.Height)"
+        $records[$id] = $record
+    }
+    return $records
+}
+
+function Test-Icons {
+    $folder = Join-Path (Split-Path -Parent $exe) 'lab-icons'
+    $process = Start-Probe @('--open', '--theme', 'dark', '--page', 'lab')
+    try {
+        $window = Wait-Window $process
+        Start-Sleep -Milliseconds 2000
+        Focus-Window $window
+        $expected = Read-Png (Join-Path $folder 'notepad-32.png')
+        $icons = [ordered]@{ dpi = [DesignProbeWindows]::GetDpiForWindow([IntPtr]$Window.Current.NativeWindowHandle) }
+        try {
+            $icons.initial = Measure-Icons $window 'initial' $expected
+            foreach ($action in 'recreate', 'delete', 'swap') {
+                Invoke-Element (Get-Id $window "lab-icon-$action")
+                Start-Sleep -Milliseconds 1500
+                Focus-Window $window
+                $icons[$action] = Measure-Icons $window $action $expected
+            }
+        } finally {
+            $expected.Dispose()
+        }
+        $report.icons = $icons
+    } finally {
+        Stop-Probe $process
+    }
+}
+
 foreach ($name in $Part) {
     try {
         switch ($name) {
@@ -668,6 +756,7 @@ foreach ($name in $Part) {
             'renderers' { Test-Renderers }
             'localization' { Test-Localization }
             'tray' { Test-Tray }
+            'icons' { Test-Icons }
         }
     } catch {
         $report["$name-error"] = "$_ at $($_.InvocationInfo.ScriptLineNumber)"

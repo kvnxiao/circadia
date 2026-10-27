@@ -1,6 +1,7 @@
 use super::Message;
 use super::Settings;
 use super::Status;
+use crate::icon;
 use crate::l10n::ENGLISH;
 use crate::palette::Palette;
 use crate::phase;
@@ -13,16 +14,102 @@ use crate::time_picker::PickerInput;
 use crate::time_picker::TimePicker;
 use crate::widgets;
 use crate::widgets::Row;
+use std::path::Path;
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 use windows_reactor::Border;
 use windows_reactor::Button;
+use windows_reactor::Color;
 use windows_reactor::ComboBox;
+use windows_reactor::EncodedImage;
+use windows_reactor::Grid;
+use windows_reactor::GridLength;
+use windows_reactor::Image;
 use windows_reactor::Orientation;
 use windows_reactor::StackPanel;
+use windows_reactor::Stretch;
+use windows_reactor::Thickness;
 use windows_reactor::ToggleSwitch;
 use windows_reactor::VerticalAlignment;
 use windows_reactor::View;
 use windows_reactor::ViewContext;
+use windows_reactor::keyed;
+
+const NOTEPAD: &str = "C:\\Windows\\System32\\notepad.exe";
+const ICON_PIXELS: [u16; 2] = [32, 64];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IconAction {
+    Recreate,
+    Delete,
+    Swap,
+}
+
+pub(crate) struct LabIcons {
+    images: Vec<(u16, Arc<[u8]>)>,
+    folder: PathBuf,
+    generation: u32,
+}
+
+impl LabIcons {
+    pub(crate) fn load() -> (Self, Vec<String>) {
+        let folder = std::env::current_exe()
+            .map(|executable| executable.with_file_name("lab-icons"))
+            .unwrap_or_default();
+        let mut events = Vec::new();
+        let mut images = Vec::new();
+        for pixels in ICON_PIXELS {
+            match icon::png(Path::new(NOTEPAD), pixels) {
+                Ok(Some(png)) => images.push((pixels, Arc::from(png))),
+                Ok(None) => events.push(format!("notepad.exe has no {pixels} px icon")),
+                Err(error) => events.push(format!("extracting the {pixels} px icon: {error}")),
+            }
+        }
+        let icons = Self {
+            images,
+            folder,
+            generation: 0,
+        };
+        events.extend(icons.write(false).err());
+        (icons, events)
+    }
+
+    fn path(&self, pixels: u16) -> PathBuf {
+        self.folder.join(format!("notepad-{pixels}.png"))
+    }
+
+    fn write(&self, swapped: bool) -> Result<(), String> {
+        fs_err::create_dir_all(&self.folder).map_err(|error| error.to_string())?;
+        for (index, (pixels, _)) in self.images.iter().enumerate() {
+            let source = if swapped {
+                self.images.get(self.images.len() - 1 - index)
+            } else {
+                self.images.get(index)
+            };
+            if let Some((_, png)) = source {
+                fs_err::write(self.path(*pixels), png).map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn act(&mut self, action: IconAction) -> String {
+        let result = match action {
+            IconAction::Recreate => Ok(()),
+            IconAction::Delete => self.images.iter().try_for_each(|(pixels, _)| {
+                fs_err::remove_file(self.path(*pixels)).map_err(|error| error.to_string())
+            }),
+            IconAction::Swap => self.write(true),
+        };
+        self.generation += 1;
+        format!(
+            "icon action {action:?}, generation {}: {}",
+            self.generation,
+            result.err().unwrap_or_else(|| "done".to_owned())
+        )
+    }
+}
 
 const PSEUDO_SAMPLE: [&str; 8] = [
     "manage-title",
@@ -57,6 +144,75 @@ fn pseudo_ratio() -> f64 {
 }
 
 impl Settings {
+    fn icon_rows(&self, context: &ViewContext<'_, Self>) -> View {
+        let icons = &self.icons;
+        let rows = icons.images.iter().flat_map(|(pixels, png)| {
+            let data = Image::new().source_data(EncodedImage::new(Arc::clone(png)));
+            let file = Image::new().source_file(icons.path(*pixels));
+            [("data", Ok(data)), ("file", file)]
+                .into_iter()
+                .map(move |(source, image)| {
+                    let id = format!("lab-icon-{source}-{pixels}");
+                    let image: View = match image {
+                        Ok(image) => image
+                            .width(32.0)
+                            .height(32.0)
+                            .stretch(Stretch::Uniform)
+                            .automation_id(&id)
+                            .into(),
+                        Err(error) => widgets::caption(error.to_string()).into(),
+                    };
+                    keyed(
+                        format!("{id}-{}", icons.generation),
+                        Grid::new()
+                            .columns([GridLength::Pixel(260.0), GridLength::Auto])
+                            .margin(Thickness::new(16.0, 8.0, 16.0, 8.0))
+                            .children((
+                                widgets::body(format!(
+                                    "{pixels} px PNG through the {source} source"
+                                ))
+                                .vertical_alignment(VerticalAlignment::Center),
+                                Border::new()
+                                    .grid_column(1)
+                                    .background(Color::rgb(0, 0, 0))
+                                    .padding(Thickness::uniform(8.0))
+                                    .content(image),
+                            )),
+                    )
+                })
+        });
+        let action = |action: IconAction, id: &str, label: &str| -> View {
+            Button::new()
+                .automation_id(id)
+                .on_click(context.message(Message::Icons(action)))
+                .content(label)
+                .into()
+        };
+        StackPanel::new()
+            .children((
+                widgets::caption(format!(
+                    "notepad.exe's icon extracted with SHDefExtractIconW at run time, shown at 32 epx on opaque black. Files: {}",
+                    icons.folder.display()
+                ))
+                .margin(Thickness::uniform(16.0)),
+                StackPanel::new().keyed_children(rows),
+                StackPanel::new()
+                    .orientation(Orientation::Horizontal)
+                    .spacing(8.0)
+                    .margin(Thickness::uniform(16.0))
+                    .children((
+                        action(IconAction::Recreate, "lab-icon-recreate", "Recreate images"),
+                        action(
+                            IconAction::Delete,
+                            "lab-icon-delete",
+                            "Delete files and recreate",
+                        ),
+                        action(IconAction::Swap, "lab-icon-swap", "Swap files and recreate"),
+                    )),
+            ))
+            .into()
+    }
+
     fn closing_picker(
         &self,
         closing: Closing,
@@ -133,7 +289,9 @@ impl Settings {
             .collect();
         StackPanel::new()
             .children((
-                widgets::section("Fixture state", true),
+                widgets::section("Runtime icon", true),
+                widgets::card(self.icon_rows(context)),
+                widgets::section("Fixture state", false),
                 widgets::group(vec![
                     widgets::card(
                         Row::new("\u{E9F5}", "Status")
