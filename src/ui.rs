@@ -561,6 +561,7 @@ impl Desktop {
     fn settings_closed(&mut self) {
         self.set_settings_open(false);
         if !self.exiting {
+            self.queue(ControllerCommand::StopPreview);
             // Closing settings ends Preview, so a position held for playback
             // applies now.
             self.apply_location();
@@ -1590,6 +1591,22 @@ mod tests {
         desktop.settings_closed();
         let saved = saved(&directory).expect("written file");
         assert!(saved.contains("bedtime = \"22:00\""), "{saved}");
+    }
+
+    #[test]
+    fn closing_settings_stops_preview_and_closing_during_exit_does_not() {
+        let (_directory, mut desktop) = desktop_with(None);
+        desktop.set_settings_open(true);
+        desktop.settings_closed();
+        let commands: Vec<_> = desktop.pending.drain(..).collect();
+        assert!(
+            matches!(commands.as_slice(), [ControllerCommand::StopPreview]),
+            "{commands:?}"
+        );
+        desktop.set_settings_open(true);
+        desktop.begin_exit();
+        desktop.settings_closed();
+        assert!(desktop.pending.is_empty());
     }
 
     #[test]

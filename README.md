@@ -30,7 +30,7 @@ Turning management off stops Preview and manual suppression, fades from the last
 
 Each settings page shows a banner at the top that lists each outstanding Night Light failure: the failed operation, the kind of error, and the Windows error code when there is one. While management is on, the banner's Retry command retries the failed Night Light operations at once. After a failed request while turning management off, Retry is unavailable and the banner says why.
 
-Start minimized defaults on; open settings from the tray or launch the executable again. A launch without configuration files opens settings even when Start minimized is on, and a launch that reports a configuration error does not open it. Closing settings saves any pending change and keeps control running. Quit fades from the last written temperature, including a Preview value, to 6500 K over the configured fade duration. It then turns off the native preview flag and requests Night Light off. Quit skips the fade, but still makes both requests, in these cases:
+Start minimized defaults on; open settings from the tray or launch the executable again. A launch without configuration files opens settings even when Start minimized is on, and a launch that reports a configuration error does not open it. Closing settings stops Preview, saves any pending change, and keeps control running. Quit fades from the last written temperature, including a Preview value, to 6500 K over the configured fade duration. It then turns off the native preview flag and requests Night Light off. Quit skips the fade, but still makes both requests, in these cases:
 
 - A Windows sign-out or shutdown is confirmed, including during the fade.
 - A fade step fails, or a Night Light failure is outstanding.
