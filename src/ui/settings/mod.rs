@@ -27,6 +27,7 @@ use crate::WindowsZone;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
+use crate::platform::settings_window::MinimizeEvents;
 use jiff::Timestamp;
 use problems::Action;
 use problems::Banner;
@@ -112,6 +113,12 @@ impl Page {
             Self::General => "\u{E713}",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Visibility {
+    Shown,
+    Minimized,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -348,6 +355,7 @@ pub(super) enum Message {
     Command(Command),
     Tick,
     Minute,
+    Visibility(Visibility),
     OpenDialog(Field),
     DialogClosed(ContentDialogResult),
     Choose(String, bool),
@@ -364,6 +372,8 @@ pub(super) struct Settings {
     timer: Option<ComponentTimer>,
     tick: Option<ComponentTimer>,
     minute: Option<ComponentTimer>,
+    visibility: Visibility,
+    _minimize_events: Option<MinimizeEvents>,
     consent: bool,
     dialog: Option<apps::AddDialog>,
     exclusions_expanded: bool,
@@ -413,7 +423,7 @@ impl Settings {
             self.tick =
                 Some(context.set_local_timeout(Duration::from_millis(100), || Message::Tick));
         }
-        if !apps::relative_times_shown(self.page, &self.input.model) {
+        if !apps::relative_times_shown(self.page, &self.input.model, self.visibility) {
             self.minute = None;
         } else if self.minute.is_none() {
             self.minute = Some(context.set_local_timeout(apps::MINUTE, || Message::Minute));
@@ -689,6 +699,16 @@ impl Component for Settings {
 
     fn create(input: &Input, context: &ComponentContext<Self>) -> Self {
         input.opened.call(());
+        let visibility = context.callback(Message::Visibility);
+        let minimize_events = MinimizeEvents::listen(move |minimized| {
+            visibility.call(if minimized {
+                Visibility::Minimized
+            } else {
+                Visibility::Shown
+            });
+        })
+        .inspect_err(|error| tracing::warn!(%error, "observing settings minimize and restore"))
+        .ok();
         let mut settings = Self {
             input: input.clone(),
             page: Page::Schedule,
@@ -697,6 +717,8 @@ impl Component for Settings {
             timer: None,
             tick: None,
             minute: None,
+            visibility: Visibility::Shown,
+            _minimize_events: minimize_events,
             consent: false,
             dialog: None,
             exclusions_expanded: false,
@@ -765,6 +787,7 @@ impl Component for Settings {
             Message::Command(command) => self.input.command.call(command),
             Message::Tick => self.tick = None,
             Message::Minute => self.minute = None,
+            Message::Visibility(visibility) => self.visibility = visibility,
             Message::OpenDialog(list) => self.dialog = Some(apps::AddDialog::new(list)),
             Message::DialogClosed(result) => self.dialog_closed(result),
             Message::Choose(executable, checked) => {

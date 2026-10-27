@@ -4,6 +4,7 @@ use super::Model;
 use super::NumberControls;
 use super::Page;
 use super::Settings;
+use super::Visibility;
 use super::problems;
 use super::widgets;
 use super::widgets::Row;
@@ -157,8 +158,8 @@ pub(super) fn manual_button(manual: ManualView, context: &ViewContext<'_, Settin
         .into()
 }
 
-pub(super) fn relative_times_shown(page: Page, model: &Model) -> bool {
-    page == Page::Apps && !model.recent.is_empty()
+pub(super) fn relative_times_shown(page: Page, model: &Model, visibility: Visibility) -> bool {
+    visibility == Visibility::Shown && page == Page::Apps && !model.recent.is_empty()
 }
 
 pub(super) fn since(text: &Text, region: &RegionalFormat, elapsed: Duration) -> String {
