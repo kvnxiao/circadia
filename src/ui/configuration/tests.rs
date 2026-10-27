@@ -592,10 +592,10 @@ fn a_restore_whose_write_fails_is_accepted_without_saving() {
     folder.write(None, Some(&valid()));
     let configuration = folder.load();
     assert_eq!(configuration.startup(), Startup::Restored);
-    assert!(matches!(
+    assert_eq!(
         configuration.restore(),
-        Some(FileProblem::Unreadable { .. })
-    ));
+        Some(FileProblem::Unreadable { code: Some(5) })
+    );
     assert_eq!(
         configuration.accepted().map(AsRef::as_ref),
         Some(&Config::default())

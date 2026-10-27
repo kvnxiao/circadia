@@ -86,8 +86,10 @@ enum Read {
     Bytes(Vec<u8>),
 }
 
+// fs_err errors do not expose the OS error code, which the configuration
+// banner shows.
 fn read(path: &Path) -> Read {
-    match fs_err::read(path) {
+    match std::fs::read(path) {
         Ok(bytes) => Read::Bytes(bytes),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Read::Missing,
         Err(error) => Read::Unreadable(error),
