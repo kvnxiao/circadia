@@ -2,6 +2,7 @@ use crate::platform::win_event::WinEventHook;
 use std::io;
 use std::path::Path;
 use windows_reactor::WindowHandle;
+use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::WindowsAndMessaging::EVENT_SYSTEM_MINIMIZEEND;
 use windows_sys::Win32::UI::WindowsAndMessaging::EVENT_SYSTEM_MINIMIZESTART;
 use windows_sys::Win32::UI::WindowsAndMessaging::IsIconic;
@@ -38,6 +39,16 @@ pub(crate) fn activate(window: &WindowHandle<'_>) {
     // background launch's foreground request; denial does not invalidate
     // the open window.
     unsafe { SetForegroundWindow(window) };
+}
+
+#[expect(
+    unsafe_code,
+    reason = "read the DPI of the live settings window supplied by Reactor"
+)]
+pub(crate) fn dpi(window: &WindowHandle<'_>) -> u32 {
+    // SAFETY: Reactor keeps this window alive on its owning UI thread for the
+    // callback.
+    unsafe { GetDpiForWindow(window.as_raw()) }
 }
 
 // Settings is the only window in this process that can be minimized, so the

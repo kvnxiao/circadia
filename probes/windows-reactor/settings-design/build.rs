@@ -7,7 +7,7 @@ fn main() -> Result<()> {
     let manifest = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR").context("CARGO_MANIFEST_DIR is missing")?,
     );
-    let source = manifest.join("../../../assets/circadia.ico");
+    let source = manifest.join("assets/circadia.ico");
     println!("cargo:rerun-if-changed={}", source.display());
     println!("cargo:rerun-if-changed=i18n");
     let output = PathBuf::from(std::env::var_os("OUT_DIR").context("OUT_DIR is missing")?);

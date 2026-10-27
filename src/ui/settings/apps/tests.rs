@@ -3,7 +3,9 @@ use crate::ManagementState;
 use crate::SchedulingState;
 use crate::l10n::LanguageTag;
 use crate::ui::configuration::Configuration;
+use crate::ui::file_info::IconImages;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 use test_case::test_case;
 
@@ -714,4 +716,84 @@ fn entries_without_title_keys_are_noted_at_their_list(removed: &[&str], expected
     };
     assert_eq!(note(Field::Suppression), Some(expected.to_owned()));
     assert_eq!(note(Field::Exclusions), None);
+}
+
+fn images(tag: u8) -> IconImages {
+    IconImages([
+        Arc::from(vec![tag, 32]),
+        Arc::from(vec![tag, 48]),
+        Arc::from(vec![tag, 64]),
+    ])
+}
+
+fn names(executables: &[&str]) -> Vec<String> {
+    executables.iter().map(|name| (*name).to_owned()).collect()
+}
+
+#[test]
+fn each_app_row_requests_its_icon_once_per_page_view() {
+    let fixture = Fixture::new(Some(&entries_file(&["cs2.exe"], &["browser.exe"])));
+    let model = fixture.model(vec![
+        recent_app("game.exe", None),
+        recent_app("circadia.exe", None),
+    ]);
+    let page = names(&["browser.exe", "cs2.exe", "game.exe"]);
+    let mut requests = IconRequests::default();
+    assert_eq!(requests.due(Page::Apps, None, &model), page);
+    assert_eq!(requests.due(Page::Apps, None, &model), Vec::<String>::new());
+    let mut dialog = AddDialog::new(Field::Exclusions);
+    assert_eq!(requests.due(Page::Apps, Some(&dialog), &model), page);
+    assert!(dialog.browsed(&model, file("tool.exe")));
+    assert_eq!(
+        requests.due(Page::Apps, Some(&dialog), &model),
+        names(&["tool.exe"])
+    );
+    assert_eq!(
+        requests.due(Page::Schedule, None, &model),
+        Vec::<String>::new()
+    );
+    assert_eq!(requests.due(Page::Apps, None, &model), page);
+}
+
+#[test]
+fn a_row_shows_the_generic_icon_until_its_own_icon_is_read() {
+    let mut icons = AppIcons::default();
+    assert_eq!(
+        icon_for(&icons, "circadia.exe", "game.exe", 32),
+        AppIcon::Placeholder
+    );
+    icons.generic = Some(images(0));
+    assert_eq!(
+        icon_for(&icons, "circadia.exe", "game.exe", 32),
+        AppIcon::Image(Arc::from(vec![0, 32]))
+    );
+    icons.apps.insert("game.exe".to_owned(), images(1));
+    assert_eq!(
+        icon_for(&icons, "circadia.exe", "game.exe", 64),
+        AppIcon::Image(Arc::from(vec![1, 64]))
+    );
+}
+
+#[test]
+fn circadias_own_fixed_exclusion_shows_circadias_icon() {
+    let fixture = Fixture::new(None);
+    let model = fixture.model(Vec::new());
+    let icons = AppIcons {
+        apps: BTreeMap::from([("circadia.exe".to_owned(), images(1))]),
+        generic: Some(images(0)),
+    };
+    let own = fixed_rows(&model, &english())
+        .into_iter()
+        .map(|row| icon_for(&icons, &model.running_executable, &row.executable, 32))
+        .next();
+    assert_eq!(own, Some(AppIcon::Circadia));
+}
+
+#[test_case(0, 32; "unknown scale")]
+#[test_case(96, 32; "100 percent")]
+#[test_case(120, 40; "125 percent")]
+#[test_case(144, 48; "150 percent")]
+#[test_case(192, 64; "200 percent")]
+fn icon_pixels_follow_the_window_scale(dpi: u32, pixels: u16) {
+    assert_eq!(icon_pixels(dpi), pixels);
 }

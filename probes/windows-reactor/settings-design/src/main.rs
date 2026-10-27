@@ -2,6 +2,7 @@
 
 mod fixture;
 mod graph;
+mod icon;
 mod kelvin;
 mod l10n;
 mod log;

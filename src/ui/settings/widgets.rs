@@ -1,18 +1,53 @@
+use std::sync::Arc;
 use windows_reactor::AutomationLiveSetting;
 use windows_reactor::Border;
+use windows_reactor::EncodedImage;
 use windows_reactor::FontIcon;
 use windows_reactor::FontWeight;
 use windows_reactor::Grid;
 use windows_reactor::GridLength;
 use windows_reactor::HorizontalAlignment;
+use windows_reactor::Image;
 use windows_reactor::Orientation;
 use windows_reactor::StackPanel;
+use windows_reactor::Stretch;
 use windows_reactor::TextBlock;
 use windows_reactor::TextWrapping;
 use windows_reactor::ThemeBrush;
 use windows_reactor::Thickness;
 use windows_reactor::VerticalAlignment;
 use windows_reactor::View;
+
+pub(super) const APP_GLYPH: &str = "\u{ECAA}";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum AppIcon {
+    Circadia,
+    Image(Arc<[u8]>),
+    Placeholder,
+}
+
+impl AppIcon {
+    pub(super) fn view(&self, size: f64) -> View {
+        let image = match self {
+            Self::Circadia => Image::new().source_svg(EncodedImage::from_static(super::APP_ICON)),
+            Self::Image(png) => Image::new().source_data(EncodedImage::new(Arc::clone(png))),
+            Self::Placeholder => {
+                return FontIcon::new()
+                    .glyph(APP_GLYPH)
+                    .font_size(size)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .into();
+            }
+        };
+        image
+            .width(size)
+            .height(size)
+            .stretch(Stretch::Uniform)
+            .vertical_alignment(VerticalAlignment::Center)
+            .into()
+    }
+}
 
 pub(super) fn caption(text: impl AsRef<str>) -> TextBlock {
     TextBlock::new()

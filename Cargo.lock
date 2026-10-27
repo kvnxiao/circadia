@@ -115,6 +115,7 @@ dependencies = [
  "i18n-embed-fl",
  "ico",
  "jiff",
+ "png",
  "regex",
  "resvg",
  "rust-embed",

@@ -9,6 +9,7 @@ mod widgets;
 use super::configuration::Configuration;
 use super::configuration::ConfigurationError;
 use super::configuration::FileProblem;
+use super::icon_cache::AppIcons;
 use crate::Config;
 use crate::ControllerSnapshot;
 use crate::DiagnosticFailure;
@@ -259,6 +260,7 @@ pub(super) struct Input {
     pub(super) text: Rc<Text>,
     pub(super) region: Rc<RegionalFormat>,
     pub(super) model: Rc<Model>,
+    pub(super) icons: Rc<AppIcons>,
     pub(super) sign_in: general::SignInStatus,
     pub(super) activation: u64,
     pub(super) exiting: bool,
@@ -274,6 +276,7 @@ impl PartialEq for Input {
         Rc::ptr_eq(&self.text, &other.text)
             && Rc::ptr_eq(&self.region, &other.region)
             && self.model == other.model
+            && Rc::ptr_eq(&self.icons, &other.icons)
             && self.sign_in == other.sign_in
             && self.activation == other.activation
             && self.exiting == other.exiting
@@ -305,6 +308,7 @@ pub(super) enum Command {
     Manual(ManualCommand),
     Add(Field, Vec<super::file_info::AppFile>),
     Browsed(super::file_info::AppFile),
+    Icons(Vec<String>),
     Remove(Field, usize, String),
     Title {
         list: Field,
@@ -350,6 +354,7 @@ impl PendingWrite {
 pub(super) enum Message {
     Navigate(Option<Rc<str>>),
     Placed,
+    Dpi(u32),
     Activated,
     Edit(Vec<(Field, FieldValue)>),
     Number(Field, Option<f64>),
@@ -384,6 +389,8 @@ pub(super) struct Settings {
     tick: Option<ComponentTimer>,
     minute: Option<ComponentTimer>,
     visibility: Visibility,
+    dpi: u32,
+    icon_requests: apps::IconRequests,
     _minimize_events: Option<crate::platform::win_event::WinEventHook>,
     consent: bool,
     dialog: Option<apps::AddDialog>,
@@ -477,6 +484,20 @@ impl Settings {
         if dialog.browsed(&self.input.model, file.clone()) {
             self.input.command.call(Command::Browsed(file));
         }
+    }
+
+    fn request_icons(&mut self) {
+        let due = self
+            .icon_requests
+            .due(self.page, self.dialog.as_ref(), &self.input.model);
+        if !due.is_empty() {
+            self.input.command.call(Command::Icons(due));
+        }
+    }
+
+    fn read_dpi(context: &ComponentContext<Self>) {
+        let _queued = context
+            .run_window(|window| Message::Dpi(crate::platform::settings_window::dpi(&window)));
     }
 
     fn activate(context: &ComponentContext<Self>) {
@@ -730,6 +751,8 @@ impl Component for Settings {
             tick: None,
             minute: None,
             visibility: Visibility::Shown,
+            dpi: 96,
+            icon_requests: apps::IconRequests::default(),
             _minimize_events: minimize_events,
             consent: false,
             dialog: None,
@@ -737,6 +760,7 @@ impl Component for Settings {
             exclusions_expanded: false,
         };
         settings.animate(context);
+        settings.request_icons();
         settings
     }
 
@@ -748,6 +772,7 @@ impl Component for Settings {
             return;
         }
         self.animate(context);
+        self.request_icons();
         if activated && self.placed {
             Self::activate(context);
         }
@@ -763,11 +788,15 @@ impl Component for Settings {
                     self.page = page;
                 }
             }
-            Message::Placed if !self.placed => {
-                self.placed = true;
-                Self::activate(context);
+            Message::Placed => {
+                if !self.placed {
+                    self.placed = true;
+                    Self::activate(context);
+                }
+                Self::read_dpi(context);
             }
-            Message::Placed | Message::Activated => {}
+            Message::Dpi(dpi) => self.dpi = dpi,
+            Message::Activated => {}
             Message::Edit(edits) => self.edit(edits, context),
             Message::Number(field, value) => {
                 if let Some(edits) = number_edits(field, value) {
@@ -841,6 +870,7 @@ impl Component for Settings {
             }
         }
         self.animate(context);
+        self.request_icons();
     }
 
     fn view(&self, _: &Input, context: &mut ViewContext<'_, Self>) -> View {

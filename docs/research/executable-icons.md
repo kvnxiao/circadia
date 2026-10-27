@@ -8,6 +8,7 @@ observed-in:
   - Windows 11 Pro build 26300.9711, x64, standard (non-elevated) user session, 2026-10-24
   - Python 3.15.0 ctypes calls to kernel32, psapi, version, user32, and shell32 from a temporary script outside the repository, single runs
   - Microsoft Learn pages for PrivateExtractIconsW, SHDefExtractIconW, SHGetStockIconInfo, and GetFileAttributesExW, retrieved 2026-10-24
+  - Settings-design probe display of an extracted icon through Reactor's Image at windows-rs 0496ec1, Windows 11 Pro build 26300, 100% scaling, 2026-10-27
 recheck-when: Circadia changes how it identifies or reads executables; Windows documents a change to icon extraction; or users report generic icons for a category of applications, such as games protected by an anti-cheat product that was not running in these measurements.
 ---
 
@@ -100,7 +101,7 @@ Read icons with `SHDefExtractIconW` from the executable path, at the pixel size 
 
 No uncertainty found here changes the approach. Implementation and release checks:
 
-- Display of an extracted icon through Reactor's `Image`, which exposes file, data, and SVG sources at the pinned windows-rs commit ([Settings design support](settings-design-support.md)); the [settings-design probe](../../probes/windows-reactor/settings-design/README.md) exercised only SVG images. Show one extracted icon at 100% and 200% scaling.
+- Display of an extracted icon through Reactor's `Image` at 200% scaling. **Observed on 2026-10-27 at 100% scaling (96 DPI)** in the [settings-design probe](../../probes/windows-reactor/settings-design/README.md#runtime-icons-on-2026-10-27): `notepad.exe`'s icon, extracted with `SHDefExtractIconW` at 32 pixels and encoded as PNG, rendered pixel for pixel in a 32 epx `Image` through both the in-memory data source and the file source. The 64-pixel extraction scaled down to 32 epx matched only 336 of 1,024 pixels, so each display scale needs its own extraction. A file source kept showing the original image after its file was deleted or replaced and the element was recreated, so the application uses the in-memory source. The 200% run did not take place.
 - Whether an anti-cheat product denies reading its game's executable file. A protected game that was not running in these measurements could deny it; the result would then be the generic icon, not a failure.
 - First-open latency on a cold disk and under antivirus scanning, measured from the application's reader thread.
 - Legibility of application icons in contrast themes, where Circadia shows them without recoloring.
