@@ -90,13 +90,29 @@ pub(super) fn feedback(
             text, region, field, mark, &in_use,
         )));
     }
-    model.report.missing.get(&field).map(|source| {
-        Feedback::Note(format!(
+    if let Some(source) = model.report.missing.get(&field) {
+        return Some(Feedback::Note(format!(
             "{} {}",
             text!(text, "missing-note"),
             using(text, region, field, *source, &in_use)
-        ))
-    })
+        )));
+    }
+    let prefix = format!("{}.", field.key());
+    let missing = |key: &str| {
+        model
+            .report
+            .missing_entry_keys
+            .iter()
+            .any(|missing| missing.strip_prefix(&prefix) == Some(key))
+    };
+    let notes: Vec<String> = [
+        missing("title").then(|| text!(text, "missing-entry-title-note")),
+        missing("regex").then(|| text!(text, "missing-entry-regex-note")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!notes.is_empty()).then(|| Feedback::Note(notes.join(" ")))
 }
 
 pub(super) fn banners(

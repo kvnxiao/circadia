@@ -20,24 +20,46 @@ pub struct Coordinates {
 ///
 /// - A loaded entry keeps its file's text when that text is not a plain
 ///   executable file name, and such an entry matches nothing.
+/// - An empty `title` means the entry has no window-title condition, whatever
+///   `regex` is.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct AppEntry {
     /// Executable file name, lowercase when it is a valid file name.
     pub executable: String,
     /// Display name read from the executable's version information.
     pub name: String,
+    /// Window-title text, or empty for no title condition.
+    pub title: String,
+    /// Whether `title` is a regular expression instead of literal text.
+    pub regex: bool,
     #[serde(skip)]
     wrong_type: bool,
+    #[serde(skip)]
+    wrong_title: bool,
 }
 
 impl AppEntry {
-    /// Create an entry from a file name and a display name.
+    /// Create an entry without a title condition from a file name and a
+    /// display name.
     pub fn new(executable: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             executable: executable.into(),
             name: name.into(),
+            title: String::new(),
+            regex: false,
             wrong_type: false,
+            wrong_title: false,
         }
+    }
+
+    /// Return the entry with a window-title condition, replacing a title or
+    /// option that loaded with the wrong type.
+    #[must_use]
+    pub fn with_title(mut self, title: impl Into<String>, regex: bool) -> Self {
+        self.title = title.into();
+        self.regex = regex;
+        self.wrong_title = false;
+        self
     }
 
     /// Return the normalized file name that the entry matches, or none for an
@@ -68,34 +90,78 @@ impl AppEntry {
 /// Explain why loading marks a list entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntryProblem {
-    /// The file name is missing, empty, or not a plain file name, or a value
-    /// has the wrong type; the entry matches nothing.
+    /// The file name is missing, empty, or not a plain file name, or the file
+    /// name or display name has the wrong type; the entry matches nothing.
     Invalid,
+    /// The title condition is a regular expression that does not compile, or
+    /// the title or its option has the wrong type; the entry matches nothing.
+    Expression,
     /// Another entry on the same list has the same file name.
     Duplicate,
 }
 
-/// Mark each entry of a list that is invalid or that shares its file name with
-/// another entry, compared case-insensitively.
-pub fn entry_problems(entries: &[AppEntry]) -> Vec<Option<EntryProblem>> {
-    entries
-        .iter()
-        .map(|entry| {
-            let name = entry.executable.to_lowercase();
-            if entry.file_name().is_none() {
-                Some(EntryProblem::Invalid)
-            } else if entries
-                .iter()
-                .filter(|other| other.executable.to_lowercase() == name)
-                .nth(1)
-                .is_some()
-            {
-                Some(EntryProblem::Duplicate)
-            } else {
-                None
-            }
-        })
-        .collect()
+#[derive(Clone, Debug)]
+enum TitleMatcher {
+    Any,
+    Pattern(regex::Regex),
+    Invalid,
+}
+
+impl TitleMatcher {
+    fn new(title: &str, regex: bool) -> Self {
+        if title.is_empty() {
+            return Self::Any;
+        }
+        let escaped;
+        let pattern = if regex {
+            title
+        } else {
+            escaped = regex::escape(title);
+            &escaped
+        };
+        regex::RegexBuilder::new(pattern)
+            .case_insensitive(true)
+            .build()
+            .map_or(Self::Invalid, Self::Pattern)
+    }
+
+    fn for_entry(entry: &AppEntry) -> Self {
+        if entry.wrong_title {
+            Self::Invalid
+        } else {
+            Self::new(&entry.title, entry.regex)
+        }
+    }
+
+    fn matches(&self, title: Option<&str>) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Pattern(pattern) => title.is_some_and(|title| pattern.is_match(title)),
+            Self::Invalid => false,
+        }
+    }
+}
+
+/// Report whether a window-title condition is valid: empty text, literal
+/// text, or a regular expression that the `regex` crate compiles with its
+/// default size limits.
+pub fn valid_title(title: &str, regex: bool) -> bool {
+    !matches!(TitleMatcher::new(title, regex), TitleMatcher::Invalid)
+}
+
+/// Describe how the suppression and exclusion lists treat one window.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Membership {
+    /// Some suppression entry matches the window and no exclusion does.
+    pub matches: bool,
+    /// A suppression entry has the window's file name.
+    pub included: bool,
+    /// Title text of the first suppression entry with the file name, empty
+    /// when that entry has no title condition or there is no such entry.
+    pub condition: String,
+    /// A fixed exclusion or an exclusion without a title condition has the
+    /// file name.
+    pub excluded: bool,
 }
 
 pub(crate) const SHARED_HOST: &str = "ApplicationFrameHost.exe";
@@ -187,11 +253,16 @@ impl Default for ConfigInput {
 }
 
 /// Use validated settings with normalized temperatures and executable names.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// - Equality compares the settings, not the compiled title conditions that
+///   derive from them.
+#[derive(Clone, Debug)]
 pub struct Config {
     input: ConfigInput,
     wake_minutes: u16,
     bedtime_minutes: u16,
+    suppression_titles: Vec<TitleMatcher>,
+    exclusion_titles: Vec<TitleMatcher>,
 }
 
 impl Default for Config {
@@ -200,7 +271,17 @@ impl Default for Config {
             input: ConfigInput::default(),
             wake_minutes: 7 * 60,
             bedtime_minutes: 23 * 60,
+            suppression_titles: Vec::new(),
+            exclusion_titles: Vec::new(),
         }
+    }
+}
+
+impl PartialEq for Config {
+    fn eq(&self, other: &Self) -> bool {
+        self.input == other.input
+            && self.wake_minutes == other.wake_minutes
+            && self.bedtime_minutes == other.bedtime_minutes
     }
 }
 
@@ -579,7 +660,10 @@ impl ConfigInput {
         let bedtime_minutes = clock(&self.bedtime)?;
         self.suppression.iter_mut().for_each(AppEntry::normalize);
         self.exclusions.iter_mut().for_each(AppEntry::normalize);
+        let titles = |entries: &[AppEntry]| entries.iter().map(TitleMatcher::for_entry).collect();
         Ok(Config {
+            suppression_titles: titles(&self.suppression),
+            exclusion_titles: titles(&self.exclusions),
             input: self,
             wake_minutes,
             bedtime_minutes,
@@ -768,15 +852,45 @@ impl Config {
         self.input.value(field)
     }
 
-    /// Check membership without applying exclusions.
-    pub fn includes(&self, executable: &str) -> bool {
-        listed(&self.input.suppression, executable)
+    /// Classify a window by its executable file name and title under fixed
+    /// exclusions and both lists.
+    ///
+    /// - `title` is none when the window title cannot be read; an entry with a
+    ///   title condition then does not match.
+    pub fn classify(
+        &self,
+        executable: &str,
+        title: Option<&str>,
+        running_executable: &str,
+    ) -> Membership {
+        let executable = executable.to_lowercase();
+        let named = |list: Field| {
+            self.entries(list)
+                .iter()
+                .zip(self.titles(list))
+                .filter(|(entry, _)| entry.file_name().as_deref() == Some(executable.as_str()))
+        };
+        let matching = |list: Field| named(list).any(|(_, matcher)| matcher.matches(title));
+        let fixed = is_fixed_exclusion(&executable, running_executable);
+        let first = named(Field::Suppression).next().map(|(entry, _)| entry);
+        Membership {
+            matches: !fixed && matching(Field::Suppression) && !matching(Field::Exclusions),
+            included: first.is_some(),
+            condition: first.map(|entry| entry.title.clone()).unwrap_or_default(),
+            excluded: fixed || named(Field::Exclusions).any(|(entry, _)| entry.title.is_empty()),
+        }
     }
 
-    /// Apply fixed and user exclusions to the resolved executable filename.
-    pub fn is_excluded(&self, executable: &str, running_executable: &str) -> bool {
-        is_fixed_exclusion(executable, running_executable)
-            || listed(&self.input.exclusions, executable)
+    /// Report whether an entry with a title condition on either list has the
+    /// executable file name.
+    pub fn has_title_condition(&self, executable: &str) -> bool {
+        let executable = executable.to_lowercase();
+        [Field::Suppression, Field::Exclusions]
+            .into_iter()
+            .flat_map(|list| self.entries(list))
+            .any(|entry| {
+                !entry.title.is_empty() && entry.file_name().as_deref() == Some(executable.as_str())
+            })
     }
 
     /// Return the entries of the suppression or exclusion list.
@@ -787,15 +901,46 @@ impl Config {
         }
     }
 
+    fn titles(&self, list: Field) -> &[TitleMatcher] {
+        match list {
+            Field::Exclusions => &self.exclusion_titles,
+            _ => &self.suppression_titles,
+        }
+    }
+
+    /// Mark each entry of a list that is invalid, that has a regular
+    /// expression that does not compile, or that shares its file name with
+    /// another entry, compared case-insensitively.
+    pub fn entry_problems(&self, list: Field) -> Vec<Option<EntryProblem>> {
+        let entries = self.entries(list);
+        entries
+            .iter()
+            .zip(self.titles(list))
+            .map(|(entry, matcher)| {
+                let name = entry.executable.to_lowercase();
+                if entry.file_name().is_none() {
+                    Some(EntryProblem::Invalid)
+                } else if matches!(matcher, TitleMatcher::Invalid) {
+                    Some(EntryProblem::Expression)
+                } else if entries
+                    .iter()
+                    .filter(|other| other.executable.to_lowercase() == name)
+                    .nth(1)
+                    .is_some()
+                {
+                    Some(EntryProblem::Duplicate)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Report whether either list has an entry that loading marks.
     pub fn has_entry_problems(&self) -> bool {
         [Field::Suppression, Field::Exclusions]
             .into_iter()
-            .any(|list| {
-                entry_problems(self.entries(list))
-                    .iter()
-                    .any(Option::is_some)
-            })
+            .any(|list| self.entry_problems(list).iter().any(Option::is_some))
     }
 
     /// Return a list with `added` appended in order, each with its normalized
@@ -848,13 +993,6 @@ impl Config {
             && left.sunset == right.sunset
             && left.coordinates == right.coordinates
     }
-}
-
-fn listed(entries: &[AppEntry], executable: &str) -> bool {
-    let executable = executable.to_lowercase();
-    entries
-        .iter()
-        .any(|entry| entry.file_name().as_deref() == Some(executable.as_str()))
 }
 
 fn parse_clock(input: &str) -> Option<u16> {
@@ -939,11 +1077,21 @@ pub struct LoadReport {
     pub missing: BTreeMap<Field, Source>,
     /// Keys the configuration does not define, as dotted paths.
     pub unknown: Vec<String>,
+    /// Title keys absent from list entries in use, as dotted paths such as
+    /// `suppression.title`; such an entry has no title condition.
+    pub missing_entry_keys: Vec<String>,
+}
+
+#[derive(Default)]
+struct EntryKeys {
+    unknown: Vec<String>,
+    missing: Vec<String>,
 }
 
 struct Decoded {
     entries: BTreeMap<Field, (Result<FieldValue, FieldErrorKind>, String)>,
     unknown: Vec<String>,
+    missing_entry_keys: Vec<String>,
 }
 
 const GROUPS: [&[Field]; 3] = [
@@ -1003,6 +1151,7 @@ pub fn load(file: &str, backup: Option<&str>) -> Result<(Config, LoadReport), Un
     let solar_selected = config.input.sunrise || config.input.sunset;
     let mut report = LoadReport {
         unknown: decoded.unknown,
+        missing_entry_keys: decoded.missing_entry_keys,
         ..LoadReport::default()
     };
     for field in Field::ALL {
@@ -1099,26 +1248,30 @@ fn parse(text: &str) -> Result<toml::Table, Unusable> {
 
 fn decode(text: &str) -> Result<Decoded, Unusable> {
     let table = parse(text)?;
-    let mut unknown = Vec::new();
+    let mut keys = EntryKeys::default();
     let mut entries = BTreeMap::new();
     for (key, value) in &table {
         if key == "schema_version" {
             continue;
         }
         let Some(field) = Field::ALL.into_iter().find(|field| field.key() == key) else {
-            unknown.push(key.clone());
+            keys.unknown.push(key.clone());
             continue;
         };
-        let decoded = decode_value(field, value, &mut unknown);
+        let decoded = decode_value(field, value, &mut keys);
         entries.insert(field, (decoded, value.to_string()));
     }
-    Ok(Decoded { entries, unknown })
+    Ok(Decoded {
+        entries,
+        unknown: keys.unknown,
+        missing_entry_keys: keys.missing,
+    })
 }
 
 fn decode_value(
     field: Field,
     value: &toml::Value,
-    unknown: &mut Vec<String>,
+    keys: &mut EntryKeys,
 ) -> Result<FieldValue, FieldErrorKind> {
     let mut input = ConfigInput::default();
     let decoded = match (field, value) {
@@ -1132,7 +1285,7 @@ fn decode_value(
                 Some(toml::Value::Integer(value)) => i32::try_from(*value).ok().map(f64::from),
                 _ => None,
             };
-            unknown.extend(
+            keys.unknown.extend(
                 table
                     .keys()
                     .filter(|key| !matches!(key.as_str(), "latitude" | "longitude"))
@@ -1143,16 +1296,21 @@ fn decode_value(
                 longitude: coordinate("longitude").ok_or(FieldErrorKind::WrongType)?,
             }))
         }
-        (Field::Suppression | Field::Exclusions, toml::Value::Array(items)) => FieldValue::Apps(
-            items
+        (Field::Suppression | Field::Exclusions, toml::Value::Array(items)) => {
+            let mut missing = Vec::new();
+            let entries = items
                 .iter()
                 .map(|item| match item {
-                    toml::Value::Table(table) => Some(decode_entry(field, table, unknown)),
+                    toml::Value::Table(table) => {
+                        Some(decode_entry(field, table, &mut keys.unknown, &mut missing))
+                    }
                     _ => None,
                 })
                 .collect::<Option<_>>()
-                .ok_or(FieldErrorKind::WrongType)?,
-        ),
+                .ok_or(FieldErrorKind::WrongType)?;
+            keys.missing.extend(missing);
+            FieldValue::Apps(entries)
+        }
         (_, toml::Value::Boolean(value)) => FieldValue::Switch(*value),
         (_, toml::Value::Integer(value)) => FieldValue::Number(*value),
         _ => return Err(FieldErrorKind::WrongType),
@@ -1163,7 +1321,12 @@ fn decode_value(
     Ok(input.value(field))
 }
 
-fn decode_entry(list: Field, table: &toml::Table, unknown: &mut Vec<String>) -> AppEntry {
+fn decode_entry(
+    list: Field,
+    table: &toml::Table,
+    unknown: &mut Vec<String>,
+    missing: &mut Vec<String>,
+) -> AppEntry {
     let mut wrong_type = false;
     let mut text = |key: &str| match table.get(key) {
         Some(toml::Value::String(text)) => Some(text.clone()),
@@ -1175,16 +1338,44 @@ fn decode_entry(list: Field, table: &toml::Table, unknown: &mut Vec<String>) -> 
     };
     let executable = text("executable").unwrap_or_default();
     let name = text("name");
+    let mut wrong_title = false;
+    let title = match table.get("title") {
+        Some(toml::Value::String(title)) => title.clone(),
+        Some(other) => {
+            wrong_title = true;
+            other.to_string()
+        }
+        None => String::new(),
+    };
+    let regex = match table.get("regex") {
+        Some(toml::Value::Boolean(regex)) => *regex,
+        Some(_) => {
+            wrong_title = true;
+            false
+        }
+        None => false,
+    };
     for key in table.keys() {
         let path = format!("{}.{key}", list.key());
-        if !matches!(key.as_str(), "executable" | "name") && !unknown.contains(&path) {
+        if !matches!(key.as_str(), "executable" | "name" | "title" | "regex")
+            && !unknown.contains(&path)
+        {
             unknown.push(path);
+        }
+    }
+    for key in ["title", "regex"] {
+        let path = format!("{}.{key}", list.key());
+        if !table.contains_key(key) && !missing.contains(&path) {
+            missing.push(path);
         }
     }
     let mut entry = AppEntry {
         executable,
         name: String::new(),
+        title,
+        regex,
         wrong_type,
+        wrong_title,
     };
     entry.normalize();
     entry.name = name.unwrap_or_else(|| entry.executable.clone());
@@ -1566,12 +1757,12 @@ mod tests {
         .validate()
         .expect("an invalid entry does not reject the configuration");
         assert_eq!(
-            entry_problems(&config.input().suppression),
+            config.entry_problems(Field::Suppression),
             [Some(EntryProblem::Invalid)]
         );
         assert!(config.has_entry_problems());
-        assert!(!config.includes(name));
-        assert!(!config.includes("game.exe"));
+        assert!(!config.classify(name, None, "circadia.exe").included);
+        assert!(!config.classify("game.exe", None, "circadia.exe").included);
     }
 
     #[test]
@@ -1604,11 +1795,31 @@ mod tests {
         }
         .validate()
         .expect("valid filenames");
-        assert!(config.includes("NIGHT-COLORS.EXE"));
-        assert!(config.is_excluded("night-colors.exe", "NIGHT-COLORS.EXE"));
-        assert!(config.is_excluded("ApplicationFrameHost.exe", "night-colors.exe"));
-        assert!(config.is_excluded("browser.exe", "night-colors.exe"));
-        assert!(!config.is_excluded("calculatorapp.exe", "night-colors.exe"));
+        assert!(
+            config
+                .classify("NIGHT-COLORS.EXE", None, "circadia.exe")
+                .included
+        );
+        assert!(
+            config
+                .classify("night-colors.exe", None, "NIGHT-COLORS.EXE")
+                .excluded
+        );
+        assert!(
+            config
+                .classify("ApplicationFrameHost.exe", None, "night-colors.exe")
+                .excluded
+        );
+        assert!(
+            config
+                .classify("browser.exe", None, "night-colors.exe")
+                .excluded
+        );
+        assert!(
+            !config
+                .classify("calculatorapp.exe", None, "night-colors.exe")
+                .excluded
+        );
     }
 
     #[test]
@@ -2009,6 +2220,13 @@ mod tests {
         );
     }
 
+    fn untitled_suppression() -> LoadReport {
+        LoadReport {
+            missing_entry_keys: vec!["suppression.title".into(), "suppression.regex".into()],
+            ..LoadReport::default()
+        }
+    }
+
     fn entries(entries: &[&[(&str, &str)]]) -> toml::Value {
         toml::Value::Array(
             entries
@@ -2036,8 +2254,8 @@ mod tests {
             );
         });
         let (config, report) = load(&file, Some(&backup)).expect("usable file");
-        assert!(config.includes("vlc.exe"));
-        assert!(!config.includes("game.exe"));
+        assert!(config.classify("vlc.exe", None, "circadia.exe").included);
+        assert!(!config.classify("game.exe", None, "circadia.exe").included);
         assert_eq!(
             report.marks,
             BTreeMap::from([(
@@ -2046,7 +2264,7 @@ mod tests {
             )])
         );
         let (config, report) = load(&file, None).expect("usable file");
-        assert!(!config.includes("game.exe"));
+        assert!(!config.classify("game.exe", None, "circadia.exe").included);
         assert_eq!(
             report
                 .marks
@@ -2070,7 +2288,7 @@ mod tests {
             );
         });
         let (config, report) = load(&file, None).expect("usable file");
-        assert!(config.includes("game.exe"));
+        assert!(config.classify("game.exe", None, "circadia.exe").included);
         assert!(report.marks.is_empty(), "{:?}", report.marks);
         assert_eq!(report.unknown, ["suppression.color"]);
     }
@@ -2090,11 +2308,11 @@ mod tests {
         let (config, report) = load(&file, None).expect("usable file");
         assert!(report.marks.is_empty(), "{:?}", report.marks);
         assert_eq!(
-            entry_problems(config.entries(Field::Suppression)),
+            config.entry_problems(Field::Suppression),
             [Some(EntryProblem::Duplicate), Some(EntryProblem::Duplicate)]
         );
         assert!(config.has_entry_problems());
-        assert!(config.includes("game.exe"));
+        assert!(config.classify("game.exe", None, "circadia.exe").included);
         for removed in 0..2 {
             let mut remaining = config.entries(Field::Suppression).to_vec();
             remaining.remove(removed);
@@ -2103,9 +2321,9 @@ mod tests {
                 &inputs(&[(Field::Suppression, FieldValue::Apps(remaining))]),
             );
             assert!(errors.is_empty(), "{errors:?}");
-            assert_eq!(entry_problems(edited.entries(Field::Suppression)), [None]);
+            assert_eq!(edited.entry_problems(Field::Suppression), [None]);
             assert!(!edited.has_entry_problems());
-            assert!(edited.includes("game.exe"));
+            assert!(edited.classify("game.exe", None, "circadia.exe").included);
         }
     }
 
@@ -2126,10 +2344,10 @@ mod tests {
             [AppEntry::new(executable, "Game")]
         );
         assert_eq!(
-            entry_problems(config.entries(Field::Suppression)),
+            config.entry_problems(Field::Suppression),
             [Some(EntryProblem::Invalid)]
         );
-        assert!(!config.includes("game.exe"));
+        assert!(!config.classify("game.exe", None, "circadia.exe").included);
     }
 
     #[test]
@@ -2143,10 +2361,10 @@ mod tests {
         let (config, report) = load(&file, None).expect("usable file");
         assert!(report.marks.is_empty(), "{:?}", report.marks);
         assert_eq!(
-            entry_problems(config.entries(Field::Suppression)),
+            config.entry_problems(Field::Suppression),
             [Some(EntryProblem::Invalid)]
         );
-        assert!(!config.includes("game.exe"));
+        assert!(!config.classify("game.exe", None, "circadia.exe").included);
     }
 
     #[test]
@@ -2159,12 +2377,12 @@ mod tests {
             );
         });
         let (config, report) = load(&file, None).expect("usable file");
-        assert_eq!(report, LoadReport::default());
+        assert_eq!(report, untitled_suppression());
         assert_eq!(
             config.entries(Field::Suppression),
             [AppEntry::new("game.exe", "Game")]
         );
-        assert!(config.includes("GAME.exe"));
+        assert!(config.classify("GAME.exe", None, "circadia.exe").included);
         assert!(!config.has_entry_problems());
     }
 
@@ -2182,11 +2400,19 @@ mod tests {
             set(table, "bedtime", "22:00");
         });
         let (config, report) = load(&file, None).expect("usable file");
-        assert_eq!(report, LoadReport::default());
+        assert_eq!(report, untitled_suppression());
         assert!(!config.has_entry_problems());
         assert_eq!(config.bedtime_minutes(), 22 * 60);
-        assert!(config.includes("applicationframehost.exe"));
-        assert!(config.is_excluded("applicationframehost.exe", "circadia.exe"));
+        assert!(
+            config
+                .classify("applicationframehost.exe", None, "circadia.exe")
+                .included
+        );
+        assert!(
+            config
+                .classify("applicationframehost.exe", None, "circadia.exe")
+                .excluded
+        );
     }
 
     #[test_case(Field::Suppression; "suppression list")]
@@ -2261,6 +2487,279 @@ mod tests {
             ),
             Err(FieldErrorKind::AlreadyListed)
         );
+    }
+
+    fn titled(list: &[(&str, &str, bool)]) -> Vec<AppEntry> {
+        list.iter()
+            .map(|(executable, title, regex)| {
+                AppEntry::new(*executable, *executable).with_title(*title, *regex)
+            })
+            .collect()
+    }
+
+    fn lists(suppression: &[(&str, &str, bool)], exclusions: &[(&str, &str, bool)]) -> Config {
+        ConfigInput {
+            suppression: titled(suppression),
+            exclusions: titled(exclusions),
+            ..ConfigInput::default()
+        }
+        .validate()
+        .expect("valid lists")
+    }
+
+    fn matches(config: &Config, executable: &str, title: Option<&str>) -> bool {
+        config.classify(executable, title, "circadia.exe").matches
+    }
+
+    #[test_case("Minecraft", false, "Minecraft 1.21.4" => true; "text in the title")]
+    #[test_case("Minecraft", false, "IntelliJ IDEA" => false; "text not in the title")]
+    #[test_case("minecraft|terraria", true, "Minecraft 1.21.4" => true; "first alternative")]
+    #[test_case("minecraft|terraria", true, "Terraria" => true; "second alternative")]
+    #[test_case("C++", false, "Notes - C++ Primer" => true; "literal special characters")]
+    #[test_case("C++", false, "Notes - CC Primer" => false; "literal text is not an expression")]
+    #[test_case("(?-i)Minecraft", true, "minecraft 1.21" => false; "case-sensitive flag")]
+    #[test_case("(?-i)Minecraft", true, "Minecraft 1.21" => true; "case-sensitive flag same case")]
+    #[test_case("STRASSE", false, "strasse" => true; "case folding")]
+    fn a_title_condition_matches_by_text_or_expression(
+        title: &str,
+        regex: bool,
+        window: &str,
+    ) -> bool {
+        let config = lists(&[("javaw.exe", title, regex)], &[]);
+        assert!(!matches(&config, "other.exe", Some(window)));
+        matches(&config, "javaw.exe", Some(window))
+    }
+
+    #[test]
+    fn an_exclusion_with_a_title_condition_overrides_only_its_titles() {
+        let config = lists(
+            &[("javaw.exe", "", false)],
+            &[("javaw.exe", "IntelliJ", false)],
+        );
+        assert!(matches(&config, "javaw.exe", Some("Minecraft 1.21.4")));
+        assert!(matches(&config, "JAVAW.EXE", Some("Eclipse")));
+        assert!(!matches(&config, "javaw.exe", Some("IntelliJ IDEA 2025.1")));
+        let membership = config.classify("javaw.exe", None, "circadia.exe");
+        assert_eq!(
+            membership,
+            Membership {
+                matches: true,
+                included: true,
+                condition: String::new(),
+                excluded: false,
+            }
+        );
+    }
+
+    #[test]
+    fn an_unreadable_title_matches_only_entries_without_a_condition() {
+        let plain = lists(&[("javaw.exe", "", false)], &[]);
+        assert!(matches(&plain, "javaw.exe", None));
+        let limited = lists(&[("javaw.exe", "Minecraft", false)], &[]);
+        assert!(!matches(&limited, "javaw.exe", None));
+        let excluded = lists(
+            &[("javaw.exe", "", false)],
+            &[("javaw.exe", "Minecraft", false)],
+        );
+        assert!(matches(&excluded, "javaw.exe", None));
+    }
+
+    #[test]
+    fn membership_reports_the_condition_and_only_unconditional_exclusions() {
+        let config = lists(
+            &[("javaw.exe", "Minecraft", false), ("game.exe", "", false)],
+            &[("javaw.exe", "IntelliJ", false), ("game.exe", "", false)],
+        );
+        assert_eq!(
+            config.classify("javaw.exe", Some("IntelliJ IDEA"), "circadia.exe"),
+            Membership {
+                matches: false,
+                included: true,
+                condition: "Minecraft".to_owned(),
+                excluded: false,
+            }
+        );
+        assert_eq!(
+            config.classify("game.exe", Some("Game"), "circadia.exe"),
+            Membership {
+                matches: false,
+                included: true,
+                condition: String::new(),
+                excluded: true,
+            }
+        );
+        assert_eq!(
+            config.classify("CIRCADIA.EXE", None, "circadia.exe"),
+            Membership {
+                excluded: true,
+                ..Membership::default()
+            }
+        );
+    }
+
+    #[test]
+    fn title_changes_are_followed_only_for_file_names_with_a_title_condition() {
+        let config = lists(
+            &[("javaw.exe", "Minecraft", false), ("game.exe", "", false)],
+            &[("browser.exe", "Private", false)],
+        );
+        assert!(config.has_title_condition("JAVAW.EXE"));
+        assert!(config.has_title_condition("browser.exe"));
+        assert!(!config.has_title_condition("game.exe"));
+        assert!(!config.has_title_condition("other.exe"));
+    }
+
+    #[test]
+    fn empty_text_has_no_condition_whatever_the_expression_option() {
+        let config = lists(&[("javaw.exe", "", true)], &[]);
+        assert!(matches(&config, "javaw.exe", Some("anything")));
+        assert!(matches(&config, "javaw.exe", None));
+        assert_eq!(config.entry_problems(Field::Suppression), [None]);
+        assert!(valid_title("", true));
+    }
+
+    #[test_case("minecraft(", true => false; "unclosed group")]
+    #[test_case("minecraft(", false => true; "literal parenthesis")]
+    #[test_case("(?<=a)b", true => false; "lookbehind")]
+    #[test_case("minecraft|terraria", true => true; "alternation")]
+    fn an_expression_is_valid_when_the_regex_crate_compiles_it(title: &str, regex: bool) -> bool {
+        valid_title(title, regex)
+    }
+
+    fn entry_table(values: &[(&str, toml::Value)]) -> toml::Value {
+        toml::Value::Table(
+            values
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), value.clone()))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn a_loaded_invalid_expression_is_marked_and_matches_nothing_until_cleared() {
+        let file = file(|table| {
+            set(
+                table,
+                "suppression",
+                vec![entry_table(&[
+                    ("executable", "javaw.exe".into()),
+                    ("name", "Java".into()),
+                    ("title", "minecraft(".into()),
+                    ("regex", true.into()),
+                ])],
+            );
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert_eq!(report, LoadReport::default());
+        assert_eq!(
+            config.entries(Field::Suppression),
+            [AppEntry::new("javaw.exe", "Java").with_title("minecraft(", true)]
+        );
+        assert_eq!(
+            config.entry_problems(Field::Suppression),
+            [Some(EntryProblem::Expression)]
+        );
+        assert!(config.has_entry_problems());
+        assert!(!matches(&config, "javaw.exe", Some("minecraft(")));
+        assert!(!matches(&config, "javaw.exe", None));
+        let cleared = vec![AppEntry::new("javaw.exe", "Java").with_title("", true)];
+        let (edited, errors) = apply_inputs(
+            &config,
+            &inputs(&[(Field::Suppression, FieldValue::Apps(cleared))]),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(!edited.has_entry_problems());
+        assert!(matches(&edited, "javaw.exe", Some("Minecraft")));
+    }
+
+    #[test]
+    fn an_entry_without_title_keys_has_no_condition_and_reports_both_missing_keys() {
+        let file = file(|table| {
+            set(
+                table,
+                "suppression",
+                entries(&[&[("executable", "javaw.exe"), ("name", "Java")]]),
+            );
+            set(
+                table,
+                "exclusions",
+                vec![entry_table(&[
+                    ("executable", "idea64.exe".into()),
+                    ("name", "IntelliJ".into()),
+                    ("title", "Settings".into()),
+                ])],
+            );
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert!(report.marks.is_empty() && report.missing.is_empty());
+        assert_eq!(
+            report.missing_entry_keys,
+            ["exclusions.regex", "suppression.title", "suppression.regex"]
+        );
+        assert!(!config.has_entry_problems());
+        assert!(matches(&config, "javaw.exe", None));
+        assert_eq!(
+            config.entries(Field::Exclusions),
+            [AppEntry::new("idea64.exe", "IntelliJ").with_title("Settings", false)]
+        );
+    }
+
+    #[test]
+    fn a_title_or_option_of_the_wrong_type_marks_the_condition_until_it_is_replaced() {
+        let file = file(|table| {
+            set(
+                table,
+                "suppression",
+                vec![
+                    entry_table(&[
+                        ("executable", "javaw.exe".into()),
+                        ("name", "Java".into()),
+                        ("title", 5.into()),
+                        ("regex", false.into()),
+                    ]),
+                    entry_table(&[
+                        ("executable", "game.exe".into()),
+                        ("name", "Game".into()),
+                        ("title", "".into()),
+                        ("regex", "yes".into()),
+                    ]),
+                ],
+            );
+        });
+        let (config, report) = load(&file, None).expect("usable file");
+        assert!(report.marks.is_empty() && report.missing_entry_keys.is_empty());
+        assert_eq!(
+            config.entry_problems(Field::Suppression),
+            [
+                Some(EntryProblem::Expression),
+                Some(EntryProblem::Expression)
+            ]
+        );
+        assert!(!matches(&config, "javaw.exe", None));
+        assert!(!matches(&config, "game.exe", None));
+        let mut input = config.input().clone();
+        let entries: Vec<AppEntry> = config
+            .entries(Field::Suppression)
+            .iter()
+            .cloned()
+            .map(|entry| entry.with_title("", false))
+            .collect();
+        input
+            .set(Field::Suppression, FieldValue::Apps(entries))
+            .expect("list value");
+        let corrected = input.validate().expect("valid config");
+        assert_eq!(corrected.entry_problems(Field::Suppression), [None, None]);
+        assert!(matches(&corrected, "javaw.exe", None));
+    }
+
+    #[test]
+    fn a_saved_title_condition_round_trips_through_the_file() {
+        let config = lists(&[("javaw.exe", "minecraft|terraria", true)], &[]);
+        let text = toml::to_string(config.input()).expect("serialize config");
+        let (loaded, report) = load(&text, None).expect("usable file");
+        assert_eq!(report, LoadReport::default());
+        assert_eq!(loaded, config);
+        assert!(matches(&loaded, "javaw.exe", Some("Terraria")));
     }
 
     #[test]

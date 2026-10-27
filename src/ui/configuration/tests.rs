@@ -16,6 +16,13 @@ fn set(table: &mut toml::Table, key: &str, value: impl Into<toml::Value>) {
     table.insert(key.to_owned(), value.into());
 }
 
+fn untitled_entry(executable: &str) -> toml::Value {
+    let mut entry = toml::Table::new();
+    entry.insert("executable".into(), executable.into());
+    entry.insert("name".into(), executable.into());
+    toml::Value::Array(vec![toml::Value::Table(entry)])
+}
+
 struct Folder {
     _temporary: tempfile::TempDir,
     path: std::path::PathBuf,
@@ -401,12 +408,13 @@ fn startup_logs_one_record_for_each_mark_missing_key_and_unknown_key() {
             set(table, "output_rate_hz", 241);
             table.remove("focus_delay_ms");
             set(table, "theme", "dark");
+            set(table, "exclusions", untitled_entry("idea64.exe"));
         })),
         None,
     );
     let records = crate::log::capture(Level::INFO, || drop(folder.load()));
     assert!(
-        records[0].ends_with(" configuration=file problems=4"),
+        records[0].ends_with(" configuration=file problems=6"),
         "{records:?}"
     );
     assert_eq!(
@@ -418,7 +426,11 @@ fn startup_logs_one_record_for_each_mark_missing_key_and_unknown_key() {
     );
     assert_eq!(
         records_matching(&records, " missing key "),
-        ["INFO circadia::ui::configuration: missing key field=focus_delay_ms source=default"]
+        [
+            "INFO circadia::ui::configuration: missing key field=focus_delay_ms source=default",
+            "INFO circadia::ui::configuration: missing key field=exclusions.title",
+            "INFO circadia::ui::configuration: missing key field=exclusions.regex",
+        ]
     );
     assert_eq!(
         records_matching(&records, " unknown key "),
@@ -471,15 +483,29 @@ fn the_next_write_stores_missing_keys_and_drops_unknown_keys() {
         Some(&document(|table| {
             table.remove("focus_delay_ms");
             set(table, "theme", "dark");
+            set(table, "suppression", untitled_entry("javaw.exe"));
         })),
         Some(&document(|table| set(table, "focus_delay_ms", 300))),
     );
     let mut configuration = folder.load();
     assert!(!configuration.paused());
+    assert_eq!(
+        configuration.report().missing_entry_keys,
+        ["suppression.title", "suppression.regex"]
+    );
     configuration.edit(vec![(Field::PreviewSeconds, FieldValue::Number(20))]);
     configuration.write();
     let saved = folder.read().0.expect("written file");
     assert!(saved.contains("focus_delay_ms = 300"), "{saved}");
+    assert!(
+        saved.contains(
+            "executable = \"javaw.exe\"
+name = \"javaw.exe\"
+title = \"\"
+regex = false"
+        ),
+        "{saved}"
+    );
     assert!(!saved.contains("theme"), "{saved}");
     assert_eq!(configuration.report(), &LoadReport::default());
 }
@@ -669,5 +695,73 @@ fn removing_an_entry_that_moved_since_the_click_changes_nothing() {
             .entries(Field::Suppression)
             .len(),
         2
+    );
+}
+
+#[test]
+fn a_tray_toggle_does_not_remove_an_entry_with_a_title_condition() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let mut configuration = Configuration::load(directory.path(), "circadia.exe");
+    configuration
+        .add(
+            Field::Suppression,
+            vec![AppEntry::new("javaw.exe".to_owned(), "Java".to_owned())],
+        )
+        .expect("added");
+    configuration
+        .set_title(
+            Field::Suppression,
+            0,
+            "javaw.exe",
+            "Minecraft".to_owned(),
+            false,
+        )
+        .expect("title saved");
+    assert!(
+        configuration
+            .toggle(AppEntry::new("javaw.exe", "Java"), false)
+            .is_none()
+    );
+    assert_eq!(
+        configuration
+            .accepted()
+            .expect("accepted")
+            .entries(Field::Suppression),
+        [AppEntry::new("javaw.exe", "Java").with_title("Minecraft", false)]
+    );
+}
+
+#[test]
+fn an_invalid_expression_or_a_moved_entry_does_not_change_the_title() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let mut configuration = Configuration::load(directory.path(), "circadia.exe");
+    configuration
+        .add(
+            Field::Suppression,
+            vec![AppEntry::new("javaw.exe".to_owned(), "Java".to_owned())],
+        )
+        .expect("added");
+    assert!(
+        configuration
+            .set_title(
+                Field::Suppression,
+                0,
+                "javaw.exe",
+                "minecraft(".to_owned(),
+                true
+            )
+            .is_none()
+    );
+    assert!(
+        configuration
+            .set_title(Field::Suppression, 0, "game.exe", "Game".to_owned(), false)
+            .is_none()
+    );
+    assert_eq!(
+        configuration
+            .accepted()
+            .expect("accepted")
+            .entries(Field::Suppression),
+        [AppEntry::new("javaw.exe", "Java")]
     );
 }

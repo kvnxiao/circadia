@@ -796,9 +796,10 @@ fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
             })
         };
         for executable in ["editor.exe", "browser.exe", "game.exe", "editor.exe"] {
-            submit(ControllerCommand::Foreground(Foreground::application(
-                executable,
-            )));
+            submit(ControllerCommand::Foreground {
+                foreground: Foreground::application(executable),
+                previous: None,
+            });
             let snapshot = wait_for(&client, &notified, |snapshot| {
                 snapshot.suppression.automatic == (executable == "game.exe")
             });

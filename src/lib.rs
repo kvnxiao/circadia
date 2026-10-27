@@ -41,16 +41,17 @@ pub use config::FieldInputs;
 pub use config::FieldValue;
 pub use config::LoadReport;
 pub use config::Mark;
+pub use config::Membership;
 pub use config::NumberRange;
 pub use config::Source;
 pub use config::Unusable;
 pub use config::ValidationError;
 pub use config::apply_inputs;
-pub use config::entry_problems;
 pub use config::is_fixed_exclusion;
 pub use config::load;
 pub use config::normalize_executable;
 pub use config::solar_timing_enabled;
+pub use config::valid_title;
 #[cfg(windows)]
 pub use controller::AttemptStatus;
 #[cfg(windows)]
@@ -213,6 +214,7 @@ pub use suppression::Foreground;
 pub use suppression::ForegroundApps;
 pub use suppression::ManualCommand;
 pub use suppression::ManualOutcome;
+pub use suppression::PreviousWindow;
 pub use suppression::RecentApp;
 pub use suppression::Suppression;
 pub use suppression::SuppressionError;

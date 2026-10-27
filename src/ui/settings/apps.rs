@@ -13,7 +13,6 @@ use crate::EntryProblem;
 use crate::Field;
 use crate::FieldErrorKind;
 use crate::ManualCommand;
-use crate::entry_problems;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
@@ -32,8 +31,10 @@ use windows_reactor::FontIcon;
 use windows_reactor::Grid;
 use windows_reactor::GridLength;
 use windows_reactor::HorizontalAlignment;
+use windows_reactor::HyperlinkButton;
 use windows_reactor::Orientation;
 use windows_reactor::StackPanel;
+use windows_reactor::TextBox;
 use windows_reactor::ThemeBrush;
 use windows_reactor::Thickness;
 use windows_reactor::VerticalAlignment;
@@ -105,9 +106,13 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             .view(),
     ));
     vec![
-        StackPanel::new()
-            .children(children)
-            .content_dialog(add_dialog(settings, context)),
+        Border::new()
+            .content(
+                StackPanel::new()
+                    .children(children)
+                    .content_dialog(add_dialog(settings, context)),
+            )
+            .content_dialog(title_dialog(settings, context)),
     ]
 }
 
@@ -219,7 +224,9 @@ pub(super) fn recent_rows(
                 .entries(Field::Suppression)
                 .iter()
                 .position(|entry| entry.file_name().as_deref() == Some(recent.executable.as_str())),
-            excluded: config.is_excluded(&recent.executable, &model.running_executable),
+            excluded: config
+                .classify(&recent.executable, None, &model.running_executable)
+                .excluded,
         })
         .collect()
 }
@@ -229,27 +236,45 @@ pub(super) struct EntryRow {
     pub(super) index: usize,
     pub(super) name: String,
     pub(super) executable: String,
+    pub(super) detail: String,
     pub(super) inactive: bool,
     pub(super) error: Option<String>,
 }
 
 pub(super) fn entry_rows(model: &Model, text: &Text, list: Field) -> Vec<EntryRow> {
     let config = model.config();
-    let entries = config.entries(list);
-    entries
+    config
+        .entries(list)
         .iter()
-        .zip(entry_problems(entries))
+        .zip(config.entry_problems(list))
         .enumerate()
         .map(|(index, (entry, problem))| EntryRow {
             index,
-            name: entry.display_name().to_owned(),
+            name: if entry.title.is_empty() {
+                entry.display_name().to_owned()
+            } else {
+                entry.title.clone()
+            },
             executable: entry.executable.clone(),
+            detail: if entry.title.is_empty() {
+                entry.executable.clone()
+            } else {
+                text!(
+                    text,
+                    "entry-title-detail",
+                    regex = if entry.regex { "yes" } else { "no" },
+                    executable = entry.executable.as_str()
+                )
+            },
             inactive: list == Field::Suppression
-                && entry
-                    .file_name()
-                    .is_some_and(|name| config.is_excluded(&name, &model.running_executable)),
+                && entry.file_name().is_some_and(|name| {
+                    config
+                        .classify(&name, None, &model.running_executable)
+                        .excluded
+                }),
             error: problem.map(|problem| match problem {
                 EntryProblem::Invalid => text!(text, "entry-invalid"),
+                EntryProblem::Expression => text!(text, "entry-expression"),
                 EntryProblem::Duplicate => text!(
                     text,
                     "entry-duplicate",
@@ -432,6 +457,103 @@ pub(super) fn dialog_view(
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct TitleDialog {
+    list: Field,
+    index: usize,
+    executable: String,
+    text: String,
+    regex: bool,
+}
+
+impl TitleDialog {
+    pub(super) fn open(model: &Model, list: Field, index: usize) -> Option<Self> {
+        let config = model.config();
+        let entry = config.entries(list).get(index)?;
+        Some(Self {
+            list,
+            index,
+            executable: entry.executable.clone(),
+            text: entry.title.clone(),
+            regex: entry.regex,
+        })
+    }
+
+    pub(super) fn set_text(&mut self, text: &str) {
+        text.clone_into(&mut self.text);
+    }
+
+    pub(super) fn set_regex(&mut self, regex: bool) {
+        self.regex = regex;
+    }
+
+    pub(super) fn use_title(&mut self, model: &Model) {
+        if let Some(title) = last_seen(model, &self.executable) {
+            self.text = if self.regex {
+                regex::escape(title)
+            } else {
+                title.to_owned()
+            };
+        }
+    }
+
+    pub(super) fn command(&self) -> Option<Command> {
+        crate::valid_title(&self.text, self.regex).then(|| Command::Title {
+            list: self.list,
+            index: self.index,
+            executable: self.executable.clone(),
+            title: self.text.clone(),
+            regex: self.regex,
+        })
+    }
+}
+
+fn last_seen<'a>(model: &'a Model, executable: &str) -> Option<&'a str> {
+    model
+        .recent
+        .iter()
+        .find(|recent| recent.executable == executable)
+        .and_then(|recent| recent.title.as_deref())
+        .filter(|title| !title.is_empty())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct TitleDialogView {
+    pub(super) title: String,
+    pub(super) description: String,
+    pub(super) label: String,
+    pub(super) text: String,
+    pub(super) regex: bool,
+    pub(super) suggestion: Option<String>,
+    pub(super) error: Option<String>,
+    pub(super) save_enabled: bool,
+}
+
+pub(super) fn title_dialog_view(
+    model: &Model,
+    text: &Text,
+    dialog: &TitleDialog,
+) -> TitleDialogView {
+    let regex = if dialog.regex { "yes" } else { "no" };
+    let valid = crate::valid_title(&dialog.text, dialog.regex);
+    TitleDialogView {
+        title: text!(text, "title-dialog-title"),
+        description: text!(
+            text,
+            "title-dialog-description",
+            regex = regex,
+            executable = dialog.executable.as_str()
+        ),
+        label: text!(text, "title-dialog-field", regex = regex),
+        text: dialog.text.clone(),
+        regex: dialog.regex,
+        suggestion: last_seen(model, &dialog.executable)
+            .map(|title| text!(text, "title-dialog-last-seen", title = title)),
+        error: (!valid).then(|| text!(text, "title-dialog-invalid")),
+        save_enabled: valid,
+    }
+}
+
 fn glyph_label(glyph: &'static str, label: impl AsRef<str>) -> StackPanel {
     StackPanel::new()
         .orientation(Orientation::Horizontal)
@@ -477,6 +599,29 @@ fn app_row(name: &str, detail: Vec<View>, controls: Vec<View>, id: String) -> Vi
                         .children(controls),
                 )),
         )
+        .into()
+}
+
+fn title_button(
+    row: &EntryRow,
+    list: Field,
+    id: &str,
+    settings: &Settings,
+    context: &ViewContext<'_, Settings>,
+) -> View {
+    Button::new()
+        .style(ButtonStyle::Subtle)
+        .width(32.0)
+        .height(32.0)
+        .is_enabled(settings.input.model.editable())
+        .automation_id(format!("{id}-title"))
+        .automation_name(text!(
+            settings.input.text,
+            "entry-title-name",
+            name = row.name.as_str()
+        ))
+        .content(FontIcon::new().glyph("\u{E71C}").font_size(16.0))
+        .on_click(context.message(Message::OpenTitle(list, row.index)))
         .into()
 }
 
@@ -617,7 +762,7 @@ fn list_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
 }
 
 fn entry_card(row: &EntryRow, text: &Text, controls: Vec<View>, id: String) -> View {
-    let mut detail: Vec<View> = vec![widgets::caption(&row.executable).into()];
+    let mut detail: Vec<View> = vec![widgets::caption(&row.detail).into()];
     if row.inactive {
         detail.push(widgets::caption(text!(text, "entry-inactive")).into());
     }
@@ -666,7 +811,8 @@ fn suppression_cards(settings: &Settings, context: &ViewContext<'_, Settings>) -
                     row.executable.clone(),
                 ))),
             );
-            entry_card(row, text, vec![remove.into()], id)
+            let title = title_button(row, Field::Suppression, &id, settings, context);
+            entry_card(row, text, vec![title, remove.into()], id)
         })
         .collect();
     vec![widgets::group(cards)]
@@ -731,24 +877,30 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         }));
         children.extend(rows.iter().map(|row| {
             let id = format!("exclusion-{}", row.index);
-            let mut detail: Vec<View> = vec![widgets::caption(&row.executable).into()];
+            let mut detail: Vec<View> = vec![widgets::caption(&row.detail).into()];
             if let Some(error) = &row.error {
                 detail.push(widgets::field_error(error, &format!("{id}-message")));
             }
+            let actions = StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(12.0)
+                .children((
+                    title_button(row, Field::Exclusions, &id, settings, context),
+                    remove_button(
+                        &text!(text, "entry-remove-name", name = row.name.as_str()),
+                        format!("{id}-remove"),
+                        model.editable(),
+                        context.message(Message::Command(Command::Remove(
+                            Field::Exclusions,
+                            row.index,
+                            row.executable.clone(),
+                        ))),
+                    ),
+                ));
             nested_app_row(
                 &row.name,
                 StackPanel::new().spacing(2.0).children(detail).into(),
-                remove_button(
-                    &text!(text, "entry-remove-name", name = row.name.as_str()),
-                    format!("{id}-remove"),
-                    model.editable(),
-                    context.message(Message::Command(Command::Remove(
-                        Field::Exclusions,
-                        row.index,
-                        row.executable.clone(),
-                    ))),
-                )
-                .into(),
+                actions.into(),
                 id,
             )
         }));
@@ -879,6 +1031,67 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
                 StackPanel::new().spacing(2.0).children(browse),
             )),
         )
+}
+fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> ContentDialog {
+    let text = &settings.input.text;
+    let dialog = ContentDialog::new()
+        .close_button_text(text!(text, "dialog-cancel"))
+        .default_button(ContentDialogButton::Primary)
+        .is_open(settings.title_dialog.is_some())
+        .on_closed(context.callback(Message::TitleClosed));
+    let Some(state) = &settings.title_dialog else {
+        return dialog;
+    };
+    let view = title_dialog_view(&settings.input.model, text, state);
+    let mut field: Vec<View> = vec![
+        TextBox::new()
+            .header(widgets::body(&view.label))
+            .text(&view.text)
+            .automation_id("title-dialog-text")
+            .automation_name(&view.label)
+            .on_text_changed(context.callback(Message::TitleText))
+            .into(),
+    ];
+    if let Some(error) = &view.error {
+        field.push(widgets::field_error(error, "title-dialog-error"));
+    }
+    field.push(
+        CheckBox::new()
+            .is_checked(Some(view.regex))
+            .automation_id("title-dialog-regex")
+            .automation_name(text!(text, "title-dialog-regex"))
+            .on_is_checked_changed(
+                context
+                    .callback(|checked: Option<bool>| Message::TitleRegex(checked == Some(true))),
+            )
+            .content(text!(text, "title-dialog-regex"))
+            .into(),
+    );
+    if let Some(suggestion) = &view.suggestion {
+        field.push(
+            StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(8.0)
+                .children((
+                    widgets::caption(suggestion)
+                        .automation_id("title-dialog-last-seen")
+                        .vertical_alignment(VerticalAlignment::Center),
+                    HyperlinkButton::new()
+                        .automation_id("title-dialog-use")
+                        .on_click(context.message(Message::UseTitle))
+                        .content(text!(text, "title-dialog-use")),
+                ))
+                .into(),
+        );
+    }
+    dialog
+        .title(view.title)
+        .primary_button_text(text!(text, "title-dialog-save"))
+        .is_primary_button_enabled(view.save_enabled)
+        .content(StackPanel::new().spacing(16.0).max_width(472.0).children((
+            widgets::caption(view.description),
+            StackPanel::new().spacing(8.0).children(field),
+        )))
 }
 
 #[cfg(test)]

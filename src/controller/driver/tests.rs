@@ -402,7 +402,7 @@ fn read_failure_waits_from_completion_and_focus_does_not_bypass_recovery() {
     fixture
         .driver
         .runtime_mut()
-        .foreground(&Foreground::Unknown, at(130))
+        .foreground(&Foreground::Unknown, None, at(130))
         .expect("focus");
     fixture.observe(140);
     assert!(fixture.cycle(219).attempt.is_none());

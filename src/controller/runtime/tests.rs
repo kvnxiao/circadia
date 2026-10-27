@@ -98,7 +98,7 @@ fn fail(
 fn initialize(session: &Layers, foreground: &Foreground, kelvin: u16) -> ControlRuntime {
     let mut runtime = ControlRuntime::new("circadia.exe").expect("runtime");
     runtime
-        .foreground(foreground, time(0))
+        .foreground(foreground, None, time(0))
         .expect("initial identity");
     let request = runtime
         .configure(session.active(), OutputUpdate::Fade, time(0))
@@ -162,7 +162,7 @@ fn automatic_suppression_while_preview_calculation_is_pending_keeps_the_playback
     runtime.expect_calculation(2);
     assert!(!runtime.controlling());
     runtime
-        .foreground(&Foreground::application("game.exe"), time(150))
+        .foreground(&Foreground::application("game.exe"), None, time(150))
         .expect("matching focus");
     runtime.advance(time(450)).expect("elapsed focus delay");
     assert!(runtime.suppression().automatic);
@@ -719,7 +719,7 @@ fn resume_discards_a_focus_delay_pending_during_preview_and_requires_a_fresh_one
         .calculated(result(2, request, 3000), time(100))
         .expect("preview calculation");
     runtime
-        .foreground(&Foreground::application("game.exe"), time(150))
+        .foreground(&Foreground::application("game.exe"), None, time(150))
         .expect("matching focus");
     runtime
         .advance(time(350))
@@ -834,10 +834,10 @@ fn foreground_changes_record_the_executable_and_decision_at_debug_level() {
     let records = crate::log::capture(tracing::Level::DEBUG, || {
         let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
         runtime
-            .foreground(&Foreground::application("javaw.exe"), time(100))
+            .foreground(&Foreground::application("javaw.exe"), None, time(100))
             .expect("matching focus");
         runtime
-            .foreground(&Foreground::Shell, time(200))
+            .foreground(&Foreground::Shell, None, time(200))
             .expect("shell focus");
     });
     assert_eq!(
@@ -968,7 +968,7 @@ fn ended_playback(end: PlaybackEnd, focused: &str) -> (ControlRuntime, Layers, R
     start_preview(&mut runtime, 2, 3000, time(100));
     assert_eq!(store(&mut runtime, &mut session, 3400, time(100)), 3000);
     runtime
-        .foreground(&Foreground::application(focused), time(200))
+        .foreground(&Foreground::application(focused), None, time(200))
         .expect("focus");
     runtime.advance(time(450)).expect("focus delay elapses");
     assert_eq!(runtime.suppression().automatic, focused == "game.exe");
@@ -1111,4 +1111,144 @@ fn listing_the_focused_app_during_preview_keeps_playback_and_fades_to_6500_k_whe
         Some(Duration::from_millis(10_600))
     );
     assert_eq!(store(&mut runtime, &mut session, 3000, time(10_600)), 6500);
+}
+
+fn deceased_craft() -> Config {
+    ConfigInput {
+        suppression: vec![
+            crate::AppEntry::new("javaw.exe", "Java").with_title("DeceasedCraft", false),
+        ],
+        ..managed()
+    }
+    .validate()
+    .expect("title-limited configuration")
+}
+
+#[test]
+fn a_title_change_that_makes_the_window_match_starts_suppression_one_focus_delay_later() {
+    let session = Layers::new(Some(deceased_craft()));
+    let mut runtime = initialize(
+        &session,
+        &Foreground::window("javaw.exe", "Minecraft* 1.20.1"),
+        3400,
+    );
+    runtime.advance(time(1000)).expect("stable focus");
+    assert!(!runtime.suppression().automatic);
+    runtime
+        .foreground(
+            &Foreground::window("javaw.exe", "DeceasedCraft"),
+            None,
+            time(1000),
+        )
+        .expect("title update");
+    runtime.advance(time(1249)).expect("before the delay");
+    assert!(!runtime.suppression().automatic);
+    runtime.advance(time(1250)).expect("after the delay");
+    assert!(runtime.suppression().automatic);
+}
+
+#[test]
+fn a_title_change_that_keeps_the_match_does_not_restart_a_pending_delay() {
+    let session = Layers::new(Some(listed("javaw.exe")));
+    let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
+    runtime
+        .foreground(
+            &Foreground::window("javaw.exe", "Minecraft 1.21.4"),
+            None,
+            time(100),
+        )
+        .expect("matching focus");
+    runtime
+        .foreground(
+            &Foreground::window("javaw.exe", "Minecraft 1.21.4 - Singleplayer"),
+            None,
+            time(300),
+        )
+        .expect("title update");
+    runtime.advance(time(350)).expect("original deadline");
+    assert!(runtime.suppression().automatic);
+}
+
+fn history_title(runtime: &ControlRuntime, executable: &str) -> Option<String> {
+    runtime
+        .recent()
+        .into_iter()
+        .find(|recent| recent.executable == executable)
+        .and_then(|recent| recent.title)
+}
+
+#[test]
+fn the_history_keeps_the_last_title_after_focus_moves_to_another_executable() {
+    let session = Layers::new(Some(deceased_craft()));
+    let mut runtime = initialize(
+        &session,
+        &Foreground::window("javaw.exe", "Minecraft* 1.20.1"),
+        3400,
+    );
+    runtime
+        .foreground(
+            &Foreground::window("javaw.exe", "DeceasedCraft"),
+            None,
+            time(100),
+        )
+        .expect("title update");
+    runtime
+        .foreground(&Foreground::application("circadia.exe"), None, time(200))
+        .expect("settings focus");
+    assert_eq!(
+        history_title(&runtime, "javaw.exe").as_deref(),
+        Some("DeceasedCraft")
+    );
+    runtime
+        .foreground(
+            &Foreground::window("javaw.exe", "Minecraft* 1.20.1"),
+            None,
+            time(300),
+        )
+        .expect("refocus");
+    runtime
+        .foreground(
+            &Foreground::window("game.exe", "Game"),
+            Some(&PreviousWindow {
+                executable: "javaw.exe".into(),
+                title: "DeceasedCraft".into(),
+            }),
+            time(400),
+        )
+        .expect("another executable");
+    assert_eq!(
+        history_title(&runtime, "javaw.exe").as_deref(),
+        Some("DeceasedCraft")
+    );
+    assert_eq!(history_title(&runtime, "game.exe").as_deref(), Some("Game"));
+}
+
+#[test]
+fn foreground_and_title_changes_record_the_executable_and_window_title_at_debug_level() {
+    let session = Layers::new(Some(deceased_craft()));
+    let records = crate::log::capture(tracing::Level::DEBUG, || {
+        let mut runtime = initialize(&session, &Foreground::Unknown, 3400);
+        runtime
+            .foreground(
+                &Foreground::window("javaw.exe", "Minecraft 1.21.4"),
+                None,
+                time(100),
+            )
+            .expect("focus");
+        runtime
+            .foreground(
+                &Foreground::window("javaw.exe", "DeceasedCraft"),
+                None,
+                time(200),
+            )
+            .expect("title update");
+    });
+    assert_eq!(
+        records,
+        [
+            "DEBUG circadia::controller::runtime: foreground executable=unknown",
+            "DEBUG circadia::controller::runtime: foreground executable=javaw.exe title=Minecraft 1.21.4 decision=none",
+            "DEBUG circadia::controller::runtime: foreground executable=javaw.exe title=DeceasedCraft decision=suppress",
+        ]
+    );
 }

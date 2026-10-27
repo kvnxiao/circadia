@@ -274,7 +274,7 @@ struct Session {
     client: ControllerClient,
     wake: crate::UiWake,
     focus_pending: Rc<Cell<bool>>,
-    _foreground: ForegroundEvents,
+    foreground: ForegroundEvents,
     _window: LifecycleWindow,
     result: Rc<RefCell<Option<io::Error>>>,
 }
@@ -296,7 +296,7 @@ impl Session {
             },
             move || end_session(&ending, &ending_configuration, &exit_result),
         )?;
-        let focus_pending = Rc::new(Cell::new(false));
+        let focus_pending = Rc::new(Cell::new(true));
         let focused = Rc::clone(&focus_pending);
         let focus_wake = window.wake();
         let foreground = ForegroundEvents::listen(move || {
@@ -330,7 +330,7 @@ impl Session {
             client,
             wake: window.wake(),
             focus_pending,
-            _foreground: foreground,
+            foreground,
             _window: window,
             result: startup.result,
         })
@@ -648,6 +648,22 @@ impl Desktop {
                     .remove(list, index, &executable);
                 self.configure(changed);
             }
+            settings::Command::Title {
+                list,
+                index,
+                executable,
+                title,
+                regex,
+            } => {
+                let changed = self.configuration.borrow_mut().set_title(
+                    list,
+                    index,
+                    &executable,
+                    title,
+                    regex,
+                );
+                self.configure(changed);
+            }
             settings::Command::Browsed(file) => {
                 if let Some(file_info) = &mut self.file_info {
                     file_info.request(&file.executable, &file.path);
@@ -896,7 +912,7 @@ impl Desktop {
     }
 
     fn refresh(&mut self) {
-        let Some(session) = &self.session else {
+        let Some(session) = &mut self.session else {
             return;
         };
         match session.client.snapshot() {
@@ -904,7 +920,16 @@ impl Desktop {
             Err(error) => tracing::warn!(%error, "reading the controller snapshot"),
         }
         if self.pending.len() < COMMAND_QUEUE_CAPACITY && session.focus_pending.replace(false) {
-            self.queue(ControllerCommand::Foreground(read_foreground()));
+            let config = self.configuration.borrow().accepted().cloned();
+            let (foreground, previous) = session.foreground.read(|executable| {
+                config
+                    .as_ref()
+                    .is_some_and(|config| config.has_title_condition(executable))
+            });
+            self.queue(ControllerCommand::Foreground {
+                foreground,
+                previous,
+            });
         }
         self.request_names();
         self.receive_names();

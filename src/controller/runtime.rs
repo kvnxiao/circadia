@@ -16,6 +16,7 @@ use crate::ManualCommand;
 use crate::ManualOutcome;
 use crate::NativeAttempt;
 use crate::Playback;
+use crate::PreviousWindow;
 use crate::RecentApp;
 use crate::Suppression;
 use crate::SuppressionState;
@@ -417,17 +418,24 @@ impl ControlRuntime {
         }
     }
 
-    /// Process current identity without repeating queries while focus is
-    /// stable.
+    /// Process current identity and window title without repeating queries
+    /// while focus is stable.
+    ///
+    /// - A title update of the same window is a foreground change only when it
+    ///   changes whether the window matches.
+    /// - `previous` is the previous foreground window's executable and the
+    ///   title it had when focus moved from it to a window of another
+    ///   executable.
     ///
     /// # Errors
     /// Report an unrepresentable focus deadline or unavailable target.
     pub fn foreground(
         &mut self,
         foreground: &Foreground,
+        previous: Option<&PreviousWindow>,
         now: RuntimeTime,
     ) -> Result<(), ControlError> {
-        self.foreground.observe(foreground, now.uptime);
+        self.foreground.observe(foreground, previous, now.uptime);
         let Some(config) = &self.config else {
             record_foreground(foreground, None);
             return Ok(());
@@ -588,7 +596,7 @@ impl ControlRuntime {
         self.suppression.suspend(now.uptime);
         self.output.stop();
         self.output.request_refresh();
-        self.foreground.observe(foreground, now.uptime);
+        self.foreground.observe(foreground, None, now.uptime);
         let Some(config) = &self.config else {
             record_foreground(foreground, None);
             return Ok(None);
@@ -809,10 +817,12 @@ impl ControlRuntime {
 }
 
 fn record_foreground(foreground: &Foreground, focus: Option<Focus>) {
-    let executable = match foreground {
-        Foreground::Unknown => "unknown",
-        Foreground::Shell => "shell",
-        Foreground::Application { executable, .. } => executable,
+    let (executable, title) = match foreground {
+        Foreground::Unknown => ("unknown", None),
+        Foreground::Shell => ("shell", None),
+        Foreground::Application {
+            executable, title, ..
+        } => (executable.as_str(), title.as_deref()),
     };
     let decision = focus.map(|focus| match focus {
         Focus::Matching => "suppress",
@@ -820,6 +830,7 @@ fn record_foreground(foreground: &Foreground, focus: Option<Focus>) {
     });
     tracing::debug!(
         executable = %executable,
+        title = title.map(tracing::field::display),
         decision = decision.map(tracing::field::display),
         "foreground"
     );
