@@ -91,6 +91,7 @@ fn a_panic_record_after_the_marker_identifies_the_crash() {
         previous_run(directory.path(), "circadia.exe", no_query),
         PreviousRun::Crashed(CrashSummary {
             time: timestamp("2026-10-25T08:00:05Z"),
+            kind: CrashKind::Panic,
             description: "index out of bounds: \"key\"".into(),
             module: None,
             offset: None,
@@ -110,6 +111,7 @@ fn a_panic_record_dated_before_the_marker_by_a_clock_correction_identifies_the_c
         previous_run(directory.path(), "circadia.exe", no_query),
         PreviousRun::Crashed(CrashSummary {
             time: timestamp("2026-10-25T07:58:00Z"),
+            kind: CrashKind::Panic,
             description: "after a clock correction".into(),
             module: None,
             offset: None,
@@ -135,6 +137,7 @@ fn an_exception_record_after_the_marker_identifies_the_native_crash() {
         previous_run(directory.path(), "circadia.exe", no_query),
         PreviousRun::Crashed(CrashSummary {
             time: timestamp("2026-10-25T08:00:05Z"),
+            kind: CrashKind::Exception,
             description: "0xc0000005".into(),
             module: Some("Microsoft.ui.xaml.dll".into()),
             offset: Some("0x6e0057".into()),
@@ -166,6 +169,7 @@ fn a_crash_event_for_the_marker_process_identifies_the_crash() {
             ),
             PreviousRun::Crashed(CrashSummary {
                 time: timestamp("2026-10-24T23:15:46.1893937Z"),
+                kind: CrashKind::Exception,
                 description: "0xc0000409".into(),
                 module: Some("circadia-settings-design-probe.exe".into()),
                 offset: Some("0xa481d5".into()),

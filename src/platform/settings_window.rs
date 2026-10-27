@@ -17,8 +17,12 @@ pub(crate) fn open_folder(directory: &Path) -> io::Result<()> {
     let directory = directory
         .to_str()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "folder path is not Unicode"))?;
+    open_page(directory)
+}
+
+pub(crate) fn open_page(target: &str) -> io::Result<()> {
     winsafe::HWND::NULL
-        .ShellExecute("open", directory, None, None, winsafe::co::SW::SHOWNORMAL)
+        .ShellExecute("open", target, None, None, winsafe::co::SW::SHOWNORMAL)
         .map_err(io::Error::other)
 }
 

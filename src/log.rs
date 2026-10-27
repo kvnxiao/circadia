@@ -80,7 +80,7 @@ pub(crate) fn record_start(configuration: &str, restore_cause: Option<&str>, pro
 
 #[cfg(windows)]
 #[expect(unsafe_code, reason = "read the running Windows version from ntdll")]
-fn windows_build() -> Option<String> {
+pub(crate) fn windows_build() -> Option<String> {
     use windows_sys::Win32::System::SystemInformation::OSVERSIONINFOW;
     let mut version = OSVERSIONINFOW {
         dwOSVersionInfoSize: u32::try_from(size_of::<OSVERSIONINFOW>()).ok()?,

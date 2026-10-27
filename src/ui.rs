@@ -1,4 +1,5 @@
 mod configuration;
+mod crash_notice;
 mod file_info;
 mod icon_cache;
 #[cfg(feature = "graph-measurement")]
@@ -163,7 +164,10 @@ fn run_with_native(
     let text = Text::load(&language).map_err(io::Error::other)?;
     let regional_format = RegionalFormat::capture_user_default()?;
     let configuration = Rc::new(RefCell::new(configuration));
-    let previous_run = crate::log::run::begin(&directory, &running_executable);
+    let crash = crash_notice::pending(
+        &directory,
+        crate::log::run::begin(&directory, &running_executable),
+    );
     let result = Rc::new(RefCell::new(None));
     let application = App::run_application::<Desktop>(Input {
         startup: RefCell::new(Some(Startup {
@@ -178,7 +182,7 @@ fn run_with_native(
         icon: executable.with_file_name("circadia.ico"),
         executable,
         startup_directory,
-        previous_run,
+        crash,
         regional_format: Rc::new(regional_format),
         text: Rc::new(text),
     })
@@ -217,11 +221,7 @@ struct Input {
     icon: PathBuf,
     executable: PathBuf,
     startup_directory: Option<PathBuf>,
-    #[expect(
-        dead_code,
-        reason = "the crash notice does not read the previous run yet"
-    )]
-    previous_run: crate::log::run::PreviousRun,
+    crash: Option<crate::log::run::CrashSummary>,
     regional_format: Rc<RegionalFormat>,
     text: Rc<Text>,
 }
@@ -383,6 +383,7 @@ struct Desktop {
     icons: IconCache,
     browsed: BTreeMap<String, (PathBuf, Duration)>,
     configuration: Rc<RefCell<Configuration>>,
+    crash: Option<crate::log::run::CrashSummary>,
     startup: Option<Startup>,
     snapshot: Option<Arc<ControllerSnapshot>>,
     pending: VecDeque<ControllerCommand>,
@@ -419,15 +420,18 @@ impl Application for Desktop {
             }
             context.exit();
         }
-        Self::new(
-            Rc::clone(&input.configuration),
-            startup,
-            input.directory.clone(),
-            Box::new(Registration::new(
-                input.executable.clone(),
-                input.startup_directory.clone(),
-            )),
-        )
+        Self {
+            crash: input.crash.clone(),
+            ..Self::new(
+                Rc::clone(&input.configuration),
+                startup,
+                input.directory.clone(),
+                Box::new(Registration::new(
+                    input.executable.clone(),
+                    input.startup_directory.clone(),
+                )),
+            )
+        }
     }
 
     fn update(&mut self, message: Message, context: &ApplicationContext<Self>) {
@@ -503,7 +507,8 @@ impl Application for Desktop {
             self.retrying(),
             line.clone(),
             &names,
-        );
+        )
+        .with_crash(self.crash.as_ref());
         ApplicationView::new()
             .window::<settings::Settings>(
                 "settings",
@@ -546,6 +551,7 @@ impl Desktop {
             icons: IconCache::load(&directory),
             browsed: BTreeMap::new(),
             configuration,
+            crash: None,
             startup,
             snapshot: None,
             pending: VecDeque::new(),
@@ -694,6 +700,15 @@ impl Desktop {
                 }
             }
             settings::Command::DismissRestore => self.configuration.borrow_mut().dismiss_restore(),
+            settings::Command::DismissCrash => {
+                crash_notice::dismiss(&self.directory);
+                self.crash = None;
+            }
+            settings::Command::Report(url) => {
+                if let Err(error) = crate::platform::settings_window::open_page(&url) {
+                    tracing::warn!(%error, "opening the new-issue page failed");
+                }
+            }
             settings::Command::RetrySignIn => self.retry_sign_in(),
             settings::Command::Preview => {
                 let config = self.configuration.borrow().accepted().cloned();
@@ -1591,6 +1606,39 @@ mod tests {
             Box::new(settings::general::FakeRegistration::default()),
         );
         (directory, desktop)
+    }
+
+    fn crashed() -> crate::log::run::PreviousRun {
+        crate::log::run::PreviousRun::Crashed(crate::log::run::CrashSummary {
+            kind: crate::log::run::CrashKind::Panic,
+            time: "2026-10-25T08:00:05Z".parse().expect("fixture time"),
+            description: "index out of bounds".to_owned(),
+            module: None,
+            offset: None,
+        })
+    }
+
+    #[test]
+    fn dismissing_the_crash_notice_deletes_it_for_later_launches() {
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        crash_notice::pending(directory.path(), crashed());
+        let configuration = configuration::Configuration::load(directory.path(), "circadia.exe");
+        let mut desktop = Desktop {
+            crash: crash_notice::pending(directory.path(), crate::log::run::PreviousRun::Normal),
+            ..Desktop::new(
+                Rc::new(RefCell::new(configuration)),
+                None,
+                directory.path().to_owned(),
+                Box::new(settings::general::FakeRegistration::default()),
+            )
+        };
+        assert!(desktop.crash.is_some());
+        desktop.command(settings::Command::DismissCrash);
+        assert_eq!(desktop.crash, None);
+        assert_eq!(
+            crash_notice::pending(directory.path(), crate::log::run::PreviousRun::Normal),
+            None
+        );
     }
 
     #[test]

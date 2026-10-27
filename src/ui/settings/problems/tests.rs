@@ -79,7 +79,7 @@ fn a_configuration_error_offers_reset_and_open_folder_on_every_page_and_disables
         };
         assert_eq!(banner.id, "banner-configuration-error");
         assert_eq!(banner.severity, InfoBarSeverity::Error);
-        assert!(!banner.closable);
+        assert_eq!(banner.dismiss, None);
         assert_eq!(
             banner.message,
             "config.toml \u{2068}has a syntax error on line \u{2068}1\u{2069}\u{2069}, and \
@@ -264,6 +264,45 @@ fn a_missing_key_shows_a_note_at_its_field() {
 }
 
 #[test]
+fn a_pending_crash_notice_shows_a_closable_banner_with_both_commands_on_every_page() {
+    let fixture = Fixture::new();
+    fixture.write("config.toml", &document(|_| {}));
+    let configuration = fixture.load();
+    let crash = crate::log::run::CrashSummary {
+        kind: crate::log::run::CrashKind::Panic,
+        time: "2026-10-25T08:00:05Z".parse().expect("fixture time"),
+        description: "index out of bounds".to_owned(),
+        module: None,
+        offset: None,
+    };
+    let model = Model::new(&configuration, None, false, String::new(), &BTreeMap::new())
+        .with_crash(Some(&crash));
+    for page in Page::ALL {
+        let banners = banners(&model, &fixture.text, &fixture.region, page);
+        let [banner] = banners.as_slice() else {
+            panic!("one banner on {page:?}: {banners:?}");
+        };
+        assert_eq!(banner.id, "banner-crash");
+        assert_eq!(banner.severity, InfoBarSeverity::Informational);
+        assert_eq!(banner.title, "Circadia closed unexpectedly");
+        assert_eq!(
+            banner.actions,
+            [
+                (Action::OpenLogs, "Open folder".to_owned()),
+                (Action::Report, "Report a problem".to_owned()),
+            ]
+        );
+        assert_eq!(banner.dismiss, Some(super::super::Command::DismissCrash));
+    }
+    let dismissed =
+        Model::new(&configuration, None, false, String::new(), &BTreeMap::new()).with_crash(None);
+    assert_eq!(
+        banners(&dismissed, &fixture.text, &fixture.region, Page::Schedule),
+        []
+    );
+}
+
+#[test]
 fn paused_saving_unknown_keys_and_a_restored_backup_show_on_every_page() {
     let fixture = Fixture::new();
     let backup = document(|table| {
@@ -280,12 +319,14 @@ fn paused_saving_unknown_keys_and_a_restored_backup_show_on_every_page() {
             ["banner-paused", "banner-restored", "banner-unknown-keys"],
             "{page:?}"
         );
-        let closable: Vec<&str> = banners
+        let closable: Vec<(&str, &super::super::Command)> = banners
             .iter()
-            .filter(|banner| banner.closable)
-            .map(|banner| banner.id)
+            .filter_map(|banner| Some((banner.id, banner.dismiss.as_ref()?)))
             .collect();
-        assert_eq!(closable, ["banner-restored"]);
+        assert_eq!(
+            closable,
+            [("banner-restored", &super::super::Command::DismissRestore)]
+        );
     }
     let banners = fixture.banners(&configuration, Page::Schedule);
     assert_eq!(
@@ -407,7 +448,7 @@ fn the_native_banner_lists_each_outstanding_failure_once_with_retry() {
          Error \u{2068}0x00000005\u{2069}"
     );
     assert_eq!(banner.actions, [(Action::RetryNative, "Retry".to_owned())]);
-    assert!(!banner.closable);
+    assert_eq!(banner.dismiss, None);
     assert!(banner.enabled);
 }
 
@@ -472,7 +513,7 @@ fn a_time_zone_failure_without_a_last_temperature_shows_retry_on_every_page() {
         };
         assert_eq!(banner.id, "banner-schedule");
         assert_eq!(banner.severity, InfoBarSeverity::Error);
-        assert!(!banner.closable);
+        assert_eq!(banner.dismiss, None);
         assert!(banner.enabled);
         assert_eq!(banner.actions, [(Action::RetryNative, "Retry".to_owned())]);
     }

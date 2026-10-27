@@ -34,6 +34,8 @@ pub enum DiagnosticOperation {
     StartupStatusRead,
     /// Acquire location after an explicit user action.
     Location,
+    /// Read, store, or delete the pending crash notice.
+    CrashNotice,
 }
 
 impl fmt::Display for DiagnosticOperation {
@@ -54,6 +56,7 @@ impl fmt::Display for DiagnosticOperation {
             Self::StartupRegistration => "startup_registration",
             Self::StartupStatusRead => "startup_status_read",
             Self::Location => "location",
+            Self::CrashNotice => "crash_notice",
         })
     }
 }

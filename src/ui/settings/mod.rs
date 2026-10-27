@@ -33,6 +33,7 @@ use crate::SuppressionState;
 use crate::WindowsZone;
 use crate::l10n::Text;
 use crate::l10n::text;
+use crate::log::run::CrashSummary;
 use crate::platform::nls::RegionalFormat;
 use jiff::Timestamp;
 use problems::Action;
@@ -157,6 +158,7 @@ pub(super) struct Model {
     solar: schedule::SolarStatus,
     calculation: Option<Calculation>,
     last_scheduled: Option<u16>,
+    crash: Option<CrashSummary>,
 }
 
 #[derive(Clone, Debug)]
@@ -248,6 +250,14 @@ impl Model {
             last_scheduled: snapshot
                 .and_then(|snapshot| snapshot.accepted.as_ref())
                 .and_then(crate::ConfigLayer::last_scheduled),
+            crash: None,
+        }
+    }
+
+    pub(super) fn with_crash(self, crash: Option<&CrashSummary>) -> Self {
+        Self {
+            crash: crash.cloned(),
+            ..self
         }
     }
 
@@ -366,6 +376,8 @@ pub(super) enum Command {
     RetryNative,
     OpenFolder(Folder),
     DismissRestore,
+    DismissCrash,
+    Report(String),
     Quit,
     RetrySignIn,
     Preview,
@@ -617,6 +629,32 @@ impl Settings {
         }
     }
 
+    fn action(&mut self, action: Action) {
+        let command = match action {
+            Action::GoTo(page) => {
+                self.page = page;
+                return;
+            }
+            Action::Reset => Command::Reset,
+            Action::Retry => Command::Retry,
+            Action::RetryNative => Command::RetryNative,
+            Action::OpenFolder => Command::OpenFolder(Folder::Data),
+            Action::OpenLogs => Command::OpenFolder(Folder::Logs),
+            Action::Report => {
+                let Some(crash) = &self.input.model.crash else {
+                    return;
+                };
+                Command::Report(super::crash_notice::issue_url(
+                    &self.input.text,
+                    env!("CARGO_PKG_VERSION"),
+                    &crate::log::windows_build().unwrap_or_default(),
+                    crash,
+                ))
+            }
+        };
+        self.input.command.call(command);
+    }
+
     fn read_dpi(context: &ComponentContext<Self>) {
         let _queued = context
             .run_window(|window| Message::Dpi(crate::platform::settings_window::dpi(&window)));
@@ -775,6 +813,8 @@ impl Settings {
                 let id = match action {
                     Action::Reset => "banner-reset".to_owned(),
                     Action::OpenFolder => "banner-open-folder".to_owned(),
+                    Action::OpenLogs => format!("{}-open-folder", banner.id),
+                    Action::Report => format!("{}-report", banner.id),
                     Action::Retry | Action::RetryNative => format!("{}-retry", banner.id),
                     Action::GoTo(page) => format!("banner-go-to-{}", page.tag()),
                 };
@@ -786,14 +826,17 @@ impl Settings {
                         .on_click(message)
                         .content(label)
                         .into(),
-                    Action::Reset | Action::OpenFolder | Action::Retry | Action::RetryNative => {
-                        Button::new()
-                            .automation_id(id)
-                            .is_enabled(banner.enabled)
-                            .on_click(message)
-                            .content(label)
-                            .into()
-                    }
+                    Action::Reset
+                    | Action::OpenFolder
+                    | Action::OpenLogs
+                    | Action::Report
+                    | Action::Retry
+                    | Action::RetryNative => Button::new()
+                        .automation_id(id)
+                        .is_enabled(banner.enabled)
+                        .on_click(message)
+                        .content(label)
+                        .into(),
                 }
             })
             .collect();
@@ -802,11 +845,11 @@ impl Settings {
             .title(banner.title)
             .message(banner.message)
             .is_open(true)
-            .is_closable(banner.closable)
+            .is_closable(banner.dismiss.is_some())
             .automation_id(banner.id)
             .automation_live_setting(AutomationLiveSetting::Assertive);
-        if banner.closable {
-            info = info.on_closed(context.message(Message::Command(Command::DismissRestore)));
+        if let Some(command) = banner.dismiss {
+            info = info.on_closed(context.message(Message::Command(command)));
         }
         keyed(
             banner.id,
@@ -1049,13 +1092,7 @@ impl Component for Settings {
                 }
             }
             Message::WriteDue(token) => self.write_due(token),
-            Message::Action(Action::GoTo(page)) => self.page = page,
-            Message::Action(Action::Reset) => self.input.command.call(Command::Reset),
-            Message::Action(Action::Retry) => self.input.command.call(Command::Retry),
-            Message::Action(Action::RetryNative) => self.input.command.call(Command::RetryNative),
-            Message::Action(Action::OpenFolder) => {
-                self.input.command.call(Command::OpenFolder(Folder::Data));
-            }
+            Message::Action(action) => self.action(action),
             Message::Command(command) => self.input.command.call(command),
             message @ (Message::Tick | Message::Indicator | Message::Minute) => {
                 self.timer_elapsed(&message);
