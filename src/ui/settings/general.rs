@@ -5,6 +5,8 @@ use super::Message;
 use super::Model;
 use super::Settings;
 use super::problems;
+use super::problems::FeatureMessage;
+use super::problems::Severity;
 use super::schedule;
 use super::widgets;
 use super::widgets::Row;
@@ -106,19 +108,6 @@ fn diagnostic(error: &io::Error) -> DiagnosticFailure {
         },
         code: error.raw_os_error(),
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Severity {
-    Error,
-    Warning,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub(super) struct FeatureMessage {
-    pub(super) severity: Severity,
-    pub(super) text: String,
-    pub(super) retry: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -453,25 +442,11 @@ fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
         .view(),
     ];
     if let Some(message) = view.message {
-        let glyph = match message.severity {
-            Severity::Error => FontIcon::new()
-                .glyph("\u{EB90}")
-                .foreground(ThemeBrush::SystemCritical),
-            Severity::Warning => FontIcon::new().glyph("\u{E7BA}"),
-        };
-        let retry = message.retry.map(|label| {
-            Button::new()
-                .automation_id("sign-in-retry")
-                .is_enabled(settings.input.model.editable())
-                .on_click(context.message(Message::Command(Command::RetrySignIn)))
-                .content(label)
-                .into()
-        });
-        rows.push(widgets::nested_row(
-            glyph,
-            vec![widgets::body(message.text).into()],
-            retry,
-            "sign-in-message",
+        rows.push(widgets::feature_row(
+            message,
+            "sign-in",
+            settings.input.model.editable(),
+            context.message(Message::Command(Command::RetrySignIn)),
         ));
     }
     widgets::card(StackPanel::new().children(rows))

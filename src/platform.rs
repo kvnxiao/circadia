@@ -5,10 +5,6 @@ pub(crate) mod file_info;
 pub(crate) mod foreground;
 pub(crate) mod instance;
 pub(crate) mod lifecycle_inputs;
-#[expect(
-    dead_code,
-    reason = "the solar timing settings request the Windows location"
-)]
 pub(crate) mod location;
 pub(crate) mod nls;
 pub(crate) mod picker;

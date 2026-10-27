@@ -9,6 +9,7 @@ use super::problems;
 use super::widgets;
 use super::widgets::APP_GLYPH;
 use super::widgets::AppIcon;
+use super::widgets::Expansion;
 use super::widgets::Row;
 use crate::AppEntry;
 use crate::EntryProblem;
@@ -47,7 +48,6 @@ use windows_reactor::ViewContext;
 
 const SUN_GLYPH: &str = "\u{E706}";
 const ADD_GLYPH: &str = "\u{E710}";
-const COLLAPSE_GLYPH: &str = "\u{E70E}";
 pub(super) const MINUTE: Duration = Duration::from_mins(1);
 
 pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vec<View> {
@@ -914,13 +914,12 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
     let rows = entry_rows(model, text, Field::Exclusions);
     let held = rows.iter().any(|row| row.error.is_some())
         || model.report.marks.contains_key(&Field::Exclusions);
-    let expanded = settings.exclusions_expanded || held;
-    let (expand_glyph, expand_name) = if held {
-        (COLLAPSE_GLYPH, text!(text, "exclusions-held"))
-    } else if expanded {
-        (COLLAPSE_GLYPH, text!(text, "exclusions-collapse"))
-    } else {
-        ("\u{E70D}", text!(text, "exclusions-expand"))
+    let expansion = Expansion::chosen(settings.expanded.exclusions).held_when(held);
+    let expanded = expansion.expanded();
+    let expand_name = match expansion {
+        Expansion::Held => text!(text, "exclusions-held"),
+        Expansion::Expanded => text!(text, "exclusions-collapse"),
+        Expansion::Collapsed => text!(text, "exclusions-expand"),
     };
     let header = Row::new(
         "\u{E733}",
@@ -937,15 +936,12 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                     .automation_id("add-exclusion")
                     .on_click(context.message(Message::OpenDialog(Field::Exclusions)))
                     .content(text!(text, "add-exclusion")),
-                Button::new()
-                    .style(ButtonStyle::Subtle)
-                    .width(32.0)
-                    .height(32.0)
-                    .is_enabled(!held)
-                    .automation_id("exclusions-expand")
-                    .automation_name(expand_name)
-                    .on_click(context.message(Message::Expand(!expanded)))
-                    .content(FontIcon::new().glyph(expand_glyph).font_size(12.0)),
+                widgets::expand_button(
+                    expansion,
+                    expand_name,
+                    "exclusions-expand",
+                    context.message(Message::Expand(!expanded)),
+                ),
             ))
             .into(),
     ])
@@ -1141,7 +1137,9 @@ fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Con
             .text(&view.text)
             .automation_id("title-dialog-text")
             .automation_name(&view.label)
-            .on_text_changed(context.callback(Message::TitleText))
+            .on_text_changed(
+                context.callback(|text: std::rc::Rc<str>| Message::TitleText(text.to_string())),
+            )
             .into(),
     ];
     if let Some(error) = &view.error {

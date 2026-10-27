@@ -72,6 +72,30 @@ wake-description = Your earliest wake time. The screen reaches daytime color by 
 wake-description-sunrise = Your earliest wake time. The screen reaches morning color by now, then daytime color at sunrise.
 bedtime-title = Bedtime
 bedtime-description = The screen reaches your bedtime color by this time.
+solar-title = Follow sunrise and sunset
+solar-description = Adds a morning and evening color between your wake time and bedtime that shifts with the seasons.
+solar-expand = Expand sunrise and sunset options
+solar-collapse = Collapse sunrise and sunset options
+solar-held = Sunrise and sunset options stay expanded while a value needs a fix
+sunrise-title = Use sunrise
+sunrise-description = Morning color from wake time, daytime color from sunrise.
+sunset-title = Use sunset
+sunset-description = Evening color from sunset until bedtime.
+location-title = Use my Windows location
+location-on = Asks Windows for your position when you turn this on or open these settings.
+location-off = Enter coordinates below. Circadia never needs location access this way.
+location-requesting = Finding your location…
+location-denied = Windows denied location access, so Circadia keeps the current coordinates. Turn on location access for desktop apps in Windows Settings, or turn this off and enter coordinates.
+location-disabled = Windows location services are turned off, so Circadia keeps the current coordinates. Turn them on in Windows Settings, or turn this off and enter coordinates.
+location-unavailable = Windows couldn't find your position, so Circadia keeps the current coordinates. Settings asks again the next time it opens.
+coordinates-title = Coordinates
+coordinates-description = Decimal degrees. North and east are positive.
+latitude = Latitude
+longitude = Longitude
+solar-today = Today: { $time }
+solar-today-off = Today: off
+solar-fallback = Sunrise and sunset can't be calculated, so the schedule uses only Wake time and Bedtime.
+solar-conflict = Between { $wake } and { $bedtime }, sunset comes before sunrise, so that day uses only Wake time and Bedtime.
 picker-name = { $field }, { $time }
 picker-hour = Hour
 picker-minute = Minute
@@ -270,8 +294,10 @@ field-name =
         [focus_delay_ms] Switch delay
         [output_rate_hz] Maximum update rate
         [preview_seconds] Preview length
+        [solar_timing] Follow sunrise and sunset
         [sunrise] Use sunrise
         [sunset] Use sunset
+        [use_windows_location] Use my Windows location
         [coordinates] Coordinates
         [suppression] Suppression list
         [exclusions] Excluded apps
@@ -301,6 +327,7 @@ error-lower = { $field } ({ $value }) can't be lower than { $other } ({ $other_v
 error-higher = { $field } ({ $value }) can't be higher than { $other } ({ $other_value }). This change isn't applied yet.
 error-range = { $field } must be from { $minimum } to { $maximum }. This change isn't applied yet.
 error-coordinates-required = { $field } needs coordinates. This change isn't applied yet.
+error-coordinates = Enter both a latitude and a longitude. This change isn't applied yet.
 error-invalid = { $field } has an invalid value. This change isn't applied yet.
 error-code = Error { $code }
 

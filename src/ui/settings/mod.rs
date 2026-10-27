@@ -1,5 +1,6 @@
 mod apps;
 pub(super) mod general;
+mod location;
 mod problems;
 mod schedule;
 mod time_picker;
@@ -12,6 +13,7 @@ use super::configuration::FileProblem;
 use super::icon_cache::AppIcons;
 use crate::Config;
 use crate::ControllerSnapshot;
+use crate::Coordinates;
 use crate::DiagnosticFailure;
 use crate::DiagnosticOperation;
 use crate::Field;
@@ -146,6 +148,8 @@ pub(super) struct Model {
     running_executable: String,
     recent: Vec<RecentApp>,
     names: BTreeMap<String, String>,
+    today: Option<crate::SolarToday>,
+    solar: schedule::SolarStatus,
 }
 
 impl Model {
@@ -206,6 +210,11 @@ impl Model {
             running_executable: configuration.running_executable().to_owned(),
             recent: snapshot.map_or_else(Vec::new, |snapshot| snapshot.recent.clone()),
             names: names.clone(),
+            today: snapshot
+                .and_then(|snapshot| snapshot.calculation.as_ref())
+                .and_then(|calculation| calculation.result.as_ref().ok())
+                .and_then(|schedule| schedule.today),
+            solar: snapshot.map(schedule::SolarStatus::new).unwrap_or_default(),
         }
     }
 
@@ -294,7 +303,7 @@ pub(super) enum Folder {
     Logs,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum Command {
     Reset,
     Retry,
@@ -310,6 +319,7 @@ pub(super) enum Command {
     Browsed(super::file_info::AppFile),
     Icons(Vec<String>),
     Remove(Field, usize, String),
+    Located(Result<Coordinates, DiagnosticFailure>),
     Title {
         list: Field,
         index: usize,
@@ -352,9 +362,10 @@ impl PendingWrite {
 
 #[derive(Clone)]
 pub(super) enum Message {
-    Navigate(Option<Rc<str>>),
+    Navigate(Option<String>),
     Placed,
     Dpi(u32),
+    Opened,
     Activated,
     Edit(Vec<(Field, FieldValue)>),
     Number(Field, Option<f64>),
@@ -374,10 +385,21 @@ pub(super) enum Message {
     Picked(Option<super::file_info::AppFile>),
     Expand(bool),
     OpenTitle(Field, usize),
-    TitleText(Rc<str>),
+    TitleText(String),
     TitleRegex(bool),
     UseTitle,
     TitleClosed(ContentDialogResult),
+    SolarExpand(bool),
+    WindowsLocation(bool),
+    Location(location::Event),
+    CoordinateText(schedule::Axis, String),
+    CoordinateCommit(schedule::Axis),
+}
+
+#[derive(Debug, Default)]
+struct Expanded {
+    exclusions: bool,
+    solar: bool,
 }
 
 pub(super) struct Settings {
@@ -395,7 +417,9 @@ pub(super) struct Settings {
     consent: bool,
     dialog: Option<apps::AddDialog>,
     title_dialog: Option<apps::TitleDialog>,
-    exclusions_expanded: bool,
+    expanded: Expanded,
+    location: location::Location,
+    coordinate_drafts: schedule::CoordinateDrafts,
 }
 
 impl Settings {
@@ -500,11 +524,65 @@ impl Settings {
             .run_window(|window| Message::Dpi(crate::platform::settings_window::dpi(&window)));
     }
 
-    fn activate(context: &ComponentContext<Self>) {
-        let _queued = context.run_window(|window| {
+    fn activate(context: &ComponentContext<Self>, activated: Message) {
+        let _queued = context.run_window(move |window| {
             crate::platform::settings_window::activate(&window);
-            Message::Activated
+            activated
         });
+    }
+
+    fn deliver(
+        context: &ComponentContext<Self>,
+    ) -> impl Fn(location::Event) + Clone + Send + 'static {
+        let completion = context.completion();
+        move |event| {
+            let _delivered = completion.clone().complete(Message::Location(event));
+        }
+    }
+
+    fn located(&self, result: Option<Result<Coordinates, DiagnosticFailure>>) {
+        if let Some(result) = result {
+            self.input.command.call(Command::Located(result));
+        }
+    }
+
+    fn solar_update(&mut self, message: Message, context: &ComponentContext<Self>) {
+        if location::starts_request(&message, &self.input.model) {
+            let started = self
+                .location
+                .start(&location::WindowsLocation, Self::deliver(context));
+            self.located(started);
+        }
+        match message {
+            Message::SolarExpand(expanded) => self.expanded.solar = expanded,
+            Message::WindowsLocation(on) => {
+                if !on {
+                    self.location.cancel();
+                }
+                self.edit(
+                    vec![(Field::UseWindowsLocation, FieldValue::Switch(on))],
+                    context,
+                );
+            }
+            Message::CoordinateText(axis, text) => self.coordinate_drafts.typed(axis, text),
+            Message::CoordinateCommit(axis) => {
+                if let Some(edits) =
+                    self.coordinate_drafts
+                        .commit(&self.input.model, &self.input.region, axis)
+                {
+                    self.edit(edits, context);
+                }
+            }
+            Message::Location(event) => {
+                let finished = self.location.receive(
+                    event,
+                    &location::WindowsLocation,
+                    Self::deliver(context),
+                );
+                self.located(finished);
+            }
+            _ => {}
+        }
     }
 
     fn title_bar(text: &Text) -> View {
@@ -757,7 +835,9 @@ impl Component for Settings {
             consent: false,
             dialog: None,
             title_dialog: None,
-            exclusions_expanded: false,
+            expanded: Expanded::default(),
+            location: location::Location::default(),
+            coordinate_drafts: schedule::CoordinateDrafts::default(),
         };
         settings.animate(context);
         settings.request_icons();
@@ -766,6 +846,8 @@ impl Component for Settings {
 
     fn input_changed(&mut self, input: &Input, context: &ComponentContext<Self>) {
         let activated = input.activation != self.input.activation;
+        self.coordinate_drafts
+            .follow(&self.input.model, &input.model, &input.region);
         self.input = input.clone();
         if input.exiting {
             let _closed = context.close_window();
@@ -774,12 +856,18 @@ impl Component for Settings {
         self.animate(context);
         self.request_icons();
         if activated && self.placed {
-            Self::activate(context);
+            Self::activate(context, Message::Activated);
         }
     }
 
     fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
         match message {
+            message @ (Message::Opened
+            | Message::SolarExpand(_)
+            | Message::WindowsLocation(_)
+            | Message::CoordinateText(..)
+            | Message::CoordinateCommit(_)
+            | Message::Location(_)) => self.solar_update(message, context),
             Message::Navigate(tag) => {
                 if let Some(page) = Page::ALL
                     .into_iter()
@@ -791,7 +879,7 @@ impl Component for Settings {
             Message::Placed => {
                 if !self.placed {
                     self.placed = true;
-                    Self::activate(context);
+                    Self::activate(context, Message::Opened);
                 }
                 Self::read_dpi(context);
             }
@@ -843,7 +931,7 @@ impl Component for Settings {
                     self.picked(file);
                 }
             }
-            Message::Expand(expanded) => self.exclusions_expanded = expanded,
+            Message::Expand(expanded) => self.expanded.exclusions = expanded,
             Message::OpenTitle(list, index) => {
                 self.title_dialog = apps::TitleDialog::open(&self.input.model, list, index);
             }
@@ -919,7 +1007,9 @@ impl Component for Settings {
                     .into_iter()
                     .map(|page| self.nav_item(page, marked.contains(&page))),
             )
-            .on_selected_tag_changed(context.callback(Message::Navigate))
+            .on_selected_tag_changed(context.callback(|tag: Option<Rc<str>>| {
+                Message::Navigate(tag.as_deref().map(str::to_owned))
+            }))
             .automation_id("navigation")
             .grid_row(1)
             .content(

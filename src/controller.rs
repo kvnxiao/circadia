@@ -17,6 +17,7 @@ pub use calculation::CalculationRequest;
 pub use calculation::CalculationResult;
 pub use calculation::CalculationWorker;
 pub use calculation::SolarConflict;
+pub use calculation::SolarToday;
 pub use driver::NativeCycle;
 pub use driver::NativeDriver;
 pub use fade::TemperatureFade;

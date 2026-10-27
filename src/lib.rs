@@ -117,6 +117,8 @@ pub use controller::SchedulingState;
 #[cfg(windows)]
 pub use controller::SolarConflict;
 #[cfg(windows)]
+pub use controller::SolarToday;
+#[cfg(windows)]
 pub use controller::TemperatureFade;
 #[cfg(windows)]
 pub use controller::TemperatureOutput;
@@ -206,6 +208,8 @@ pub use schedule::graph_interval;
 pub use schedule::resolve_anchors;
 #[cfg(windows)]
 pub use schedule::select_solar;
+#[cfg(windows)]
+pub use schedule::solar_today;
 pub use storage::ConfigStore;
 pub use storage::PersistResult;
 pub use storage::StorageError;

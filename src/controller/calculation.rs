@@ -7,6 +7,7 @@ use crate::ScheduleError;
 use crate::TimeInterval;
 use crate::WindowsZone;
 use crate::graph_interval;
+use crate::solar_today;
 use jiff::SignedDuration;
 use jiff::Timestamp;
 use jiff::civil::DateTime;
@@ -58,10 +59,22 @@ pub struct CalculatedSchedule {
     pub solar_error: Option<ScheduleError>,
     /// Activity intervals whose solar events could not form an ordered pair.
     pub conflicts: Vec<SolarConflict>,
+    /// Today's selected solar targets, or none when their calculation failed.
+    pub today: Option<SolarToday>,
+}
+
+/// Give the selected Sunrise and Sunset targets of the activity interval that
+/// starts on the request's local date, in the calculation's Windows time zone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SolarToday {
+    /// Local Sunrise target, absent when disabled, absent, or conflicting.
+    pub sunrise: Option<DateTime>,
+    /// Local Sunset target, absent when disabled, absent, or conflicting.
+    pub sunset: Option<DateTime>,
 }
 
 /// Describe a solar ordering conflict in the calculation's Windows time zone.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SolarConflict {
     /// Actual bounds used to select conflicts for a displayed graph interval.
     pub interval: ActivityInterval,
@@ -360,6 +373,19 @@ fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, Schedul
             })
         })
         .collect::<Result<_, ScheduleError>>()?;
+    let today = match solar_today(&request.config, &mut zone, request.at) {
+        Ok(selection) => Some(SolarToday {
+            sunrise: selection
+                .sunrise
+                .map(|instant| zone.local(instant))
+                .transpose()?,
+            sunset: selection
+                .sunset
+                .map(|instant| zone.local(instant))
+                .transpose()?,
+        }),
+        Err(_) => None,
+    };
     Ok(CalculatedSchedule {
         curve: Arc::new(schedule.curve),
         valid,
@@ -369,6 +395,7 @@ fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, Schedul
         next_date,
         solar_error: schedule.solar_error,
         conflicts,
+        today,
     })
 }
 

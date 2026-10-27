@@ -65,6 +65,7 @@ fn result(revision: u64, request: CalculationRequest, kelvin: u16) -> Arc<Calcul
             next_date: Timestamp::from_second(86400).expect("next date"),
             solar_error: None,
             conflicts: Vec::new(),
+            today: None,
         }),
     })
 }
@@ -276,6 +277,7 @@ enum PreviewRecomputeCase {
 #[test]
 fn solar_fallback_during_preview_preserves_position_and_original_deadline() {
     let config = ConfigInput {
+        solar_timing: true,
         sunrise: true,
         sunset: true,
         coordinates: Some(crate::Coordinates {

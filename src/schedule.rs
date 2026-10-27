@@ -18,6 +18,7 @@ pub use curve::Segment;
 pub use curve::Target;
 pub use generated::ActivityInterval;
 pub use generated::Schedule;
+pub use generated::solar_today;
 pub use solar::SolarCrossings;
 pub use solar::SolarSelection;
 pub use solar::calculate_solar;
