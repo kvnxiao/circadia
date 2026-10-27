@@ -337,9 +337,16 @@ fn automatic(
     let foreground = Foreground::Application {
         executable: "activity-game.exe".into(),
         path: std::path::PathBuf::from("activity-game.exe"),
+        title: None,
     };
     activity.set_foreground(foreground.clone())?;
-    command(activity, ControllerCommand::Foreground(foreground))?;
+    command(
+        activity,
+        ControllerCommand::Foreground {
+            foreground,
+            previous: None,
+        },
+    )?;
     *time = advance(activity, shifted(*time, Duration::from_millis(100))?)?.now;
     let stopped = quiet_wait(activity)?;
     require(
@@ -442,7 +449,13 @@ fn manual(
             .filter(|snapshot| snapshot.suppression.manual()))
     })?;
     activity.set_foreground(Foreground::Unknown)?;
-    command(activity, ControllerCommand::Foreground(Foreground::Unknown))?;
+    command(
+        activity,
+        ControllerCommand::Foreground {
+            foreground: Foreground::Unknown,
+            previous: None,
+        },
+    )?;
     let deadline = wait("manual suppression expiry selected", || {
         Ok(latest_wait(activity)?.1.logical)
     })?;

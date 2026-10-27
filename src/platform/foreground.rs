@@ -1,17 +1,16 @@
 use crate::Foreground;
+use crate::PreviousWindow;
 use crate::normalize_executable;
-use std::cell::RefCell;
+use crate::platform::win_event::WinEventHook;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
-use windows_sys::Win32::Foundation::HWND as RawWindow;
-use windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK;
-use windows_sys::Win32::UI::Accessibility::SetWinEventHook;
-use windows_sys::Win32::UI::Accessibility::UnhookWinEvent;
+use windows_sys::Win32::UI::WindowsAndMessaging::CHILDID_SELF;
+use windows_sys::Win32::UI::WindowsAndMessaging::EVENT_OBJECT_NAMECHANGE;
 use windows_sys::Win32::UI::WindowsAndMessaging::EVENT_SYSTEM_FOREGROUND;
-use windows_sys::Win32::UI::WindowsAndMessaging::WINEVENT_OUTOFCONTEXT;
+use windows_sys::Win32::UI::WindowsAndMessaging::OBJID_WINDOW;
 use winsafe::HPROCESS;
 use winsafe::HWND;
 use winsafe::co;
@@ -23,6 +22,7 @@ trait WindowSource {
     fn is_shell(&self, window: &Self::Window) -> Option<bool>;
     fn children(&self, window: &Self::Window) -> Vec<Self::Window>;
     fn executable(&self, process: u32) -> Option<PathBuf>;
+    fn title(&self, window: &Self::Window) -> Option<String>;
 }
 
 struct Windows;
@@ -58,6 +58,17 @@ impl WindowSource for Windows {
     fn executable(&self, process: u32) -> Option<PathBuf> {
         process_executable(process).ok()
     }
+
+    // For another process's window, GetWindowText reads the cached caption
+    // without sending a message. For this process's own window it sends
+    // WM_GETTEXT, which would block the controller thread on the UI thread;
+    // Circadia's windows are fixed exclusions, so their titles are not read.
+    fn title(&self, window: &HWND) -> Option<String> {
+        if self.owner(window)? == std::process::id() {
+            return None;
+        }
+        window.GetWindowText().ok()
+    }
 }
 
 fn process_executable(process: u32) -> io::Result<PathBuf> {
@@ -73,44 +84,55 @@ fn file_name(path: &Path) -> Option<String> {
     normalize_executable(path.file_name()?.to_str()?).ok()
 }
 
-/// Read current foreground identity using window metadata and limited queries.
+/// Read current foreground identity and window title using window metadata
+/// and limited queries.
 pub fn read_foreground() -> Foreground {
+    current().0
+}
+
+fn current() -> (Foreground, Option<HWND>) {
     #[cfg(feature = "graph-measurement")]
     crate::activity::record(crate::ActivityEvent::ForegroundQuery);
     #[cfg(feature = "graph-measurement")]
     if let Some(foreground) = crate::activity::foreground() {
-        return foreground;
+        return (foreground, None);
     }
-    resolve_window(&Windows, HWND::GetForegroundWindow())
+    let window = HWND::GetForegroundWindow();
+    (resolve_window(&Windows, window.as_ref()), window)
 }
 
-fn resolve_window<S: WindowSource>(source: &S, window: Option<S::Window>) -> Foreground {
+fn resolve_window<S: WindowSource>(source: &S, window: Option<&S::Window>) -> Foreground {
     let Some(window) = window else {
         return Foreground::Unknown;
     };
-    match source.is_shell(&window) {
+    match source.is_shell(window) {
         Some(true) => return Foreground::Shell,
         None => return Foreground::Unknown,
         Some(false) => {}
     }
-    let Some(owner) = source.owner(&window) else {
+    let Some(owner) = source.owner(window) else {
         return Foreground::Unknown;
     };
     let Some(path) = source.executable(owner) else {
         return Foreground::Unknown;
     };
     let identity = match file_name(&path) {
-        Some(name) if name == "applicationframehost.exe" => hosted_identity(source, &window, owner),
+        Some(name) if name == "applicationframehost.exe" => hosted_identity(source, window, owner),
         Some(name) => Some((name, path)),
         None => None,
     };
+    let title = identity.as_ref().and_then(|_| source.title(window));
     // A window can exit or change ownership during synchronous identity
     // queries.
-    if source.owner(&window) != Some(owner) {
+    if source.owner(window) != Some(owner) {
         return Foreground::Unknown;
     }
     identity.map_or(Foreground::Unknown, |(executable, path)| {
-        Foreground::Application { executable, path }
+        Foreground::Application {
+            executable,
+            path,
+            title,
+        }
     })
 }
 
@@ -141,18 +163,30 @@ fn hosted_identity<S: WindowSource>(
     }
 }
 
-struct Registration {
-    handle: HWINEVENTHOOK,
-    notify: Rc<dyn Fn()>,
+fn title_event<W: PartialEq + Copy>(window: W, object: i32, child: i32, foreground: W) -> bool {
+    window == foreground && object == OBJID_WINDOW && u32::try_from(child) == Ok(CHILDID_SELF)
 }
 
-thread_local! {
-    static REGISTRATION: RefCell<Option<Registration>> = const { RefCell::new(None) };
+struct Previous {
+    window: HWND,
+    process: u32,
+    executable: String,
 }
 
-/// Remove the foreground hook on its registering message-loop thread on drop.
+struct Titles {
+    process: u32,
+    executable: String,
+    _hook: WinEventHook,
+}
+
+/// Watch foreground changes, and title changes of the foreground window while
+/// a title condition names its app; remove both hooks on the registering
+/// message-loop thread on drop.
 pub struct ForegroundEvents {
-    handle: HWINEVENTHOOK,
+    _foreground: WinEventHook,
+    notify: Rc<dyn Fn()>,
+    previous: Option<Previous>,
+    titles: Option<Titles>,
 }
 
 impl ForegroundEvents {
@@ -164,84 +198,114 @@ impl ForegroundEvents {
     ///
     /// # Errors
     ///
-    /// Reject a second registration on the thread or a failed Windows hook.
-    #[expect(
-        unsafe_code,
-        reason = "the static callback remains valid until this thread removes its hook"
-    )]
+    /// Report a failed Windows hook.
     pub fn listen(notify: impl Fn() + 'static) -> io::Result<Self> {
-        if REGISTRATION.with(|registration| registration.borrow().is_some()) {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "foreground hook already registered",
-            ));
-        }
-        // SAFETY: The callback has the required ABI and static lifetime.
-        // Out-of-context delivery executes only on this registering
-        // thread and does not inject code.
-        let handle = unsafe {
-            SetWinEventHook(
-                EVENT_SYSTEM_FOREGROUND,
-                EVENT_SYSTEM_FOREGROUND,
-                std::ptr::null_mut(),
-                Some(foreground_event),
-                0,
-                0,
-                WINEVENT_OUTOFCONTEXT,
-            )
+        let notify: Rc<dyn Fn()> = Rc::new(notify);
+        let foreground_notify = Rc::clone(&notify);
+        let hook = WinEventHook::listen(
+            EVENT_SYSTEM_FOREGROUND..=EVENT_SYSTEM_FOREGROUND,
+            0,
+            move |_| {
+                #[cfg(feature = "graph-measurement")]
+                crate::activity::record(crate::ActivityEvent::ForegroundEvent);
+                foreground_notify();
+            },
+        )?;
+        Ok(Self {
+            _foreground: hook,
+            notify,
+            previous: None,
+            titles: None,
+        })
+    }
+
+    /// Read the foreground window, and the executable and title of the
+    /// previously read window when that window still exists and belongs to
+    /// another executable.
+    ///
+    /// - `follow_titles` reports whether a title condition names an executable
+    ///   file name. While it names the foreground app, title changes of the
+    ///   foreground window notify like foreground changes until the next read
+    ///   that names another app.
+    pub(crate) fn read(
+        &mut self,
+        follow_titles: impl FnOnce(&str) -> bool,
+    ) -> (Foreground, Option<PreviousWindow>) {
+        let (foreground, window) = current();
+        let executable = match &foreground {
+            Foreground::Application { executable, .. } => Some(executable.as_str()),
+            Foreground::Unknown | Foreground::Shell => None,
         };
-        if handle.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        REGISTRATION.with(|registration| {
-            *registration.borrow_mut() = Some(Registration {
-                handle,
-                notify: Rc::new(notify),
+        let previous = self
+            .previous
+            .take()
+            .filter(|previous| {
+                Some(previous.executable.as_str()) != executable
+                    && Windows.owner(&previous.window) == Some(previous.process)
+            })
+            .and_then(|previous| {
+                Windows.title(&previous.window).map(|title| PreviousWindow {
+                    executable: previous.executable,
+                    title,
+                })
             });
-        });
-        Ok(Self { handle })
-    }
-}
-
-impl Drop for ForegroundEvents {
-    #[expect(
-        unsafe_code,
-        reason = "the non-Send guard removes its owned hook on the registering thread"
-    )]
-    fn drop(&mut self) {
-        REGISTRATION.with(|registration| {
-            drop(registration.borrow_mut().take());
-        });
-        // SAFETY: This guard owns a live hook and cannot move to another
-        // thread.
-        unsafe { UnhookWinEvent(self.handle) };
-    }
-}
-
-#[expect(
-    unsafe_code,
-    reason = "Windows invokes this static callback with the WinEvent ABI"
-)]
-unsafe extern "system" fn foreground_event(
-    hook: HWINEVENTHOOK,
-    _event: u32,
-    _window: RawWindow,
-    _object: i32,
-    _child: i32,
-    _thread: u32,
-    _time: u32,
-) {
-    let callback = REGISTRATION.with(|registration| {
-        registration
-            .borrow()
+        let process = window
             .as_ref()
-            .filter(|value| value.handle == hook)
-            .map(|value| Rc::clone(&value.notify))
-    });
-    if let Some(callback) = callback {
-        #[cfg(feature = "graph-measurement")]
-        crate::activity::record(crate::ActivityEvent::ForegroundEvent);
-        callback();
+            .and_then(|window| Windows.owner(window))
+            .filter(|process| *process != std::process::id());
+        let follow = executable
+            .zip(process)
+            .filter(|(executable, _)| follow_titles(executable));
+        let following = self
+            .titles
+            .as_ref()
+            .map(|titles| (titles.executable.as_str(), titles.process));
+        if following != follow {
+            self.titles = None;
+            self.titles = follow
+                .and_then(|(executable, process)| self.follow(executable.to_owned(), process));
+        }
+        if let (Some(window), Some(executable), Some(process)) = (window, executable, process) {
+            self.previous = Some(Previous {
+                window,
+                process,
+                executable: executable.to_owned(),
+            });
+        }
+        (foreground, previous)
+    }
+
+    fn follow(&self, executable: String, process: u32) -> Option<Titles> {
+        let notify = Rc::clone(&self.notify);
+        let logged = executable.clone();
+        WinEventHook::listen(
+            EVENT_OBJECT_NAMECHANGE..=EVENT_OBJECT_NAMECHANGE,
+            process,
+            move |event| {
+                let Some(foreground) = HWND::GetForegroundWindow() else {
+                    return;
+                };
+                if !title_event(event.window, event.object, event.child, foreground.ptr()) {
+                    return;
+                }
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    let title = Windows.title(&foreground);
+                    tracing::debug!(
+                        executable = %logged,
+                        title = title.as_deref().map(tracing::field::display),
+                        "title changed"
+                    );
+                }
+                notify();
+            },
+        )
+        .inspect_err(|error| tracing::warn!(%error, "observing window title changes"))
+        .ok()
+        .map(|hook| Titles {
+            process,
+            executable,
+            _hook: hook,
+        })
     }
 }
 
@@ -250,6 +314,8 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::collections::BTreeMap;
+    use windows_sys::Win32::UI::WindowsAndMessaging::OBJID_CLIENT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::OBJID_TITLEBAR;
 
     struct Fixture {
         names: BTreeMap<u32, Option<String>>,
@@ -281,6 +347,10 @@ mod tests {
                 .flatten()
                 .map(|name| PathBuf::from(format!("C:/Apps/{name}")))
         }
+
+        fn title(&self, window: &u32) -> Option<String> {
+            Some(format!("Window {window}"))
+        }
     }
 
     fn fixture(names: &[(u32, Option<&str>)]) -> Fixture {
@@ -299,10 +369,11 @@ mod tests {
     fn direct_process_uses_only_its_own_filename() {
         let source = fixture(&[(1, Some("VLC.EXE")), (2, Some("other.exe"))]);
         assert_eq!(
-            resolve_window(&source, Some(1)),
+            resolve_window(&source, Some(&1)),
             Foreground::Application {
                 executable: "vlc.exe".into(),
                 path: PathBuf::from("C:/Apps/VLC.EXE"),
+                title: Some("Window 1".into()),
             }
         );
     }
@@ -318,6 +389,7 @@ mod tests {
                 Foreground::Application {
                     executable: "calculatorapp.exe".into(),
                     path: PathBuf::from("C:/Apps/CalculatorApp.exe"),
+                    title: Some("Window 1".into()),
                 },
             ),
             (
@@ -337,7 +409,7 @@ mod tests {
                 Foreground::Unknown,
             ),
         ] {
-            assert_eq!(resolve_window(&fixture(&names), Some(1)), expected);
+            assert_eq!(resolve_window(&fixture(&names), Some(&1)), expected);
         }
     }
 
@@ -345,9 +417,9 @@ mod tests {
     fn inaccessible_or_exited_windows_do_not_supply_identity() {
         let mut source = fixture(&[(1, Some("game.exe"))]);
         source.exit_on_query = true;
-        assert_eq!(resolve_window(&source, Some(1)), Foreground::Unknown);
+        assert_eq!(resolve_window(&source, Some(&1)), Foreground::Unknown);
         assert_eq!(
-            resolve_window(&fixture(&[(1, None)]), Some(1)),
+            resolve_window(&fixture(&[(1, None)]), Some(&1)),
             Foreground::Unknown
         );
         assert_eq!(resolve_window(&source, None), Foreground::Unknown);
@@ -355,7 +427,7 @@ mod tests {
 
     #[test]
     fn desktop_or_taskbar_is_not_an_application_candidate() {
-        assert_eq!(resolve_window(&fixture(&[]), Some(0)), Foreground::Shell);
+        assert_eq!(resolve_window(&fixture(&[]), Some(&0)), Foreground::Shell);
     }
 
     #[test]
@@ -377,12 +449,20 @@ mod tests {
     }
 
     #[test]
-    fn foreground_registration_is_removed_before_replacement() {
+    fn foreground_registration_can_be_replaced_after_drop() {
         let first = ForegroundEvents::listen(|| {}).expect("first hook");
-        assert!(ForegroundEvents::listen(|| {}).is_err());
         drop(first);
         let second = ForegroundEvents::listen(|| {}).expect("replacement hook");
         drop(second);
-        assert!(REGISTRATION.with(|registration| registration.borrow().is_none()));
+    }
+
+    #[test]
+    fn title_events_are_accepted_only_for_the_foreground_window_itself() {
+        let child = i32::try_from(CHILDID_SELF).expect("child identifier");
+        assert!(title_event(7, OBJID_WINDOW, child, 7));
+        assert!(!title_event(8, OBJID_WINDOW, child, 7));
+        assert!(!title_event(7, OBJID_TITLEBAR, child, 7));
+        assert!(!title_event(7, OBJID_CLIENT, child, 7));
+        assert!(!title_event(7, OBJID_WINDOW, 3, 7));
     }
 }

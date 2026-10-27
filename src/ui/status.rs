@@ -86,7 +86,11 @@ pub(super) fn menu_items(
     let recent = snapshot.map_or(&[][..], |snapshot| snapshot.recent.as_slice());
     items.extend(recent.iter().take(3).map(|recent| {
         let executable = recent.executable.as_str();
-        let name = names.get(executable).map_or(executable, String::as_str);
+        let name = if recent.condition.is_empty() {
+            names.get(executable).map_or(executable, String::as_str)
+        } else {
+            recent.condition.as_str()
+        };
         let listed = if recent.included { "yes" } else { "no" };
         let action = if recent.included { "remove" } else { "add" };
         let key = format!("{action}:{executable}");
@@ -111,7 +115,7 @@ pub(super) fn menu_items(
                     name = name,
                     executable = executable
                 ),
-                toggles == Toggles::Available,
+                toggles == Toggles::Available && recent.condition.is_empty(),
             )
         }
     }));
@@ -518,7 +522,9 @@ mod tests {
             executable: executable.into(),
             path: std::path::PathBuf::from(format!("C:/Apps/{executable}")),
             focus_ended: None,
+            title: None,
             included: false,
+            condition: String::new(),
             excluded: false,
         }
     }
@@ -598,6 +604,33 @@ mod tests {
                 entry("separator-quit", "-", false),
                 entry("quit", "Quit Circadia", true),
             ]
+        );
+    }
+
+    #[test]
+    fn an_entry_with_a_title_condition_shows_its_title_text_and_is_unavailable() {
+        let mut state = snapshot(ConfigInput::default());
+        state.recent = vec![RecentApp {
+            included: true,
+            condition: "Minecraft".to_owned(),
+            ..recent("javaw.exe")
+        }];
+        let names = BTreeMap::from([("javaw.exe".to_owned(), "Java".to_owned())]);
+        let items = menu_items(
+            &english(),
+            Some(&state),
+            ManualCommand::Start,
+            Toggles::Available,
+            &names,
+        );
+        assert!(
+            labels(&items).contains(&entry(
+                "remove:javaw.exe",
+                "\u{2713} Minecraft (javaw.exe)",
+                false
+            )),
+            "{:?}",
+            labels(&items)
         );
     }
 
@@ -759,7 +792,7 @@ mod tests {
             "a.exe",
             "game.exe",
         ] {
-            apps.observe(&Foreground::application(name), Duration::ZERO);
+            apps.observe(&Foreground::application(name), None, Duration::ZERO);
         }
         let mut state = snapshot(ConfigInput::default());
         state.recent = apps.recent(&config);

@@ -25,6 +25,7 @@ fs-err = "3.3"
 i18n-embed = { version = "0.16", features = ["fluent-system"] }
 i18n-embed-fl = "0.10"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
+regex = "1.13"
 rust-embed = { version = "8", features = ["debug-embed"] }
 serde = { version = "1.0", features = ["derive"] }
 solar-positioning = { version = "0.7.1", default-features = false, features = ["std"] }

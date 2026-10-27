@@ -124,7 +124,32 @@ list-empty-description = Add a game, video player or photo editor to keep its co
 entry-remove-name = Remove { $name }
 entry-inactive = Inactive because this app is excluded.
 entry-invalid = Invalid file name. This entry matches nothing until you remove it.
+entry-expression = Invalid window title pattern. This entry matches nothing until you fix it.
 entry-duplicate = { $executable } is on this list twice. Remove one entry.
+entry-title-detail =
+    { $regex ->
+        [yes] { $executable } · Title matches
+       *[no] { $executable } · Title contains
+    }
+entry-title-name = Window title condition for { $name }
+title-dialog-title = Match window titles
+title-dialog-description =
+    { $regex ->
+        [yes] Limit this entry to windows whose title matches this pattern. Leave it empty to match every window of { $executable }.
+       *[no] Limit this entry to windows whose title contains this text. Leave it empty to match every window of { $executable }.
+    }
+title-dialog-field =
+    { $regex ->
+        [yes] Window title matches
+       *[no] Window title contains
+    }
+title-dialog-regex = Use regular expression
+title-dialog-last-seen = Last seen: { $title }
+title-dialog-use = Use this title
+title-dialog-invalid = This isn't a valid regular expression.
+title-dialog-save = Save
+missing-entry-title-note = Some entries in the settings file have no window title setting, so they have no window title condition.
+missing-entry-regex-note = Some entries in the settings file have no regular expression setting, so their window title text is matched as plain text.
 section-never = Never suppress
 exclusions-title = Excluded apps
 exclusions-description = Exclusions win over the suppression list. They don't affect Suppress for 1 hour.

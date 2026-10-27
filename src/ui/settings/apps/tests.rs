@@ -118,7 +118,9 @@ fn recent_app(executable: &str, focus_ended: Option<Duration>) -> crate::RecentA
         executable: executable.into(),
         path: std::path::PathBuf::from(format!("C:/Apps/{executable}")),
         focus_ended,
+        title: None,
         included: false,
+        condition: String::new(),
         excluded: false,
     }
 }
@@ -478,4 +480,238 @@ fn relative_times_update_only_while_the_shown_app_page_has_recent_apps() {
         Visibility::Shown
     ));
     assert_eq!(MINUTE, Duration::from_secs(60));
+}
+
+fn titled_file(suppression: &[(&str, &str, bool)], exclusions: &[(&str, &str, bool)]) -> String {
+    let entries = |list: &[(&str, &str, bool)]| -> Vec<crate::AppEntry> {
+        list.iter()
+            .map(|(executable, title, regex)| {
+                crate::AppEntry::new(*executable, *executable).with_title(*title, *regex)
+            })
+            .collect()
+    };
+    let input = crate::ConfigInput {
+        suppression: entries(suppression),
+        exclusions: entries(exclusions),
+        ..crate::ConfigInput::default()
+    };
+    toml::to_string(&input).expect("fixture serializes")
+}
+
+fn seen(executable: &str, title: &str) -> crate::RecentApp {
+    crate::RecentApp {
+        title: Some(title.into()),
+        ..recent_app(executable, None)
+    }
+}
+
+fn row_labels(model: &Model, list: Field) -> Vec<(String, String)> {
+    entry_rows(model, &english(), list)
+        .into_iter()
+        .map(|row| (plain(&row.name), plain(&row.detail)))
+        .collect()
+}
+
+#[test_case(false, "javaw.exe \u{b7} Title contains"; "literal text")]
+#[test_case(true, "javaw.exe \u{b7} Title matches"; "regular expression")]
+fn saving_a_title_relabels_the_entry_by_its_title_text(regex: bool, detail: &str) {
+    let mut fixture = Fixture::new(Some(&titled_file(&[("javaw.exe", "", false)], &[])));
+    let model = fixture.model(Vec::new());
+    assert_eq!(
+        row_labels(&model, Field::Suppression),
+        [("javaw.exe".to_owned(), "javaw.exe".to_owned())]
+    );
+    let mut dialog = TitleDialog::open(&model, Field::Suppression, 0).expect("user entry");
+    dialog.set_regex(regex);
+    dialog.set_text("Minecraft");
+    assert!(title_dialog_view(&model, &english(), &dialog).save_enabled);
+    let command = dialog.command().expect("valid condition");
+    fixture.desktop.command(command);
+    assert_eq!(
+        fixture.configured(),
+        [vec![
+            crate::AppEntry::new("javaw.exe", "javaw.exe").with_title("Minecraft", regex)
+        ]]
+    );
+    let model = fixture.model(Vec::new());
+    assert_eq!(
+        row_labels(&model, Field::Suppression),
+        [("Minecraft".to_owned(), detail.to_owned())]
+    );
+    let saved = fixture.saved().expect("a dialog choice writes at once");
+    assert!(saved.contains("title = \"Minecraft\""), "{saved}");
+}
+
+#[test]
+fn the_title_dialog_suggests_the_history_title_and_use_this_title_copies_it() {
+    let fixture = Fixture::new(Some(&titled_file(&[("javaw.exe", "", false)], &[])));
+    let model = fixture.model(vec![seen("javaw.exe", "Minecraft 1.21.4")]);
+    let mut dialog = TitleDialog::open(&model, Field::Suppression, 0).expect("user entry");
+    let view = title_dialog_view(&model, &english(), &dialog);
+    assert_eq!(plain(&view.title), "Match window titles");
+    assert_eq!(
+        plain(&view.description),
+        "Limit this entry to windows whose title contains this text. Leave it empty to match every window of javaw.exe."
+    );
+    assert_eq!(plain(&view.label), "Window title contains");
+    assert_eq!(
+        view.suggestion.as_deref().map(plain),
+        Some("Last seen: Minecraft 1.21.4".to_owned())
+    );
+    dialog.use_title(&model);
+    assert_eq!(
+        title_dialog_view(&model, &english(), &dialog).text,
+        "Minecraft 1.21.4"
+    );
+    dialog.set_regex(true);
+    dialog.use_title(&model);
+    let view = title_dialog_view(&model, &english(), &dialog);
+    assert_eq!(view.text, "Minecraft 1\\.21\\.4");
+    assert_eq!(plain(&view.label), "Window title matches");
+    assert!(
+        plain(&view.description)
+            .starts_with("Limit this entry to windows whose title matches this pattern.")
+    );
+    let unseen = fixture.model(Vec::new());
+    assert_eq!(
+        title_dialog_view(&unseen, &english(), &dialog).suggestion,
+        None
+    );
+}
+
+#[test]
+fn an_invalid_expression_shows_a_field_error_disables_save_and_keeps_the_condition() {
+    let fixture = Fixture::new(Some(&titled_file(
+        &[("javaw.exe", "Minecraft", false)],
+        &[],
+    )));
+    let model = fixture.model(Vec::new());
+    let mut dialog = TitleDialog::open(&model, Field::Suppression, 0).expect("user entry");
+    assert_eq!(
+        title_dialog_view(&model, &english(), &dialog).text,
+        "Minecraft"
+    );
+    dialog.set_regex(true);
+    dialog.set_text("minecraft(");
+    let view = title_dialog_view(&model, &english(), &dialog);
+    assert_eq!(
+        view.error.as_deref().map(plain),
+        Some("This isn't a valid regular expression.".to_owned())
+    );
+    assert!(!view.save_enabled);
+    assert_eq!(dialog.command(), None);
+    assert_eq!(
+        fixture
+            .model(Vec::new())
+            .config()
+            .entries(Field::Suppression),
+        [crate::AppEntry::new("javaw.exe", "javaw.exe").with_title("Minecraft", false)]
+    );
+}
+
+#[test]
+fn an_app_with_a_title_limited_entry_is_not_offered_again() {
+    let fixture = Fixture::new(Some(&titled_file(
+        &[("javaw.exe", "Minecraft", false)],
+        &[("javaw.exe", "IntelliJ", false)],
+    )));
+    let model = fixture.model(vec![seen("javaw.exe", "Minecraft 1.21.4")]);
+    for list in [Field::Suppression, Field::Exclusions] {
+        assert_eq!(AddDialog::new(list).candidates(&model), [], "{list:?}");
+    }
+}
+
+#[test]
+fn only_an_exclusion_without_a_title_condition_makes_an_entry_inactive_or_excluded() {
+    let fixture = Fixture::new(Some(&titled_file(
+        &[("javaw.exe", "", false), ("game.exe", "", false)],
+        &[("javaw.exe", "IntelliJ", false), ("game.exe", "", false)],
+    )));
+    let model = fixture.model(vec![
+        recent_app("javaw.exe", None),
+        recent_app("game.exe", None),
+    ]);
+    let inactive: Vec<bool> = entry_rows(&model, &english(), Field::Suppression)
+        .into_iter()
+        .map(|row| row.inactive)
+        .collect();
+    assert_eq!(inactive, [false, true]);
+    let excluded: Vec<bool> = recent_rows(&model, &english(), &region(), Duration::ZERO)
+        .into_iter()
+        .map(|row| row.excluded)
+        .collect();
+    assert_eq!(excluded, [false, true]);
+    assert_eq!(
+        row_labels(&model, Field::Exclusions),
+        [
+            (
+                "IntelliJ".to_owned(),
+                "javaw.exe \u{b7} Title contains".to_owned()
+            ),
+            ("game.exe".to_owned(), "game.exe".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn fixed_exclusions_have_no_title_condition_command() {
+    let fixture = Fixture::new(Some(&titled_file(&[], &[("browser.exe", "", false)])));
+    let model = fixture.model(Vec::new());
+    assert!(TitleDialog::open(&model, Field::Exclusions, 0).is_some());
+    assert_eq!(fixed_rows(&model, &english()).len(), 2);
+    assert!(TitleDialog::open(&model, Field::Exclusions, 1).is_none());
+    assert!(TitleDialog::open(&model, Field::Exclusions, 2).is_none());
+}
+
+#[test]
+fn clearing_a_loaded_invalid_expression_removes_its_mark_and_writes_the_file() {
+    let file = titled_file(&[("javaw.exe", "minecraft(", true)], &[]);
+    let mut fixture = Fixture::new(Some(&file));
+    let model = fixture.model(Vec::new());
+    assert!(model.paused);
+    let errors: Vec<Option<String>> = entry_rows(&model, &english(), Field::Suppression)
+        .into_iter()
+        .map(|row| row.error.as_deref().map(plain))
+        .collect();
+    assert_eq!(
+        errors,
+        [Some(
+            "Invalid window title pattern. This entry matches nothing until you fix it.".to_owned()
+        )]
+    );
+    let mut dialog = TitleDialog::open(&model, Field::Suppression, 0).expect("user entry");
+    assert!(!title_dialog_view(&model, &english(), &dialog).save_enabled);
+    dialog.set_text("");
+    let command = dialog.command().expect("an empty condition is valid");
+    fixture.desktop.command(command);
+    assert!(!fixture.configuration.borrow().paused());
+    let saved = fixture.saved().expect("ending the pause writes the file");
+    assert_ne!(saved, file);
+    assert!(saved.contains("title = \"\""), "{saved}");
+    let model = fixture.model(Vec::new());
+    assert!(super::super::problems::marked_pages(&model).is_empty());
+}
+
+#[test_case(&["title = \"\"\n", "regex = false\n"], "Some entries in the settings file have no window title setting, so they have no window title condition. Some entries in the settings file have no regular expression setting, so their window title text is matched as plain text." ; "both keys")]
+#[test_case(&["regex = false\n"], "Some entries in the settings file have no regular expression setting, so their window title text is matched as plain text." ; "regex only")]
+#[test_case(&["title = \"\"\n"], "Some entries in the settings file have no window title setting, so they have no window title condition." ; "title only")]
+fn entries_without_title_keys_are_noted_at_their_list(removed: &[&str], expected: &str) {
+    let file = removed
+        .iter()
+        .fold(entries_file(&["javaw.exe"], &[]), |file, line| {
+            file.replace(line, "")
+        });
+    let fixture = Fixture::new(Some(&file));
+    let model = fixture.model(Vec::new());
+    assert!(!model.paused);
+    let note = |list: Field| {
+        super::super::problems::feedback(&model, &english(), &region(), list).map(|feedback| {
+            match feedback {
+                super::super::problems::Feedback::Note(note) => plain(&note),
+                super::super::problems::Feedback::Error(error) => format!("error: {error}"),
+            }
+        })
+    };
+    assert_eq!(note(Field::Suppression), Some(expected.to_owned()));
+    assert_eq!(note(Field::Exclusions), None);
 }

@@ -217,11 +217,12 @@ impl Configuration {
         let entries = self.accepted.iter().flat_map(|config| {
             [Field::Suppression, Field::Exclusions]
                 .into_iter()
-                .flat_map(|list| crate::entry_problems(config.entries(list)))
+                .flat_map(|list| config.entry_problems(list))
         });
         let problems = self.report.marks.len()
             + self.report.missing.len()
             + self.report.unknown.len()
+            + self.report.missing_entry_keys.len()
             + entries.flatten().count();
         let cause = self.restore.map(|problem| problem.to_string());
         crate::log::record_start(configuration, cause.as_deref(), problems);
@@ -277,16 +278,19 @@ impl Configuration {
         for (field, source) in &self.report.missing {
             tracing::info!(field = %field.key(), source = %source_name(*source), "missing key");
         }
+        for key in &self.report.missing_entry_keys {
+            tracing::info!(field = %key, "missing key");
+        }
         for key in &self.report.unknown {
             tracing::info!(key = %key, "unknown key");
         }
         let lists = self.accepted.iter().flat_map(|config| {
             [Field::Suppression, Field::Exclusions]
                 .into_iter()
-                .map(|list| (list, config.entries(list)))
+                .map(|list| (list, config.entries(list), config.entry_problems(list)))
         });
-        for (list, entries) in lists {
-            let problems = entries.iter().zip(crate::entry_problems(entries));
+        for (list, entries, problems) in lists {
+            let problems = entries.iter().zip(problems);
             for (entry, problem) in problems.filter_map(|(entry, problem)| Some((entry, problem?)))
             {
                 tracing::info!(
@@ -473,8 +477,33 @@ impl Configuration {
             .as_ref()?
             .entries(Field::Suppression)
             .iter()
-            .position(|listed| listed.file_name().as_deref() == Some(executable.as_str()))?;
+            .enumerate()
+            .find(|(_, listed)| listed.file_name().as_deref() == Some(executable.as_str()))
+            .filter(|(_, listed)| listed.title.is_empty())
+            .map(|(index, _)| index)?;
         self.remove(Field::Suppression, index, &executable)
+    }
+
+    pub(crate) fn set_title(
+        &mut self,
+        list: Field,
+        index: usize,
+        executable: &str,
+        title: String,
+        regex: bool,
+    ) -> Option<Arc<Config>> {
+        if !crate::valid_title(&title, regex) {
+            return None;
+        }
+        let mut entries = self.accepted.as_ref()?.entries(list).to_vec();
+        let entry = entries.get_mut(index)?;
+        if entry.executable != executable && entry.file_name().as_deref() != Some(executable) {
+            return None;
+        }
+        *entry = std::mem::take(entry).with_title(title, regex);
+        let changed = self.edit(vec![(list, FieldValue::Apps(entries))]);
+        self.write();
+        changed
     }
 
     pub(crate) fn record_name(&mut self, executable: &str, name: &str) -> Option<Arc<Config>> {
@@ -528,6 +557,7 @@ impl Configuration {
                 self.write_error = None;
                 self.log.recovered(DiagnosticOperation::ConfigurationWrite);
                 self.report.missing.clear();
+                self.report.missing_entry_keys.clear();
                 self.report.unknown.clear();
                 if let Some(error) = result.backup_error {
                     self.log

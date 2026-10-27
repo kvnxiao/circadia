@@ -27,7 +27,6 @@ use crate::WindowsZone;
 use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
-use crate::platform::settings_window::MinimizeEvents;
 use jiff::Timestamp;
 use problems::Action;
 use problems::Banner;
@@ -307,6 +306,13 @@ pub(super) enum Command {
     Add(Field, Vec<super::file_info::AppFile>),
     Browsed(super::file_info::AppFile),
     Remove(Field, usize, String),
+    Title {
+        list: Field,
+        index: usize,
+        executable: String,
+        title: String,
+        regex: bool,
+    },
 }
 
 fn local_minute(instant: Timestamp) -> Option<u16> {
@@ -362,6 +368,11 @@ pub(super) enum Message {
     Browse,
     Picked(Option<super::file_info::AppFile>),
     Expand(bool),
+    OpenTitle(Field, usize),
+    TitleText(Rc<str>),
+    TitleRegex(bool),
+    UseTitle,
+    TitleClosed(ContentDialogResult),
 }
 
 pub(super) struct Settings {
@@ -373,9 +384,10 @@ pub(super) struct Settings {
     tick: Option<ComponentTimer>,
     minute: Option<ComponentTimer>,
     visibility: Visibility,
-    _minimize_events: Option<MinimizeEvents>,
+    _minimize_events: Option<crate::platform::win_event::WinEventHook>,
     consent: bool,
     dialog: Option<apps::AddDialog>,
+    title_dialog: Option<apps::TitleDialog>,
     exclusions_expanded: bool,
 }
 
@@ -700,7 +712,7 @@ impl Component for Settings {
     fn create(input: &Input, context: &ComponentContext<Self>) -> Self {
         input.opened.call(());
         let visibility = context.callback(Message::Visibility);
-        let minimize_events = MinimizeEvents::listen(move |minimized| {
+        let minimize_events = crate::platform::settings_window::minimize_events(move |minimized| {
             visibility.call(if minimized {
                 Visibility::Minimized
             } else {
@@ -721,6 +733,7 @@ impl Component for Settings {
             _minimize_events: minimize_events,
             consent: false,
             dialog: None,
+            title_dialog: None,
             exclusions_expanded: false,
         };
         settings.animate(context);
@@ -802,6 +815,30 @@ impl Component for Settings {
                 }
             }
             Message::Expand(expanded) => self.exclusions_expanded = expanded,
+            Message::OpenTitle(list, index) => {
+                self.title_dialog = apps::TitleDialog::open(&self.input.model, list, index);
+            }
+            Message::TitleText(text) => {
+                if let Some(dialog) = &mut self.title_dialog {
+                    dialog.set_text(&text);
+                }
+            }
+            Message::TitleRegex(regex) => {
+                if let Some(dialog) = &mut self.title_dialog {
+                    dialog.set_regex(regex);
+                }
+            }
+            Message::UseTitle => {
+                if let Some(dialog) = &mut self.title_dialog {
+                    dialog.use_title(&self.input.model);
+                }
+            }
+            Message::TitleClosed(result) => {
+                let command = self.title_dialog.take().and_then(|dialog| dialog.command());
+                if let (ContentDialogResult::Primary, Some(command)) = (result, command) {
+                    self.input.command.call(command);
+                }
+            }
         }
         self.animate(context);
     }

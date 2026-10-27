@@ -27,6 +27,7 @@ use crate::Native;
 use crate::NativeExit;
 use crate::NativeFailure;
 use crate::NativeWake;
+use crate::PreviousWindow;
 use crate::RecentApp;
 use crate::SuppressionState;
 use crate::WindowsZone;
@@ -102,7 +103,14 @@ pub enum ControllerCommand {
         result: Result<(), DiagnosticFailure>,
     },
     /// Process an already resolved foreground observation.
-    Foreground(Foreground),
+    Foreground {
+        /// Current foreground identity and window title.
+        foreground: Foreground,
+        /// Previous foreground window's executable and the title it had when
+        /// focus moved from it to a window of another executable, or none
+        /// when that window closed or its title could not be read.
+        previous: Option<PreviousWindow>,
+    },
     /// Recompute after a Windows notification or explicit Retry.
     Recompute(Recompute),
     /// Stop Preview on session lock while retaining ordinary control.
@@ -153,17 +161,34 @@ impl ControllerCommand {
                                 .executable
                                 .len()
                                 .saturating_add(entry.name.len())
+                                .saturating_add(entry.title.len())
                                 .saturating_add(size_of::<crate::AppEntry>())
                         })
                         .fold(0_usize, usize::saturating_add),
                 )
         } else {
             match self {
-                Self::Foreground(Foreground::Application { executable, path })
-                | Self::Resume {
-                    foreground: Foreground::Application { executable, path },
+                Self::Foreground {
+                    foreground:
+                        Foreground::Application {
+                            executable,
+                            path,
+                            title,
+                        },
                     ..
-                } => executable.len().saturating_add(path.as_os_str().len()),
+                }
+                | Self::Resume {
+                    foreground:
+                        Foreground::Application {
+                            executable,
+                            path,
+                            title,
+                        },
+                    ..
+                } => executable
+                    .len()
+                    .saturating_add(path.as_os_str().len())
+                    .saturating_add(title.as_ref().map_or(0, String::len)),
                 _ => 0,
             }
         };
@@ -696,7 +721,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             return self
                 .driver
                 .runtime_mut()
-                .foreground(&(self.foreground)(), now)
+                .foreground(&(self.foreground)(), None, now)
                 .map_err(io::Error::other);
         }
         let request = self
@@ -706,7 +731,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             .map_err(io::Error::other)?;
         self.driver
             .runtime_mut()
-            .foreground(&(self.foreground)(), now)
+            .foreground(&(self.foreground)(), None, now)
             .map_err(io::Error::other)?;
         if let Some(request) = request {
             // A Configure prepares a Schedule calculation at submission;
@@ -1114,10 +1139,13 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                     .stop_preview(now)
                     .map_err(io::Error::other)?;
             }
-            ControllerCommand::Foreground(foreground) => {
+            ControllerCommand::Foreground {
+                foreground,
+                previous,
+            } => {
                 self.driver
                     .runtime_mut()
-                    .foreground(&foreground, now)
+                    .foreground(&foreground, previous.as_ref(), now)
                     .map_err(io::Error::other)?;
             }
             ControllerCommand::Recompute(Recompute::Retry) if !self.driver.runtime().managing() => {
