@@ -236,6 +236,12 @@ mod tests {
         .expect("fade");
         assert_eq!(fade.end(), Duration::from_millis(20_500));
         assert_eq!(
+            fade.rounded(Duration::from_millis(20_111))
+                .expect("fractional destination affects rounding")
+                .kelvin(),
+            6050
+        );
+        assert_eq!(
             fade.rounded(Duration::from_millis(20_250))
                 .expect("halfway fade")
                 .kelvin(),

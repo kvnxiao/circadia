@@ -224,6 +224,7 @@ enum Pending {
     Fade,
     Set,
     Apply,
+    Retry,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -652,6 +653,17 @@ impl TemperatureOutput {
             return scheduled;
         }
         if report.cancelled {
+            if let Some(step) = issued {
+                self.pending = match step.request.mode {
+                    TemperatureMode::Set => Pending::Set,
+                    _ => Pending::Retry,
+                };
+                self.refresh |= !report.requested_stored
+                    && matches!(
+                        step.request.mode,
+                        TemperatureMode::Apply | TemperatureMode::ApplyHeld
+                    );
+            }
             return scheduled;
         }
         if let Some(step) = issued {

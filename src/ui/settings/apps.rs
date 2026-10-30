@@ -285,7 +285,9 @@ impl IconRequests {
             self.view = Some(view);
             self.requested.clear();
         }
-        let due: Vec<crate::ExecutablePath> = shown_apps(page, dialog, model)
+        let shown = shown_apps(page, dialog, model);
+        self.requested.retain(|path| shown.contains(path));
+        let due: Vec<crate::ExecutablePath> = shown
             .into_iter()
             .filter(|executable| !self.requested.contains(executable))
             .collect();
@@ -323,83 +325,58 @@ pub(super) fn recent_rows(
     model
         .recent
         .iter()
-        .map(|recent| RecentRow {
-            file: AppFile {
+        .map(|recent| {
+            let file = AppFile {
                 executable: recent.executable.clone(),
                 path: recent.path.clone(),
-            },
-            name: display_name(
-                model,
-                &AppFile {
-                    executable: recent.executable.clone(),
-                    path: recent.path.clone(),
-                },
-            ),
-            detail: {
-                let detail = fl!(
-                    "recent-detail",
-                    executable = recent.executable.as_str(),
-                    since = since(text, region, recent.since_focus(now))
-                );
-                let same_name = model
-                    .recent
-                    .iter()
-                    .filter(|other| crate::same_executable(&other.executable, &recent.executable))
-                    .count()
-                    > 1;
-                recent
-                    .path
-                    .to_str()
-                    .and_then(|path| crate::ExecutablePath::new(path).ok())
-                    .filter(|_| same_name)
-                    .map_or_else(
+            };
+            let path = file.identity();
+            let membership = config.classify_path(
+                &recent.executable,
+                path.as_ref(),
+                None,
+                &model.running_executable,
+            );
+            RecentRow {
+                name: display_name(model, &file),
+                file,
+                detail: {
+                    let detail = fl!(
+                        "recent-detail",
+                        executable = recent.executable.as_str(),
+                        since = since(text, region, recent.since_focus(now))
+                    );
+                    let same_name = model
+                        .recent
+                        .iter()
+                        .filter(|other| {
+                            crate::same_executable(&other.executable, &recent.executable)
+                        })
+                        .count()
+                        > 1;
+                    path.as_ref().filter(|_| same_name).map_or_else(
                         || detail.clone(),
                         |path| format!("{detail}\n{}", path.folder()),
                     )
-            },
-            listed: {
-                let path = recent
-                    .path
-                    .to_str()
-                    .and_then(|path| crate::ExecutablePath::new(path).ok());
-                let entries: Vec<_> = config
-                    .entries(Field::Suppression)
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, entry)| entry.covers(&recent.executable, path.as_ref()))
-                    .collect();
-                (entries.len() == 1)
-                    .then(|| {
-                        entries
-                            .first()
-                            .map(|(index, entry)| (*index, (*entry).clone()))
-                    })
-                    .flatten()
-            },
-            covering: config
-                .classify_path(
-                    &recent.executable,
-                    recent
-                        .path
-                        .to_str()
-                        .and_then(|path| crate::ExecutablePath::new(path).ok())
-                        .as_ref(),
-                    None,
-                    &model.running_executable,
-                )
-                .covering,
-            excluded: config
-                .classify_path(
-                    &recent.executable,
-                    recent
-                        .path
-                        .to_str()
-                        .and_then(|path| crate::ExecutablePath::new(path).ok())
-                        .as_ref(),
-                    None,
-                    &model.running_executable,
-                )
-                .excluded,
+                },
+                listed: {
+                    let entries: Vec<_> = config
+                        .entries(Field::Suppression)
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, entry)| entry.covers(&recent.executable, path.as_ref()))
+                        .collect();
+                    (entries.len() == 1)
+                        .then(|| {
+                            entries
+                                .first()
+                                .map(|(index, entry)| (*index, (*entry).clone()))
+                        })
+                        .flatten()
+                },
+                covering: membership.covering,
+                excluded: membership.excluded,
+            }
         })
         .collect()
 }
@@ -529,7 +506,14 @@ impl AddDialog {
     }
 
     pub(super) fn choose(&mut self, path: &crate::ExecutablePath, checked: bool, model: &Model) {
-        if checked && self.available(path, model) {
+        self.follow(model);
+        if checked
+            && self
+                .candidates(model)
+                .iter()
+                .any(|file| file.identity().as_ref() == Some(path))
+            && self.available(path, model)
+        {
             self.chosen.insert(path.clone());
         } else {
             self.chosen.remove(path);
@@ -542,6 +526,7 @@ impl AddDialog {
         restricted: bool,
         model: &Model,
     ) {
+        self.follow(model);
         if restricted {
             self.restricted.insert(path.clone());
         } else {
@@ -557,6 +542,16 @@ impl AddDialog {
             .identity()
             .is_some_and(|path| self.restricted.contains(&path));
         AppSelection { file, restricted }
+    }
+
+    pub(super) fn follow(&mut self, model: &Model) {
+        let current: BTreeSet<_> = self
+            .candidates(model)
+            .iter()
+            .filter_map(AppFile::identity)
+            .collect();
+        self.chosen.retain(|path| current.contains(path));
+        self.restricted.retain(|path| current.contains(path));
     }
 
     fn available(&self, path: &crate::ExecutablePath, model: &Model) -> bool {
@@ -583,6 +578,7 @@ impl AddDialog {
     }
 
     pub(super) fn browsed(&mut self, model: &Model, file: AppFile) -> bool {
+        self.follow(model);
         let Some(path) = file.identity() else {
             return false;
         };
@@ -678,7 +674,47 @@ pub(super) fn dialog_view(
     dialog: &AddDialog,
 ) -> DialogView {
     bind_text!(fl, text);
-    let count = dialog.files(model).len();
+    let rows: Vec<_> = dialog
+        .candidates(model)
+        .into_iter()
+        .map(|file| {
+            let path = file.identity();
+            let available = path
+                .as_ref()
+                .is_some_and(|path| dialog.available(path, model));
+            let checked = available
+                && path
+                    .as_ref()
+                    .is_some_and(|path| dialog.chosen.contains(path));
+            let restricted = path
+                .as_ref()
+                .is_some_and(|path| dialog.restricted.contains(path));
+            let name = path
+                .as_ref()
+                .and_then(|path| model.names.get(path))
+                .cloned()
+                .unwrap_or_else(|| file.executable.clone());
+            let section = if dialog
+                .browsed
+                .iter()
+                .any(|browsed| browsed.identity() == path)
+            {
+                CandidateSection::Browsed
+            } else {
+                CandidateSection::Recent
+            };
+            DialogRow {
+                path,
+                name,
+                checked,
+                restricted,
+                available,
+                section,
+                executable: file.executable,
+            }
+        })
+        .collect();
+    let count = rows.iter().filter(|row| row.checked).count();
     let apps = problems::whole(region, i64::try_from(count).unwrap_or(i64::MAX));
     let exclusion = dialog.list == Field::Exclusions;
     DialogView {
@@ -692,33 +728,7 @@ pub(super) fn dialog_view(
         } else {
             fl!("dialog-add-description")
         },
-        rows: dialog
-            .candidates(model)
-            .into_iter()
-            .map(|file| DialogRow {
-                path: file.identity(),
-                name: display_name(model, &file),
-                checked: file.identity().is_some_and(|path| {
-                    dialog.chosen.contains(&path) && dialog.available(&path, model)
-                }),
-                restricted: file
-                    .identity()
-                    .is_some_and(|path| dialog.restricted.contains(&path)),
-                available: file
-                    .identity()
-                    .is_some_and(|path| dialog.available(&path, model)),
-                section: if dialog
-                    .browsed
-                    .iter()
-                    .any(|browsed| browsed.identity() == file.identity())
-                {
-                    CandidateSection::Browsed
-                } else {
-                    CandidateSection::Recent
-                },
-                executable: file.executable,
-            })
-            .collect(),
+        rows,
         primary: if exclusion {
             fl!("dialog-exclude", count = count, apps = apps.as_str())
         } else {

@@ -1362,6 +1362,9 @@ impl Component for Settings {
         self.coordinate_drafts
             .follow(&self.input.model, &input.model, &input.region);
         self.input = input.clone();
+        if let Some(dialog) = &mut self.dialog {
+            dialog.follow(&input.model);
+        }
         self.graph = graph::retained(self.graph.take(), input.model.calculation.as_ref());
         if input.exiting {
             // Closing the window while a ContentDialog is open makes Reactor

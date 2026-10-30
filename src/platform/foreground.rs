@@ -503,9 +503,13 @@ mod tests {
     }
 
     #[test]
-    fn foreground_registration_can_be_replaced_after_drop() {
-        let first = ForegroundEvents::listen(|| {}).expect("first hook");
+    fn dropping_foreground_registration_releases_its_callback_and_allows_replacement() {
+        let token = Rc::new(());
+        let lifetime = Rc::downgrade(&token);
+        let first = ForegroundEvents::listen(move || drop(Rc::clone(&token))).expect("first hook");
+        assert!(lifetime.upgrade().is_some());
         drop(first);
+        assert!(lifetime.upgrade().is_none());
         let second = ForegroundEvents::listen(|| {}).expect("replacement hook");
         drop(second);
     }

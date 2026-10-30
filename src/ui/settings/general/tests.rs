@@ -11,19 +11,24 @@ fn english() -> Text {
     Text::load(&LanguageTag::english()).expect("English catalog loads")
 }
 
-fn owned(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
-    pairs
-        .iter()
-        .map(|(value, label)| ((*value).to_owned(), (*label).to_owned()))
-        .collect()
-}
-
 #[test]
 fn the_language_list_offers_windows_then_each_shipped_language_under_its_own_name() {
+    let choices = languages(&english());
     assert_eq!(
-        languages(&english()),
-        owned(&[("windows", "Use Windows language"), ("en-US", "English")])
+        choices.first(),
+        Some(&("windows".to_owned(), "Use Windows language".to_owned()))
     );
+    let tags: Vec<_> = choices.iter().skip(1).map(|(tag, _)| tag.clone()).collect();
+    assert_eq!(
+        tags,
+        crate::l10n::shipped()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+    );
+    for (tag, name) in choices.iter().skip(1) {
+        assert_eq!(*name, crate::l10n::language_name(tag));
+    }
 }
 
 #[test]
@@ -47,7 +52,11 @@ fn selecting_a_language_sends_one_configure_and_asks_for_a_restart_in_the_curren
         )
     };
     assert_eq!(prompt(&configuration.borrow()), None);
-    desktop.edit(language_edits(Some(1)).expect("an option"));
+    let english_index = languages(&text)
+        .iter()
+        .position(|(tag, _)| tag == "en-US")
+        .expect("English is shipped");
+    desktop.edit(language_edits(Some(english_index)).expect("an option"));
     let commands: Vec<_> = desktop.pending.drain(..).collect();
     let [ControllerCommand::Configure { config, .. }] = commands.as_slice() else {
         panic!("one Configure command, got {}", commands.len());
@@ -69,7 +78,7 @@ fn selecting_a_language_sends_one_configure_and_asks_for_a_restart_in_the_curren
 #[test]
 fn a_selection_outside_the_list_sends_no_edit() {
     assert_eq!(language_edits(None), None);
-    assert_eq!(language_edits(Some(2)), None);
+    assert_eq!(language_edits(Some(languages(&english()).len())), None);
 }
 
 const DENIED: i32 = 5;

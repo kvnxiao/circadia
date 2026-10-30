@@ -16,6 +16,7 @@ const RECORD_LIMIT: usize = 100_000;
 struct Attempt {
     due: Duration,
     eligible: Duration,
+    ready: Duration,
     started: Duration,
     discrete: bool,
     hertz: u16,
@@ -30,6 +31,7 @@ struct Call {
     started: Duration,
     completed: Duration,
     eligible: Option<Duration>,
+    ready: Option<Duration>,
     attempt: Option<Attempt>,
     success: bool,
 }
@@ -216,15 +218,23 @@ impl Records {
     }
 
     fn begin(&mut self, started: Duration, due: Duration, hertz: u16, discrete: bool) {
-        let eligible = eligibility(due, self.last_attempt, self.last_call, hertz, discrete);
-        match eligible {
-            Ok(eligible) => {
+        let ready = eligibility(
+            Duration::ZERO,
+            self.last_attempt,
+            self.last_call,
+            hertz,
+            discrete,
+        );
+        match ready {
+            Ok(ready) => {
+                let eligible = due.max(ready);
                 if started < eligible {
                     self.error = Some("output attempt started before eligibility".into());
                 }
                 self.attempt = Some(Attempt {
                     due,
                     eligible,
+                    ready,
                     started,
                     discrete,
                     hertz,
@@ -265,16 +275,19 @@ impl Records {
         if completed < started || started < self.last_call {
             self.error = Some("native call timestamps overlap or run backward".into());
         }
-        let eligible = if let (Some(_), Some(attempt)) = (kelvin, self.attempt.as_mut()) {
-            let eligible = if attempt.temperatures == 0 {
-                attempt.eligible
+        let (eligible, ready) = if let (Some(_), Some(attempt)) = (kelvin, self.attempt.as_mut()) {
+            let (eligible, ready) = if attempt.temperatures == 0 {
+                (attempt.eligible, attempt.ready)
             } else {
-                attempt.eligible.max(self.last_call)
+                (
+                    attempt.eligible.max(self.last_call),
+                    attempt.ready.max(self.last_call),
+                )
             };
             attempt.temperatures += 1;
-            Some(eligible)
+            (Some(eligible), Some(ready))
         } else {
-            None
+            (None, None)
         };
         if kelvin.is_some() && eligible.is_none() {
             self.error = Some("temperature call has no attempt eligibility".into());
@@ -285,6 +298,7 @@ impl Records {
             started,
             completed,
             eligible,
+            ready,
             attempt: self.attempt,
             success,
         });
@@ -403,10 +417,7 @@ impl Records {
             });
             let final_call = preceding.or(following);
             let already_stored = final_call.is_some_and(|call| call.completed <= endpoint.due);
-            let delay = final_call.and_then(|call| {
-                call.eligible
-                    .and_then(|eligible| call.started.checked_sub(eligible))
-            });
+            let delay = final_call.and_then(|call| endpoint_delay(call, endpoint.due));
             let timely = delay.is_some_and(|delay| delay <= Duration::from_millis(20));
             passed &= timely;
             writeln!(
@@ -420,6 +431,15 @@ impl Records {
         }
         Ok(passed)
     }
+}
+
+fn endpoint_delay(call: &Call, due: Duration) -> Option<Duration> {
+    let operation_delay = call.started.checked_sub(call.eligible?)?;
+    if call.started < due {
+        return Some(operation_delay);
+    }
+    let endpoint_delay = call.started.checked_sub(due.max(call.ready?))?;
+    Some(operation_delay.max(endpoint_delay))
 }
 
 fn milliseconds(duration: Duration) -> f64 {
@@ -734,18 +754,101 @@ mod tests {
         );
     }
 
-    #[test]
-    fn input_waits_for_readiness_and_observes_startup_failure() {
+    #[test_case(Lifecycle::Ready, true; "startup succeeds")]
+    #[test_case(Lifecycle::Stopped, false; "startup fails")]
+    fn readiness_reports_the_startup_outcome(state: Lifecycle, expected_ok: bool) {
         let measurement = OutputMeasurement::default();
         let input = measurement.clone();
         let (started, beginning) = std::sync::mpsc::sync_channel(1);
+        let (completed, results) = std::sync::mpsc::sync_channel(1);
         let thread = std::thread::spawn(move || {
             started.send(()).expect("test receives startup");
-            input.wait_ready()
+            completed
+                .send(input.wait_ready())
+                .expect("test receives outcome");
         });
-        beginning.recv().expect("input thread starts");
-        *measurement.0.lifecycle.lock().expect("lifecycle lock") = Lifecycle::Stopped;
+        beginning
+            .recv_timeout(Duration::from_secs(5))
+            .expect("input thread starts");
+        *measurement.0.lifecycle.lock().expect("lifecycle lock") = state;
         measurement.0.ready.notify_all();
-        assert!(thread.join().expect("input thread returns").is_err());
+        let result = results
+            .recv_timeout(Duration::from_secs(5))
+            .expect("readiness completes");
+        thread.join().expect("input thread returns");
+        assert_eq!(result.is_ok(), expected_ok, "{result:?}");
+    }
+
+    #[test]
+    fn a_late_controller_deadline_does_not_make_the_endpoint_timely() {
+        let mut records = Records::default();
+        records.begin(
+            Duration::from_millis(500),
+            Duration::from_millis(500),
+            60,
+            true,
+        );
+        records.call(
+            "apply_color_temperature",
+            Some(3400),
+            Duration::from_millis(500),
+            Duration::from_millis(501),
+            true,
+        );
+        records.endpoint("scheduled", Duration::from_millis(100), 3400);
+        let mut text = String::new();
+        assert!(
+            !records
+                .report_endpoints(&mut text)
+                .expect("endpoint report"),
+            "{text}"
+        );
+    }
+
+    #[test_case(100, 110, 110, true; "rate limited endpoint")]
+    #[test_case(100, 200, 200, true; "serialized endpoint")]
+    #[test_case(100, 200, 221, false; "late after serialized call")]
+    fn endpoint_timing_preserves_rate_and_serialization_allowances(
+        previous_start: u64,
+        previous_end: u64,
+        started: u64,
+        expected: bool,
+    ) {
+        let mut records = Records::default();
+        records.begin(
+            Duration::from_millis(previous_start),
+            Duration::from_millis(previous_start),
+            100,
+            true,
+        );
+        records.call(
+            "apply_color_temperature",
+            Some(3500),
+            Duration::from_millis(previous_start),
+            Duration::from_millis(previous_end),
+            true,
+        );
+        records.begin(
+            Duration::from_millis(started),
+            Duration::from_millis(105),
+            100,
+            false,
+        );
+        records.call(
+            "apply_color_temperature",
+            Some(3400),
+            Duration::from_millis(started),
+            Duration::from_millis(started + 1),
+            true,
+        );
+        records.endpoint("scheduled", Duration::from_millis(105), 3400);
+        let mut text = String::new();
+        assert_eq!(
+            records
+                .report_endpoints(&mut text)
+                .expect("endpoint report"),
+            expected,
+            "{text}"
+        );
     }
 }

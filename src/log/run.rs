@@ -31,6 +31,7 @@ pub(crate) struct CrashSummary {
 struct CrashEvent {
     time: Timestamp,
     process_id: u32,
+    created: Option<u64>,
     code: String,
     module: String,
     offset: String,
@@ -39,6 +40,13 @@ struct CrashEvent {
 
 fn marker_path(data_directory: &Path) -> PathBuf {
     super::folder(data_directory).join("run.marker")
+}
+
+pub(crate) fn process_created() -> Option<u64> {
+    winsafe::HPROCESS::GetCurrentProcess()
+        .GetProcessTimes()
+        .ok()
+        .map(|(created, _, _, _)| u64::from(created))
 }
 
 pub(crate) fn begin(data_directory: &Path, executable: &str) -> PreviousRun {
@@ -55,9 +63,10 @@ pub(crate) fn begin(data_directory: &Path, executable: &str) -> PreviousRun {
             fs_err::write(
                 &marker,
                 format!(
-                    "process_id={}\nstarted={:.6}\n",
+                    "process_id={}\nstarted={:.6}\ncreated={:#x}\n",
                     std::process::id(),
-                    Timestamp::now()
+                    Timestamp::now(),
+                    process_created().unwrap_or_default()
                 ),
             )
         });
@@ -90,6 +99,7 @@ fn previous_run(
             .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
     };
     let started_text = value("started").unwrap_or_default();
+    let created = value("created").and_then(creation_time);
     let (Some(process_id), Ok(started)) = (
         value("process_id").and_then(|id| id.parse::<u32>().ok()),
         started_text.parse::<Timestamp>(),
@@ -97,21 +107,30 @@ fn previous_run(
         tracing::info!(marker = %marker.trim_end(), "previous run ended unexpectedly");
         return PreviousRun::Unexplained;
     };
-    // System time can move backward after the marker is written, such as a
-    // time-sync correction after sign-in.
+    // Older markers lack process creation time; their wall-clock fallback
+    // tolerates only small backward corrections.
     let earliest = started
         .checked_sub(SignedDuration::from_mins(10))
         .unwrap_or(started);
-    if let Some(summary) = logged_crash(data_directory, process_id, earliest) {
+    if let Some(summary) = logged_crash(data_directory, process_id, created, earliest) {
         return PreviousRun::Crashed(summary);
     }
     let mut query_error = None;
-    let event = match event_query(executable, &format!("{earliest:.6}")) {
+    let event = match event_query(
+        executable,
+        &format!("{earliest:.6}"),
+        created.map(|created| (process_id, created)),
+    ) {
         Some(xpath) => match query(&xpath) {
             Ok(events) => events
                 .iter()
                 .filter_map(|event| crash_event(event))
-                .find(|event| event.process_id == process_id && event.time >= earliest),
+                .find(|event| {
+                    event.process_id == process_id
+                        && created.map_or(event.time >= earliest, |created| {
+                            event.created == Some(created)
+                        })
+                }),
             Err(error) => {
                 query_error = Some(error);
                 None
@@ -157,20 +176,26 @@ fn previous_run(
     })
 }
 
-fn event_query(executable: &str, earliest: &str) -> Option<String> {
+fn event_query(executable: &str, earliest: &str, process: Option<(u32, u64)>) -> Option<String> {
     let executable = if executable.contains('\'') {
         (!executable.contains('"')).then(|| format!("\"{executable}\""))?
     } else {
         format!("'{executable}'")
     };
-    Some(format!(
-        "*[System[Provider[@Name='Application Error'] and (EventID=1000) and TimeCreated[@SystemTime>='{earliest}']]] and *[EventData[Data[@Name='AppName']={executable}]]"
-    ))
+    Some(match process {
+        Some((id, created)) => format!(
+            "*[System[Provider[@Name='Application Error'] and (EventID=1000)]] and *[EventData[Data[@Name='AppName']={executable} and Data[@Name='ProcessId']='{id:#x}' and Data[@Name='ProcessCreationTime']='{created:#x}']]"
+        ),
+        None => format!(
+            "*[System[Provider[@Name='Application Error'] and (EventID=1000) and TimeCreated[@SystemTime>='{earliest}']]] and *[EventData[Data[@Name='AppName']={executable}]]"
+        ),
+    })
 }
 
 fn logged_crash(
     data_directory: &Path,
     process_id: u32,
+    created: Option<u64>,
     earliest: Timestamp,
 ) -> Option<CrashSummary> {
     let logs = data_directory.join("logs");
@@ -183,7 +208,10 @@ fn logged_crash(
         let time = time.parse::<Timestamp>().ok()?;
         let record = record.trim_start().strip_prefix("ERROR circadia::log: ")?;
         let (kind, fields) = record.split_once(' ')?;
-        if time < earliest || field(fields, "process_id")?.parse::<u32>().ok()? != process_id {
+        let same_run = created.map_or(time >= earliest, |created| {
+            field(fields, "created").and_then(creation_time) == Some(created)
+        });
+        if !same_run || field(fields, "process_id")?.parse::<u32>().ok()? != process_id {
             return None;
         }
         match kind {
@@ -204,6 +232,12 @@ fn logged_crash(
             _ => None,
         }
     })
+}
+
+fn creation_time(text: &str) -> Option<u64> {
+    u64::from_str_radix(text.strip_prefix("0x")?, 16)
+        .ok()
+        .filter(|created| *created != 0)
 }
 
 fn field<'a>(fields: &'a str, key: &str) -> Option<&'a str> {
@@ -248,6 +282,9 @@ fn crash_event(event: &str) -> Option<CrashEvent> {
     Some(CrashEvent {
         time,
         process_id,
+        created: data(event, "ProcessCreationTime")
+            .as_deref()
+            .and_then(creation_time),
         code: format!("{code:#010x}"),
         module: data(event, "ModuleName")?,
         offset: format!("{offset:#x}"),
