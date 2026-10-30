@@ -139,13 +139,13 @@ jobs:
         if: matrix.cache == 'application-checks'
         run: rustup component add rustfmt --toolchain stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        id: compiled
         with:
           key: ${{ matrix.cache }}
           workspaces: ${{ matrix.project }} -> target
           cache-bin: false
+          cache-directories: '!~/.cargo/git'
       - name: Restore shared Git sources
-        if: matrix.cache != 'solar' && steps.compiled.outputs.cache-hit != 'true'
+        if: matrix.cache != 'solar'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
@@ -223,12 +223,11 @@ jobs:
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        id: compiled
         with:
           key: installer-release
           cache-bin: false
+          cache-directories: '!~/.cargo/git'
       - name: Restore shared Git sources
-        if: steps.compiled.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
