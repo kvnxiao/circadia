@@ -41,6 +41,14 @@ jobs:
         with:
           path: ~/.cargo/git
           key: ${{ inputs.git-cache-key }}
+      - name: Locate runtime cache
+        id: runtime
+        run: echo "path=$(cygpath -m "$LOCALAPPDATA")/windows-reactor-setup/temp/v1" >> "$GITHUB_OUTPUT"
+      - name: Cache Windows runtime packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.runtime.outputs.path }}
+          key: reactor-runtime-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.git-cache-key }}
       - name: Build unsigned installer
         run: just installer
       - name: Upload installer and checksum
