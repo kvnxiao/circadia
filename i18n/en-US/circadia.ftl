@@ -1,4 +1,54 @@
-tray-settings = Open Circadia settings
+### Shared terminology
+## The invariant -brand-name and -github terms are injected from i18n/shared.ftl.
+## Do not redefine them in locale catalogs.
+
+## Use the target locale's official Windows terminology from the translation
+## dictionary. Feature and settings names are not invariant English text.
+-windows = Windows
+-night-light = Night Light
+-windows-settings = { -windows } Settings
+-quick-settings = Quick Settings
+-windows-apps = Apps
+-windows-startup = Startup
+
+## These terms name schedule events and temperature levels as standalone labels.
+## Translate full sentences for their grammar; do not substitute these labels for
+## inflected words in prose. Add locale-specific term forms when needed.
+-label-wake = Wake
+-label-sunrise = Sunrise
+-label-sunset = Sunset
+-label-bedtime = Bedtime
+-label-morning = Morning
+-label-daytime = Daytime
+-label-evening = Evening
+-label-middle-temperature = Morning and evening
+
+## Reuse these complete setting and action labels in controls and field names.
+-label-wake-time = Wake time
+-label-solar-timing = Follow sunrise and sunset
+-label-use-sunrise = Use sunrise
+-label-use-sunset = Use sunset
+-label-use-windows-location = Use my { -windows } location
+-label-coordinates = Coordinates
+-label-excluded-apps = Excluded apps
+-label-switch-delay = Switch delay
+-label-transition-length = Transition length
+-label-fade-duration = Fade duration
+-label-update-rate = Maximum update rate
+-label-preview-length = Preview length
+-label-start-minimized = Start minimized
+-label-language = Language
+-label-recently-focused = Recently focused
+-label-preview = Preview
+-label-cancel = Cancel
+-label-quit = Quit { -brand-name }
+-label-on = On
+-label-off = Off
+-label-not-used = Not used
+
+### Messages
+
+tray-settings = Open { -brand-name } settings
 tray-caption =
     { $reason ->
         [error] Suppress while focused (settings couldn't be read)
@@ -16,19 +66,19 @@ tray-app-excluded =
        *[no] { $name } ({ $executable }) (excluded)
     }
 app-entry-name = { $name } ({ $executable })
-tray-quit = Quit Circadia
+tray-quit = { -label-quit }
 
 toggle-state =
     { $on ->
-        [yes] On
-       *[no] Off
+        [yes] { -label-on }
+       *[no] { -label-off }
     }
 
-tooltip = Circadia: { $status }
+tooltip = { -brand-name }: { $status }
 
-status-starting = Starting Circadia.
-status-configuration-error = Settings could not be read; Night Light is not managed.
-status-not-managing = Not managing Night Light.
+status-starting = Starting { -brand-name }.
+status-configuration-error = Settings could not be read; { -night-light } is not managed.
+status-not-managing = Not managing { -night-light }.
 status-control-unavailable = Control is unavailable; starting suppression is disabled.
 status-output-unavailable = Output is unavailable.
 status-output-unavailable-suppressed = Output is unavailable; suppression is requested, not applied.
@@ -39,21 +89,21 @@ status-managing =
     { $state ->
         [preview] Previewing · { $kelvin }
         [suppressed] Suppressed · { $kelvin }
-       *[schedule] Managing Night Light · { $kelvin }
+       *[schedule] Managing { -night-light } · { $kelvin }
     }{ $solar ->
         [fallback] {" "}· Wake and Bedtime only
        *[available] {""}
     }
 status-calculating = Calculating the schedule.
 
-announcement = Circadia. { $status }
+announcement = { -brand-name }. { $status }
 announcement-management =
     { $mode ->
-        [off] Not managing Night Light.
-        [starting] Turning on Night Light management.
-        [stopping] Turning off Night Light management.
-        [exiting] Exiting Circadia.
-       *[on] Managing Night Light.
+        [off] Not managing { -night-light }.
+        [starting] Turning on { -night-light } management.
+        [stopping] Turning off { -night-light } management.
+        [exiting] Exiting { -brand-name }.
+       *[on] Managing { -night-light }.
     }
 announcement-phase = { $phase }.
 announcement-preview = Preview. { $phase }.
@@ -64,12 +114,12 @@ announcement-schedule-retained = The schedule is unavailable; using its last tem
 phase-name =
     { $phase ->
         [not-managing] Not managing
-        [preview] Preview
+        [preview] { -label-preview }
         [suppressed] Suppressed
-        [morning] Morning
-        [daytime] Daytime
-        [evening] Evening
-       *[bedtime] Bedtime
+        [morning] { -label-morning }
+        [daytime] { -label-daytime }
+        [evening] { -label-evening }
+       *[bedtime] { -label-bedtime }
     }
 phase-shifting =
     { $phase ->
@@ -80,27 +130,27 @@ phase-shifting =
     }
 event-name =
     { $event ->
-        [wake] Wake
-        [sunrise] Sunrise
-        [sunset] Sunset
-       *[bedtime] Bedtime
+        [wake] { -label-wake }
+        [sunrise] { -label-sunrise }
+        [sunset] { -label-sunset }
+       *[bedtime] { -label-bedtime }
     }
 graph-event =
     { $event ->
-        [wake] Wake
-        [sunrise] Sunrise
-        [sunset] Sunset
-       *[bedtime] Bedtime
+        [wake] { -label-wake }
+        [sunrise] { -label-sunrise }
+        [sunset] { -label-sunset }
+       *[bedtime] { -label-bedtime }
     } { $time }
 graph-name = Color temperature from { $clock } today to { $clock } tomorrow
-event-off = Off
-event-not-used = Not used
+event-off = { -label-off }
+event-not-used = { -label-not-used }
 event-unavailable = Unavailable
 event-fallback = Wake and Bedtime only
 event-pending = Calculating…
-output-off = Off
+output-off = { -label-off }
 output-unknown = —
-sentence-not-managing = Windows controls Night Light. Turn on management to follow this schedule.
+sentence-not-managing = { -windows } controls { -night-light }. Turn on management to follow this schedule.
 sentence-preview =
     Previewing { $time }. { $resumes ->
         [suppression] Suppression resumes when the preview ends.
@@ -111,8 +161,8 @@ sentence-manual-active = Showing { $kelvin } for 1 hour.
 sentence-automatic = Showing { $kelvin } while { $app } is focused.
 sentence-automatic-unknown = Showing { $kelvin } while a listed app is focused.
 sentence-schedule-at = Your schedule is at { $kelvin }.
-sentence-control-unavailable = Control is unavailable until Windows provides the time zone, so Suppress for 1 hour is disabled.
-sentence-retained = The schedule is unavailable, so Circadia uses its last scheduled temperature, { $kelvin }.
+sentence-control-unavailable = Control is unavailable until { -windows } provides the time zone, so Suppress for 1 hour is disabled.
+sentence-retained = The schedule is unavailable, so { -brand-name } uses its last scheduled temperature, { $kelvin }.
 sentence-reaching =
     Reaches { $kelvin } by { $time } ({ $event ->
         [wake] wake
@@ -131,65 +181,65 @@ sentence-next =
        *[cooling] cooling
     } from { $start }.
 sentence-holding = Holding until { $time }.
-phase-art-not-managing = Not managing Night Light
+phase-art-not-managing = Not managing { -night-light }
 phase-art-manual = Suppressed for 1 hour
 phase-art-automatic = Suppressed while an app is focused
 phase-art-shifting =
     { $phase ->
-        [morning] Morning
-        [daytime] Daytime
-        [evening] Evening
-       *[bedtime] Bedtime
+        [morning] { -label-morning }
+        [daytime] { -label-daytime }
+        [evening] { -label-evening }
+       *[bedtime] { -label-bedtime }
     }, shifting, { $percent }% there
 
 language-name = English
-app-name = Circadia
+app-name = { -brand-name }
 
 nav-schedule = Schedule
 nav-apps = App suppression
 nav-transitions = Transitions
 nav-general = General
 
-manage-title = Let Circadia manage Night Light
-manage-description = While on, Circadia fully controls Windows Night Light and reverts changes made in Windows Settings or Quick Settings.
+manage-title = Let { -brand-name } manage { -night-light }
+manage-description = While on, { -brand-name } fully controls { -windows } { -night-light } and reverts changes made in { -windows-settings } or { -quick-settings }.
 manage-turning-on = Turning on…
 manage-turning-off = Turning off…
-consent-title = Let Circadia manage Night Light?
-consent-body = While Circadia is running, it fully controls Windows Night Light:
-consent-schedule = Night Light stays on and follows Circadia's schedule.
-consent-native = The Windows Night Light schedule is turned off.
-consent-undo = Changes you make in Windows Settings or Quick Settings are undone.
-consent-closing = To give control back, turn this off or quit Circadia from the notification area. Quitting fades out and turns Night Light off.
+consent-title = Let { -brand-name } manage { -night-light }?
+consent-body = While { -brand-name } is running, it fully controls { -windows } { -night-light }:
+consent-schedule = { -night-light } stays on and follows { -brand-name }'s schedule.
+consent-native = The { -windows } { -night-light } schedule is turned off.
+consent-undo = Changes you make in { -windows-settings } or { -quick-settings } are undone.
+consent-closing = To give control back, turn this off or quit { -brand-name } from the notification area. Quitting fades out and turns { -night-light } off.
 consent-turn-on = Turn on
-consent-cancel = Cancel
+consent-cancel = { -label-cancel }
 
 section-times = Times
-wake-title = Wake time
+wake-title = { -label-wake-time }
 wake-description = Your earliest wake time. The screen reaches daytime color by now.
 wake-description-sunrise = Your earliest wake time. The screen reaches morning color by now, then daytime color at sunrise.
-bedtime-title = Bedtime
+bedtime-title = { -label-bedtime }
 bedtime-description = The screen reaches your bedtime color by this time.
-solar-title = Follow sunrise and sunset
+solar-title = { -label-solar-timing }
 solar-description = Adds a morning and evening color between your wake time and bedtime that shifts with the seasons.
 solar-expand = Expand sunrise and sunset options
 solar-collapse = Collapse sunrise and sunset options
 solar-held = Sunrise and sunset options stay expanded while a value needs a fix
-sunrise-title = Use sunrise
+sunrise-title = { -label-use-sunrise }
 sunrise-description = Morning color from wake time, daytime color from sunrise.
-sunset-title = Use sunset
+sunset-title = { -label-use-sunset }
 sunset-description = Evening color from sunset until bedtime.
-location-title = Use my Windows location
+location-title = { -label-use-windows-location }
 location-on = Requests one position on startup and when settings opens, including while running in the tray.
-location-off = Enter coordinates below. Circadia never needs location access this way.
+location-off = Enter coordinates below. { -brand-name } never needs location access this way.
 location-requesting = Finding your location…
-location-denied = Windows location access is not available, so Circadia keeps the current coordinates. Allow location access for desktop apps in Windows Settings, or turn this off and enter coordinates.
-location-disabled = Windows location services are turned off, so Circadia keeps the current coordinates. Turn them on in Windows Settings, or turn this off and enter coordinates.
-location-unavailable = Windows couldn't find your position, so Circadia keeps the current coordinates. Circadia tries again at startup or when settings opens.
-location-consent-title = Use Windows location?
-location-consent-requests = Circadia requests your position when you turn this on, each time it starts, and when settings opens. Startup requests also run when only the tray icon is visible.
-location-consent-windows = These requests use Windows location services, which can use network-based positioning. Windows controls whether location access is allowed.
-location-consent-saving = Circadia saves this preference and your latest coordinates on this computer. Turn this setting off to stop requests and enter coordinates yourself.
-coordinates-title = Coordinates
+location-denied = { -windows } location access is not available, so { -brand-name } keeps the current coordinates. Allow location access for desktop apps in { -windows-settings }, or turn this off and enter coordinates.
+location-disabled = { -windows } location services are turned off, so { -brand-name } keeps the current coordinates. Turn them on in { -windows-settings }, or turn this off and enter coordinates.
+location-unavailable = { -windows } couldn't find your position, so { -brand-name } keeps the current coordinates. { -brand-name } tries again at startup or when settings opens.
+location-consent-title = Use { -windows } location?
+location-consent-requests = { -brand-name } requests your position when you turn this on, each time it starts, and when settings opens. Startup requests also run when only the tray icon is visible.
+location-consent-windows = These requests use { -windows } location services, which can use network-based positioning. { -windows } controls whether location access is allowed.
+location-consent-saving = { -brand-name } saves this preference and your latest coordinates on this computer. Turn this setting off to stop requests and enter coordinates yourself.
+coordinates-title = { -label-coordinates }
 coordinates-description = Decimal degrees. North and east are positive.
 latitude = Latitude
 longitude = Longitude
@@ -202,18 +252,18 @@ picker-hour = Hour
 picker-minute = Minute
 picker-period = AM or PM
 picker-accept = Accept
-picker-cancel = Cancel
+picker-cancel = { -label-cancel }
 
 section-colors = Color temperature
-color-daytime = Daytime
+color-daytime = { -label-daytime }
 color-daytime-description = From sunrise until evening.
 color-daytime-description-wake = From wake time until evening.
-color-middle = Morning and evening
+color-middle = { -label-middle-temperature }
 color-middle-description = From wake time to sunrise, and from sunset to bedtime.
 color-middle-description-unused = Not used while sunrise and sunset are off. Still has to sit between the other two.
-color-bedtime = Bedtime
+color-bedtime = { -label-bedtime }
 color-bedtime-description = From bedtime until your next wake time.
-not-used = Not used
+not-used = { -label-not-used }
 kelvin-unit = K
 restore-colors = Restore recommended colors
 manual-title = Suppress for 1 hour
@@ -221,10 +271,10 @@ manual-stop = Stop suppressing
 manual-description = Request { $kelvin } for the next hour, whichever app is focused.
 manual-until = Suppressed until { $time }.
 manual-active = Suppressed for 1 hour.
-manual-unmanaged = Turn on Night Light management on the Schedule page to suppress.
+manual-unmanaged = Turn on { -night-light } management on the Schedule page to suppress.
 apps-explanation-title = Suppress while listed apps are focused
-apps-explanation-description = Circadia fades to { $kelvin } while a listed app is in the foreground, in any window mode, and returns to your schedule after you switch away.
-section-recent = Recently focused
+apps-explanation-description = { -brand-name } fades to { $kelvin } while a listed app is in the foreground, in any window mode, and returns to your schedule after you switch away.
+section-recent = { -label-recently-focused }
 recent-detail = { $executable } · { $since }
 recent-now = just now
 recent-minutes = { $minutes } min ago
@@ -241,7 +291,7 @@ recent-remove = Remove
 recent-remove-name = Remove { $name } from the suppression list
 recent-excluded = Excluded
 recent-empty = Apps you switch to appear here.
-recent-note = The last 5 apps you switched to. Circadia itself is never listed.
+recent-note = The last 5 apps you switched to. { -brand-name } itself is never listed.
 section-suppression = Suppression list ({ $count })
 add-app = Add app
 list-empty-title = No apps yet
@@ -276,24 +326,24 @@ title-dialog-save = Save
 missing-entry-title-note = Some entries in the settings file have no window title setting, so they have no window title condition.
 missing-entry-regex-note = Some entries in the settings file have no regular expression setting, so their window title text is matched as plain text.
 section-never = Never suppress
-exclusions-title = Excluded apps
+exclusions-title = { -label-excluded-apps }
 exclusions-description = Exclusions win over the suppression list. They don't affect Suppress for 1 hour.
 add-exclusion = Add exclusion
 exclusions-expand = Expand excluded apps
 exclusions-collapse = Collapse excluded apps
 exclusions-held = Excluded apps stay expanded while an entry needs a fix
 fixed-self = This app. Built in, can't be removed.
-fixed-host = Windows app host. Hosted apps are matched by their own executable instead. Built in.
+fixed-host = { -windows } app host. Hosted apps are matched by their own executable instead. Built in.
 fixed-locked = Locked
 exclusions-empty = No exclusions added yet.
 section-timing = Timing
-focus-delay-title = Switch delay
+focus-delay-title = { -label-switch-delay }
 focus-delay-description = How long an app must stay focused before suppression starts or ends. Stops flicker when you alt-tab.
 dialog-add-title = Add apps to suppress
 dialog-add-description = Pick from apps you used recently, or browse for any .exe file.
 dialog-exclude-title = Exclude apps from suppression
 dialog-exclude-description = Pick from apps you used recently, or browse for any .exe file. Excluded apps never start suppression on their own.
-dialog-recent = Recently focused
+dialog-recent = { -label-recently-focused }
 dialog-all-listed = Every recent app is already on your list.
 dialog-file-title = Choose an app file
 dialog-file-description = Match this file name in any folder, or choose only this installation.
@@ -313,8 +363,8 @@ dialog-exclude =
         [one] Exclude
        *[other] Exclude { $apps } apps
     }
-dialog-cancel = Cancel
-preview-start = Preview
+dialog-cancel = { -label-cancel }
+preview-start = { -label-preview }
 preview-stop = Stop
 preview-ready =
     Plays the next 24 hours on your screen in { $count ->
@@ -325,10 +375,10 @@ preview-playing = Previewing
 preview-playing-detail = { $time } · { $kelvin }
 preview-starting = Starting the preview…
 preview-invalid = Fix the highlighted values to preview.
-preview-unmanaged = Turn on Night Light management on the Schedule page to preview.
+preview-unmanaged = Turn on { -night-light } management on the Schedule page to preview.
 
 section-slow = Slow transitions
-transition-length = Transition length
+transition-length = { -label-transition-length }
 transition-length-description = How long the color ramps before each event. The ramp ends at the event time, so it starts earlier.
 minutes-unit = min
 example-daytime = Daytime { $kelvin }
@@ -337,42 +387,42 @@ example-starts = Starts { $time }
 example-sunset = Sunset { $time }
 example-caption = Example: with a { $minutes }-minute transition, evening color ({ $kelvin }) is reached exactly at sunset. When two events are closer together than this, the ramp shortens to fit.
 section-fades = Quick fades
-fade-duration = Fade duration
-fade-duration-description = Used when Circadia starts or quits, when management turns on or off, when suppression starts or ends, and when Circadia undoes a change made outside it. { $minimum } to { $maximum } ms.
+fade-duration = { -label-fade-duration }
+fade-duration-description = Used when { -brand-name } starts or quits, when management turns on or off, when suppression starts or ends, and when { -brand-name } undoes a change made outside it. { $minimum } to { $maximum } ms.
 milliseconds-unit = ms
-section-preview = Preview
-preview-length = Preview length
+section-preview = { -label-preview }
+preview-length = { -label-preview-length }
 preview-length-description = Preview plays the next 24 hours of your schedule in this many seconds. It takes priority over suppression while it plays.
 seconds-unit = s
 section-output = Output
-update-rate = Maximum update rate
-update-rate-description = How many times per second Circadia may change the color during fades and previews. Lower values can look uneven. { $minimum } to { $maximum } Hz.
+update-rate = { -label-update-rate }
+update-rate-description = How many times per second { -brand-name } may change the color during fades and previews. Lower values can look uneven. { $minimum } to { $maximum } Hz.
 hertz-unit = Hz
 
-section-language = Language
-language-title = Language
-language-description = The language Circadia's windows and menus use.
-language-windows = Use Windows language
-restart-title = Restart Circadia to use the new language.
-restart-description = Quit Circadia, then start it again.
+section-language = { -label-language }
+language-title = { -label-language }
+language-description = The language { -brand-name }'s windows and menus use.
+language-windows = Use { -windows } language
+restart-title = Restart { -brand-name } to use the new language.
+restart-description = Quit { -brand-name }, then start it again.
 
 section-startup = Startup
-sign-in-title = Start Circadia when I sign in to Windows
+sign-in-title = Start { -brand-name } when I sign in to { -windows }
 sign-in-description = Runs in the notification area. No administrator rights needed.
-sign-in-failed = Circadia couldn't change its startup registration. Startup at sign-in is { $state ->
+sign-in-failed = { -brand-name } couldn't change its startup registration. Startup at sign-in is { $state ->
         [on] on
        *[off] off
     }.
-sign-in-read-failed = Circadia couldn't read its Windows startup setting.
-sign-in-disabled-by-windows = Windows has turned off startup for Circadia. To start Circadia when you sign in, turn it on in Windows Settings > Apps > Startup.
-sign-in-not-registered = Circadia isn't registered to start when you sign in. Turn the switch on to register it again.
-sign-in-other-location = Windows starts Circadia from a different location or data folder. Turn the switch on to start this copy instead.
-sign-in-still-registered = Circadia is still registered to start when you sign in. Turn the switch off to remove it.
-start-minimized-title = Start minimized
+sign-in-read-failed = { -brand-name } couldn't read its { -windows } startup setting.
+sign-in-disabled-by-windows = { -windows } has turned off startup for { -brand-name }. To start { -brand-name } when you sign in, turn it on in { -windows-settings } > { -windows-apps } > { -windows-startup }.
+sign-in-not-registered = { -brand-name } isn't registered to start when you sign in. Turn the switch on to register it again.
+sign-in-other-location = { -windows } starts { -brand-name } from a different location or data folder. Turn the switch on to start this copy instead.
+sign-in-still-registered = { -brand-name } is still registered to start when you sign in. Turn the switch off to remove it.
+start-minimized-title = { -label-start-minimized }
 start-minimized-description = Open to the notification area instead of this window.
-section-night-light = Windows Night Light
-night-light-title = How Circadia uses Night Light
-night-light-description = While managing, Circadia keeps Night Light on, turns the Windows Night Light schedule off, and undoes outside changes. Turning management off or quitting fades to 6500 K, turns Night Light off, and hands control back to Windows.
+section-night-light = { -windows } { -night-light }
+night-light-title = How { -brand-name } uses { -night-light }
+night-light-description = While managing, { -brand-name } keeps { -night-light } on, turns the { -windows } { -night-light } schedule off, and undoes outside changes. Turning management off or quitting fades to 6500 K, turns { -night-light } off, and hands control back to { -windows }.
 night-light-managing = Managing
 night-light-not-managing = Not managing
 section-troubleshooting = Troubleshooting
@@ -386,27 +436,27 @@ about-version = Version { $version }
 
 field-name =
     { $field ->
-        [wake] Wake time
-        [bedtime] Bedtime
-        [daytime_kelvin] Daytime
-        [middle_kelvin] Morning and evening
-        [sleep_kelvin] Bedtime
-        [scheduled_transition_minutes] Transition length
-        [ordinary_fade_ms] Fade duration
-        [focus_delay_ms] Switch delay
-        [output_rate_hz] Maximum update rate
-        [preview_seconds] Preview length
-        [solar_timing] Follow sunrise and sunset
-        [sunrise] Use sunrise
-        [sunset] Use sunset
-        [use_windows_location] Use my Windows location
-        [coordinates] Coordinates
+        [wake] { -label-wake-time }
+        [bedtime] { -label-bedtime }
+        [daytime_kelvin] { -label-daytime }
+        [middle_kelvin] { -label-middle-temperature }
+        [sleep_kelvin] { -label-bedtime }
+        [scheduled_transition_minutes] { -label-transition-length }
+        [ordinary_fade_ms] { -label-fade-duration }
+        [focus_delay_ms] { -label-switch-delay }
+        [output_rate_hz] { -label-update-rate }
+        [preview_seconds] { -label-preview-length }
+        [solar_timing] { -label-solar-timing }
+        [sunrise] { -label-use-sunrise }
+        [sunset] { -label-use-sunset }
+        [use_windows_location] { -label-use-windows-location }
+        [coordinates] { -label-coordinates }
         [suppression] Suppression list
-        [exclusions] Excluded apps
+        [exclusions] { -label-excluded-apps }
         [start_at_sign_in] Start at sign-in
-        [interface_language] Language
-        [manage_night_light] Manage Night Light
-       *[start_minimized] Start minimized
+        [interface_language] { -label-language }
+        [manage_night_light] Manage { -night-light }
+       *[start_minimized] { -label-start-minimized }
     }
 value-number =
     { $unit ->
@@ -415,8 +465,8 @@ value-number =
         [preview_seconds] { $value } s
        *[milliseconds] { $value } ms
     }
-value-on = On
-value-off = Off
+value-on = { -label-on }
+value-off = { -label-off }
 value-none = None
 value-apps =
     { $count ->
@@ -451,15 +501,15 @@ problem-syntax-line = has a syntax error on line { $line }
 problem-version = has a different format version
 
 banner-error-title = Settings couldn't be read
-banner-error-message = config.toml { $file }, and config.backup.toml { $backup }. Circadia isn't managing Night Light until you reset to the default settings.
+banner-error-message = config.toml { $file }, and config.backup.toml { $backup }. { -brand-name } isn't managing { -night-light } until you reset to the default settings.
 banner-paused-title = Changes aren't being saved
-banner-paused-message = Some settings in config.toml are invalid. Change each marked setting to save again. Your changes apply now but are lost when Circadia quits.
+banner-paused-message = Some settings in config.toml are invalid. Change each marked setting to save again. Your changes apply now but are lost when { -brand-name } quits.
 banner-write-title = Changes are running but not saved
-banner-write-message = Circadia couldn't save config.toml. Your changes apply now and are saved when a write succeeds.
+banner-write-message = { -brand-name } couldn't save config.toml. Your changes apply now and are saved when a write succeeds.
 banner-restored-title = Settings were restored from a backup
-banner-restored-message = config.toml { $problem }, so Circadia restored your last saved settings.
+banner-restored-message = config.toml { $problem }, so { -brand-name } restored your last saved settings.
 banner-unknown-title = Some settings were ignored
-banner-unknown-message = config.toml has settings Circadia doesn't recognize: { $keys }. They're removed the next time settings are saved.
+banner-unknown-message = config.toml has settings { -brand-name } doesn't recognize: { $keys }. They're removed the next time settings are saved.
 banner-backup-title = The backup couldn't be saved
 banner-backup-message = Your settings are saved, but config.backup.toml couldn't be updated.
 banner-invalid-title =
@@ -469,27 +519,27 @@ banner-invalid-title =
     }
 banner-invalid-note =
     { $saving ->
-        [paused] Circadia keeps using your last valid settings until this is fixed.
-       *[automatic] Circadia keeps using your last valid settings until this is fixed. Everything else is saved automatically.
+        [paused] { -brand-name } keeps using your last valid settings until this is fixed.
+       *[automatic] { -brand-name } keeps using your last valid settings until this is fixed. Everything else is saved automatically.
     }
 nav-invalid = { $page }, has an invalid value
-banner-schedule-title = Night Light control is unavailable
+banner-schedule-title = { -night-light } control is unavailable
 banner-schedule-retained-title = The schedule is unavailable
-banner-schedule-retained-message = Circadia can't read the Windows time zone. It keeps using the last scheduled temperature until the schedule can be calculated again.
-banner-schedule-message = Circadia can't read the Windows time zone and has no earlier scheduled temperature to use, so it doesn't change Night Light. Suppress for 1 hour is unavailable until Circadia can read the time zone.
-banner-native-output-title = Circadia can't control Night Light
-banner-native-observation-title = Circadia can't watch Night Light for changes
-banner-native-off-title = Circadia couldn't finish turning Night Light off
-banner-native-retry-unavailable = Retry is available while Circadia manages Night Light.
-banner-crash-title = Circadia closed unexpectedly
-banner-crash-message = An error ended an earlier run of Circadia. The log in the logs folder records what happened. Report the problem on GitHub to help fix it.
+banner-schedule-retained-message = { -brand-name } can't read the { -windows } time zone. It keeps using the last scheduled temperature until the schedule can be calculated again.
+banner-schedule-message = { -brand-name } can't read the { -windows } time zone and has no earlier scheduled temperature to use, so it doesn't change { -night-light }. Suppress for 1 hour is unavailable until { -brand-name } can read the time zone.
+banner-native-output-title = { -brand-name } can't control { -night-light }
+banner-native-observation-title = { -brand-name } can't watch { -night-light } for changes
+banner-native-off-title = { -brand-name } couldn't finish turning { -night-light } off
+banner-native-retry-unavailable = Retry is available while { -brand-name } manages { -night-light }.
+banner-crash-title = { -brand-name } closed unexpectedly
+banner-crash-message = An error ended an earlier run of { -brand-name }. The log in the logs folder records what happened. Report the problem on { -github } to help fix it.
 issue-title = Crash: { $summary }
 issue-body =
-    ## Circadia version
+    ## { -brand-name } version
 
     { $version }
 
-    ## Windows build
+    ## { -windows } build
 
     { $build }
 
@@ -499,31 +549,31 @@ issue-body =
 
     ## Steps to reproduce
 
-    Describe what you were doing when Circadia closed.
+    Describe what you were doing when { -brand-name } closed.
 
     ## Log
 
-    Attach circadia.log from the logs folder that Open folder in Circadia's crash notice opens. If the folder also has circadia.1.log, attach it too; it has the older records.
+    Attach circadia.log from the logs folder that Open folder in { -brand-name }'s crash notice opens. If the folder also has circadia.1.log, attach it too; it has the older records.
 
     The log can contain personal data, such as coordinates, executable names, file paths, and window titles. Before attaching it, remove anything you do not want to share.
 native-failure = { $operation } failed: { $category }
 native-operation =
     { $operation ->
-        [observation] Watching Night Light for changes
-        [native_settings_read] Reading Night Light settings
-        [native_state_read] Reading whether Night Light is on
-        [native_schedule_write] Turning off the Windows Night Light schedule
-        [native_activation_write] Turning Night Light on or off
+        [observation] Watching { -night-light } for changes
+        [native_settings_read] Reading { -night-light } settings
+        [native_state_read] Reading whether { -night-light } is on
+        [native_schedule_write] Turning off the { -windows } { -night-light } schedule
+        [native_activation_write] Turning { -night-light } on or off
         [temperature_write] Setting the color temperature
-        [preview_cleanup] Clearing the Night Light setting that applies a temperature at once
-       *[other] A Night Light operation
+        [preview_cleanup] Clearing the { -night-light } setting that applies a temperature at once
+       *[other] A { -night-light } operation
     }
 native-category =
     { $category ->
-        [missing] Windows' stored Night Light settings are missing.
+        [missing] { -windows }' stored { -night-light } settings are missing.
         [access_denied] access was denied.
-        [invalid_data] Windows' stored Night Light settings are invalid.
-       *[other] Windows reported an error.
+        [invalid_data] { -windows }' stored { -night-light } settings are invalid.
+       *[other] { -windows } reported an error.
     }
 
 action-reset = Reset to default settings
@@ -531,7 +581,7 @@ action-open-folder = Open folder
 action-report = Report a problem
 action-retry = Retry
 action-go-to = Go to { $page }
-action-quit = Quit Circadia
+action-quit = { -label-quit }
 
 status-saving-paused = Some settings are invalid; changes are not saved until they are fixed.
 status-write-failed = Changes are running but not saved.

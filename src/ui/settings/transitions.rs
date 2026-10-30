@@ -7,7 +7,7 @@ use crate::Config;
 use crate::Field;
 use crate::automation_id;
 use crate::l10n::Text;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use crate::platform::nls::RegionalFormat;
 use windows_reactor::Border;
 use windows_reactor::Canvas;
@@ -49,6 +49,7 @@ pub(super) fn example(
     config: &Config,
     sunset: u16,
 ) -> Example {
+    bind_text!(fl, text);
     let input = config.input();
     let minutes = input.scheduled_transition_minutes;
     let start = u16::try_from((i64::from(sunset) - minutes).rem_euclid(24 * 60)).unwrap_or(0);
@@ -58,24 +59,14 @@ pub(super) fn example(
         start,
         daytime: input.daytime_kelvin,
         evening: input.middle_kelvin,
-        daytime_label: text!(
-            text,
+        daytime_label: fl!(
             "example-daytime",
             kelvin = problems::kelvin(region, input.daytime_kelvin)
         ),
-        evening_label: text!(text, "example-evening", kelvin = evening.as_str()),
-        start_label: text!(
-            text,
-            "example-starts",
-            time = problems::clock(region, start)
-        ),
-        sunset_label: text!(
-            text,
-            "example-sunset",
-            time = problems::clock(region, sunset)
-        ),
-        caption: text!(
-            text,
+        evening_label: fl!("example-evening", kelvin = evening.as_str()),
+        start_label: fl!("example-starts", time = problems::clock(region, start)),
+        sunset_label: fl!("example-sunset", time = problems::clock(region, sunset)),
+        caption: fl!(
             "example-caption",
             minutes = problems::whole(region, minutes),
             kelvin = evening.as_str()
@@ -85,39 +76,39 @@ pub(super) fn example(
 
 pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vec<View> {
     let (text, region) = (&settings.input.text, &settings.input.region);
+    bind_text!(fl, text);
     let (fade_minimum, fade_maximum) = bounds(region, Field::OrdinaryFadeMs);
     let (rate_minimum, rate_maximum) = bounds(region, Field::OutputRateHz);
     let example = example(text, region, &settings.input.model.config(), 18 * 60 + 6);
     let (transition, fade, preview, rate) = (
-        text!(text, "transition-length"),
-        text!(text, "fade-duration"),
-        text!(text, "preview-length"),
-        text!(text, "update-rate"),
+        fl!("transition-length"),
+        fl!("fade-duration"),
+        fl!("preview-length"),
+        fl!("update-rate"),
     );
     vec![
-        widgets::section(text!(text, "section-slow"), true),
+        widgets::section(fl!("section-slow"), true),
         widgets::card(StackPanel::new().children((
             number_row(
                 settings,
                 "\u{E9D9}",
-                text!(text, "transition-length-description"),
+                fl!("transition-length-description"),
                 NumberControls {
                     field: Field::ScheduledTransitionMinutes,
                     number: automation_id::TRANSITION_NUMBER,
                     slider: Some(automation_id::TRANSITION_SLIDER),
                     title: &transition,
-                    unit: text!(text, "minutes-unit"),
+                    unit: fl!("minutes-unit"),
                 },
                 context,
             ),
             example_view(example),
         ))),
-        widgets::section(text!(text, "section-fades"), false),
+        widgets::section(fl!("section-fades"), false),
         widgets::card(number_row(
             settings,
             "\u{E945}",
-            text!(
-                text,
+            fl!(
                 "fade-duration-description",
                 minimum = fade_minimum,
                 maximum = fade_maximum
@@ -127,30 +118,29 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 number: automation_id::FADE_NUMBER,
                 slider: None,
                 title: &fade,
-                unit: text!(text, "milliseconds-unit"),
+                unit: fl!("milliseconds-unit"),
             },
             context,
         )),
-        widgets::section(text!(text, "section-preview"), false),
+        widgets::section(fl!("section-preview"), false),
         widgets::card(number_row(
             settings,
             "\u{E768}",
-            text!(text, "preview-length-description"),
+            fl!("preview-length-description"),
             NumberControls {
                 field: Field::PreviewSeconds,
                 number: automation_id::PREVIEW_LENGTH_NUMBER,
                 slider: Some(automation_id::PREVIEW_LENGTH_SLIDER),
                 title: &preview,
-                unit: text!(text, "seconds-unit"),
+                unit: fl!("seconds-unit"),
             },
             context,
         )),
-        widgets::section(text!(text, "section-output"), false),
+        widgets::section(fl!("section-output"), false),
         widgets::card(number_row(
             settings,
             "\u{E9D2}",
-            text!(
-                text,
+            fl!(
                 "update-rate-description",
                 minimum = rate_minimum,
                 maximum = rate_maximum
@@ -160,7 +150,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 number: automation_id::RATE_NUMBER,
                 slider: None,
                 title: &rate,
-                unit: text!(text, "hertz-unit"),
+                unit: fl!("hertz-unit"),
             },
             context,
         )),

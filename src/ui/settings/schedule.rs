@@ -34,7 +34,7 @@ use crate::SolarConflict;
 use crate::TimeInterval;
 use crate::automation_id;
 use crate::l10n::Text;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use crate::platform::nls::RegionalFormat;
 use crate::solar_timing_enabled;
 use crate::ui::status;
@@ -83,21 +83,22 @@ const SOLAR_FIELDS: [Field; 5] = [
 
 pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vec<View> {
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let config = settings.input.model.config();
     let wake_description = if config.sunrise_enabled() {
-        text!(text, "wake-description-sunrise")
+        fl!("wake-description-sunrise")
     } else {
-        text!(text, "wake-description")
+        fl!("wake-description")
     };
     vec![
         widgets::group(vec![
             management_card(settings, context),
             status_card(settings, context),
         ]),
-        widgets::section(text!(text, "section-times"), false),
+        widgets::section(fl!("section-times"), false),
         widgets::group(vec![
             widgets::card(
-                Row::new("\u{E823}", text!(text, "wake-title"), wake_description)
+                Row::new("\u{E823}", fl!("wake-title"), wake_description)
                     .controls(settings.with_feedback(
                         Field::Wake,
                         picker(settings, Field::Wake, automation_id::WAKE, context),
@@ -105,20 +106,16 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                     .view(settings.stacked()),
             ),
             widgets::card(
-                Row::new(
-                    "\u{E708}",
-                    text!(text, "bedtime-title"),
-                    text!(text, "bedtime-description"),
-                )
-                .controls(settings.with_feedback(
-                    Field::Bedtime,
-                    picker(settings, Field::Bedtime, automation_id::BEDTIME, context),
-                ))
-                .view(settings.stacked()),
+                Row::new("\u{E708}", fl!("bedtime-title"), fl!("bedtime-description"))
+                    .controls(settings.with_feedback(
+                        Field::Bedtime,
+                        picker(settings, Field::Bedtime, automation_id::BEDTIME, context),
+                    ))
+                    .view(settings.stacked()),
             ),
             solar_card(settings, context),
         ]),
-        widgets::section(text!(text, "section-colors"), false),
+        widgets::section(fl!("section-colors"), false),
         widgets::group(
             LEVELS
                 .into_iter()
@@ -132,7 +129,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             .is_enabled(settings.input.model.editable())
             .automation_id(automation_id::RESTORE_COLORS)
             .on_click(context.message(Message::Edit(recommended_colors())))
-            .content(text!(text, "restore-colors"))
+            .content(fl!("restore-colors"))
             .into(),
     ]
 }
@@ -145,11 +142,12 @@ pub(super) struct ManagementView {
 }
 
 pub(super) fn change_line(model: &Model, text: &Text) -> Option<String> {
+    bind_text!(fl, text);
     model.management_change().map(|change| {
         if change == ManagementState::TurningOn {
-            text!(text, "manage-turning-on")
+            fl!("manage-turning-on")
         } else {
-            text!(text, "manage-turning-off")
+            fl!("manage-turning-off")
         }
     })
 }
@@ -234,10 +232,10 @@ impl Playing {
     }
 
     fn detail(&self, text: &Text, region: &RegionalFormat, now: Instant) -> Option<String> {
+        bind_text!(fl, text);
         let instant = self.instant(now)?;
         let kelvin = self.curve.as_ref()?.rounded(instant).ok()?;
-        Some(text!(
-            text,
+        Some(fl!(
             "preview-playing-detail",
             time = problems::clock(region, super::local_minute(instant)?),
             kelvin = problems::kelvin(region, i64::from(kelvin))
@@ -260,6 +258,7 @@ pub(super) fn preview_view(
     region: &RegionalFormat,
     now: Instant,
 ) -> PreviewView {
+    bind_text!(fl, text);
     if model.preview_active {
         let detail = model
             .playing
@@ -269,17 +268,16 @@ pub(super) fn preview_view(
             playing: true,
             enabled: true,
             caption: if detail.is_some() {
-                text!(text, "preview-playing")
+                fl!("preview-playing")
             } else {
-                text!(text, "preview-starting")
+                fl!("preview-starting")
             },
             detail,
             progress: model.playing.as_ref().map(|playing| playing.progress(now)),
         };
     }
     let seconds = model.config().input().preview_seconds;
-    let ready = text!(
-        text,
+    let ready = fl!(
         "preview-ready",
         count = seconds,
         seconds = problems::whole(region, seconds)
@@ -287,9 +285,9 @@ pub(super) fn preview_view(
     let (enabled, caption) = if model.accepted.is_none() {
         (false, ready)
     } else if !model.management.is_on() {
-        (false, text!(text, "preview-unmanaged"))
+        (false, fl!("preview-unmanaged"))
     } else if !model.errors.is_empty() {
-        (false, text!(text, "preview-invalid"))
+        (false, fl!("preview-invalid"))
     } else {
         (
             matches!(
@@ -384,6 +382,7 @@ fn graph_view(settings: &Settings, palette: &Palette) -> Option<View> {
         &settings.input.region,
         &settings.input.model,
     );
+    bind_text!(fl, text);
     let calculation = settings.graph.as_ref()?;
     let schedule = calculation.schedule()?;
     let instant = model
@@ -403,8 +402,7 @@ fn graph_view(settings: &Settings, palette: &Palette) -> Option<View> {
     let start = (model.config().wake_minutes() + 20 * 60) % (24 * 60);
     let clock = problems::clock(region, start);
     let chip = |event: &crate::LocalEvent| {
-        text!(
-            text,
+        fl!(
             "graph-event",
             event = graph::event_key(event.kind),
             time = problems::clock(region, local_minute(event.local))
@@ -419,7 +417,7 @@ fn graph_view(settings: &Settings, palette: &Palette) -> Option<View> {
         layout: &layout,
         surface,
         palette,
-        name: text!(text, "graph-name", clock = clock.as_str()),
+        name: fl!("graph-name", clock = clock.as_str()),
         chip: &chip,
         hour: &hour,
         animation: model
@@ -473,15 +471,12 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
         &settings.input.region,
         &settings.input.model,
     );
+    bind_text!(fl, text);
     let preview = preview_view(model, text, region, Instant::now());
     let (glyph, label, command) = if preview.playing {
-        (
-            "\u{E71A}",
-            text!(text, "preview-stop"),
-            Command::StopPreview,
-        )
+        ("\u{E71A}", fl!("preview-stop"), Command::StopPreview)
     } else {
-        ("\u{E768}", text!(text, "preview-start"), Command::Preview)
+        ("\u{E768}", fl!("preview-start"), Command::Preview)
     };
     let mut line: Vec<View> = vec![
         widgets::caption(&preview.caption)
@@ -548,29 +543,24 @@ pub(super) fn event_summary(
     text: &Text,
     region: &RegionalFormat,
 ) -> [SummaryColumn; 4] {
+    bind_text!(fl, text);
     let config = model.config();
     let input = config.input();
     let column =
         |id: &'static str, (time, temperature): (String, String), used: bool| SummaryColumn {
             id,
-            name: text!(text, "event-name", event = id),
+            name: fl!("event-name", event = id),
             time,
             temperature,
             used,
         };
     let kelvin = |value: i64| problems::kelvin(region, value);
     let solar = |enabled: bool, time: Option<jiff::civil::DateTime>, value: i64| {
-        let off = || (text!(text, "event-off"), text!(text, "event-not-used"));
+        let off = || (fl!("event-off"), fl!("event-not-used"));
         if !enabled {
             (off(), false)
         } else if model.solar.failed {
-            (
-                (
-                    text!(text, "event-unavailable"),
-                    text!(text, "event-fallback"),
-                ),
-                false,
-            )
+            ((fl!("event-unavailable"), fl!("event-fallback")), false)
         } else if let Some(time) = time {
             (
                 (problems::clock(region, local_minute(time)), kelvin(value)),
@@ -579,7 +569,7 @@ pub(super) fn event_summary(
         } else if model.today.is_some() {
             (off(), false)
         } else {
-            ((text!(text, "event-pending"), String::new()), false)
+            ((fl!("event-pending"), String::new()), false)
         }
     };
     let (sunrise, sunrise_used) = solar(
@@ -623,13 +613,13 @@ fn suppressed_sentence(
     control: &status::Control<'_>,
     current: jiff::Timestamp,
 ) -> Option<String> {
+    bind_text!(fl, text);
     let kelvin = problems::kelvin(region, 6500);
     let first = if control.suppression.manual() {
         model.manual_end.map_or_else(
-            || text!(text, "sentence-manual-active", kelvin = kelvin.as_str()),
+            || fl!("sentence-manual-active", kelvin = kelvin.as_str()),
             |minute| {
-                text!(
-                    text,
+                fl!(
                     "sentence-manual",
                     kelvin = kelvin.as_str(),
                     time = problems::clock(region, minute)
@@ -651,15 +641,8 @@ fn suppressed_sentence(
                 )
             });
         app.map_or_else(
-            || text!(text, "sentence-automatic-unknown", kelvin = kelvin.as_str()),
-            |app| {
-                text!(
-                    text,
-                    "sentence-automatic",
-                    kelvin = kelvin.as_str(),
-                    app = app
-                )
-            },
+            || fl!("sentence-automatic-unknown", kelvin = kelvin.as_str()),
+            |app| fl!("sentence-automatic", kelvin = kelvin.as_str(), app = app),
         )
     } else {
         return None;
@@ -668,8 +651,7 @@ fn suppressed_sentence(
         .schedule
         .and_then(|schedule| status::scheduled_kelvin(schedule, current))
         .map(|value| {
-            text!(
-                text,
+            fl!(
                 "sentence-schedule-at",
                 kelvin = problems::kelvin(region, i64::from(value))
             )
@@ -684,10 +666,11 @@ pub(super) fn status_sentence(
     control: &status::Control<'_>,
     current: jiff::Timestamp,
 ) -> String {
+    bind_text!(fl, text);
     let kelvin = |value: u16| problems::kelvin(region, i64::from(value));
     let clock = |time: jiff::civil::DateTime| problems::clock(region, local_minute(time));
     if !model.management.is_on() {
-        return text!(text, "sentence-not-managing");
+        return fl!("sentence-not-managing");
     }
     if control.preview_active {
         let time = control
@@ -700,14 +683,14 @@ pub(super) fn status_sentence(
         } else {
             "schedule"
         };
-        return text!(text, "sentence-preview", time = time, resumes = resumes);
+        return fl!("sentence-preview", time = time, resumes = resumes);
     }
     match (model.scheduling, model.last_scheduled) {
         (SchedulingState::Stopped, _) | (SchedulingState::Retained, None) => {
-            return text!(text, "sentence-control-unavailable");
+            return fl!("sentence-control-unavailable");
         }
         (SchedulingState::Retained, Some(value)) => {
-            return text!(text, "sentence-retained", kelvin = kelvin(value));
+            return fl!("sentence-retained", kelvin = kelvin(value));
         }
         _ => {}
     }
@@ -715,7 +698,7 @@ pub(super) fn status_sentence(
         return sentence;
     }
     let Some(schedule) = control.schedule else {
-        return text!(text, "status-calculating");
+        return fl!("status-calculating");
     };
     if let Some(status::Position::Shifting {
         event,
@@ -724,8 +707,7 @@ pub(super) fn status_sentence(
         ..
     }) = status::position(schedule, current)
     {
-        return text!(
-            text,
+        return fl!(
             "sentence-reaching",
             kelvin = kelvin(to),
             time = clock(local),
@@ -734,15 +716,14 @@ pub(super) fn status_sentence(
     }
     let Some(next) = status::next_change(schedule, current) else {
         return status::scheduled_kelvin(schedule, current).map_or_else(
-            || text!(text, "status-calculating"),
-            |value| text!(text, "sentence-schedule-at", kelvin = kelvin(value)),
+            || fl!("status-calculating"),
+            |value| fl!("sentence-schedule-at", kelvin = kelvin(value)),
         );
     };
     next.from.map_or_else(
-        || text!(text, "sentence-holding", time = clock(next.local)),
+        || fl!("sentence-holding", time = clock(next.local)),
         |from| {
-            text!(
-                text,
+            fl!(
                 "sentence-next",
                 kelvin = kelvin(next.kelvin),
                 time = clock(next.local),
@@ -812,6 +793,7 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
         &settings.input.region,
         &settings.input.model,
     );
+    bind_text!(fl, text);
     let palette = settings.palette();
     let mut control = model.control(Instant::now());
     control.schedule = control.schedule.or_else(|| settings.schedule());
@@ -819,11 +801,11 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
     let phase = control.phase(current);
     let temperature = if model.management.is_on() {
         control.kelvin(current).map_or_else(
-            || text!(text, "output-unknown"),
+            || fl!("output-unknown"),
             |value| problems::kelvin(region, i64::from(value)),
         )
     } else {
-        text!(text, "output-off")
+        fl!("output-off")
     };
     Grid::new()
         .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
@@ -903,10 +885,11 @@ fn status_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
 
 fn management_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let text = &settings.input.text;
-    let title = text!(text, "manage-title");
+    bind_text!(fl, text);
+    let title = fl!("manage-title");
     let view = management_view(&settings.input.model, text);
     widgets::card(
-        Row::new("\u{EA18}", title.clone(), text!(text, "manage-description"))
+        Row::new("\u{EA18}", title.clone(), fl!("manage-description"))
             .detail(view.change.map(|line| {
                 widgets::caption(line)
                     .automation_id(automation_id::MANAGE_CHANGE)
@@ -937,37 +920,38 @@ pub(super) fn consent_dialog(
     open: Option<Consent>,
     context: &ViewContext<'_, Settings>,
 ) -> ContentDialog {
+    bind_text!(fl, text);
     let dialog = ContentDialog::new()
-        .primary_button_text(text!(text, "consent-turn-on"))
-        .close_button_text(text!(text, "consent-cancel"))
+        .primary_button_text(fl!("consent-turn-on"))
+        .close_button_text(fl!("consent-cancel"))
         .default_button(ContentDialogButton::Primary)
         .is_open(open.is_some())
         .on_closed(context.callback(Message::Consent));
     if open == Some(Consent::Location) {
-        return dialog.title(text!(text, "location-consent-title")).content(
+        return dialog.title(fl!("location-consent-title")).content(
             StackPanel::new().spacing(12.0).max_width(452.0).children((
-                widgets::body(text!(text, "location-consent-requests")),
-                widgets::body(text!(text, "location-consent-windows")),
-                widgets::body(text!(text, "location-consent-saving")),
+                widgets::body(fl!("location-consent-requests")),
+                widgets::body(fl!("location-consent-windows")),
+                widgets::body(fl!("location-consent-saving")),
             )),
         );
     }
     let bullets: Vec<View> = [
-        text!(text, "consent-schedule"),
-        text!(text, "consent-native"),
-        text!(text, "consent-undo"),
+        fl!("consent-schedule"),
+        fl!("consent-native"),
+        fl!("consent-undo"),
     ]
     .into_iter()
     .map(|line| widgets::body(format!("\u{2022} {line}")).into())
     .collect();
-    dialog.title(text!(text, "consent-title")).content(
+    dialog.title(fl!("consent-title")).content(
         StackPanel::new().spacing(12.0).max_width(452.0).children((
-            widgets::body(text!(text, "consent-body")),
+            widgets::body(fl!("consent-body")),
             StackPanel::new()
                 .spacing(4.0)
                 .margin(Thickness::new(20.0, 0.0, 0.0, 0.0))
                 .children(bullets),
-            widgets::body(text!(text, "consent-closing")),
+            widgets::body(fl!("consent-closing")),
         )),
     )
 }
@@ -991,10 +975,11 @@ fn picker(
     context: &ViewContext<'_, Settings>,
 ) -> View {
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let name = if field == Field::Bedtime {
-        text!(text, "bedtime-title")
+        fl!("bedtime-title")
     } else {
-        text!(text, "wake-title")
+        fl!("wake-title")
     };
     View::component::<TimePicker>(PickerInput {
         id,
@@ -1015,27 +1000,17 @@ fn temperature_card(
     context: &ViewContext<'_, Settings>,
 ) -> View {
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let (title, description) = match field {
-        Field::DaytimeKelvin if config.sunrise_enabled() => (
-            text!(text, "color-daytime"),
-            text!(text, "color-daytime-description"),
-        ),
-        Field::DaytimeKelvin => (
-            text!(text, "color-daytime"),
-            text!(text, "color-daytime-description-wake"),
-        ),
-        Field::MiddleKelvin if unused(config, field) => (
-            text!(text, "color-middle"),
-            text!(text, "color-middle-description-unused"),
-        ),
-        Field::MiddleKelvin => (
-            text!(text, "color-middle"),
-            text!(text, "color-middle-description"),
-        ),
-        _ => (
-            text!(text, "color-bedtime"),
-            text!(text, "color-bedtime-description"),
-        ),
+        Field::DaytimeKelvin if config.sunrise_enabled() => {
+            (fl!("color-daytime"), fl!("color-daytime-description"))
+        }
+        Field::DaytimeKelvin => (fl!("color-daytime"), fl!("color-daytime-description-wake")),
+        Field::MiddleKelvin if unused(config, field) => {
+            (fl!("color-middle"), fl!("color-middle-description-unused"))
+        }
+        Field::MiddleKelvin => (fl!("color-middle"), fl!("color-middle-description")),
+        _ => (fl!("color-bedtime"), fl!("color-bedtime-description")),
     };
     let (slider, number) = match field {
         Field::DaytimeKelvin => (automation_id::DAYTIME_SLIDER, automation_id::DAYTIME_NUMBER),
@@ -1044,7 +1019,7 @@ fn temperature_card(
     };
     let mut heading: Vec<View> = vec![widgets::body(&title).into()];
     if unused(config, field) {
-        heading.push(widgets::pill(text!(text, "not-used")));
+        heading.push(widgets::pill(fl!("not-used")));
     }
     widgets::card(
         Border::new()
@@ -1079,7 +1054,7 @@ fn temperature_card(
                                         number,
                                         slider: Some(slider),
                                         title: &title,
-                                        unit: text!(text, "kelvin-unit"),
+                                        unit: fl!("kelvin-unit"),
                                     },
                                     context,
                                 ),
@@ -1162,14 +1137,15 @@ pub(super) fn solar_messages(
     now: Instant,
     current: jiff::Timestamp,
 ) -> Vec<(String, FeatureMessage)> {
+    bind_text!(fl, text);
     let mut messages = Vec::new();
     if model.solar.failed {
         messages.push((
             automation_id::SOLAR_FALLBACK.to_owned(),
             FeatureMessage {
                 severity: Severity::Warning,
-                text: text!(text, "solar-fallback"),
-                retry: Some(text!(text, "action-retry")),
+                text: fl!("solar-fallback"),
+                retry: Some(fl!("action-retry")),
             },
         ));
     }
@@ -1184,8 +1160,7 @@ pub(super) fn solar_messages(
                     automation_id::solar_conflict(index),
                     FeatureMessage {
                         severity: Severity::Warning,
-                        text: text!(
-                            text,
+                        text: fl!(
                             "solar-conflict",
                             wake = clock(conflict.local_wake),
                             bedtime = clock(conflict.local_bedtime)
@@ -1372,6 +1347,7 @@ pub(super) fn solar_today_line(
     region: &RegionalFormat,
     field: Field,
 ) -> Option<String> {
+    bind_text!(fl, text);
     let config = model.config();
     let (enabled, time) = if field == Field::Sunrise {
         (
@@ -1384,13 +1360,12 @@ pub(super) fn solar_today_line(
             model.today.map(|today| today.sunset),
         )
     };
-    let off = || text!(text, "solar-today-off");
+    let off = || fl!("solar-today-off");
     if !enabled {
         return Some(off());
     }
     Some(time?.map_or_else(off, |time| {
-        text!(
-            text,
+        fl!(
             "solar-today",
             time = problems::clock(region, local_minute(time))
         )
@@ -1490,20 +1465,21 @@ fn solar_check(
 
 fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let (text, model) = (&settings.input.text, &settings.input.model);
-    let title = text!(text, "location-title");
+    bind_text!(fl, text);
+    let title = fl!("location-title");
     let on = switch(model, Field::UseWindowsLocation);
     let mut lines: Vec<View> = vec![
         widgets::body(&title).into(),
         widgets::caption(if on {
-            text!(text, "location-on")
+            fl!("location-on")
         } else {
-            text!(text, "location-off")
+            fl!("location-off")
         })
         .into(),
     ];
     if settings.input.location.requesting {
         lines.push(
-            widgets::caption(text!(text, "location-requesting"))
+            widgets::caption(fl!("location-requesting"))
                 .automation_id(automation_id::LOCATION_REQUESTING)
                 .automation_live_setting(AutomationLiveSetting::Polite)
                 .into(),
@@ -1588,6 +1564,7 @@ fn coordinate_field(
 
 fn coordinates_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let enabled = coordinates_enabled(&settings.input.model);
     nested(
         with_solar_feedback(
@@ -1603,8 +1580,8 @@ fn coordinates_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         .spacing(2.0)
                         .vertical_alignment(VerticalAlignment::Center)
                         .children((
-                            widgets::body(text!(text, "coordinates-title")),
-                            widgets::caption(text!(text, "coordinates-description")),
+                            widgets::body(fl!("coordinates-title")),
+                            widgets::caption(fl!("coordinates-description")),
                         )),
                     StackPanel::new()
                         .grid_column(i32::from(!settings.stacked()))
@@ -1616,13 +1593,13 @@ fn coordinates_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                             coordinate_field(
                                 settings,
                                 Axis::Latitude,
-                                (text!(text, "latitude"), enabled),
+                                (fl!("latitude"), enabled),
                                 context,
                             ),
                             coordinate_field(
                                 settings,
                                 Axis::Longitude,
-                                (text!(text, "longitude"), enabled),
+                                (fl!("longitude"), enabled),
                                 context,
                             ),
                         )),
@@ -1635,16 +1612,17 @@ fn coordinates_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
 
 fn solar_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let (text, model) = (&settings.input.text, &settings.input.model);
+    bind_text!(fl, text);
     let options = solar_options_enabled(model);
-    let title = text!(text, "solar-title");
+    let title = fl!("solar-title");
     let expansion = Expansion::chosen(settings.expanded.solar).held_when(solar_held(model));
     let expanded = expansion.expanded();
     let expand_name = match expansion {
-        Expansion::Held => text!(text, "solar-held"),
-        Expansion::Expanded => text!(text, "solar-collapse"),
-        Expansion::Collapsed => text!(text, "solar-expand"),
+        Expansion::Held => fl!("solar-held"),
+        Expansion::Expanded => fl!("solar-collapse"),
+        Expansion::Collapsed => fl!("solar-expand"),
     };
-    let header = Row::new("\u{E706}", title.clone(), text!(text, "solar-description"))
+    let header = Row::new("\u{E706}", title.clone(), fl!("solar-description"))
         .controls(vec![with_solar_feedback(
             settings,
             Field::SolarTiming,
@@ -1700,20 +1678,14 @@ fn solar_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View 
         rows.push(solar_check(
             settings,
             Field::Sunrise,
-            (
-                text!(text, "sunrise-title"),
-                text!(text, "sunrise-description"),
-            ),
+            (fl!("sunrise-title"), fl!("sunrise-description")),
             (switch(model, Field::Sunrise), options),
             context,
         ));
         rows.push(solar_check(
             settings,
             Field::Sunset,
-            (
-                text!(text, "sunset-title"),
-                text!(text, "sunset-description"),
-            ),
+            (fl!("sunset-title"), fl!("sunset-description")),
             (switch(model, Field::Sunset), options),
             context,
         ));

@@ -48,9 +48,9 @@ Read a native check's instructions before running it. Some send mouse and keyboa
 
 ## Windows dependencies
 
-`Cargo.lock` pins resolved versions. While Reactor is in preview, `windows-reactor`, `windows-window`, and `windows-reactor-setup` track windows-rs `master` through one explicit Git revision. The application and both Reactor experiments use that revision. Direct Windows bindings also share it so their Rust COM types agree.
+`Cargo.lock` pins resolved versions. While Reactor is in preview, `windows-reactor`, `windows-window`, and `windows-reactor-setup` track windows-rs `master` through one explicit Git revision. The application, [Reactor experiment](tools/windows-reactor/README.md), and [settings-design experiment](tools/windows-reactor/settings-design/README.md) use that revision. Direct Windows bindings also share it so their Rust COM types agree.
 
-Root patches align crates.io dependencies whose version ranges accept the pinned Windows crates. Dependencies requiring older versions keep them, including `windows-sys` 0.61 in the Night Light watcher and `tempfile`. The Night Light crates remain published dependencies; Circadia's pin policy does not change the sibling Night Light repository.
+Root patches align crates.io dependencies whose version ranges accept the pinned Windows crates. Dependencies requiring older versions keep them, including `windows-sys` 0.61 in the Night Light watcher and `tempfile`. The Night Light crates remain published dependencies; Circadia's pin policy does not change the separate `win-nightlight-cli` repository.
 
 ### Updating Reactor
 
@@ -78,15 +78,36 @@ The generator reads [tools/composition-bindings.txt](tools/composition-bindings.
 
 The configuration owner validates settings and tray edits through one path. Valid edits become the running configuration immediately and are persisted after a short debounce. Persistence failures do not undo the running configuration; startup recovery and paused saving are defined in the [configuration contract](docs/specs/application.md).
 
-The controller is the only component requesting Night Light writes. It serializes public library calls on its worker thread. A separate calculation worker supplies schedule and graph results, so a blocked native call does not block graph calculation or the UI. Configuration revisions reject obsolete calculation results. Preview's captured start time and deadline determine UI playback independently of native-call completion.
+The controller is the only component requesting Night Light writes. It serializes public library calls on its worker thread. A separate calculation worker supplies schedule and graph results, so a blocked native call does not block graph calculation or the UI. Configuration revisions reject obsolete calculation results. Preview plays through one daily schedule at an accelerated rate. Its captured start time and deadline determine UI playback independently of native-call completion.
 
-The controller uses one Night Light handle for its lifetime and distinguishes successful temperature storage from successful preview cleanup. Windows stores settings and on/off state separately, so exit cleanup makes independent best-effort requests. See [native access](docs/specs/native-access.md) and [lifecycle](docs/specs/control.md) for failure and ordering guarantees.
+The controller uses one Night Light handle for its lifetime and distinguishes successful temperature storage from clearing Windows' native preview flag after an immediate temperature change. Windows stores settings and on/off state separately, so exit cleanup makes independent best-effort requests. See [native access](docs/specs/native-access.md) and [lifecycle](docs/specs/control.md) for failure and ordering guarantees.
 
 Foreground inspection uses window metadata and limited-query process identity. Display names and icons come from executable files on a separate worker. Circadia does not read other processes' memory, inject code, or request elevation. The [matching research](docs/research/executable-matching.md) explains identity and path limits.
 
 ## Localization
 
 Interface messages use Project Fluent `.ftl` files under `i18n/`, one directory per language. The Language setting chooses Windows' preferred supported language or an explicitly selected shipped language. Changes take effect at the next launch. Windows regional formats are read once at startup for times and numbers.
+
+Use the [UI localization design guide](docs/design/localization.md) for shared wording, grammar, and layout principles. Create each locale catalog from [en-US](i18n/en-US/circadia.ftl). Preserve message identifiers, named arguments, and selector keys that represent application states; adapt plural categories to the target language.
+
+- [Shared terms](i18n/shared.ftl) define invariant brand names, including Circadia and GitHub, and are loaded into every language. Reference these terms without redefining them in a locale catalog. Change a brand in this shared file.
+- Terms at the start of en-US define official Windows names and repeated complete labels. Translate Windows feature names, including Night Light, using the official terminology dictionary for the target locale.
+- Keep standalone event labels, such as Wake, and temperature labels, such as Daytime, consistent. Translate complete sentences for their grammar; locale-specific term forms and helper terms are allowed.
+- Preserve file names, executable names, technical codes, and values supplied through message arguments.
+
+For assisted translation, provide the en-US catalog, shared terms, target locale, and its official Windows terminology dictionary together. The catalog comments explain how to use the terms. Run `just check` to validate catalog structure, formatting, and argument consistency.
+
+In Rust, bind the current `Text` to a local formatting macro once per function or closure:
+
+```rust
+use crate::l10n::bind_text;
+
+bind_text!(fl, text);
+let title = fl!("app-name");
+let caption = fl!("manual-until", time = formatted_time);
+```
+
+The wrapper preserves compile-time message and named-argument checks, plus pseudo-localization. Use distinct aliases when formatting multiple locales in one scope, such as `english_fl` and `pseudo_fl`. Do not call `bind_text!` with the same alias in a nested scope; the generated macro names are ambiguous.
 
 Debug builds accept `--language TAG` to override the saved language for that process. `--language qps-Ploc` generates accented, bracketed text with at least 40% expansion to expose missing translations and clipped layouts. Release builds reject that option and exclude the pseudo-language generator. `just test-release-text`, included in `just check`, verifies those boundaries with debug assertions disabled.
 

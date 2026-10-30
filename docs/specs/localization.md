@@ -14,15 +14,20 @@ The validation scenarios use pseudo-localization: a developer-only artificial te
 
 Every piece of interface text comes from a translation resource for the interface language: labels, descriptions, buttons, status lines, phase names (such as Daytime or Suppressed), graph labels, event names (Wake, Sunrise, Sunset, and Bedtime), validation and error messages, dialog text, tray menu items, the tray tooltip, and accessible names and descriptions. English is the source language and the fallback: a message missing from a translation uses its English text. Messages that include values use named placeholders, so a translation can reorder them, and counts use the plural rules of the interface language. Error explanations are translated; technical error codes appear unchanged. Log records are not interface text.
 
+Shared translatable terms are names or complete phrases reused across interface messages. They follow the same translation and pseudo-localization rules as other message text.
+
+Product and service brand names, such as Circadia and GitHub, retain their spelling in every language, including the pseudo-locale. Windows feature and settings names use the target language's official Windows terminology.
+
 The first release ships English. Adding a language requires only its translation resource; additional translated languages are post-MVP work under [Future work](SPEC.md#future-work).
 
 **Intent:** Let translators localize Circadia completely, and keep everything a user sees or hears in one language.
 
 **Scenarios:**
 
-- The interface language is the pseudo-locale: every label, message, tray item, tooltip, and accessible name shows pseudo-localized text, and no English source string appears.
+- The interface language is the pseudo-locale: every label, message, tray item, tooltip, and accessible name shows pseudo-localized text, including text from shared translatable terms. Invariant brand names, technical codes, and values supplied through placeholders are not transformed.
 - A translation of "Morning and evening (1900 K) can't be lower than Bedtime (2400 K)." places the second value, the Sleep temperature labeled Bedtime, first: both values appear in the translation's order with the correct numbers.
 - The suppression list has 1 entry, then 3 entries: its heading uses the language's singular form, then its plural form.
+- A translated message mentions Circadia, GitHub, and Night Light: the brand names retain their spelling, and Night Light uses the official Windows term for that language.
 - A translation lacks one message: that message appears in English, and the rest stay translated.
 - A native access error occurs: settings shows a translated explanation and the error code, such as 0x80070005, without the underlying library's English message.
 

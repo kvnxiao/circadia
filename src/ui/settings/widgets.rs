@@ -2,7 +2,7 @@ use super::problems::FeatureMessage;
 use super::problems::Severity;
 use crate::automation_id;
 use crate::l10n::Text;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use std::sync::Arc;
 use windows_reactor::AutomationLiveSetting;
 use windows_reactor::Border;
@@ -33,7 +33,8 @@ pub(super) const CONTENT_INSET: f64 = 16.0;
 pub(super) const COMPACT_ACTION_INSET: f64 = CONTENT_INSET - (ICON_ACTION_SIZE - 16.0) / 2.0;
 
 pub(super) fn toggle(text: &Text, on: bool, control: ToggleSwitch) -> StackPanel {
-    let label = text!(text, "toggle-state", on = if on { "yes" } else { "no" });
+    bind_text!(fl, text);
+    let label = fl!("toggle-state", on = if on { "yes" } else { "no" });
     action_group(vec![
         body(label)
             .vertical_alignment(VerticalAlignment::Center)

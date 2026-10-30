@@ -27,6 +27,7 @@ required-features = ["native-tests"]
 
 [dependencies]
 windows-bindgen = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", optional = true }
+fluent-bundle = "0.16"
 fluent-pseudo = "0.3"
 fs-err = "3.3"
 i18n-embed = { version = "0.16", features = ["fluent-system"] }
@@ -70,7 +71,6 @@ resvg = { version = "0.49", default-features = false }
 windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", optional = true }
 
 [dev-dependencies]
-fluent-bundle = "0.16"
 fluent-syntax = "0.12"
 test-case = "3"
 

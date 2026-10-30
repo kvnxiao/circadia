@@ -18,7 +18,7 @@ use crate::FieldErrorKind;
 use crate::ManualCommand;
 use crate::automation_id;
 use crate::l10n::Text;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use crate::platform::nls::RegionalFormat;
 use crate::ui::file_info::AppFile;
 use crate::ui::file_info::AppSelection;
@@ -62,15 +62,15 @@ pub(super) const MINUTE: Duration = Duration::from_mins(1);
 pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vec<View> {
     let model = &settings.input.model;
     let (text, region) = (&settings.input.text, &settings.input.region);
+    bind_text!(fl, text);
     let manual = manual_view(model, text, region);
     let mut children = vec![
         widgets::group(vec![
             widgets::card(
                 Row::new(
                     "\u{E7F4}",
-                    text!(text, "apps-explanation-title"),
-                    text!(
-                        text,
+                    fl!("apps-explanation-title"),
+                    fl!(
                         "apps-explanation-description",
                         kelvin = problems::kelvin(region, 6500)
                     ),
@@ -78,30 +78,26 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 .view(settings.stacked()),
             ),
             widgets::card(
-                Row::new(
-                    SUN_GLYPH,
-                    text!(text, "manual-title"),
-                    manual.description.clone(),
-                )
-                .controls(vec![manual_button(manual, context)])
-                .view(settings.stacked()),
+                Row::new(SUN_GLYPH, fl!("manual-title"), manual.description.clone())
+                    .controls(vec![manual_button(manual, context)])
+                    .view(settings.stacked()),
             ),
         ]),
-        widgets::section(text!(text, "section-recent"), false),
+        widgets::section(fl!("section-recent"), false),
         recent_card(settings, context),
-        widgets::caption(text!(text, "recent-note"))
+        widgets::caption(fl!("recent-note"))
             .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
             .into(),
         list_header(settings, context),
     ];
     children.extend(settings.feedback(Field::Suppression));
     children.extend(suppression_cards(settings, context));
-    children.push(widgets::section(text!(text, "section-never"), false));
+    children.push(widgets::section(fl!("section-never"), false));
     children.push(exclusions_card(settings, context));
-    children.push(widgets::section(text!(text, "section-timing"), false));
-    let delay = text!(text, "focus-delay-title");
+    children.push(widgets::section(fl!("section-timing"), false));
+    let delay = fl!("focus-delay-title");
     children.push(widgets::card(
-        Row::new("\u{E916}", &delay, text!(text, "focus-delay-description"))
+        Row::new("\u{E916}", &delay, fl!("focus-delay-description"))
             .controls(settings.with_feedback(
                 Field::FocusDelayMs,
                 settings.number_controls(
@@ -110,7 +106,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         number: automation_id::FOCUS_DELAY_NUMBER,
                         slider: None,
                         title: &delay,
-                        unit: text!(text, "milliseconds-unit"),
+                        unit: fl!("milliseconds-unit"),
                     },
                     context,
                 ),
@@ -137,25 +133,25 @@ pub(super) struct ManualView {
 }
 
 pub(super) fn manual_view(model: &Model, text: &Text, region: &RegionalFormat) -> ManualView {
+    bind_text!(fl, text);
     let enabled = status::manual_available(model.management, model.scheduling, model.suppression);
     let description = if model.suppression.manual() {
         model.manual_end.map_or_else(
-            || text!(text, "manual-active"),
-            |minute| text!(text, "manual-until", time = problems::clock(region, minute)),
+            || fl!("manual-active"),
+            |minute| fl!("manual-until", time = problems::clock(region, minute)),
         )
     } else if model.accepted.is_some() && !model.management.is_on() {
-        text!(text, "manual-unmanaged")
+        fl!("manual-unmanaged")
     } else {
-        text!(
-            text,
+        fl!(
             "manual-description",
             kelvin = problems::kelvin(region, 6500)
         )
     };
     let (command, label) = if model.suppression.manual() {
-        (ManualCommand::Stop, text!(text, "manual-stop"))
+        (ManualCommand::Stop, fl!("manual-stop"))
     } else {
-        (ManualCommand::Start, text!(text, "manual-title"))
+        (ManualCommand::Start, fl!("manual-title"))
     };
     ManualView {
         command,
@@ -180,15 +176,16 @@ pub(super) fn relative_times_shown(page: Page, model: &Model, visibility: Visibi
 }
 
 pub(super) fn since(text: &Text, region: &RegionalFormat, elapsed: Duration) -> String {
+    bind_text!(fl, text);
     let minutes = elapsed.as_secs() / MINUTE.as_secs();
     let whole = |value: u64| problems::whole(region, i64::try_from(value).unwrap_or(i64::MAX));
     match minutes {
-        0 => text!(text, "recent-now"),
-        1..60 => text!(text, "recent-minutes", minutes = whole(minutes)),
-        60..1440 => text!(text, "recent-hours", hours = whole(minutes / 60)),
+        0 => fl!("recent-now"),
+        1..60 => fl!("recent-minutes", minutes = whole(minutes)),
+        60..1440 => fl!("recent-hours", hours = whole(minutes / 60)),
         _ => {
             let days = minutes / 1440;
-            text!(text, "recent-days", count = days, days = whole(days))
+            fl!("recent-days", count = days, days = whole(days))
         }
     }
 }
@@ -321,6 +318,7 @@ pub(super) fn recent_rows(
     region: &RegionalFormat,
     now: Duration,
 ) -> Vec<RecentRow> {
+    bind_text!(fl, text);
     let config = model.config();
     model
         .recent
@@ -338,8 +336,7 @@ pub(super) fn recent_rows(
                 },
             ),
             detail: {
-                let detail = text!(
-                    text,
+                let detail = fl!(
                     "recent-detail",
                     executable = recent.executable.as_str(),
                     since = since(text, region, recent.since_focus(now))
@@ -421,6 +418,7 @@ pub(super) struct EntryRow {
 }
 
 pub(super) fn entry_rows(model: &Model, text: &Text, list: Field) -> Vec<EntryRow> {
+    bind_text!(fl, text);
     let config = model.config();
     config
         .entries(list)
@@ -460,8 +458,7 @@ pub(super) fn entry_rows(model: &Model, text: &Text, list: Field) -> Vec<EntryRo
                 let detail = if entry.title.is_empty() {
                     entry.executable.clone()
                 } else {
-                    text!(
-                        text,
+                    fl!(
                         "entry-title-detail",
                         regex = if entry.regex { "yes" } else { "no" },
                         executable = entry.executable.as_str()
@@ -479,15 +476,13 @@ pub(super) fn entry_rows(model: &Model, text: &Text, list: Field) -> Vec<EntryRo
             inactive: list == Field::Suppression
                 && config.inactive(entry, &model.running_executable),
             error: problem.map(|problem| match problem {
-                EntryProblem::Invalid => text!(text, "entry-invalid"),
-                EntryProblem::Expression => text!(text, "entry-expression"),
-                EntryProblem::Path => text!(text, "entry-path-invalid"),
-                EntryProblem::PathFilename => text!(text, "entry-path-filename"),
-                EntryProblem::Duplicate => text!(
-                    text,
-                    "entry-duplicate",
-                    executable = entry.executable.as_str()
-                ),
+                EntryProblem::Invalid => fl!("entry-invalid"),
+                EntryProblem::Expression => fl!("entry-expression"),
+                EntryProblem::Path => fl!("entry-path-invalid"),
+                EntryProblem::PathFilename => fl!("entry-path-filename"),
+                EntryProblem::Duplicate => {
+                    fl!("entry-duplicate", executable = entry.executable.as_str())
+                }
             }),
         })
         .collect()
@@ -500,14 +495,15 @@ pub(super) struct FixedRow {
 }
 
 pub(super) fn fixed_rows(model: &Model, text: &Text) -> Vec<FixedRow> {
+    bind_text!(fl, text);
     vec![
         FixedRow {
             executable: model.running_executable.clone(),
-            description: text!(text, "fixed-self"),
+            description: fl!("fixed-self"),
         },
         FixedRow {
             executable: crate::config::SHARED_HOST.to_owned(),
-            description: text!(text, "fixed-host"),
+            description: fl!("fixed-host"),
         },
     ]
 }
@@ -681,19 +677,20 @@ pub(super) fn dialog_view(
     region: &RegionalFormat,
     dialog: &AddDialog,
 ) -> DialogView {
+    bind_text!(fl, text);
     let count = dialog.files(model).len();
     let apps = problems::whole(region, i64::try_from(count).unwrap_or(i64::MAX));
     let exclusion = dialog.list == Field::Exclusions;
     DialogView {
         title: if exclusion {
-            text!(text, "dialog-exclude-title")
+            fl!("dialog-exclude-title")
         } else {
-            text!(text, "dialog-add-title")
+            fl!("dialog-add-title")
         },
         description: if exclusion {
-            text!(text, "dialog-exclude-description")
+            fl!("dialog-exclude-description")
         } else {
-            text!(text, "dialog-add-description")
+            fl!("dialog-add-description")
         },
         rows: dialog
             .candidates(model)
@@ -723,25 +720,22 @@ pub(super) fn dialog_view(
             })
             .collect(),
         primary: if exclusion {
-            text!(text, "dialog-exclude", count = count, apps = apps.as_str())
+            fl!("dialog-exclude", count = count, apps = apps.as_str())
         } else {
-            text!(text, "dialog-add", count = count, apps = apps.as_str())
+            fl!("dialog-add", count = count, apps = apps.as_str())
         },
         primary_enabled: count > 0,
         message: dialog
             .problem
             .as_ref()
             .and_then(|(executable, kind)| match kind {
-                FieldErrorKind::AlreadyListed => Some(text!(
-                    text,
+                FieldErrorKind::AlreadyListed => Some(fl!(
                     "dialog-already-listed",
                     executable = executable.as_str()
                 )),
-                FieldErrorKind::FixedExclusion => Some(text!(
-                    text,
-                    "dialog-fixed",
-                    executable = executable.as_str()
-                )),
+                FieldErrorKind::FixedExclusion => {
+                    Some(fl!("dialog-fixed", executable = executable.as_str()))
+                }
                 _ => None,
             }),
     }
@@ -922,24 +916,25 @@ pub(super) fn title_dialog_view(
     text: &Text,
     dialog: &TitleDialog,
 ) -> TitleDialogView {
+    bind_text!(fl, text);
     let regex = if dialog.regex { "yes" } else { "no" };
     let valid = crate::valid_title(&dialog.text, dialog.regex);
     TitleDialogView {
-        title: text!(text, "title-dialog-title"),
-        description: text!(text, "title-dialog-description", regex = regex),
-        label: text!(text, "title-dialog-field", regex = regex),
+        title: fl!("title-dialog-title"),
+        description: fl!("title-dialog-description", regex = regex),
+        label: fl!("title-dialog-field", regex = regex),
         text: dialog.text.clone(),
         regex: dialog.regex,
         restricted: dialog.restricted,
         path: dialog.path.clone(),
         path_error: dialog.path_error(model).map(|problem| match problem {
-            EntryProblem::Duplicate => text!(text, "dialog-scope-duplicate"),
-            EntryProblem::PathFilename => text!(text, "entry-path-filename"),
-            _ => text!(text, "entry-path-invalid"),
+            EntryProblem::Duplicate => fl!("dialog-scope-duplicate"),
+            EntryProblem::PathFilename => fl!("entry-path-filename"),
+            _ => fl!("entry-path-invalid"),
         }),
         suggestion: last_seen(model, &dialog.replacement())
-            .map(|title| text!(text, "title-dialog-last-seen", title = title)),
-        error: (!valid).then(|| text!(text, "title-dialog-invalid")),
+            .map(|title| fl!("title-dialog-last-seen", title = title)),
+        error: (!valid).then(|| fl!("title-dialog-invalid")),
         save_enabled: dialog.command(model).is_some(),
     }
 }
@@ -989,14 +984,11 @@ fn title_button(
     settings: &Settings,
     context: &ViewContext<'_, Settings>,
 ) -> View {
+    bind_text!(fl, settings.input.text);
     widgets::icon_button("\u{E71C}", 16.0)
         .is_enabled(settings.input.model.editable())
         .automation_id(automation_id::title(id))
-        .automation_name(text!(
-            settings.input.text,
-            "entry-title-name",
-            name = row.name.as_str()
-        ))
+        .automation_name(fl!("entry-title-name", name = row.name.as_str()))
         .on_click(context.message(Message::OpenTitle(list, row.index, row.expected.clone())))
         .into()
 }
@@ -1017,13 +1009,14 @@ fn remove_button(
 fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let model = &settings.input.model;
     let (text, region) = (&settings.input.text, &settings.input.region);
+    bind_text!(fl, text);
     let editable = model.editable();
     let rows = recent_rows(model, text, region, crate::elapsed_since_boot());
     if rows.is_empty() {
         return widgets::card(
             Border::new()
                 .padding(Thickness::new(16.0, 12.0, 16.0, 12.0))
-                .content(widgets::caption(text!(text, "recent-empty"))),
+                .content(widgets::caption(fl!("recent-empty"))),
         );
     }
     let views: Vec<KeyedView> = rows
@@ -1037,7 +1030,7 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
             let mut controls: Vec<View> = Vec::new();
             let mut detail = vec![widgets::caption(&row.detail).into()];
             if row.excluded {
-                detail.push(widgets::caption(text!(text, "recent-excluded")).into());
+                detail.push(widgets::caption(fl!("recent-excluded")).into());
             }
             if let Some((index, expected)) = &row.listed {
                 controls.push(
@@ -1047,7 +1040,7 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                         .vertical_alignment(VerticalAlignment::Center)
                         .children((
                             FontIcon::new().glyph("\u{E73E}").font_size(12.0),
-                            widgets::caption(text!(text, "recent-on-list")),
+                            widgets::caption(fl!("recent-on-list")),
                         ))
                         .into(),
                 );
@@ -1055,17 +1048,13 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                     Button::new()
                         .is_enabled(editable)
                         .automation_id(automation_id::recent_remove(&executable))
-                        .automation_name(text!(
-                            text,
-                            "recent-remove-name",
-                            name = row.name.as_str()
-                        ))
+                        .automation_name(fl!("recent-remove-name", name = row.name.as_str()))
                         .on_click(context.message(Message::Command(Command::Remove(
                             Field::Suppression,
                             *index,
                             expected.clone(),
                         ))))
-                        .content(text!(text, "recent-remove"))
+                        .content(fl!("recent-remove"))
                         .into(),
                 );
             } else if row.covering == 0 {
@@ -1073,16 +1062,16 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                     Button::new()
                         .is_enabled(editable)
                         .automation_id(automation_id::recent_add(&executable))
-                        .automation_name(text!(text, "recent-add-name", name = row.name.as_str()))
+                        .automation_name(fl!("recent-add-name", name = row.name.as_str()))
                         .on_click(context.message(Message::Command(Command::Add(
                             Field::Suppression,
                             vec![row.file.clone().into()],
                         ))))
-                        .content(widgets::glyph_label(ADD_GLYPH, text!(text, "recent-add")))
+                        .content(widgets::glyph_label(ADD_GLYPH, fl!("recent-add")))
                         .into(),
                 );
             } else {
-                detail.push(widgets::caption(text!(text, "recent-multiple-rules")).into());
+                detail.push(widgets::caption(fl!("recent-multiple-rules")).into());
             }
             let row_view = app_row(
                 icon(
@@ -1118,6 +1107,7 @@ fn divided(view: View, divider: bool) -> View {
 
 fn list_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let count = settings
         .input
         .model
@@ -1130,7 +1120,7 @@ fn list_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
         .row_spacing(if settings.stacked() { 8.0 } else { 0.0 })
         .margin(Thickness::new(0.0, 28.0, 0.0, 8.0))
         .children((
-            widgets::strong(text!(text, "section-suppression", count = count))
+            widgets::strong(fl!("section-suppression", count = count))
                 .vertical_alignment(VerticalAlignment::Center),
             Button::new()
                 .grid_column(i32::from(!settings.stacked()))
@@ -1139,18 +1129,19 @@ fn list_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 .style(ButtonStyle::Accent)
                 .is_enabled(settings.input.model.editable())
                 .automation_id(automation_id::ADD_APP)
-                .automation_name(text!(text, "add-app"))
+                .automation_name(fl!("add-app"))
                 .on_click(context.message(Message::OpenDialog(Field::Suppression)))
-                .content(widgets::glyph_label(ADD_GLYPH, text!(text, "add-app"))),
+                .content(widgets::glyph_label(ADD_GLYPH, fl!("add-app"))),
         ))
         .into()
 }
 
 fn entry_card(row: &EntryRow, settings: &Settings, controls: Vec<View>, id: String) -> View {
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let mut detail: Vec<View> = vec![widgets::caption(&row.detail).into()];
     if row.inactive {
-        detail.push(widgets::caption(text!(text, "entry-inactive")).into());
+        detail.push(widgets::caption(fl!("entry-inactive")).into());
     }
     if let Some(error) = &row.error {
         detail.push(widgets::field_error(error, &automation_id::message(&id)));
@@ -1187,13 +1178,14 @@ fn entry_card(row: &EntryRow, settings: &Settings, controls: Vec<View>, id: Stri
 fn suppression_cards(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vec<View> {
     let model = &settings.input.model;
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let rows = entry_rows(model, text, Field::Suppression);
     if rows.is_empty() {
         return vec![widgets::card(
             Row::new(
                 APP_GLYPH,
-                text!(text, "list-empty-title"),
-                text!(text, "list-empty-description"),
+                fl!("list-empty-title"),
+                fl!("list-empty-description"),
             )
             .view(settings.stacked()),
         )];
@@ -1203,7 +1195,7 @@ fn suppression_cards(settings: &Settings, context: &ViewContext<'_, Settings>) -
         .map(|row| {
             let id = row.id.clone();
             let remove = remove_button(
-                &text!(text, "entry-remove-name", name = row.name.as_str()),
+                &fl!("entry-remove-name", name = row.name.as_str()),
                 automation_id::remove(&id),
                 model.editable(),
                 context.message(Message::Command(Command::Remove(
@@ -1229,6 +1221,7 @@ fn exclusion_row(
 ) -> KeyedView {
     let model = &settings.input.model;
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let id = row.id.clone();
     let mut detail: Vec<View> = vec![widgets::caption(&row.detail).into()];
     if let Some(error) = &row.error {
@@ -1237,7 +1230,7 @@ fn exclusion_row(
     let actions = vec![
         title_button(row, Field::Exclusions, &id, settings, context),
         remove_button(
-            &text!(text, "entry-remove-name", name = row.name.as_str()),
+            &fl!("entry-remove-name", name = row.name.as_str()),
             automation_id::remove(&id),
             model.editable(),
             context.message(Message::Command(Command::Remove(
@@ -1263,20 +1256,21 @@ fn exclusion_row(
 fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let model = &settings.input.model;
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let rows = entry_rows(model, text, Field::Exclusions);
     let held = rows.iter().any(|row| row.error.is_some())
         || model.report.marks.contains_key(&Field::Exclusions);
     let expansion = Expansion::chosen(settings.expanded.exclusions).held_when(held);
     let expanded = expansion.expanded();
     let expand_name = match expansion {
-        Expansion::Held => text!(text, "exclusions-held"),
-        Expansion::Expanded => text!(text, "exclusions-collapse"),
-        Expansion::Collapsed => text!(text, "exclusions-expand"),
+        Expansion::Held => fl!("exclusions-held"),
+        Expansion::Expanded => fl!("exclusions-collapse"),
+        Expansion::Collapsed => fl!("exclusions-expand"),
     };
     let header = Row::new(
         "\u{E733}",
-        text!(text, "exclusions-title"),
-        text!(text, "exclusions-description"),
+        fl!("exclusions-title"),
+        fl!("exclusions-description"),
     )
     .controls(vec![
         widgets::action_group(vec![
@@ -1284,7 +1278,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 .is_enabled(model.editable())
                 .automation_id(automation_id::ADD_EXCLUSION)
                 .on_click(context.message(Message::OpenDialog(Field::Exclusions)))
-                .content(text!(text, "add-exclusion"))
+                .content(fl!("add-exclusion"))
                 .into(),
             widgets::expand_button(
                 expansion,
@@ -1315,7 +1309,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                                 .font_size(16.0)
                                 .horizontal_alignment(HorizontalAlignment::Center)
                                 .vertical_alignment(VerticalAlignment::Center)
-                                .automation_name(text!(text, "fixed-locked")),
+                                .automation_name(fl!("fixed-locked")),
                         )
                         .into(),
                 ],
@@ -1330,7 +1324,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         if rows.is_empty() {
             children.push(
                 widgets::nested("exclusions-empty")
-                    .content(widgets::caption(text!(text, "exclusions-empty")))
+                    .content(widgets::caption(fl!("exclusions-empty")))
                     .into(),
             );
         }
@@ -1437,6 +1431,7 @@ fn candidate_view(
     row: &DialogRow,
 ) -> KeyedView {
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let path = row.path.clone();
     let identity = path.as_ref().map_or("", crate::ExecutablePath::as_str);
     let restriction_path = path.clone();
@@ -1447,8 +1442,8 @@ fn candidate_view(
             restriction: CheckBox::new()
                 .is_checked(row.restricted)
                 .automation_id(automation_id::dialog_restriction(identity))
-                .automation_name(text!(text, "installation-only"))
-                .content(widgets::body(text!(text, "installation-only")))
+                .automation_name(fl!("installation-only"))
+                .content(widgets::body(fl!("installation-only")))
                 .on_is_checked_changed(context.callback(move |checked: Option<bool>| {
                     restriction_path.clone().map_or(Message::Tick, |path| {
                         Message::RestrictCandidate(path, checked == Some(true))
@@ -1458,9 +1453,10 @@ fn candidate_view(
                 .spacing(4.0)
                 .children(
                     std::iter::once(widgets::caption(identity).into())
-                        .chain((!row.available).then(|| {
-                            widgets::caption(text!(text, "dialog-scope-duplicate")).into()
-                        }))
+                        .chain(
+                            (!row.available)
+                                .then(|| widgets::caption(fl!("dialog-scope-duplicate")).into()),
+                        )
                         .collect::<Vec<View>>(),
                 )
                 .into(),
@@ -1468,8 +1464,7 @@ fn candidate_view(
                 .is_checked(row.checked)
                 .is_enabled(row.available)
                 .automation_id(automation_id::dialog_choice(identity))
-                .automation_name(text!(
-                    text,
+                .automation_name(fl!(
                     "app-entry-name",
                     name = row.name.as_str(),
                     executable = row.executable.as_str()
@@ -1498,8 +1493,9 @@ fn candidate_view(
 fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> ContentDialog {
     let model = &settings.input.model;
     let (text, region) = (&settings.input.text, &settings.input.region);
+    bind_text!(fl, text);
     let dialog = ContentDialog::new()
-        .close_button_text(text!(text, "dialog-cancel"))
+        .close_button_text(fl!("dialog-cancel"))
         .default_button(ContentDialogButton::Primary)
         .is_open(settings.dialog.is_some())
         .on_closed(context.callback(Message::DialogClosed));
@@ -1513,25 +1509,19 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
         .into_iter()
         .partition(|row| row.section == CandidateSection::Browsed);
     let rows: Vec<KeyedView> = if recent.is_empty() {
-        vec![keyed(
-            "empty",
-            widgets::caption(text!(text, "dialog-all-listed")),
-        )]
+        vec![keyed("empty", widgets::caption(fl!("dialog-all-listed")))]
     } else {
         recent.into_iter().enumerate().map(choice).collect()
     };
     let mut browse: Vec<View> = vec![
-        widgets::body(text!(text, "dialog-file-title")).into(),
-        widgets::caption(text!(text, "dialog-file-description")).into(),
+        widgets::body(fl!("dialog-file-title")).into(),
+        widgets::caption(fl!("dialog-file-description")).into(),
         Button::new()
             .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
             .automation_id(automation_id::DIALOG_BROWSE)
-            .automation_name(text!(text, "dialog-browse"))
+            .automation_name(fl!("dialog-browse"))
             .on_click(context.message(Message::Browse))
-            .content(widgets::glyph_label(
-                "\u{E8B7}",
-                text!(text, "dialog-browse"),
-            ))
+            .content(widgets::glyph_label("\u{E8B7}", fl!("dialog-browse")))
             .into(),
     ];
     browse.push(
@@ -1559,7 +1549,7 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
                     StackPanel::new().spacing(16.0).max_width(472.0).children((
                         widgets::caption(view.description),
                         StackPanel::new().spacing(6.0).children((
-                            widgets::strong(text!(text, "dialog-recent")),
+                            widgets::strong(fl!("dialog-recent")),
                             StackPanel::new().spacing(2.0).keyed_children(rows),
                         )),
                         Border::new()
@@ -1576,12 +1566,13 @@ fn restriction_fields(
     view: &TitleDialogView,
     context: &ViewContext<'_, Settings>,
 ) -> Vec<View> {
+    bind_text!(fl, text);
     let mut field: Vec<View> = vec![
         CheckBox::new()
             .is_checked(view.restricted)
             .automation_id(automation_id::RULE_RESTRICTION)
-            .automation_name(text!(text, "installation-only"))
-            .content(widgets::body(text!(text, "installation-only")))
+            .automation_name(fl!("installation-only"))
+            .content(widgets::body(fl!("installation-only")))
             .on_is_checked_changed(
                 context
                     .callback(|checked: Option<bool>| Message::RestrictRule(checked == Some(true))),
@@ -1590,19 +1581,15 @@ fn restriction_fields(
     ];
     if view.restricted {
         field.push(
-            widgets::caption(
-                view.path
-                    .as_deref()
-                    .unwrap_or(&text!(text, "installation-unknown")),
-            )
-            .automation_id(automation_id::RULE_PATH)
-            .into(),
+            widgets::caption(view.path.as_deref().unwrap_or(&fl!("installation-unknown")))
+                .automation_id(automation_id::RULE_PATH)
+                .into(),
         );
         field.push(
             Button::new()
                 .horizontal_alignment(HorizontalAlignment::Right)
                 .automation_id(automation_id::RULE_BROWSE)
-                .content(text!(text, "installation-browse"))
+                .content(fl!("installation-browse"))
                 .on_click(context.message(Message::Browse))
                 .into(),
         );
@@ -1617,8 +1604,9 @@ fn restriction_fields(
 
 fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> ContentDialog {
     let text = &settings.input.text;
+    bind_text!(fl, text);
     let dialog = ContentDialog::new()
-        .close_button_text(text!(text, "dialog-cancel"))
+        .close_button_text(fl!("dialog-cancel"))
         .default_button(ContentDialogButton::Primary)
         .is_open(settings.title_dialog.is_some())
         .on_closed(context.callback(Message::TitleClosed));
@@ -1648,12 +1636,12 @@ fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Con
         CheckBox::new()
             .is_checked(Some(view.regex))
             .automation_id(automation_id::TITLE_DIALOG_REGEX)
-            .automation_name(text!(text, "title-dialog-regex"))
+            .automation_name(fl!("title-dialog-regex"))
             .on_is_checked_changed(
                 context
                     .callback(|checked: Option<bool>| Message::TitleRegex(checked == Some(true))),
             )
-            .content(text!(text, "title-dialog-regex"))
+            .content(fl!("title-dialog-regex"))
             .into(),
     );
     if let Some(suggestion) = &view.suggestion {
@@ -1667,14 +1655,14 @@ fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Con
                         .horizontal_alignment(HorizontalAlignment::Right)
                         .automation_id(automation_id::TITLE_DIALOG_USE)
                         .on_click(context.message(Message::UseTitle))
-                        .content(text!(text, "title-dialog-use")),
+                        .content(fl!("title-dialog-use")),
                 ))
                 .into(),
         );
     }
     dialog
         .title(view.title)
-        .primary_button_text(text!(text, "title-dialog-save"))
+        .primary_button_text(fl!("title-dialog-save"))
         .is_primary_button_enabled(view.save_enabled)
         .content(
             ScrollViewer::new()

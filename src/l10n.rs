@@ -1,28 +1,37 @@
+use fluent_bundle::FluentResource;
 use i18n_embed::I18nAssets;
-use i18n_embed::I18nEmbedError;
 use i18n_embed::LanguageLoader;
 use i18n_embed::fluent::FluentLanguageLoader;
 use i18n_embed::unic_langid::LanguageIdentifier;
 use rust_embed::RustEmbed;
 #[cfg(any(debug_assertions, test))]
 use std::borrow::Cow;
+use std::io;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 #[derive(RustEmbed)]
 #[folder = "i18n"]
 struct Catalogs;
 
-macro_rules! text {
-    ($text:expr, $($message:tt)+) => {{
-        let text: &$crate::l10n::Text = &$text;
-        let message = ::i18n_embed_fl::fl!(text.loader(), $($message)+);
-        #[cfg(debug_assertions)]
-        let message = text.finish(message);
-        message
-    }};
+macro_rules! bind_text {
+    ($name:ident, $source:expr) => {
+        $crate::l10n::bind_text!(@define $name, $source, $);
+    };
+    (@define $name:ident, $source:expr, $dollar:tt) => {
+        macro_rules! $name {
+            ($dollar($dollar message:tt)+) => {{
+                let text: &$crate::l10n::Text = &$source;
+                let message = ::i18n_embed_fl::fl!(text.loader(), $dollar($dollar message)+);
+                #[cfg(debug_assertions)]
+                let message = text.finish(message);
+                message
+            }};
+        }
+    };
 }
 
-pub(crate) use text;
+pub(crate) use bind_text;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LanguageTag(LanguageIdentifier);
@@ -75,8 +84,13 @@ pub(crate) fn language_name(language: &str) -> String {
             shipped()
                 .iter()
                 .map(|tag| {
-                    let name = Text::load(tag)
-                        .map_or_else(|_| tag.to_string(), |text| text!(text, "language-name"));
+                    let name = Text::load(tag).map_or_else(
+                        |_| tag.to_string(),
+                        |text| {
+                            bind_text!(fl, text);
+                            fl!("language-name")
+                        },
+                    );
                     (tag.to_string(), name)
                 })
                 .collect()
@@ -151,11 +165,20 @@ pub(crate) struct Text {
 }
 
 impl Text {
-    pub(crate) fn load(language: &LanguageTag) -> Result<Self, I18nEmbedError> {
+    pub(crate) fn load(language: &LanguageTag) -> io::Result<Self> {
         Self::load_from(&Catalogs, language)
     }
 
-    fn load_from(assets: &dyn I18nAssets, language: &LanguageTag) -> Result<Self, I18nEmbedError> {
+    fn load_from(assets: &dyn I18nAssets, language: &LanguageTag) -> io::Result<Self> {
+        let shared = assets
+            .get_files("shared.ftl")
+            .into_iter()
+            .next()
+            .ok_or_else(|| io::Error::other("shared translation terms are missing"))?;
+        let source = String::from_utf8(shared.into_owned()).map_err(io::Error::other)?;
+        let shared = Arc::new(FluentResource::try_new(source).map_err(|(_, errors)| {
+            io::Error::other(format!("shared translation terms are invalid: {errors:?}"))
+        })?);
         let loader = FluentLanguageLoader::new(env!("CARGO_PKG_NAME"), english());
         #[cfg(debug_assertions)]
         let pseudo = language.is_pseudo();
@@ -167,7 +190,10 @@ impl Text {
         };
         #[cfg(not(debug_assertions))]
         let catalog = language.0.clone();
-        loader.load_languages(assets, &[catalog])?;
+        loader
+            .load_languages(assets, &[catalog])
+            .map_err(io::Error::other)?;
+        loader.with_bundles_mut(|bundle| bundle.add_resource_overriding(Arc::clone(&shared)));
         #[cfg(debug_assertions)]
         if pseudo {
             loader.with_bundles_mut(|bundle| bundle.set_transform(Some(pseudo_text)));
@@ -227,22 +253,23 @@ impl InterfaceText {
     pub fn load(language: &str) -> std::io::Result<Self> {
         let tag = resolve(Some(language), None, &[])
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
-        let text = Text::load(&tag).map_err(std::io::Error::other)?;
-        let tooltip = text!(text, "tooltip", status = "");
+        let text = Text::load(&tag)?;
+        bind_text!(fl, text);
+        let tooltip = fl!("tooltip", status = "");
         Ok(Self {
-            app_name: text!(text, "app-name"),
-            tray_settings: text!(text, "tray-settings"),
-            manual_start: text!(text, "manual-title"),
-            manual_stop: text!(text, "manual-stop"),
-            tray_caption: text!(text, "tray-caption", reason = "none"),
-            tray_quit: text!(text, "tray-quit"),
+            app_name: fl!("app-name"),
+            tray_settings: fl!("tray-settings"),
+            manual_start: fl!("manual-title"),
+            manual_stop: fl!("manual-stop"),
+            tray_caption: fl!("tray-caption", reason = "none"),
+            tray_quit: fl!("tray-quit"),
             tooltip_prefix: tooltip
                 .split_once('\u{2068}')
                 .map_or(tooltip.as_str(), |(prefix, _)| prefix)
                 .to_owned(),
-            observation_failed: text!(text, "status-observation-failed"),
-            output_unavailable: text!(text, "status-output-unavailable"),
-            picker_title: text!(text, "dialog-file-title"),
+            observation_failed: fl!("status-observation-failed"),
+            output_unavailable: fl!("status-output-unavailable"),
+            picker_title: fl!("dialog-file-title"),
         })
     }
 }
@@ -305,7 +332,12 @@ mod tests {
         }
     }
 
+    const FIXTURE_SHARED: &str = r#"-brand-name = { "Sample Brand" }
+"#;
+
     const FIXTURE_ENGLISH: &str = "\
+-night-light = Night Light
+fixture-brand = { -brand-name } uses { -night-light }.
 fixture-greeting = Hello
 fixture-untranslated = Browse
 fixture-entries =
@@ -318,6 +350,8 @@ fixture-focus = { $app } was focused at { $time }
 ";
 
     const FIXTURE_GERMAN: &str = "\
+-night-light = Nachtmodus
+fixture-brand = { -brand-name } verwendet { -night-light }.
 fixture-greeting = Hallo
 fixture-entries =
     { $count ->
@@ -328,6 +362,7 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
 ";
 
     const FIXTURE: Fixture = Fixture(&[
+        ("shared.ftl", FIXTURE_SHARED),
         ("en-US/circadia.ftl", FIXTURE_ENGLISH),
         ("de/circadia.ftl", FIXTURE_GERMAN),
     ]);
@@ -392,7 +427,11 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
             ast::InlineExpression::Placeable { expression } => {
                 expression_variables(expression, names);
             }
-            ast::InlineExpression::FunctionReference { arguments, .. } => {
+            ast::InlineExpression::FunctionReference { arguments, .. }
+            | ast::InlineExpression::TermReference {
+                arguments: Some(arguments),
+                ..
+            } => {
                 for argument in &arguments.positional {
                     inline_variables(argument, names);
                 }
@@ -404,7 +443,22 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
         }
     }
 
-    fn parity(english: &str, translation: &str) -> Vec<String> {
+    fn terms(source: &str) -> BTreeSet<String> {
+        fluent_syntax::parser::parse(source)
+            .expect("catalog parses")
+            .body
+            .iter()
+            .filter_map(|entry| match entry {
+                ast::Entry::Term(term) => Some(term.id.name.to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn parity(english: &str, translation: &str, shared: &str) -> Vec<String> {
+        let english_terms = terms(english);
+        let translated_terms = terms(translation);
+        let shared_terms = terms(shared);
         let english = signatures(english);
         let translation = signatures(translation);
         let mut problems: Vec<String> = english
@@ -422,6 +476,16 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
                 .keys()
                 .filter(|id| !english.contains_key(*id))
                 .map(|id| format!("{id} is not an English message")),
+        );
+        problems.extend(
+            english_terms
+                .difference(&translated_terms)
+                .map(|id| format!("-{id} is missing")),
+        );
+        problems.extend(
+            translated_terms
+                .intersection(&shared_terms)
+                .map(|id| format!("-{id} is shared and must not be redefined")),
         );
         problems
     }
@@ -537,30 +601,65 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
         assert_eq!(language_name("en-US"), "English");
     }
 
+    fn formatting_errors(text: &Text, id: &str, names: &BTreeSet<String>) -> Vec<String> {
+        let args: FluentArgs<'_> = names.iter().map(|name| (name.as_str(), "sample")).collect();
+        text.loader()
+            .with_fluent_message_and_bundle(id, |message, bundle| {
+                let mut errors = Vec::new();
+                let pattern = message.value().expect("message has a value");
+                bundle.format_pattern(pattern, Some(&args), &mut errors);
+                errors
+                    .into_iter()
+                    .map(|error| format!("{error:?}"))
+                    .collect()
+            })
+            .expect("message exists")
+    }
+
     #[test]
-    fn every_english_message_formats_without_errors() {
-        let text = Text::load(&LanguageTag::english()).expect("English catalog loads");
-        let messages = signatures(&catalog("en-US"));
-        assert!(!messages.is_empty());
-        for (id, names) in messages {
-            let mut args = FluentArgs::new();
-            for name in &names {
-                args.set(name.clone(), "sample");
+    fn every_shipped_message_formats_without_errors() {
+        for language in shipped() {
+            let text = Text::load(&language).expect("catalog loads");
+            let messages = signatures(&catalog(&language.to_string()));
+            assert!(!messages.is_empty());
+            for (id, names) in messages {
+                assert_eq!(
+                    formatting_errors(&text, &id, &names),
+                    Vec::<String>::new(),
+                    "{id}"
+                );
             }
-            let errors = text
-                .loader()
-                .with_fluent_message_and_bundle(&id, |message, bundle| {
-                    let mut errors = Vec::new();
-                    let pattern = message.value().expect("message has a value");
-                    bundle.format_pattern(pattern, Some(&args), &mut errors);
-                    errors
-                        .into_iter()
-                        .map(|error| format!("{error:?}"))
-                        .collect::<Vec<_>>()
-                })
-                .expect("message exists");
-            assert!(errors.is_empty(), "{id}: {errors:?}");
         }
+    }
+
+    #[test]
+    fn formatting_reports_an_unknown_term_reference() {
+        const FIXTURE: Fixture = Fixture(&[
+            ("shared.ftl", FIXTURE_SHARED),
+            ("en-US/circadia.ftl", "message = { -missing-term }"),
+        ]);
+        let text = Text::load_from(&FIXTURE, &LanguageTag::english()).expect("fixture loads");
+        assert_ne!(
+            formatting_errors(&text, "message", &BTreeSet::new()),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn scoped_alias_formats_nested_messages_in_a_closure() {
+        let text = Text::load(&LanguageTag::english()).expect("English catalog loads");
+        bind_text!(fl, text);
+        let format = || {
+            fl!(
+                "error-same-clock",
+                field = fl!("wake-title"),
+                other = fl!("bedtime-title"),
+            )
+        };
+        assert_eq!(
+            plain(&format()),
+            "Wake time and Bedtime can't be the same. This change isn't applied yet."
+        );
     }
 
     #[cfg(debug_assertions)]
@@ -568,8 +667,10 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
     fn pseudo_locale_brackets_and_lengthens_the_complete_message() {
         let english = Text::load(&LanguageTag::english()).expect("English catalog loads");
         let pseudo = Text::load(&LanguageTag::pseudo()).expect("pseudo-locale loads");
-        assert_eq!(text!(english, "tray-quit"), "Quit Circadia");
-        let translated = text!(pseudo, "tray-quit");
+        bind_text!(english_fl, english);
+        bind_text!(pseudo_fl, pseudo);
+        assert_eq!(english_fl!("tray-quit"), "Quit Circadia");
+        let translated = pseudo_fl!("tray-quit");
         assert!(translated.starts_with('['), "{translated}");
         assert!(translated.ends_with(']'), "{translated}");
         assert!(
@@ -577,6 +678,7 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
             "{translated}"
         );
         assert!(!translated.contains("Quit Circadia"), "{translated}");
+        assert_eq!(english_fl!("tray-quit"), "Quit Circadia");
     }
 
     #[cfg(debug_assertions)]
@@ -636,17 +738,15 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
     }
 
     #[test]
-    fn every_shipped_translation_matches_the_english_messages_and_arguments() {
+    fn every_shipped_catalog_matches_the_english_messages_arguments_and_terms() {
         let english = catalog("en-US");
-        for name in Catalogs::iter() {
-            let language = name.split_once('/').map_or("", |(language, _)| language);
-            if language != "en-US" {
-                assert_eq!(
-                    parity(&english, &catalog(language)),
-                    Vec::<String>::new(),
-                    "{language}"
-                );
-            }
+        let shared = include_str!("../i18n/shared.ftl");
+        for language in shipped() {
+            assert_eq!(
+                parity(&english, &catalog(&language.to_string()), shared),
+                Vec::<String>::new(),
+                "{language}"
+            );
         }
     }
 
@@ -655,17 +755,157 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
         let problems = parity(
             FIXTURE_ENGLISH,
             "fixture-greeting = Hallo\nfixture-untranslated = Durchsuchen\nfixture-entries = { $total } Einträge\nfixture-order = { $field }\n",
+            FIXTURE_SHARED,
         );
         assert_eq!(
             problems,
             [
+                "fixture-brand is missing",
                 "fixture-entries uses {\"total\"} instead of {\"count\"}",
                 "fixture-focus is missing",
                 "fixture-order uses {\"field\"} instead of {\"field\", \"other\", \"other_field\", \"value\"}",
+                "-night-light is missing",
             ]
         );
         assert_eq!(
-            parity(FIXTURE_ENGLISH, FIXTURE_ENGLISH),
+            parity(FIXTURE_ENGLISH, FIXTURE_ENGLISH, FIXTURE_SHARED),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn shared_terms_are_invariant_string_literals() {
+        let source = include_str!("../i18n/shared.ftl");
+        let resource = fluent_syntax::parser::parse(source).expect("shared terms parse");
+        assert!(!terms(source).is_empty());
+        for entry in resource.body {
+            match entry {
+                ast::Entry::Term(term) => {
+                    assert!(term.attributes.is_empty(), "{}", term.id.name);
+                    assert!(
+                        matches!(
+                            term.value.elements.as_slice(),
+                            [ast::PatternElement::Placeable {
+                                expression: ast::Expression::Inline(
+                                    ast::InlineExpression::StringLiteral { .. }
+                                )
+                            }]
+                        ),
+                        "{} must be an invariant string literal",
+                        term.id.name
+                    );
+                }
+                ast::Entry::Comment(_)
+                | ast::Entry::GroupComment(_)
+                | ast::Entry::ResourceComment(_) => {}
+                _ => panic!("shared.ftl must define only invariant terms"),
+            }
+        }
+    }
+
+    #[test]
+    fn shared_brand_and_locale_feature_terms_format_together() {
+        let english = Text::load_from(&FIXTURE, &LanguageTag::english()).expect("fixture loads");
+        let german = Text::load_from(&FIXTURE, &german()).expect("fixture loads");
+        assert_eq!(
+            english.loader().get("fixture-brand"),
+            "Sample Brand uses Night Light."
+        );
+        assert_eq!(
+            german.loader().get("fixture-brand"),
+            "Sample Brand verwendet Nachtmodus."
+        );
+    }
+
+    #[test]
+    fn shared_brand_overrides_a_locale_redefinition() {
+        const FIXTURE: Fixture = Fixture(&[
+            (
+                "shared.ftl",
+                "-brand-name = { \"Renamed Brand\" }
+",
+            ),
+            ("en-US/circadia.ftl", FIXTURE_ENGLISH),
+            (
+                "de/circadia.ftl",
+                "-brand-name = Translated name
+fixture-brand = { -brand-name }
+",
+            ),
+        ]);
+        let english = Text::load_from(&FIXTURE, &LanguageTag::english()).expect("fixture loads");
+        let german = Text::load_from(&FIXTURE, &german()).expect("fixture loads");
+        assert_eq!(
+            english.loader().get("fixture-brand"),
+            "Renamed Brand uses Night Light."
+        );
+        assert_eq!(german.loader().get("fixture-brand"), "Renamed Brand");
+    }
+
+    #[test]
+    fn missing_or_invalid_shared_terms_prevent_loading() {
+        const MISSING: Fixture = Fixture(&[("en-US/circadia.ftl", FIXTURE_ENGLISH)]);
+        const INVALID: Fixture = Fixture(&[
+            (
+                "shared.ftl",
+                "-brand-name = {
+",
+            ),
+            ("en-US/circadia.ftl", FIXTURE_ENGLISH),
+        ]);
+        for fixture in [&MISSING, &INVALID] {
+            assert!(Text::load_from(fixture, &LanguageTag::english()).is_err());
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn pseudo_locale_preserves_shared_brand_names() {
+        let pseudo = Text::load(&LanguageTag::pseudo()).expect("pseudo-locale loads");
+        bind_text!(fl, pseudo);
+        assert!(fl!("app-name").contains("Circadia"));
+        let notice = fl!("banner-crash-message");
+        assert!(
+            notice.contains("Circadia") && notice.contains("GitHub"),
+            "{notice}"
+        );
+    }
+
+    #[test]
+    fn parity_rejects_missing_terms_and_shared_redefinitions() {
+        assert_eq!(
+            parity(
+                "-night-light = Night Light
+message = { -night-light }
+",
+                "-brand-name = Translated name
+message = Translated message
+",
+                FIXTURE_SHARED,
+            ),
+            [
+                "-night-light is missing",
+                "-brand-name is shared and must not be redefined"
+            ]
+        );
+    }
+
+    #[test]
+    fn parity_allows_locale_specific_term_forms() {
+        assert_eq!(
+            parity(
+                "-night-light = Night Light
+message = { -night-light }
+",
+                "-night-light = { $case ->
+    [genitive] Nachtmodus
+   *[other] Nachtmodus
+    }
+-helper = Zusatz
+message = { -night-light(case: \"genitive\") }
+",
+                FIXTURE_SHARED,
+            ),
             Vec::<String>::new()
         );
     }

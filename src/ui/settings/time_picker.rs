@@ -1,6 +1,6 @@
 use crate::automation_id;
 use crate::l10n::Text;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use crate::platform::nls::ClockLayout;
 use crate::platform::nls::RegionalFormat;
 use std::rc::Rc;
@@ -260,19 +260,11 @@ impl TimePicker {
         let selected = index(self.layout.parts(self.selection.draft), segment);
         let order = rows(values.len(), anchor);
         let text = &self.input.text;
+        bind_text!(fl, text);
         let (name, id) = match segment {
-            Segment::Hour => (
-                text!(text, "picker-hour"),
-                automation_id::hour(self.input.id),
-            ),
-            Segment::Minute => (
-                text!(text, "picker-minute"),
-                automation_id::minute(self.input.id),
-            ),
-            Segment::Period => (
-                text!(text, "picker-period"),
-                automation_id::period(self.input.id),
-            ),
+            Segment::Hour => (fl!("picker-hour"), automation_id::hour(self.input.id)),
+            Segment::Minute => (fl!("picker-minute"), automation_id::minute(self.input.id)),
+            Segment::Period => (fl!("picker-period"), automation_id::period(self.input.id)),
         };
         let items = order.iter().map(|&value| {
             let label = values.get(value).cloned().unwrap_or_default();
@@ -300,6 +292,7 @@ impl TimePicker {
 
     fn flyout(&self, context: &ViewContext<'_, Self>) -> Flyout {
         let text = &self.input.text;
+        bind_text!(fl, text);
         let lists: Vec<View> = self
             .layout
             .order()
@@ -324,14 +317,14 @@ impl TimePicker {
                     Button::new()
                         .horizontal_alignment(HorizontalAlignment::Stretch)
                         .automation_id(automation_id::accept(self.input.id))
-                        .automation_name(text!(text, "picker-accept"))
+                        .automation_name(fl!("picker-accept"))
                         .on_click(context.message(Message::Accept))
                         .content(FontIcon::new().glyph("\u{E8FB}").font_size(16.0)),
                     Button::new()
                         .grid_column(1)
                         .horizontal_alignment(HorizontalAlignment::Stretch)
                         .automation_id(automation_id::cancel(self.input.id))
-                        .automation_name(text!(text, "picker-cancel"))
+                        .automation_name(fl!("picker-cancel"))
                         .on_click(context.message(Message::Cancel))
                         .content(FontIcon::new().glyph("\u{E711}").font_size(16.0)),
                 )),
@@ -413,6 +406,7 @@ impl Component for TimePicker {
             .format_clock(input.minute)
             .unwrap_or_else(|_| segments.join(" "));
         let text = &input.text;
+        bind_text!(fl, text);
         let button = Button::new()
             .element_ref(&self.button)
             .width(224.0)
@@ -424,8 +418,7 @@ impl Component for TimePicker {
             .horizontal_content_alignment(HorizontalAlignment::Stretch)
             .vertical_content_alignment(VerticalAlignment::Stretch)
             .automation_id(input.id)
-            .automation_name(text!(
-                text,
+            .automation_name(fl!(
                 "picker-name",
                 field = input.field.as_str(),
                 time = time

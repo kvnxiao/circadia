@@ -3,7 +3,7 @@ use crate::DiagnosticFailure;
 use crate::DiagnosticLog;
 use crate::DiagnosticOperation;
 use crate::l10n::Text;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use crate::log::run::CrashKind;
 use crate::log::run::CrashSummary;
 use crate::log::run::PreviousRun;
@@ -125,10 +125,10 @@ pub(super) fn summary(crash: &CrashSummary) -> String {
 }
 
 pub(super) fn issue_url(text: &Text, version: &str, build: &str, crash: &CrashSummary) -> String {
+    bind_text!(fl, text);
     let summary = summary(crash);
-    let title = text!(text, "issue-title", summary = summary.as_str());
-    let body = text!(
-        text,
+    let title = fl!("issue-title", summary = summary.as_str());
+    let body = fl!(
         "issue-body",
         version = version,
         build = build,

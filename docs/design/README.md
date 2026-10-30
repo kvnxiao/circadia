@@ -1,6 +1,6 @@
 # Design
 
-These documents describe how Circadia looks: the settings window and its dialogs, the tray menu, the app icon, and the phase art (the round pictures that show the current part of the day). They also record the visual rules for drawing new elements in the same style.
+These documents describe how Circadia looks: the settings window and its dialogs, the tray menu, the app icon, and the phase art (the round pictures that show the current part of the day). They also record the visual and wording conventions for new interface elements.
 
 ## How design relates to the spec, research, and plans
 
@@ -9,7 +9,7 @@ Each kind of document owns one concern:
 | Document set | Owns | Example |
 | :-- | :-- | :-- |
 | [Spec](../specs/SPEC.md) | Observable behavior and its guarantees. | A navigation pane lists the settings pages. |
-| Design (this folder) | Appearance: layout, measurements, color, typography, icons, and example wording. | The navigation pane is about 300 epx wide. |
+| Design (this folder) | Appearance and wording: layout, measurements, color, typography, icons, and localization guidance. | The navigation pane is about 300 epx wide. |
 | [Research](../research/README.md) | Mechanisms, evidence, and limits, such as which controls the Windows Reactor UI library exposes. | Whether a control can show a selected time. |
 | Implementation plans | File names, control types, exact values, and task order. Plans are created from the approved spec under `.plans/` and are not committed to git. | Which control draws the pane header. |
 
@@ -25,6 +25,7 @@ Measurements are in effective pixels (epx): layout units at 100% display scaling
 | :-- | :-- |
 | [Design language](design-language.md) | The Windows 11 design references Circadia follows, Circadia's own visual language (app icon, phase art, badge glyphs, color tokens), and how temperatures are shown as colors. |
 | [Settings window, dialogs, and tray menu](settings-window.md) | The window frame, navigation pane, card pattern, each page's sections, the status and graph card, error presentation, the time picker, dialogs, the tray menu, and accessibility and scaling notes. |
+| [UI localization](localization.md) | Shared names and labels, complete messages, translated grammar, supplied values, and text expansion. |
 
 ## Assets
 
