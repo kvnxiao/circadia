@@ -10,7 +10,7 @@ Use Windows with Rust's MSVC toolchain, the linker and Windows SDK, stable Rust,
 
 Default deployment needs Windows App SDK runtime 2.6.4 or newer. The `self-contained` feature uses the pinned setup helper to stage private runtime 2.6.4 under `target/`. Earlier pins `722f202`, `ebc5a99`, and `0496ec1` stage 2.5.1. Initial builds can download dependencies and runtime packages; the advisory check can update its database. The build also stages `probe.ico` beside the executable. Include the icon and complete runtime layout when copying a deployment directory.
 
-The [source archive](../../docs/research/archives/README.md) preserves the published-release comparison and the combined location experiment. Location APIs and the latitude sample are absent from the active probe.
+Location APIs are absent from this experiment; [application location research](../../docs/research/background-location.md) covers the current integration.
 
 ## Build and automated checks
 
@@ -55,7 +55,7 @@ On 2026-10-29 at `8786f59`, `just check` passed all 18 unit tests, formatting, C
 
 On 2026-10-24 at `0496ec1`, and on 2026-10-23 at `ebc5a99`, the 18 unit tests, formatting, Clippy, rustdoc, dependency checks, Rust 1.95 compilation, and both builds passed. At `0496ec1`, on 2026-10-24, `verify-lifecycle.ps1` and `verify-native.ps1` passed. `verify-ui.ps1` and `verify-pointer.ps1` passed every check but failed on their first runs at their final step, closing the graph window, with "Unsupported Pattern" from UI Automation; two reruns of each passed. Desktop scripts have not run at `ebc5a99`. The remaining results in this section were observed at the earlier pin, `722f202100c3bd428627941d3834d87ad6679d1c`.
 
-On 2026-10-16, revision `722f202` passed 18 unit tests and native checks at 100% scaling on the recorded desktop. Those checks covered graph interaction, settings close/reopen, preserved application state, access to the settings window's native handle inside Reactor's scoped window callback, executable selection/cancellation, and foreground lookup. A copied self-contained deployment also ran on that developer machine. The detailed [recorded results](../../docs/research/windows-reactor-ui.md#combined-pinned-revision-validation) include the retired location check.
+On 2026-10-16, revision `722f202` passed 18 unit tests and native checks at 100% scaling on the recorded desktop. Those checks covered graph interaction, settings close/reopen, preserved application state, access to the settings window's native handle inside Reactor's scoped window callback, executable selection/cancellation, and foreground lookup. A copied self-contained deployment also ran on that developer machine. The [evidence table](../../docs/research/windows-reactor-ui.md#versions-and-evidence-boundaries) identifies the tested APIs and versions.
 
 When the earlier probe crates were merged into this single crate on 2026-10-17, still at `722f202`, the 18 unit tests, formatting, Clippy, rustdoc, dependency checks, and Rust 1.95 compilation passed. All four adapted desktop scripts also passed on that host, including pointer input at 100% scaling. Graph closure preserved the tray process; settings reopened with the application counter, a value stored in the application state rather than the settings window, still at the value set before closure. Executable selection/cancellation and foreground lookup passed. A final process check found no remaining probe processes.
 

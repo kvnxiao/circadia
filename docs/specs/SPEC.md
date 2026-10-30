@@ -7,25 +7,31 @@ areas: [schedule.md, suppression.md, native-access.md, control.md, application.m
 
 ## Purpose and scope
 
-Circadia is a Windows 11 tray app that manages native Windows Night Light with a generated daily temperature curve. Users configure Daytime, Morning/Evening, and Sleep temperatures, required Wake and Bedtime clocks, and optional Sunrise and Sunset timing. Transitions finish by each target time, so evening warmth can begin hours before Bedtime. Users can temporarily request 6500 K for a listed foreground application or for one hour from the tray menu or settings. Circadia manages Night Light only after the user turns management on and accepts a consent prompt, and the user can hand Night Light back at any time. The settings window and background controller run in one process using Windows Reactor, a Rust UI library for WinUI 3.
+Circadia is a Windows 11 tray application for people who want native Night Light to follow their waking and sleeping hours. Its minimum viable product (MVP) supports one daily activity period and one overnight sleep period, including a bedtime after midnight.
 
-The target audience is active during the day and sleeps once overnight. A bedtime after midnight is supported. Night-shift schedules and multiple daily sleep periods are outside the minimum viable product (MVP)'s intended use.
+The requirement summaries below are navigation to the authoritative blocks in this spec and its areas; they do not add separate obligations.
 
-Circadia does not write GPU gamma ramps or monitor calibration profiles. Successful library operations and decoded registry readback verify native requests. Preview lets the user assess visible output at the configured rate. Registry success alone does not verify smoothness or displayed color. Instrumented optical measurements, calibration preservation by Windows, and optical equivalence between 6500 K and Night Light off are outside the acceptance criteria.
+## Functional requirements
 
-**Goals:**
+| Capability | Authoritative requirements |
+| :-- | :-- |
+| Generate transitions between three ordered temperatures from Wake, Bedtime, and optional solar events. | [Schedule settings, solar selection, and curve evaluation](schedule.md) |
+| Temporarily request 6500 K for listed foreground applications or for one hour manually. | [Automatic and manual suppression](suppression.md) |
+| Start Night Light management with consent, recover from failures, and end management explicitly. | [Control and lifecycle](control.md), [native access](native-access.md) |
+| Apply and save valid edits, recover configuration, preview the schedule, and optionally start at sign-in. | [Configuration, Preview, and launch](application.md) |
+| Show settings and tray controls with localizable text and regional times and numbers. | [Settings and tray](interface.md), [localization](localization.md) |
+| Record local diagnostics and report crashes when settings opens. | [Log and crash records](diagnostics.md) |
 
-- Generate gradual transitions between three ordered temperature levels, with each target reached by its stated time.
-- Keep Wake and Bedtime under user control while optional solar timing follows the seasons.
-- Omit unavailable or conflicting solar targets, merge targets less than one minute apart, and shorten other transitions when needed.
-- Suppress tint for user-listed foreground applications in any window mode, or through one hour of manual suppression.
-- Apply and save valid settings edits without a separate save step, and return to normal operation after startup without asking the user once Circadia has saved a configuration.
-- Present localizable text, with times and numbers in the user's regional format.
-- Keep a local log that lets developers trace failures and crashes.
-- Keep background work event-driven and settings responsive, favoring approaches that reduce power use.
-- Favor straightforward implementations with few components and explicit state ownership.
+## Nonfunctional requirements
 
-**Non-goals:**
+| Guarantee | Authoritative requirements |
+| :-- | :-- |
+| Keep background work event-driven and settings responsive. | [Idle work](#req-event-driven-idle--perform-background-work-only-when-needed), [graph latency](interface.md#req-display-generated-curve--display-the-schedule-without-point-editing), [output timing](control.md#req-temperature-cadence--request-only-due-temperature-changes) |
+| Measure resource use in the single application process. | [Resource measurements](application.md#req-lean-background--measure-the-single-processs-resource-use) |
+| Use native Night Light, limited process access, and standard user rights. | [Invariants](#invariants), [security](#security) |
+| Preserve native keyboard and accessibility behavior, and fit supported desktop sizes and translated text. | [Settings appearance and layout](interface.md), [translation layout](localization.md#req-translation-layout--fit-translated-text) |
+
+## Non-goals
 
 - Automatic fullscreen suppression in the MVP; see Future work.
 - Arbitrary curve-point editing, user-defined offsets, extra fixed-clock targets, or weekday-specific schedules.
@@ -38,7 +44,7 @@ Circadia does not write GPU gamma ramps or monitor calibration profiles. Success
 - Right-to-left interface languages in the first release; see Future work.
 - Uploading logs or crash data automatically.
 
-**Constraints:**
+## Constraints and assumptions
 
 - Use Rust and one `windows-reactor` application process per user session. The MVP targets Windows 11 x64, build 22000 or later, and distributes the required native Windows App SDK runtime alongside the executable.
 - Read and write Night Light through `win-nightlight-lib`; observe its decoded settings and state records through `win-nightlight-watch`.
@@ -48,6 +54,8 @@ Circadia does not write GPU gamma ramps or monitor calibration profiles. Success
 - Executable size is not a resource target; memory use and CPU time while running are.
 
 **Dependencies:** Circadia uses `win-nightlight-lib` and `win-nightlight-watch` 0.5.0, plus `windows-reactor`, `windows-window`, and `windows-reactor-setup` from the `windows-rs` repository. While Reactor is in preview, these three follow the repository's `master` branch through one reference commit that the application manifest records for all three. Circadia adopts a new commit only after the application's automated checks and the Windows Reactor UI probe pass on it. Supporting evidence links the capability assessments, API contracts, and deployment research.
+
+Circadia does not write GPU gamma ramps or monitor calibration profiles. Successful library operations and decoded registry readback verify native requests. Preview lets the user assess visible output at the configured rate. Registry success alone does not verify smoothness or displayed color. Instrumented optical measurements, calibration preservation by Windows, and optical equivalence between 6500 K and Night Light off are outside the acceptance criteria.
 
 ## Background and terms
 
@@ -248,7 +256,7 @@ Circadia writes its configuration and backup, its log, its icon cache, current-u
 
 ## Future work
 
-**Automatic fullscreen suppression:** A future version could suppress for an unlisted foreground app that covers a monitor. It is outside the MVP and does not block its implementation. The [fullscreen detection research](../research/fullscreen-detection.md) records candidate APIs, controlled probe results, and their limits.
+**Automatic fullscreen suppression:** A future version could suppress for an unlisted foreground app that covers a monitor. It is outside the MVP and does not block its implementation.
 
 That follow-up needs tests with mixed DPI, multiple monitors, fullscreen changes within one focused window, and shell overlays such as Game Bar, plus checks for maximized-window false positives. Its default and controls for excluding particular apps require a separate decision.
 
@@ -262,35 +270,19 @@ That follow-up needs tests with mixed DPI, multiple monitors, fullscreen changes
 
 **Display scaling above 100%:** After the MVP, run automated layout checks and full scrolling and screenshot inspection at 150% and 200%, including moving settings between displays with different scales. Inspect settings pages, dialogs, the tray menu, pseudo-localized text, and animated visuals for clipping or overlap. These checks do not block MVP acceptance, which requires the corresponding checks at 100% scaling.
 
-## Explored alternatives
-
-Area files list the alternatives specific to their area.
-
-- **Preserving tint on ordinary Quit:** Keeping the last active temperature permits warmth after automation stops, but can leave bedtime tint active after exit. Quit fades toward 6500 K and turns Night Light off; confirmed session end turns it off without a fade because the session is ending.
-- **A separate 1000 ms startup fade:** A dedicated startup duration kept launch short when the ordinary fade could be long. One fade duration with a 250 ms default covers startup, management changes, Quit, and suppression, so launch stays short by default and the user shortens every non-scheduled transition with one setting.
-- **Restoring the Windows Night Light schedule when management ends:** Circadia would have to save the native schedule at takeover and reconcile changes the user made later. Turning Night Light off leaves an untinted screen and leaves the schedule to the user.
-- **A drawn tint over settings during Preview:** Preview already applies each temperature through Night Light, so an overlay would tint the window twice and would not be Night Light output.
-
-## Implementation and release validation
+## Acceptance conditions
 
 These checks establish implementation conformance and release readiness. Spec approval does not establish that the implementation passes them.
 
-**During implementation:** Verify the complete application against the requirement scenarios:
-
-- Temperature ordering, clock and duration validation, solar omission and selection, minimum-spacing merges, shortened transitions, and conversion of local dates and clock times to actual instants.
-- Location requests while the location setting is on, manual coordinates, failed location requests, and local solar calculation across ordinary and polar dates.
-- Field-level validation, number-field limits, write timing and write failures, immediate tray persistence, backup restoration and its banner, recovery of invalid configuration values with paused saving, the configuration error reset, management start and end with consent, and Preview entry, exit, and cancellation.
-- Actual Shell interaction, second-launch activation, Explorer restart, settings closure, and shutdown.
-- Suspend/resume across partial transitions, multiple dates, and clock changes; suppression expiry, interrupted playback, native failures, missing advance suspend notice, and repeated resume notifications under REQ-suspend-resume.
-- Pseudo-localized text and both 12-hour and 24-hour regional formats, crash records for each crash class, and cleanup after an internal error on the settings thread.
+Implementation conformance requires the requirement scenarios throughout this spec and its areas, including their failure, cancellation, recovery, and ordering outcomes.
 
 Verify graph latency, due output deadlines, configured rate limits, serialized writes, cleanup, and retry delays against their requirements. Resource measurements have no numerical pass threshold; REQ-event-driven-idle is an invariant. The release maintainer declares and records each reference machine's hardware, Windows build, display modes, and build profile before collecting acceptance results.
 
 **Note:** The Windows Reactor UI probe uses predefined target times; it does not verify the complete application.
 
-**Before release:** Verify clean-machine deployment on the minimum and a current serviced Windows 11 build, resource use, accessibility, the settings window's native controls, theme following, and translated layout at 100% scaling under [interface.md](interface.md) and [localization.md](localization.md) in light, dark, and contrast themes, and foreground matching across representative applications, window modes, and elevation levels. Checks above 100% scaling are deferred to the post-MVP work above.
+Release acceptance requires clean-machine deployment on the minimum and a current serviced Windows 11 build, resource use, accessibility, the settings window's native controls, theme following, and translated layout at 100% scaling under [interface.md](interface.md) and [localization.md](localization.md) in light, dark, and contrast themes, and foreground matching across representative applications, window modes, and elevation levels. Checks above 100% scaling are deferred to the post-MVP work above.
 
-Include these Windows checks, and the checks that area files list for their areas:
+Release evidence also covers the conditions below and those in the area specifications:
 
 - Exercise sleep, hibernation, hybrid sleep, and Modern Standby on hardware that supports each state, recording unavailable states. Verify resume delivery with settings closed and without relying on unlock, fresh native reads, unchanged-temperature refresh, and visible output after resuming. Record notification, native-operation, and display-response timing separately; do not infer visible restoration from registry equality. Distinguish restoration of an existing process from startup after Fast Startup.
 - Exercise Quit after failed native-preview cleanup, including independent settings and state read failures. Verify that cleanup and off are both attempted and report remaining display uncertainty when either fails.
@@ -298,7 +290,7 @@ Include these Windows checks, and the checks that area files list for their area
 
 ## Supporting evidence
 
-The [research index](../research/README.md) records feasibility findings, versions, API details, measurements, and limitations. The [probe index](../../probes/README.md) links reproducible experiments and their run instructions. They support the design without adding requirements or proving complete application conformance. Area files list the evidence specific to their area.
+The [research index](../research/README.md) records feasibility findings, versions, API details, measurements, and limitations. The [probe index](../../tools/README.md) links reproducible experiments and their run instructions. They support the design without adding requirements or proving complete application conformance. Area files list the evidence specific to their area. [Historical decisions](../decisions.md) explain consequential evaluated directions without adding requirements.
 
 | Design decision or requirement | Evidence |
 | :-- | :-- |
@@ -311,4 +303,4 @@ The [research index](../research/README.md) records feasibility findings, versio
 
 ## Conformance
 
-A conforming implementation satisfies every requirement and invariant in this spec and its area files, the constraints and non-goals in Purpose and scope, the component responsibilities in Architecture overview, the requirements in Security, and the transitions in each diagram that lists every transition. Implementation and release validation obligations in this spec and its area files bind at their stated stages. Present-tense statements in these parts are mandatory. Uppercase SHOULD marks a recommendation an implementation may decline with a documented reason; uppercase MAY marks an allowed option. Text and diagrams labeled Example or Note, Background and terms, Explored alternatives, Future work, Supporting evidence, the architecture diagram, the design documents, and linked research are informative. Terms bind through the requirements that use them.
+A conforming implementation satisfies every requirement and invariant in this spec and its area files, Constraints and assumptions and Non-goals, the component responsibilities in Architecture overview, the requirements in Security, and the transitions in each diagram that lists every transition. Acceptance conditions in this spec and its area files bind at their stated implementation or release stages. Present-tense statements in these parts are mandatory. Uppercase SHOULD marks a recommendation an implementation may decline with a documented reason; uppercase MAY marks an allowed option. Text and diagrams labeled Example or Note, the Functional requirements and Nonfunctional requirements summaries, Background and terms, Future work, Supporting evidence, the architecture diagram, the design documents, and linked research are informative. Terms bind through the requirements that use them.

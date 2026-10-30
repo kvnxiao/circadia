@@ -11,7 +11,7 @@ Each kind of document owns one concern:
 | [Spec](../specs/SPEC.md) | Observable behavior and its guarantees. | A navigation pane lists the settings pages. |
 | Design (this folder) | Appearance: layout, measurements, color, typography, icons, and example wording. | The navigation pane is about 300 epx wide. |
 | [Research](../research/README.md) | Mechanisms, evidence, and limits, such as which controls the Windows Reactor UI library exposes. | Whether a control can show a selected time. |
-| Implementation plans | File names, control types, exact values, and task order. Plans are created from the approved spec under `.plans/` and are not committed. | Which control draws the pane header. |
+| Implementation plans | File names, control types, exact values, and task order. Plans are created from the approved spec under `.plans/` and are not committed to git. | Which control draws the pane header. |
 
 The spec governs behavior. When a design document and the spec disagree about behavior, follow the spec and correct the design document. The design documents are informative: an implementation that differs from them can still conform to the spec.
 
@@ -38,4 +38,4 @@ The application loads its vector artwork from `assets/`. The SVG files are the s
 
 The build renders `assets/icon/circadia.svg` into the ICO that the executable embeds and the tray loads.
 
-The [design language](design-language.md#direct2d-safe-svg) lists the SVG features these files may use. The exploratory mockups that preceded these documents are not stored in the repository; these documents are the design reference.
+The [design language](design-language.md#direct2d-safe-svg) lists the SVG features these files may use.

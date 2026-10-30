@@ -12,7 +12,7 @@ recheck-when: Windows session-ending behavior, the Reactor revision, or the Nigh
 
 # Windows session shutdown and startup restoration
 
-Windows provides a confirmed session-ending notification that a desktop app can handle before termination. The pinned libraries support receiving that notification in the existing process and requesting Night Light off. At startup, Circadia can prepare the current target directly while Night Light is off, or fade from the stored temperature if it is already on. These operations support best-effort cleanup and restoration. They do not guarantee an untinted display before the next sign-in or cleanup after a crash, forced termination, or power loss.
+Windows provides a confirmed session-ending notification that a desktop app can handle before termination. The pinned libraries support receiving that notification in the existing process and requesting Night Light off. The APIs also support preparing a temperature while Night Light is off before enabling it. The [control contract](../specs/control.md) selects 6500 K preparation and the ordinary startup fade; deliberate Quit and management-off fade toward 6500 K, while confirmed session end skips the fade. These operations support best-effort cleanup and restoration. They do not guarantee an untinted display before the next sign-in or cleanup after a crash, forced termination, or power loss.
 
 The design question is whether a tray application can reduce the chance of leaving a bedtime temperature active after exit. A second question is how startup can restore the current schedule without briefly enabling a stale temperature stored while Night Light was off.
 
@@ -42,11 +42,11 @@ Source inspection establishes API availability, not successful session-ending de
 
 An exit request must stop new scheduling, fade, playback, and reconciliation work before requesting off. It must serialize the off operation after any already executing library operation. Otherwise, queued control or observation handling could enable Night Light again. Requiring both settings and state to decode is a possible application guard, but it can prevent off cleanup when only settings is unreadable. The specification selects the public off operation's fresh state read; the operation does not need a settings read.
 
-For startup while inactive, calling `apply_color_temperature` while Night Light is off stores the computed current target with preview off without waiting; the application can then call `set_active(true)`. The [0.5.0 transition research](nightlight-transition-control.md) records that contract and the upstream report that temperatures written while Night Light was off appeared when it was switched on. This supports enabling the computed temperature directly without a startup fade or a fixed intermediate value. Preparation failure cannot be treated as successful preparation. External writers can still race this sequence; the operations are not atomic.
+For startup while inactive, calling `apply_color_temperature` while Night Light is off stores the computed current target with preview off without waiting; the application can then call `set_active(true)`. The [0.5.0 transition research](nightlight-transition-control.md) records that contract and the upstream report that temperatures written while Night Light was off appeared when it was switched on. This establishes an API capability, not Circadia's selected startup policy. Preparation failure cannot be treated as successful preparation. External writers can still race this sequence; the operations are not atomic.
 
 The recorded evidence does not measure the off request during Windows teardown or establish an exit deadline. An off request also does not repair a preview flag left active by a failed refresh; decoded active state alone does not establish the physical display result in that failure case.
 
-## Alternatives and recommendation
+## Exit operations compared
 
 | Exit behavior | Benefit | Limitation |
 | :-- | :-- | :-- |
@@ -54,17 +54,10 @@ The recorded evidence does not measure the off request during Windows teardown o
 | Request Night Light off | Requests an untinted display after exit, including during the next Windows startup if Windows preserves and applies that state. | Requires a successful operation before termination and immediately changes the display on ordinary Quit. |
 | Request 6500 K while keeping Night Light on | Requests the accepted neutral temperature without disabling the native mode. | Leaves Night Light enabled after exit and requires a complete temperature refresh. |
 
-For an application that owns Night Light while running, a single best-effort off request on deliberate Quit and confirmed session end is a consistent exit policy. It should not add a fade, retry loop, or shutdown veto. If Night Light is already active when Circadia starts, a separate short startup fade can correct the stored value once control is ready, regardless of the ordinary fade preference. If inactive, startup can prepare and enable the computed temperature directly. These are product recommendations; the specification defines the selected policy.
-
 ## Verification gaps
 
 The documented events and inspected APIs support this design without a separate system component. No live shutdown, restart, sign-out, or Night Light operation was performed for this investigation.
 
-Implementation checks need to establish:
+This investigation does not establish hidden-window message delivery with settings closed, serialization before acknowledging session end, recovery from independent settings/state read failures, or visible startup behavior. The [control scenarios](../specs/control.md) define those outcomes.
 
-- The hidden window receives session messages while settings is closed, and cancellation does not request off.
-- The confirmed notification path coordinates serialized cleanup before acknowledging completion, without allowing later control writes.
-- Library read failures, off failures, and interrupted or failed preview cleanup produce the specified best-effort exit behavior.
-- Startup prepares the computed target before enabling inactive Night Light, and uses the selected startup fade only when Night Light is already active.
-
-Release testing needs to observe stored state after shutdown, restart, sign-out, and Fast Startup on supported Windows builds. The evidence does not establish whether Windows applies the saved off state before the next sign-in or whether another component changes it during shutdown. A guaranteed neutral pre-sign-in display would require additional evidence and possibly a different architecture; best-effort cleanup does not make that promise.
+The evidence does not establish stored state after shutdown, restart, sign-out, and Fast Startup on supported Windows builds. The evidence does not establish whether Windows applies the saved off state before the next sign-in or whether another component changes it during shutdown. A guaranteed neutral pre-sign-in display would require additional evidence and possibly a different architecture; best-effort cleanup does not make that promise.

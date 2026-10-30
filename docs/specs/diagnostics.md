@@ -83,15 +83,6 @@ When the previous run crashed, as shown by its crash record or a crash event for
 - A crash banner is undismissed during a configuration error, and the user chooses Reset to default settings: the banner remains until the user dismisses it.
 - The pending notice cannot be stored when a launch detects a crash: settings shows the banner during that run, and the next launch does not show it again.
 
-## Explored alternatives
-
-- **Removing personal data from logs:** Redaction loses context that crash investigation needs. The log stays local, and the user decides what to share.
-- **Omitting window titles from the log:** Title conditions match window titles, so a log without them cannot explain why a window did or did not match. The log stays local, and bug reports remind the user to remove what they do not want to share.
-- **A separate crash-reporting process:** The non-goals exclude helper processes. A crash that ends the process before it can record itself is detected at the next launch instead.
-- **A settings switch for detailed logging:** A command-line flag serves the users who file detailed reports without adding a setting that can be left on.
-- **A notice for every unexplained end:** Power loss, forced termination, and a shutdown that ends the process before exit finishes leave no crash data to report, so the log records them without a notice.
-- **Opening settings after a crash:** A sign-in launch would show a window. The notice waits until the user opens settings.
-
 ## Supporting evidence
 
 | Design decision or requirement | Evidence |

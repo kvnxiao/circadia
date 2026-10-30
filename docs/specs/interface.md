@@ -232,19 +232,8 @@ Menu labels change only when the state they show changes. Explorer recreation re
 - Explorer restarts: one restored icon opens its context menu, and the controller requests the current native output without restarting the process.
 - A keyboard user opens the menu: each item is reachable, and a screen reader reads its label and whether it is available.
 
-## Explored alternatives
-
-- **A checked tray item with a live countdown:** The reference Reactor menu API lacks checked items and dismisses an open menu when its text changes. Menu labels change only when state changes, and settings shows when manual suppression ends.
-- **Native time picker:** At the reference Reactor commit it cannot show a saved time. The segmented control of REQ-time-entry keeps the native picker's segmented appearance.
-- **Free-text clock fields:** They need a parser for every regional time format and do not match the segmented appearance of Windows time entry.
-- **One banner listing every problem:** It puts errors far from the settings that fix them. Errors appear at their source, and a banner appears only for an invalid field on another page and for app-wide problems.
-- **Reversing a management change in progress:** Turning management back on during the turn-off fade, or off during the startup fade, would stop the controller partway through cleanup or startup and add partial states. The management setting is unavailable until the change finishes instead.
-- **Temperature colors in contrast themes:** Custom colors in a contrast theme override the colors the user chose for readability. Settings shows temperatures through the curve and numbers instead.
-- **Opening settings after a restored backup:** A working setup would show a window at sign-in. Settings shows a dismissible banner the next time it opens, and the tray tooltip reports the restore.
-- **Taking over Night Light on first launch:** A new install would disable the Windows Night Light schedule without the user's agreement. Management starts off and requires consent.
-
 ## Supporting evidence
 
 | Design decision or requirement | Evidence |
 | :-- | :-- |
-| Settings window structure, graph drawing, time entry, and tray menu under Reactor's limits | [Settings design support](../research/settings-design-support.md) and its [rendering probe](../../probes/windows-reactor/settings-design/README.md); the probe covered forced dark and light window themes at 100% scaling; following the Windows theme, contrast themes, other scaling, and screen-reader use remain unverified. |
+| Settings window structure, graph drawing, time entry, and tray menu under Reactor's limits | [Settings design support](../research/settings-design-support.md) and its [rendering probe](../../tools/windows-reactor/settings-design/README.md); the probe covered forced dark and light window themes at 100% scaling; following the Windows theme, contrast themes, other scaling, and screen-reader use remain unverified. |

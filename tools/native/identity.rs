@@ -355,10 +355,7 @@ pub(super) fn return_to(window: &HWND) -> io::Result<()> {
             ..winsafe::KEYBDINPUT::default()
         })
     });
-    require(
-        winsafe::SendInput(&inputs).map_err(io::Error::other)? == 4,
-        "Alt+Tab input was incomplete",
-    )?;
+    crate::automation::send_input(&inputs)?;
     wait("Alt+Tab restores Settings foreground", || {
         Ok((HWND::GetForegroundWindow().as_ref() == Some(window)).then_some(()))
     })?;

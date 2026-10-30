@@ -16,7 +16,7 @@ recheck-when: Startup registration, Windows approval encoding, supported Windows
 
 # Sign-in startup integration
 
-Circadia registers its executable in the current user's Run key only after an explicit startup change is saved or the saved preference is retried. Configuration Save and startup registration have separate results. Circadia reads Windows' startup approval record but never writes it, so a Windows-disabled entry requires a separate action in Windows Settings.
+Circadia registers or removes its current-user Run entry when the Start at sign-in switch changes or the user retries registration. Configuration persistence and startup registration have separate results. Circadia reads Windows' startup approval record but never writes it, so a Windows-disabled entry requires a separate action in Windows Settings.
 
 ## Documented Windows behavior
 
@@ -42,13 +42,11 @@ Circadia writes only the `Circadia` value under `HKCU\Software\Microsoft\Windows
 
 The read-only approval lookup uses the `Circadia` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`. Its decoder requires a 12-byte binary value. The first four bytes encode state 0 or 2 for enabled, or 3 for disabled; the final eight bytes are ignored. Unknown states, malformed data, and registry failures produce unavailable status rather than an enabled claim. A missing Run entry is unregistered. A Run command for another executable or data directory is reported separately.
 
-**Earlier settings window, 2026-10-22:** The settings editor had unsaved draft changes and a Save command, and it tracked an explicit switch change independently of other draft changes. A successful configuration Save consumed that change and attempted registration once. Registration failure preserved the saved configuration and kept the settings window open when the user closed it and chose Save. Opening settings and refreshing status only read the registry. Relaunching and unrelated Saves did not retry failed registration. The measured checks below exercised this window.
-
-**Current settings window, 2026-10-25:** Settings has no Save step. Turning the Start at sign-in switch on or off registers or removes the Run command at once and shows a failure at the switch with a Retry command. Opening settings reads the Run command and the approval record. Circadia logs a failed read under the `startup_status_read` operation and logs the first successful read after a failure as its recovery. Relaunching and changes to other settings do not retry failed registration.
+**Source inspection, 2026-10-25:** Settings has no Save step. Turning the Start at sign-in switch on or off registers or removes the Run command at once and shows a failure at the switch with a Retry command. Opening settings reads the Run command and the approval record. Circadia logs a failed read under the `startup_status_read` operation and logs the first successful read after a failure as its recovery. Relaunching and changes to other settings do not retry failed registration.
 
 ## Measured integration checks
 
-**Observed on Windows 11 x64 build 26300.9711, 2026-10-22:** `just native-startup` passed with a debug application and isolated configuration. The check verified:
+**Observed on Windows 11 x64 build 26300.9711, 2026-10-22, with the earlier Save/Discard settings model:** `just native-startup` passed with a debug application and isolated configuration. The check verified:
 
 - Save registers the current executable and data directory; editing and Discard do not.
 - Injected disabled approval survives unrelated Save and explicit Retry.
@@ -57,7 +55,7 @@ The read-only approval lookup uses the `Circadia` value under `HKCU\Software\Mic
 - A command exceeding 260 characters fails registration while preserving the saved daily Bedtime clock and startup preference, with settings still open after close-with-Save.
 - The harness removes its owned temporary registration and approval values.
 
-Unit tests cover quoted paths, trailing backslashes, the command with and without `--data-dir`, the 259-character limit, approval decoding, registry-error classification, explicit retry, and preservation of Windows' effective state after a failed removal. The [native tool instructions](../../tools/README.md#sign-in-startup) describe prerequisites and side effects.
+Unit tests cover quoted paths, trailing backslashes, the command with and without `--data-dir`, the 259-character limit, approval decoding, registry-error classification, explicit retry, and preservation of Windows' effective state after a failed removal. The [native tool instructions](../../tools/native/README.md#sign-in-startup) describe prerequisites and side effects.
 
 ## Verification limits
 

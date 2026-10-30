@@ -1011,12 +1011,53 @@ pub(super) fn press_key(key: co::VK) -> io::Result<()> {
             ..winsafe::KEYBDINPUT::default()
         }),
     ];
-    let sent = winsafe::SendInput(&inputs).map_err(io::Error::other)?;
+    send_input(&inputs)
+}
+
+pub(super) fn send_input(inputs: &[winsafe::HwKbMouse]) -> io::Result<()> {
+    send_input_with(inputs, |events| {
+        winsafe::SendInput(events).map_err(io::Error::other)
+    })
+}
+
+fn send_input_with(
+    inputs: &[winsafe::HwKbMouse],
+    mut dispatch: impl FnMut(&[winsafe::HwKbMouse]) -> io::Result<u32>,
+) -> io::Result<()> {
+    let sent = dispatch(inputs)?;
     if usize::try_from(sent).ok() == Some(inputs.len()) {
-        Ok(())
-    } else {
-        Err(io::Error::other("keyboard input was incomplete"))
+        return Ok(());
     }
+    let releases: Vec<_> = inputs
+        .iter()
+        .copied()
+        .filter(|event| match event {
+            winsafe::HwKbMouse::Kb(key) => key.dwFlags.has(co::KEYEVENTF::KEYUP),
+            winsafe::HwKbMouse::Mouse(mouse) => mouse.dwFlags.has(co::MOUSEEVENTF::LEFTUP),
+            winsafe::HwKbMouse::Hw(_) => false,
+        })
+        .collect();
+    match dispatch(&releases) {
+        Ok(cleaned) => Err(io::Error::other(format!(
+            "input insertion incomplete ({sent}/{}); released {cleaned}/{} cleanup events",
+            inputs.len(),
+            releases.len(),
+        ))),
+        Err(source) => Err(io::Error::other(InputCleanupFailure {
+            sent,
+            expected: inputs.len(),
+            source,
+        })),
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("input insertion incomplete ({sent}/{expected}); releasing input also failed")]
+struct InputCleanupFailure {
+    sent: u32,
+    expected: usize,
+    #[source]
+    source: io::Error,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1093,11 +1134,7 @@ pub(super) fn click_point(x: i32, y: i32) -> io::Result<()> {
             ..winsafe::MOUSEINPUT::default()
         }),
     ];
-    crate::lifecycle::require(
-        winsafe::SendInput(&inputs).map_err(io::Error::other)? == 2,
-        "mouse click was incomplete",
-    )?;
-    Ok(())
+    send_input(&inputs)
 }
 
 #[cfg(test)]
@@ -1275,5 +1312,129 @@ mod tests {
         })
         .expect("a successful observation establishes absence");
         assert_eq!(attempts, 3);
+    }
+    fn key_events() -> [winsafe::HwKbMouse; 2] {
+        [
+            winsafe::HwKbMouse::Kb(winsafe::KEYBDINPUT {
+                wVk: co::VK::TAB,
+                ..winsafe::KEYBDINPUT::default()
+            }),
+            winsafe::HwKbMouse::Kb(winsafe::KEYBDINPUT {
+                wVk: co::VK::TAB,
+                dwFlags: co::KEYEVENTF::KEYUP,
+                ..winsafe::KEYBDINPUT::default()
+            }),
+        ]
+    }
+
+    #[test]
+    fn complete_input_does_not_send_cleanup() {
+        let mut calls = 0;
+        send_input_with(&key_events(), |events| {
+            calls += 1;
+            assert_eq!(events.len(), 2);
+            Ok(2)
+        })
+        .expect("complete insertion");
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn partial_keyboard_input_releases_the_key() {
+        let mut calls = 0;
+        let result = send_input_with(&key_events(), |events| {
+            calls += 1;
+            if calls == 1 {
+                assert_eq!(events.len(), 2);
+            } else {
+                assert!(
+                    matches!(events, [winsafe::HwKbMouse::Kb(key)] if key.wVk == co::VK::TAB && key.dwFlags == co::KEYEVENTF::KEYUP)
+                );
+            }
+            Ok(1)
+        });
+        assert_eq!(calls, 2);
+        assert!(
+            result
+                .expect_err("partial insertion")
+                .to_string()
+                .contains("released 1/1")
+        );
+    }
+
+    #[test]
+    fn partial_mouse_input_releases_the_button() {
+        let events = [
+            winsafe::HwKbMouse::Mouse(winsafe::MOUSEINPUT {
+                dwFlags: co::MOUSEEVENTF::LEFTDOWN,
+                ..winsafe::MOUSEINPUT::default()
+            }),
+            winsafe::HwKbMouse::Mouse(winsafe::MOUSEINPUT {
+                dwFlags: co::MOUSEEVENTF::LEFTUP,
+                ..winsafe::MOUSEINPUT::default()
+            }),
+        ];
+        let mut calls = 0;
+        let result = send_input_with(&events, |events| {
+            calls += 1;
+            if calls == 2 {
+                assert!(
+                    matches!(events, [winsafe::HwKbMouse::Mouse(mouse)] if mouse.dwFlags == co::MOUSEEVENTF::LEFTUP)
+                );
+            }
+            Ok(1)
+        });
+        assert_eq!(calls, 2);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cleanup_failure_preserves_the_source() {
+        let mut calls = 0;
+        let error = send_input_with(&key_events(), |_| {
+            calls += 1;
+            if calls == 1 {
+                Ok(1)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "fixture denial",
+                ))
+            }
+        })
+        .expect_err("cleanup failure");
+        let failure = error
+            .get_ref()
+            .and_then(|error| error.downcast_ref::<InputCleanupFailure>())
+            .expect("typed cleanup error");
+        assert_eq!(failure.sent, 1);
+        assert_eq!(failure.expected, 2);
+        assert_eq!(failure.source.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn incomplete_release_is_reported() {
+        let mut calls = 0;
+        let error = send_input_with(&key_events(), |_| {
+            calls += 1;
+            Ok(u32::from(calls == 1))
+        })
+        .expect_err("partial cleanup");
+        assert!(error.to_string().contains("released 0/1"));
+    }
+
+    #[test]
+    fn rejected_initial_input_does_not_send_cleanup() {
+        let mut calls = 0;
+        let error = send_input_with(&key_events(), |_| {
+            calls += 1;
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "fixture denial",
+            ))
+        })
+        .expect_err("initial failure");
+        assert_eq!(calls, 1);
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     }
 }

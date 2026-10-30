@@ -1,0 +1,22 @@
+set shell := ["bash", "-uc"]
+set windows-shell := ["bash", "-uc"]
+
+python-fix:
+    uv run --locked ruff check --fix .
+    uv run --locked ruff format .
+
+python-check:
+    uv run --locked ruff format --check .
+    uv run --locked ruff check .
+    uv run --locked ty check .
+
+python-format:
+    uv run --locked ruff format .
+
+python-test:
+    uv run --locked pytest
+
+python-audit:
+    uv audit --locked
+
+check: python-check python-test python-audit

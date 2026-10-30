@@ -74,7 +74,7 @@ These checks used a debug build with bundled Windows App SDK 2.6.4 and Windows R
 
 The native run captured 65 screenshots at 640×480, 799×600, 800×600, and 1184×992 client sizes. The debug pseudo-locale uses accented, bracketed text expanded by at least 40% to test layout; release builds exclude its generator. Automated checks reported no untranslated application text or overflowing text bounds. Visual inspection confirmed wrapping recent-app explanations and complete actions at all four sizes. Both lists' Add dialogs and condition editors retain complete controls through scrolling, including long paths and a long window-title suggestion. Fixture processes and the test application exited after each completed run.
 
-The [native-check instructions](../../tools/README.md#installation-restrictions) describe reproduction and desktop-input effects. Higher display scales, other themes, representative third-party applications, and actual Narrator delivery remain separate validation. f.lux's current matching algorithm remains undocumented in the inspected sources and is not an implementation dependency.
+The [native-check instructions](../../tools/native/README.md#installation-restrictions) describe reproduction and desktop-input effects. Higher display scales, other themes, representative third-party applications, and actual Narrator delivery remain separate validation. f.lux's current matching algorithm remains undocumented in the inspected sources and is not an implementation dependency.
 
 ## Sources
 

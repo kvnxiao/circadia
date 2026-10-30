@@ -9,7 +9,6 @@ use winsafe::AtomStr;
 use winsafe::HPROCESS;
 use winsafe::HWND;
 use winsafe::HwKbMouse;
-use winsafe::KEYBDINPUT;
 use winsafe::MOUSEINPUT;
 use winsafe::co;
 
@@ -141,12 +140,7 @@ pub(super) fn click(element: &IUIAutomationElement) -> io::Result<()> {
             ..MOUSEINPUT::default()
         }),
     ];
-    let sent = winsafe::SendInput(&inputs).map_err(io::Error::other)?;
-    if usize::try_from(sent).ok() == Some(inputs.len()) {
-        Ok(())
-    } else {
-        Err(io::Error::other("mouse input was incomplete"))
-    }
+    crate::automation::send_input(&inputs)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -172,25 +166,7 @@ pub(super) fn open_menu(element: &IUIAutomationElement) -> io::Result<()> {
     {
         return Err(io::Error::other("tray icon did not receive keyboard focus"));
     }
-    let inputs = [
-        HwKbMouse::Kb(KEYBDINPUT {
-            wVk: co::VK::APPS,
-            ..KEYBDINPUT::default()
-        }),
-        HwKbMouse::Kb(KEYBDINPUT {
-            wVk: co::VK::APPS,
-            dwFlags: co::KEYEVENTF::KEYUP,
-            ..KEYBDINPUT::default()
-        }),
-    ];
-    let sent = winsafe::SendInput(&inputs).map_err(io::Error::other)?;
-    if usize::try_from(sent).ok() == Some(inputs.len()) {
-        Ok(())
-    } else {
-        Err(io::Error::other(
-            "context-menu keyboard input was incomplete",
-        ))
-    }
+    crate::automation::press_key(co::VK::APPS)
 }
 
 // Reactor's tray menu items expose only their text, so the checks find each

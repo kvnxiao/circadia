@@ -13,7 +13,7 @@ recheck-when: Supported Windows power states, notification integration, timer me
 
 Windows can preserve Circadia's process while time advances through sleep or hibernation, and Modern Standby can pause desktop execution. Temperature control therefore needs to reevaluate the current schedule when execution resumes. Existing timers and native records do not establish the current curve position or displayed color. Documented APIs support resume integration in the existing process; actual Windows 11 notification ordering and visible Night Light restoration remain unverified.
 
-This research addresses the difference between resuming a preserved controller and launching a new process. The relevant decisions are how to discard obsolete temperature work, expire timed suppression, and request native output after resume.
+This research addresses the difference between resuming a preserved controller and launching a new process. The relevant decisions are how to discard obsolete temperature work, expire the one-hour manual override to 6500 K, and request native output after resume.
 
 ## Preserved processes and power notifications
 
@@ -53,7 +53,7 @@ The library evidence does not exercise sleep, hibernation, or Modern Standby. St
 
 Reevaluate the current curve and suppression before new output, discard obsolete work, and require a complete refresh after each resume. A refresh already performed by a resumed fade or inactive preparation satisfies this requirement. Retain serialization and failure recovery; an in-flight synchronous operation can finish before the new attempt. Repeated notifications for the same wake need not add refreshes or restart an unchanged fade.
 
-This recommendation preserves ordinary fade behavior and the independent one-hour suppression deadline. It does not require replaying time asleep or waking the machine to visit schedule points.
+This approach preserves the configured fade when the selected temperature changes and the independent one-hour suppression deadline. It does not require replaying time asleep or waking the machine to visit schedule points.
 
 ## Validation limits
 

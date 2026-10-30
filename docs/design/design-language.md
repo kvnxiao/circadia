@@ -1,6 +1,6 @@
 # Design language
 
-Circadia looks like a Windows 11 app: it follows Microsoft's Fluent design guidance for Windows and the layout of the Windows Settings app. Its own artwork is limited to the app icon, the phase art, the suppression badge glyphs, and the colors that represent temperatures. This document describes both layers precisely enough to draw new elements in the same style. The [settings window document](settings-window.md) applies them to each screen.
+Circadia aims to look like a native Windows 11 app: it follows Microsoft's Fluent design guidance for Windows and a layout similar to the Windows Settings app. Its own artwork is limited to the app icon, the phase art, the suppression badge glyphs, and the colors that represent temperatures. This document describes both layers precisely enough to draw new elements in the same style. The [settings window document](settings-window.md) applies them to each screen.
 
 ## Terms
 
@@ -118,7 +118,7 @@ Do not hard-code colors in a contrast theme, because users can edit every system
 
 ### Direct2D-safe SVG
 
-Circadia loads its SVG files through WinUI, which renders them with Direct2D's SVG support. Direct2D ignores unsupported SVG elements and attributes and renders the rest, so an unsupported feature silently changes the picture instead of failing. Source: [SVG support in Direct2D](https://learn.microsoft.com/en-us/windows/win32/direct2d/svg-support).
+Circadia loads its SVG files through WinUI, which renders them with Direct2D's SVG support. Direct2D ignores unsupported SVG elements and attributes and renders the rest, rather than failing loudly. Source: [SVG support in Direct2D](https://learn.microsoft.com/en-us/windows/win32/direct2d/svg-support).
 
 Keep every asset in `assets/` to the features the current files use:
 
