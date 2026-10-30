@@ -892,7 +892,8 @@ fn optional_scroll(
 ) -> io::Result<Option<windows::Win32::uiautomationclient::IUIAutomationScrollPattern>> {
     match result {
         Ok(pattern) => Ok(Some(pattern)),
-        // WinUI can return S_OK with a null pattern; the projection reports Error::empty().
+        // WinUI can return S_OK with a null pattern; the projection reports
+        // Error::empty().
         Err(error)
             if error.code().0 == 0
                 || error.code().0 == windows_sys::Win32::winerror::E_NOINTERFACE
