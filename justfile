@@ -109,3 +109,6 @@ check-msrv package="circadia":
     msrv=$(jq -er --arg name "$1" '.workspace_members as $members | .packages[] | select(.id as $id | $members | index($id)) | select(.name == $name) | .rust_version // error("selected package must declare rust-version")' <<< "$metadata")
     rustup toolchain install "$msrv" --profile minimal
     cargo +"$msrv" check --package "$1" --all-targets --all-features --locked
+
+installer:
+    bash packaging/build-installer.sh

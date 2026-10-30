@@ -4,7 +4,7 @@
 
 Circadia schedules Windows Night Light around your waking and sleeping hours. Set your preferred daytime and bedtime color temperatures, then let the screen warm gradually before bed and cool again before you wake.
 
-Circadia is an **unreleased Windows 11 x64 application**. There are no release downloads yet; you can [build it from source](DEVELOPMENT.md#build-and-run).
+Circadia is a **Windows 11 x64 application in development**. Unsigned installers are built after changes reach `main` and pass automated checks; they are development builds, not stable releases.
 
 ## Features
 
@@ -39,7 +39,20 @@ Closing Settings keeps Circadia running. Reopen it from the tray or by launching
 
 Circadia requires Windows 11 x64 with working native Night Light. The intended minimum is build 22000; execution on that minimum build remains unverified. Recorded desktop checks used build 26300.9711 at 100% scaling. See the [compatibility evidence](docs/research/windows-compatibility.md) for the tested scope.
 
-After [building and launching Circadia](DEVELOPMENT.md#build-and-run):
+### Install the latest development build
+
+1. Sign in to GitHub and open the [CI runs for `main`](https://github.com/kvnxiao/circadia/actions/workflows/ci.yml?query=branch%3Amain+event%3Apush).
+2. Open the newest successful run with a completed **Unsigned Windows installer** job. Under **Artifacts**, download **Circadia-windows-x64-unsigned** and extract the ZIP.
+3. Run `Circadia-<version>-<commit>-windows-x64-unsigned-setup.exe`. If Circadia is already running, choose **Quit** from its tray menu before continuing.
+4. Finish setup, then open **Circadia** from the Windows Start menu.
+
+The installer includes the required runtime and installs for your Windows account without requesting administrator access. Downloads appear after the first successful installer build on `main` and expire after 90 days. If no download is available, you can [build from source](DEVELOPMENT.md#build-and-run).
+
+**Unsigned application:** Circadia and its installer are not code-signed yet. Expect a Microsoft Defender SmartScreen warning on the first run of a downloaded installer or app. If Windows displays **Windows protected your PC**, verify that you downloaded it from this repository, choose **More info**, then **Run anyway** to approve it manually. Windows may identify the publisher as **Unknown publisher**. New builds may prompt again. If Windows policy blocks execution without a **Run anyway** option, these instructions cannot override that policy.
+
+To update, quit Circadia and run the newer installer. To uninstall, quit Circadia and use **Settings → Apps → Installed apps → Circadia → Uninstall**. Your saved settings remain available for a later installation.
+
+### Set up your schedule
 
 1. Set Wake, Bedtime, and your temperature levels on the Schedule page.
 2. Turn on Night Light management and read the consent prompt.
