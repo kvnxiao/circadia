@@ -1,5 +1,5 @@
 ---
-date: 2026-10-29
+date: 2026-10-30
 questions:
   - How can a separate harness measure the release application's CPU, memory, and context switches?
   - What limits apply to sampled thread counters and the Windows metadata layout?
@@ -13,6 +13,7 @@ observed-in:
   - Circadia measure-graph on Windows 11 x64 build 26300.9711 (UBR 0x25EF), 2026-10-27, windows-rs 0496ec1
   - Circadia measure-resources and measure-activity on Windows 11 x64 build 26300 (UBR 0x25EF), 2026-10-27, Rust 1.99.0, windows-rs 0496ec1
   - Circadia measure-graph and measure-activity on Windows 11 x64 build 26300.9711, 2026-10-29, windows-rs 8786f59, working tree based on c453c2f
+  - Circadia measure-graph and completion-only captures on Windows 11 x64 build 26300.9711, 2026-10-30, windows-rs 3b6bea5, working tree based on a0bf3e2
 recheck-when: Windows versions, target architecture, metadata bindings, sampling intervals, measurement scenarios, the graph renderer, or the settings window change.
 ---
 
@@ -87,6 +88,16 @@ The navigation ring continued advancing on General, where the Schedule graph and
 This run used the release build with measurement instrumentation, bundled runtime 2.6.4, and 100% scaling. It did not change live Night Light. Pixel differences establish interpolation between application data updates; they do not establish every presented frame, physical display-color accuracy, or Narrator delivery. Higher-scale verification is deferred to [post-MVP work](../specs/SPEC.md#future-work).
 
 A second run recorded 11 bar fill lengths, 17 ring arc lengths, and 20 dot colors in 900 ms. It also required the navigation ring's native accessible percentage to advance on General within two seconds while output remained blocked. All checks passed; maximum graph-edit latency was 26.246 ms. The separate recovery run passed with 167 serialized simulated calls.
+
+### Preview bar completion
+
+**Measured on 2026-10-30 at windows-rs `3b6bea5`:** the completion check sampled a one-second Preview with simulated native output blocked beyond its deadline. It required a full-width pixel frame and accessible progress of 100% while editing remained locked. The bar's visual duration was 900 ms; playback still lasted one second. Captures used the release measurement build, bundled runtime 2.6.4, and 100% scaling on the machine described above.
+
+An initial implementation failed intermittently: one capture reached only 621 of 633 pixels before removal. The compositor animation used a clock sample taken before its setup, and the visual-deadline wake updated only the native accessible value. The corrected implementation samples the clock after preparing the animation and uses that existing wake to replace the compositor fill with static full width.
+
+Two corrected runs observed the full frame 74.399 ms and 66.899 ms before the actual deadline. Editing became available 21.564 ms and 11.052 ms after that deadline; pixels disappeared 36.324 ms and 26.885 ms afterward. These are sampled observations, not timer guarantees. Both runs also passed checks for starting another Preview, Stop, page exit, minimize, and close. No application frame loop or post-deadline hold was added.
+
+The full graph regression passed all 15 latency samples, with a maximum of 23.172 ms. It captured 13 bar extents, 22 ring extents, and 25 marker colors during 900 ms of blocked output. The 1 Hz native-rate case captured 71 changed marker positions in 0.903 seconds. Inactive-view observations recorded zero animation starts, status/text timer callbacks, and settings UI rebuilds over their 600 ms intervals. These checks did not change Windows Night Light.
 
 ## Resource use and settings activity in the redesigned window
 

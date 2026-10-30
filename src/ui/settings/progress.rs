@@ -26,6 +26,10 @@ use windows_reactor::ViewContext;
 
 pub(super) const MIN_ANIMATION_DURATION: Duration = Duration::from_millis(1);
 
+pub(super) fn bar_duration(playback: Duration) -> Duration {
+    playback.saturating_sub((playback / 10).min(Duration::from_millis(100)))
+}
+
 pub(super) fn accent_colors() -> [Color; 2] {
     let colors = UISettings::new().and_then(|settings| {
         Ok([
@@ -57,6 +61,25 @@ struct Frame {
 }
 
 impl Timeline {
+    fn bar_frame(&self, now: Instant) -> Option<Frame> {
+        let playing = self.playing.as_ref()?;
+        let elapsed = now.saturating_duration_since(playing.started);
+        if elapsed >= playing.playback.duration() {
+            return None;
+        }
+        let duration = bar_duration(playing.playback.duration());
+        let remaining = duration.saturating_sub(elapsed);
+        Some(Frame {
+            from: (elapsed.as_secs_f64() / duration.as_secs_f64()).min(1.0),
+            to: 1.0,
+            remaining: if remaining.is_zero() {
+                remaining
+            } else {
+                remaining.max(MIN_ANIMATION_DURATION)
+            },
+        })
+    }
+
     fn frame(&self, now: Instant, current: Timestamp) -> Option<Frame> {
         let (at, end, remaining) = match &self.playing {
             Some(playing) => {
@@ -100,7 +123,7 @@ impl Frame {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Shape {
-    Bar,
+    Bar { complete: bool },
     Ring,
 }
 
@@ -184,22 +207,23 @@ impl Progress {
         let Some(root) = &self.root else {
             return Ok(());
         };
-        let Some(frame) = self.input.timeline.frame(Instant::now(), Timestamp::now()) else {
-            return Ok(());
-        };
         let compositor = root.compositor();
         let width = narrow(self.metrics.0);
         let height = narrow(self.metrics.1);
         if width <= 0.0 || height <= 0.0 {
             return Ok(());
         }
-        match self.input.shape {
-            Shape::Bar => self.bar(root, &compositor, &frame, width, height),
+        self.animated = match self.input.shape {
+            Shape::Bar { .. } => self.bar(root, &compositor, width, height),
             Shape::Ring => {
+                let Some(frame) = self.input.timeline.frame(Instant::now(), Timestamp::now())
+                else {
+                    return Ok(());
+                };
                 self.geometry = Some(self.ring(root, &compositor, &frame, width.min(height))?);
+                frame.animation_duration().is_some()
             }
-        }
-        self.animated = frame.animation_duration().is_some();
+        };
         #[cfg(feature = "graph-measurement")]
         if self.animated {
             crate::activity::record(crate::ActivityEvent::ProgressAnimationStarted);
@@ -211,10 +235,9 @@ impl Progress {
         &self,
         root: &ContainerVisual,
         compositor: &Compositor,
-        frame: &Frame,
         width: f32,
         height: f32,
-    ) {
+    ) -> bool {
         let track = compositor.create_sprite_visual();
         track.set_size(width, 1.0);
         track.set_offset(0.0, (height - 1.0) / 2.0, 0.0);
@@ -227,12 +250,20 @@ impl Progress {
         root.children().insert_at_top(&track);
         let fill = compositor.create_sprite_visual();
         fill.set_size(width, height);
-        fill.set_scale(Vector3::new(narrow(frame.from), 1.0, 1.0));
         fill.set_brush(&compositor.create_color_brush(color(self.input.accent)));
         root.children().insert_at_top(&fill);
+        if matches!(self.input.shape, Shape::Bar { complete: true }) {
+            fill.set_scale(Vector3::new(1.0, 1.0, 1.0));
+            return false;
+        }
+        let animation = compositor.create_vector3_key_frame_animation();
+        let easing = compositor.create_linear_easing_function();
+        let Some(frame) = self.input.timeline.bar_frame(Instant::now()) else {
+            fill.set_scale(Vector3::new(0.0, 1.0, 1.0));
+            return false;
+        };
+        fill.set_scale(Vector3::new(narrow(frame.from), 1.0, 1.0));
         if let Some(duration) = frame.animation_duration() {
-            let animation = compositor.create_vector3_key_frame_animation();
-            let easing = compositor.create_linear_easing_function();
             animation.insert_key_frame_with_easing(
                 0.0,
                 Vector3::new(narrow(frame.from), 1.0, 1.0),
@@ -246,6 +277,7 @@ impl Progress {
             animation.set_duration(duration);
             fill.start_animation("Scale", &animation);
         }
+        frame.animation_duration().is_some()
     }
 
     fn ring(
@@ -386,6 +418,21 @@ mod tests {
     use crate::Playback;
     use crate::WindowsZone;
     use std::sync::Arc;
+    use test_case::test_case;
+
+    #[test_case(1, 900)]
+    #[test_case(2, 1900)]
+    #[test_case(10, 9900)]
+    #[test_case(60, 59900)]
+    fn preview_fill_reserves_at_most_100_ms_and_one_tenth_for_its_full_width(
+        seconds: u64,
+        milliseconds: u64,
+    ) {
+        assert_eq!(
+            bar_duration(Duration::from_secs(seconds)),
+            Duration::from_millis(milliseconds)
+        );
+    }
 
     fn at(value: &str) -> Timestamp {
         value.parse().expect("fixed timestamp")
@@ -418,15 +465,66 @@ mod tests {
             playing: Some(playing),
         };
         assert_eq!(
-            timeline.frame(
-                started + Duration::from_secs(15),
-                at("2026-10-27T22:00:00Z")
-            ),
+            timeline.bar_frame(started + Duration::from_millis(29950)),
             Some(Frame {
-                from: 0.25,
+                from: 0.5,
                 to: 1.0,
-                remaining: Duration::from_secs(45)
+                remaining: Duration::from_millis(29950)
             })
+        );
+    }
+
+    #[test]
+    fn full_bar_is_static_until_the_unchanged_playback_deadline() {
+        let started = Instant::now();
+        let playing = playing(started);
+        let timeline = Timeline {
+            revision: 0,
+            interval: playing.playback.interval(),
+            playing: Some(playing.clone()),
+        };
+        for elapsed in [Duration::from_millis(59900), Duration::from_millis(59999)] {
+            let frame = timeline
+                .bar_frame(started + elapsed)
+                .expect("full-width hold");
+            assert_eq!(frame.from, 1.0);
+            assert_eq!(frame.to, 1.0);
+            assert_eq!(frame.animation_duration(), None);
+        }
+        let last_partial = timeline
+            .bar_frame(started + Duration::from_micros(59_899_500))
+            .expect("last partial frame");
+        assert!(last_partial.from < 1.0);
+        assert_eq!(
+            last_partial.animation_duration(),
+            Some(Duration::from_millis(1))
+        );
+        assert!(
+            timeline
+                .bar_frame(started + Duration::from_secs(60))
+                .is_none()
+        );
+        assert_eq!(
+            playing.instant(started + Duration::from_millis(59900)),
+            Some(at("2026-10-28T21:57:36Z"))
+        );
+    }
+
+    #[test]
+    fn accessible_bar_value_gets_one_boundary_wake_only_while_the_bar_is_shown() {
+        let started = Instant::now();
+        let playing = playing(started);
+        assert_eq!(
+            playing.next_text_update(None, started + Duration::from_secs(59), true),
+            Duration::from_millis(900)
+        );
+        assert_eq!(
+            playing.next_text_update(None, started + Duration::from_secs(59), false),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            playing.next_text_update(None, started + Duration::from_millis(59900), true),
+            Duration::from_millis(100)
         );
     }
 
