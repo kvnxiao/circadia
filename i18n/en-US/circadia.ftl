@@ -40,6 +40,21 @@ status-managing =
     }
 status-calculating = Calculating the schedule.
 
+announcement = Circadia. { $status }
+announcement-management =
+    { $mode ->
+        [off] Not managing Night Light.
+        [starting] Turning on Night Light management.
+        [stopping] Turning off Night Light management.
+        [exiting] Exiting Circadia.
+       *[on] Managing Night Light.
+    }
+announcement-phase = { $phase }.
+announcement-preview = Preview. { $phase }.
+announcement-schedule-available = Schedule available.
+announcement-solar-fallback = Solar timing is unavailable; following Wake and Bedtime only.
+announcement-schedule-retained = The schedule is unavailable; using its last temperature.
+
 phase-name =
     { $phase ->
         [not-managing] Not managing
@@ -158,12 +173,16 @@ sunrise-description = Morning color from wake time, daytime color from sunrise.
 sunset-title = Use sunset
 sunset-description = Evening color from sunset until bedtime.
 location-title = Use my Windows location
-location-on = Asks Windows for your position when you turn this on or open these settings.
+location-on = Requests one position on startup and when settings opens, including while running in the tray.
 location-off = Enter coordinates below. Circadia never needs location access this way.
 location-requesting = Finding your location…
-location-denied = Windows denied location access, so Circadia keeps the current coordinates. Turn on location access for desktop apps in Windows Settings, or turn this off and enter coordinates.
+location-denied = Windows location access is not available, so Circadia keeps the current coordinates. Allow location access for desktop apps in Windows Settings, or turn this off and enter coordinates.
 location-disabled = Windows location services are turned off, so Circadia keeps the current coordinates. Turn them on in Windows Settings, or turn this off and enter coordinates.
-location-unavailable = Windows couldn't find your position, so Circadia keeps the current coordinates. Settings asks again the next time it opens.
+location-unavailable = Windows couldn't find your position, so Circadia keeps the current coordinates. Circadia tries again at startup or when settings opens.
+location-consent-title = Use Windows location?
+location-consent-requests = Circadia requests your position when you turn this on, each time it starts, and when settings opens. Startup requests also run when only the tray icon is visible.
+location-consent-windows = These requests use Windows location services, which can use network-based positioning. Windows controls whether location access is allowed.
+location-consent-saving = Circadia saves this preference and your latest coordinates on this computer. Turn this setting off to stop requests and enter coordinates yourself.
 coordinates-title = Coordinates
 coordinates-description = Decimal degrees. North and east are positive.
 latitude = Latitude
@@ -449,6 +468,8 @@ banner-invalid-note =
     }
 nav-invalid = { $page }, has an invalid value
 banner-schedule-title = Night Light control is unavailable
+banner-schedule-retained-title = The schedule is unavailable
+banner-schedule-retained-message = Circadia can't read the Windows time zone. It keeps using the last scheduled temperature until the schedule can be calculated again.
 banner-schedule-message = Circadia can't read the Windows time zone and has no earlier scheduled temperature to use, so it doesn't change Night Light. Suppress for 1 hour is unavailable until Circadia can read the time zone.
 banner-native-output-title = Circadia can't control Night Light
 banner-native-observation-title = Circadia can't watch Night Light for changes

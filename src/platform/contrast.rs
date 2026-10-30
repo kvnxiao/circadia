@@ -1,16 +1,15 @@
 use std::io;
 use windows_reactor::Color;
-use windows_sys::Win32::Graphics::Gdi::COLOR_GRAYTEXT;
-use windows_sys::Win32::Graphics::Gdi::COLOR_HIGHLIGHT;
-use windows_sys::Win32::Graphics::Gdi::COLOR_HIGHLIGHTTEXT;
-use windows_sys::Win32::Graphics::Gdi::COLOR_WINDOW;
-use windows_sys::Win32::Graphics::Gdi::COLOR_WINDOWTEXT;
-use windows_sys::Win32::Graphics::Gdi::GetSysColor;
-use windows_sys::Win32::Graphics::Gdi::SYS_COLOR_INDEX;
-use windows_sys::Win32::UI::Accessibility::HCF_HIGHCONTRASTON;
-use windows_sys::Win32::UI::Accessibility::HIGHCONTRASTW;
-use windows_sys::Win32::UI::WindowsAndMessaging::SPI_GETHIGHCONTRAST;
-use windows_sys::Win32::UI::WindowsAndMessaging::SystemParametersInfoW;
+use windows_sys::Win32::winuser::COLOR_GRAYTEXT;
+use windows_sys::Win32::winuser::COLOR_HIGHLIGHT;
+use windows_sys::Win32::winuser::COLOR_HIGHLIGHTTEXT;
+use windows_sys::Win32::winuser::COLOR_WINDOW;
+use windows_sys::Win32::winuser::COLOR_WINDOWTEXT;
+use windows_sys::Win32::winuser::GetSysColor;
+use windows_sys::Win32::winuser::HCF_HIGHCONTRASTON;
+use windows_sys::Win32::winuser::HIGHCONTRASTW;
+use windows_sys::Win32::winuser::SPI_GETHIGHCONTRAST;
+use windows_sys::Win32::winuser::SystemParametersInfoW;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ContrastColors {
@@ -43,16 +42,22 @@ fn high_contrast() -> io::Result<bool> {
     };
     // SAFETY: The structure is writable for the call and its size field matches
     // its type.
-    let succeeded =
-        unsafe { SystemParametersInfoW(SPI_GETHIGHCONTRAST, size, (&raw mut settings).cast(), 0) };
+    let succeeded = unsafe {
+        SystemParametersInfoW(
+            SPI_GETHIGHCONTRAST.cast_unsigned(),
+            size,
+            (&raw mut settings).cast(),
+            0,
+        )
+    };
     if succeeded == 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(settings.dwFlags & HCF_HIGHCONTRASTON != 0)
+    Ok(settings.dwFlags & HCF_HIGHCONTRASTON.cast_unsigned() != 0)
 }
 
 #[expect(unsafe_code, reason = "read a system color by its documented index")]
-fn system_color(index: SYS_COLOR_INDEX) -> Color {
+fn system_color(index: i32) -> Color {
     // SAFETY: GetSysColor reads a process-independent color for a documented
     // index.
     let [red, green, blue, _] = unsafe { GetSysColor(index) }.to_le_bytes();

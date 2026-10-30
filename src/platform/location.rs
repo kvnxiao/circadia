@@ -4,7 +4,10 @@ use crate::DiagnosticFailure;
 use windows::Devices::Geolocation::GeolocationAccessStatus;
 use windows::Devices::Geolocation::Geolocator;
 use windows::Devices::Geolocation::Geoposition;
+use windows::Security::Authorization::AppCapabilityAccess::AppCapability;
+use windows::Security::Authorization::AppCapabilityAccess::AppCapabilityAccessStatus;
 use windows::core::Interface;
+use windows::core::h;
 use windows_future::AsyncOperationCompletedHandler;
 use windows_future::IAsyncInfo;
 use windows_future::IAsyncOperation;
@@ -12,6 +15,13 @@ use windows_future::IAsyncOperation;
 pub(crate) struct Request(IAsyncInfo);
 
 impl Request {
+    pub(crate) fn permission() -> Result<(), DiagnosticFailure> {
+        AppCapability::Create(h!("location"))
+            .and_then(|capability| capability.CheckAccess())
+            .map_err(|error| failure(&error))
+            .and_then(permission_result)
+    }
+
     pub(crate) fn access(
         completed: impl Fn(Result<(), DiagnosticFailure>) + Send + 'static,
     ) -> Result<Option<Self>, DiagnosticFailure> {
@@ -66,6 +76,20 @@ impl Request {
     }
 }
 
+fn permission_result(access: AppCapabilityAccessStatus) -> Result<(), DiagnosticFailure> {
+    let category = match access {
+        AppCapabilityAccessStatus::Allowed => return Ok(()),
+        AppCapabilityAccessStatus::DeniedByUser
+        | AppCapabilityAccessStatus::DeniedBySystem
+        | AppCapabilityAccessStatus::UserPromptRequired => DiagnosticCategory::AccessDenied,
+        _ => DiagnosticCategory::Windows,
+    };
+    Err(DiagnosticFailure {
+        category,
+        code: None,
+    })
+}
+
 impl Drop for Request {
     fn drop(&mut self) {
         drop(self.0.Cancel());
@@ -88,12 +112,13 @@ fn access_result(access: GeolocationAccessStatus) -> Result<(), DiagnosticFailur
 // the service-disabled error rather than an access denial.
 fn failure(error: &windows::core::Error) -> DiagnosticFailure {
     let code = error.code();
-    let category = if code.0 == windows_sys::Win32::Foundation::E_ACCESSDENIED {
+    let category = if code.0 == windows_sys::Win32::winerror::E_ACCESSDENIED {
         DiagnosticCategory::AccessDenied
     } else if code
-        == windows::core::HRESULT::from_win32(
-            windows_sys::Win32::Foundation::ERROR_SERVICE_DISABLED,
+        == windows_result::WIN32_ERROR(
+            windows_sys::Win32::winerror::ERROR_SERVICE_DISABLED.cast_unsigned(),
         )
+        .to_hresult()
     {
         DiagnosticCategory::Unavailable
     } else {
@@ -155,6 +180,35 @@ mod tests {
     fn permission_outcomes(access: GeolocationAccessStatus, expected: Option<DiagnosticCategory>) {
         assert_eq!(
             access_result(access).err().map(|failure| failure.category),
+            expected
+        );
+    }
+
+    #[test_case(AppCapabilityAccessStatus::Allowed, None)]
+    #[test_case(
+        AppCapabilityAccessStatus::DeniedByUser,
+        Some(DiagnosticCategory::AccessDenied)
+    )]
+    #[test_case(
+        AppCapabilityAccessStatus::DeniedBySystem,
+        Some(DiagnosticCategory::AccessDenied)
+    )]
+    #[test_case(
+        AppCapabilityAccessStatus::UserPromptRequired,
+        Some(DiagnosticCategory::AccessDenied)
+    )]
+    #[test_case(
+        AppCapabilityAccessStatus::NotDeclaredByApp,
+        Some(DiagnosticCategory::Windows)
+    )]
+    fn silent_permission_outcomes(
+        access: AppCapabilityAccessStatus,
+        expected: Option<DiagnosticCategory>,
+    ) {
+        assert_eq!(
+            permission_result(access)
+                .err()
+                .map(|failure| failure.category),
             expected
         );
     }

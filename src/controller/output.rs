@@ -270,6 +270,8 @@ pub struct TemperatureOutput {
     #[cfg(feature = "output-measurement")]
     measured_deadlines: OutputDeadlines,
     #[cfg(feature = "output-measurement")]
+    measured_at: Option<ControlTime>,
+    #[cfg(feature = "output-measurement")]
     prepared_at: Option<ControlTime>,
 }
 
@@ -289,6 +291,8 @@ impl Default for TemperatureOutput {
             issued: None,
             #[cfg(feature = "output-measurement")]
             measured_deadlines: OutputDeadlines::default(),
+            #[cfg(feature = "output-measurement")]
+            measured_at: None,
             #[cfg(feature = "output-measurement")]
             prepared_at: None,
         }
@@ -392,6 +396,7 @@ impl TemperatureOutput {
         #[cfg(feature = "output-measurement")]
         {
             self.measured_deadlines = OutputDeadlines::default();
+            self.measured_at = None;
             self.prepared_at = None;
         }
     }
@@ -691,10 +696,24 @@ impl TemperatureOutput {
             self.last_application = Some(now.elapsed);
         }
         self.held = false;
-        if self.fade.is_none_or(|fade| now.elapsed < fade.end()) {
+        let completed_fade = self.fade.is_some_and(|fade| now.elapsed >= fade.end());
+        if completed_fade {
+            self.fade = None;
+        }
+        #[cfg(feature = "output-measurement")]
+        if let Some((at, elapsed)) = self.measured_at.zip(self.measured_deadlines.cleanup) {
+            let wall = jiff::SignedDuration::try_from(elapsed.saturating_sub(at.elapsed))
+                .ok()
+                .and_then(|advance| at.wall.checked_add(advance).ok());
+            if let Some(wall) = wall {
+                self.remember_deadlines(ControlTime { wall, elapsed });
+            } else {
+                crate::measurement::fail("capturing output deadline after cleanup");
+            }
+        }
+        if !completed_fade {
             return Ok(None);
         }
-        self.fade = None;
         let Some(target) = &self.target else {
             return Ok(None);
         };
@@ -715,7 +734,10 @@ impl TemperatureOutput {
     #[cfg(feature = "output-measurement")]
     fn remember_deadlines(&mut self, at: ControlTime) {
         match self.deadlines(at) {
-            Ok(deadlines) => self.measured_deadlines = deadlines,
+            Ok(deadlines) => {
+                self.measured_deadlines = deadlines;
+                self.measured_at = Some(at);
+            }
             Err(error) => crate::measurement::fail(&format!("capturing output deadline: {error}")),
         }
     }

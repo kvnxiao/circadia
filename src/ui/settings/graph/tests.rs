@@ -10,11 +10,11 @@ use crate::platform::contrast::ContrastColors;
 use std::sync::Arc;
 use test_case::test_case;
 
-fn at(text: &str) -> Timestamp {
+pub(super) fn at(text: &str) -> Timestamp {
     text.parse().expect("UTC instant")
 }
 
-fn calculated(config: &Config, zone: &str, now: &str) -> CalculatedSchedule {
+pub(super) fn calculated(config: &Config, zone: &str, now: &str) -> CalculatedSchedule {
     let mut zone = WindowsZone::named(zone, false).expect("Windows zone rules");
     let graph = crate::graph_interval(config, &mut zone, at(now)).expect("graph view");
     let schedule =

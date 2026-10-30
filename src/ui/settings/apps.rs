@@ -163,7 +163,7 @@ pub(super) fn manual_button(manual: ManualView, context: &ViewContext<'_, Settin
         .automation_id(automation_id::MANUAL_SUPPRESSION)
         .automation_name(&manual.label)
         .on_click(context.message(Message::Command(Command::Manual(manual.command))))
-        .content(glyph_label(SUN_GLYPH, manual.label))
+        .content(widgets::glyph_label(SUN_GLYPH, manual.label))
         .into()
 }
 
@@ -644,16 +644,6 @@ pub(super) fn title_dialog_view(
     }
 }
 
-fn glyph_label(glyph: &'static str, label: impl AsRef<str>) -> StackPanel {
-    StackPanel::new()
-        .orientation(Orientation::Horizontal)
-        .spacing(8.0)
-        .children((
-            FontIcon::new().glyph(glyph).font_size(16.0),
-            widgets::body(label),
-        ))
-}
-
 fn app_row(icon: View, name: &str, detail: Vec<View>, controls: Vec<View>, id: String) -> View {
     Border::new()
         .min_height(60.0)
@@ -674,12 +664,7 @@ fn app_row(icon: View, name: &str, detail: Vec<View>, controls: Vec<View>, id: S
                                 .chain(detail)
                                 .collect::<Vec<View>>(),
                         ),
-                    StackPanel::new()
-                        .grid_column(2)
-                        .orientation(Orientation::Horizontal)
-                        .spacing(12.0)
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .children(controls),
+                    widgets::action_group(controls).grid_column(2),
                 )),
         )
         .into()
@@ -692,10 +677,7 @@ fn title_button(
     settings: &Settings,
     context: &ViewContext<'_, Settings>,
 ) -> View {
-    Button::new()
-        .style(ButtonStyle::Subtle)
-        .width(32.0)
-        .height(32.0)
+    widgets::icon_button("\u{E71C}", 16.0)
         .is_enabled(settings.input.model.editable())
         .automation_id(automation_id::title(id))
         .automation_name(text!(
@@ -703,7 +685,6 @@ fn title_button(
             "entry-title-name",
             name = row.name.as_str()
         ))
-        .content(FontIcon::new().glyph("\u{E71C}").font_size(16.0))
         .on_click(context.message(Message::OpenTitle(list, row.index)))
         .into()
 }
@@ -714,14 +695,10 @@ fn remove_button(
     enabled: bool,
     remove: windows_reactor::Callback<()>,
 ) -> Button {
-    Button::new()
-        .style(ButtonStyle::Subtle)
-        .width(32.0)
-        .height(32.0)
+    widgets::icon_button("\u{E74D}", 16.0)
         .is_enabled(enabled)
         .automation_id(id)
         .automation_name(name)
-        .content(FontIcon::new().glyph("\u{E74D}").font_size(16.0))
         .on_click(remove)
 }
 
@@ -789,7 +766,7 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                             Field::Suppression,
                             vec![row.file.clone()],
                         ))))
-                        .content(glyph_label(ADD_GLYPH, text!(text, "recent-add")))
+                        .content(widgets::glyph_label(ADD_GLYPH, text!(text, "recent-add")))
                         .into(),
                 );
             }
@@ -840,7 +817,7 @@ fn list_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 .automation_id(automation_id::ADD_APP)
                 .automation_name(text!(text, "add-app"))
                 .on_click(context.message(Message::OpenDialog(Field::Suppression)))
-                .content(glyph_label(ADD_GLYPH, text!(text, "add-app"))),
+                .content(widgets::glyph_label(ADD_GLYPH, text!(text, "add-app"))),
         ))
         .into()
 }
@@ -928,23 +905,21 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         text!(text, "exclusions-description"),
     )
     .controls(vec![
-        StackPanel::new()
-            .orientation(Orientation::Horizontal)
-            .spacing(12.0)
-            .children((
-                Button::new()
-                    .is_enabled(model.editable())
-                    .automation_id(automation_id::ADD_EXCLUSION)
-                    .on_click(context.message(Message::OpenDialog(Field::Exclusions)))
-                    .content(text!(text, "add-exclusion")),
-                widgets::expand_button(
-                    expansion,
-                    expand_name,
-                    automation_id::EXCLUSIONS_EXPAND,
-                    context.message(Message::Expand(!expanded)),
-                ),
-            ))
-            .into(),
+        widgets::action_group(vec![
+            Button::new()
+                .is_enabled(model.editable())
+                .automation_id(automation_id::ADD_EXCLUSION)
+                .on_click(context.message(Message::OpenDialog(Field::Exclusions)))
+                .content(text!(text, "add-exclusion"))
+                .into(),
+            widgets::expand_button(
+                expansion,
+                expand_name,
+                automation_id::EXCLUSIONS_EXPAND,
+                context.message(Message::Expand(!expanded)),
+            ),
+        ])
+        .into(),
     ])
     .view();
     let mut children: Vec<View> = vec![header];
@@ -955,12 +930,21 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 icon(settings, &row.executable, 32.0),
                 &row.executable,
                 widgets::caption(&row.description).into(),
-                FontIcon::new()
-                    .glyph("\u{E72E}")
-                    .font_size(16.0)
-                    .automation_name(text!(text, "fixed-locked"))
-                    .into(),
-                automation_id::fixed_exclusion(&row.executable.to_lowercase()),
+                vec![
+                    Border::new()
+                        .width(widgets::ICON_ACTION_SIZE)
+                        .height(widgets::ICON_ACTION_SIZE)
+                        .content(
+                            FontIcon::new()
+                                .glyph("\u{E72E}")
+                                .font_size(16.0)
+                                .horizontal_alignment(HorizontalAlignment::Center)
+                                .vertical_alignment(VerticalAlignment::Center)
+                                .automation_name(text!(text, "fixed-locked")),
+                        )
+                        .into(),
+                ],
+                &automation_id::fixed_exclusion(&row.executable.to_lowercase()),
             )
         }));
         children.extend(rows.iter().map(|row| {
@@ -969,28 +953,26 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             if let Some(error) = &row.error {
                 detail.push(widgets::field_error(error, &automation_id::message(&id)));
             }
-            let actions = StackPanel::new()
-                .orientation(Orientation::Horizontal)
-                .spacing(12.0)
-                .children((
-                    title_button(row, Field::Exclusions, &id, settings, context),
-                    remove_button(
-                        &text!(text, "entry-remove-name", name = row.name.as_str()),
-                        automation_id::remove(&id),
-                        model.editable(),
-                        context.message(Message::Command(Command::Remove(
-                            Field::Exclusions,
-                            row.index,
-                            row.executable.clone(),
-                        ))),
-                    ),
-                ));
+            let actions = vec![
+                title_button(row, Field::Exclusions, &id, settings, context),
+                remove_button(
+                    &text!(text, "entry-remove-name", name = row.name.as_str()),
+                    automation_id::remove(&id),
+                    model.editable(),
+                    context.message(Message::Command(Command::Remove(
+                        Field::Exclusions,
+                        row.index,
+                        row.executable.clone(),
+                    ))),
+                )
+                .into(),
+            ];
             nested_app_row(
                 icon(settings, &row.executable, 32.0),
                 &row.name,
                 StackPanel::new().spacing(2.0).children(detail).into(),
-                actions.into(),
-                id,
+                actions,
+                &id,
             )
         }));
         if rows.is_empty() {
@@ -1007,13 +989,8 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
     widgets::card(StackPanel::new().children(children))
 }
 
-fn nested_app_row(icon: View, name: &str, detail: View, action: View, id: String) -> View {
-    Border::new()
-        .min_height(56.0)
-        .padding(Thickness::new(52.0, 10.0, 16.0, 10.0))
-        .border_brush(ThemeBrush::CardStroke)
-        .border_thickness(Thickness::new(0.0, 1.0, 0.0, 0.0))
-        .automation_id(id)
+fn nested_app_row(icon: View, name: &str, detail: View, actions: Vec<View>, id: &str) -> View {
+    widgets::nested(id)
         .content(
             Grid::new()
                 .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
@@ -1025,10 +1002,7 @@ fn nested_app_row(icon: View, name: &str, detail: View, action: View, id: String
                         .spacing(2.0)
                         .vertical_alignment(VerticalAlignment::Center)
                         .children((widgets::body(name), detail)),
-                    Border::new()
-                        .grid_column(2)
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .content(action),
+                    widgets::action_group(actions).grid_column(2),
                 )),
         )
         .into()
@@ -1089,7 +1063,10 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
             .automation_id(automation_id::DIALOG_BROWSE)
             .automation_name(text!(text, "dialog-browse"))
             .on_click(context.message(Message::Browse))
-            .content(glyph_label("\u{E8B7}", text!(text, "dialog-browse")))
+            .content(widgets::glyph_label(
+                "\u{E8B7}",
+                text!(text, "dialog-browse"),
+            ))
             .into(),
     ];
     browse.extend(browsed.into_iter().map(choice));

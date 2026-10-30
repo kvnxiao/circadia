@@ -1,16 +1,18 @@
 ---
-date: 2026-10-22
+date: 2026-10-29
 questions:
   - How can a separate harness measure the release application's CPU, memory, and context switches?
   - What limits apply to sampled thread counters and the Windows metadata layout?
   - How long does the redesigned settings window take to show a schedule edit in its graph?
   - How much CPU, memory, and background activity does the redesigned settings window add while open, and what remains after it closes?
+  - Does the compositor move the rendered Preview marker between native calls and stop animation in inactive views?
 observed-in:
   - Microsoft Windows API and MS-TSTS documentation retrieved 2026-10-22
   - windows-sys 0.61.2 WindowsProgramming and Wdk SystemInformation bindings
   - Circadia measure-resources quick check on Windows 11 x64 build 26300.9711
   - Circadia measure-graph on Windows 11 x64 build 26300.9711 (UBR 0x25EF), 2026-10-27, windows-rs 0496ec1
   - Circadia measure-resources and measure-activity on Windows 11 x64 build 26300 (UBR 0x25EF), 2026-10-27, Rust 1.99.0, windows-rs 0496ec1
+  - Circadia measure-graph and measure-activity on Windows 11 x64 build 26300.9711, 2026-10-29, windows-rs 8786f59, working tree based on c453c2f
 recheck-when: Windows versions, target architecture, metadata bindings, sampling intervals, measurement scenarios, the graph renderer, or the settings window change.
 ---
 
@@ -40,7 +42,7 @@ The accumulated count omits work after a thread's last observation if that threa
 
 **Observed on Windows 11 x64 build 26300.9711:** the short `just measure-resources --quick` run completed all seven scenarios and graceful cleanup. It obtained positive memory sizes and thread counters from the running release application. Parser tests cover fixed-layout interpretation, truncation, invalid next-record offsets, thread exit/reuse, and counter wrapping.
 
-The full run on the same host completed all seven scenarios, including 600 seconds of initially closed idle output. Preview samples included both 2200 K and 6200 K. The scheduled-transition and fade samples also changed native temperature. The application did not record an error, and final readback confirmed Night Light off with native preview cleared. The [public baseline](../../README.md#resource-baseline) records the results and reference machine.
+The full run on the same host completed all seven scenarios, including 600 seconds of initially closed idle output. Preview samples included both 2200 K and 6200 K. The scheduled-transition and fade samples also changed native temperature. The application did not record an error, and final readback confirmed Night Light off with its native preview flag cleared. Circadia uses that Windows flag during short temperature transitions; it is separate from the application's schedule Preview. The [public baseline](../../README.md#resource-baseline) records the results and reference machine.
 
 The quick run validates the harness; its two-second observations are not release baselines. The full run uses the durations and configurations in the [tool instructions](../../tools/README.md#cpu-and-memory). CPU and memory results need that run's machine, build, configuration, and raw samples. Resource counters alone do not prove the [idle-work requirement](../specs/SPEC.md#req-event-driven-idle--perform-background-work-only-when-needed): constant output with settings closed must not cause periodic foreground queries, temperature writes, graph animation, or native retries when recovery is not pending.
 
@@ -64,7 +66,27 @@ Each sample runs from the settings component's receipt of a number-field commit,
 | Sleep temperature after solar calculation recovers | 1 | 13.1 ms |
 | Sleep temperature after a resume notification cancelled a 60-second Preview | 1 | 14.0 ms |
 
-All 15 samples were within the 100 ms bound that REQ-display-generated-curve sets for graph updates; the maximum was 16.2 ms. A two-second Preview moved the graph's current-time marker through 8 rendered positions while a simulated temperature operation stayed blocked. The run did not measure Wake or Bedtime edits, because their time picker has no UI Automation value pattern; their schedule calculation follows the same path as the temperature edits.
+All 15 samples were within the 100 ms bound that REQ-display-generated-curve sets for graph updates; the maximum was 16.2 ms. A two-second Preview submitted 8 marker positions while a simulated temperature operation stayed blocked. The instrumentation recorded positions prepared for rendering, so this result does not establish visible motion. The run did not measure Wake or Bedtime edits, because their time picker has no UI Automation value pattern; their schedule calculation follows the same path as the temperature edits.
+
+## Rendered Preview motion
+
+**Measured on 2026-10-29:** `just measure-graph` captured pixels from the release application's settings window at windows-rs `8786f59`, with the working tree based on `c453c2f`. The run used bundled runtime 2.6.4 and the simulated Night Light backend. The processor, Windows build, display mode, and settings dimensions matched the graph-latency machine above.
+
+The capture detected both the moving vertical line and its dot. A two-second Preview produced eight changed rendered positions while its native output call remained blocked. Settings became editable at Preview's scheduled end, measured from command submission, before the call was released. A separate Preview configured the controller to limit native temperature calls to 1 Hz and produced 66 changed captured positions in 0.901 seconds. That case recorded two temperature calls separated by 2.428 seconds, and two timer callbacks for status or numerical text updates during capture.
+
+The checks also exercised resize, return from another page, restore after minimize, and Stop while output was blocked. During separate 600 ms observations, completed, off-page, minimized, stopped, and closed states recorded zero graph-animation starts and zero status/text timer callbacks. These counters establish application activity during those intervals; they do not count compositor frames. The 15 graph-edit latency samples had a maximum of 23.624 ms.
+
+Screen-capture overhead limits sampling frequency. Changed pixels establish visible movement between native calls, but do not establish the monitor's presentation rate or frame-time distribution. These results precede the additional progress-bar, phase-ring, and dot-color interpolation checks below.
+
+### Progress bar, phase ring, and marker color
+
+**Measured on 2026-10-29 at windows-rs `5cfe2c9`:** the same recipe and machine captured 14 distinct bar fill lengths, 18 ring arc lengths, and 21 dot colors during 900 ms with a simulated Night Light call blocked. UI Automation exposed the native bar's 0–1 range and the ring's 0–100 range. Their values changed at the lower text-update cadence while the compositor continued interpolating.
+
+The navigation ring continued advancing on General, where the Schedule graph and bar were hidden. Minimizing settings removed all progress animations. Stop restored editing before the native call finished. The graph check recorded 71 changed positions in 0.903 seconds with a 1 Hz native ceiling, and the two observed temperature calls were 1.349 seconds apart. The 15 graph-latency samples had a maximum of 23.543 ms.
+
+This run used the release build with measurement instrumentation, bundled runtime 2.6.4, and 100% scaling. It did not change live Night Light. Pixel differences establish interpolation between application data updates; they do not establish every presented frame, physical display-color accuracy, or Narrator delivery. Higher-scale verification is deferred to [post-MVP work](../specs/SPEC.md#future-work).
+
+A second run recorded 11 bar fill lengths, 17 ring arc lengths, and 20 dot colors in 900 ms. It also required the navigation ring's native accessible percentage to advance on General within two seconds while output remained blocked. All checks passed; maximum graph-edit latency was 26.246 ms. The separate recovery run passed with 167 serialized simulated calls.
 
 ## Resource use and settings activity in the redesigned window
 
@@ -84,6 +106,6 @@ CPU percentages divide process CPU seconds by sampled seconds and by 16 logical 
 
 An earlier full run on the same build completed every scenario but failed its log check: the harness sent the session-end message immediately after clicking Stop, and the application logged a warning when it submitted the Stop command to the stopped controller. The harness now waits until the settings controls are editable again before it sends the session-end message. That run's idle memory and context-switch values agree with the table within 4%. Its Preview sample used 5.078 CPU seconds (0.7053%) and 39,308 context switches, so Preview CPU varied by a factor of about 3 between the two runs; this measurement does not identify the cause.
 
-`just measure-activity` ran the same source with the `graph-measurement` instrumentation and the simulated Night Light backend. Its 600-second idle observation with settings closed recorded no foreground event, foreground query, date recomputation, native call, settings timer tick, or settings view update, so it established a ten-minute interval without focus changes or date boundaries. With manual suppression active, the open settings window on the Schedule page recorded exactly 1 timer tick and 1 view update during 60.03 seconds that crossed one minute boundary; the tick is the graph's current-time marker. After settings closed, 59.93 seconds across the next minute boundary recorded no tick or view update. The controlled transition, automatic suppression, manual-expiry, and native-recovery phases also passed. The `graph-measurement` build also registers a XAML `CompositionTarget.Rendering` callback for its graph samples while settings is open, so that build runs a callback on every frame; the activity trace records settings timer ticks and view updates, not those callbacks.
+`just measure-activity` ran the same source with the `graph-measurement` instrumentation and the simulated Night Light backend. Its 600-second idle observation with settings closed recorded zero foreground events, foreground queries, schedule recalculations at date boundaries, native calls, settings timer ticks, and settings view updates. This established a ten-minute interval without focus changes or date boundaries. With manual suppression active, the open settings window on the Schedule page recorded exactly 1 timer tick and 1 view update during 60.03 seconds that crossed one minute boundary; the tick is the graph's current-time marker. After settings closed, 59.93 seconds across the next minute boundary recorded zero ticks and view updates. The controlled transition, automatic suppression, manual-expiry, and native-recovery phases also passed. The `graph-measurement` build also registers a XAML `CompositionTarget.Rendering` callback for its graph samples while settings is open, so that build runs a callback on every frame; the activity trace records settings timer ticks and view updates, not those callbacks.
 
 **Inference:** in the ordinary build, the open window does not wake Circadia's UI code on every frame. That build registers no rendering callback, and its open window had 16,995 sampled context switches per minute, about 283 per second over 118 threads, which is below the display's 480 Hz frame rate. That rate exceeds the closed-again rate of about 189 per second; the activity trace attributes none of the difference to Circadia's settings timers or view updates, so the remainder comes from Windows App SDK, XAML, and graphics threads in the process. These counters do not identify those threads. Closing settings released about 25 MiB of private memory from the open-window median, and 36 more threads remained than before settings first opened; one open and close cycle does not establish whether memory grows over repeated cycles.

@@ -182,6 +182,39 @@ impl OutputMeasurement {
 }
 
 impl Records {
+    fn begin_due(
+        &mut self,
+        started: Duration,
+        deadlines: OutputDeadlines,
+        correction: Option<Duration>,
+        hertz: u16,
+    ) {
+        let candidates = deadlines
+            .change
+            .map(|due| (due, deadlines.discrete))
+            .into_iter()
+            .chain(correction.map(|due| (due, false)));
+        let mut first = None;
+        for (due, discrete) in candidates {
+            let eligible =
+                match eligibility(due, self.last_attempt, self.last_call, hertz, discrete) {
+                    Ok(eligible) => eligible,
+                    Err(error) => {
+                        self.error = Some(error.to_string());
+                        return;
+                    }
+                };
+            if first.is_none_or(|(earliest, _, _)| eligible < earliest) {
+                first = Some((eligible, due, discrete));
+            }
+        }
+        if let Some((_, due, discrete)) = first {
+            self.begin(started, due, hertz, discrete);
+        } else {
+            self.error = Some("temperature attempt has no original due timestamp".into());
+        }
+    }
+
     fn begin(&mut self, started: Duration, due: Duration, hertz: u16, discrete: bool) {
         let eligible = eligibility(due, self.last_attempt, self.last_call, hertz, discrete);
         match eligible {
@@ -453,17 +486,7 @@ pub(crate) fn begin(
     let Ok(mut records) = active.0.records.lock() else {
         return;
     };
-    let due = deadlines.change.into_iter().chain(correction).min();
-    if let Some(due) = due {
-        records.begin(
-            started,
-            due,
-            hertz,
-            deadlines.discrete && correction.is_none(),
-        );
-    } else {
-        records.error = Some("temperature attempt has no original due timestamp".into());
-    }
+    records.begin_due(started, deadlines, correction, hertz);
 }
 
 pub(crate) fn end(attempt: &crate::NativeAttempt, control_failed: bool) {
@@ -582,6 +605,34 @@ mod tests {
             Some(Duration::from_millis(91))
         );
         assert!(!records.report().expect("report").1);
+    }
+
+    #[test_case(103_000_000, 103_000_000, true; "discrete output precedes correction eligibility")]
+    #[test_case(110_000_000, 104_166_667, false; "correction precedes discrete output")]
+    fn concurrent_output_and_correction_use_the_first_eligible_opportunity(
+        output: u64,
+        eligible: u64,
+        discrete: bool,
+    ) {
+        let mut records = Records {
+            last_attempt: Some(Duration::from_millis(100)),
+            last_call: Duration::from_millis(101),
+            ..Records::default()
+        };
+        records.begin_due(
+            Duration::from_nanos(eligible),
+            OutputDeadlines {
+                change: Some(Duration::from_nanos(output)),
+                discrete: true,
+                ..OutputDeadlines::default()
+            },
+            Some(Duration::from_millis(101)),
+            240,
+        );
+        let attempt = records.attempt.expect("correlated attempt");
+        assert_eq!(attempt.eligible, Duration::from_nanos(eligible));
+        assert_eq!(attempt.discrete, discrete);
+        assert!(records.error.is_none(), "{:?}", records.error);
     }
 
     #[test_case(0)]

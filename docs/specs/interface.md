@@ -15,9 +15,11 @@ An initial explicit or sign-in launch with an accepted configuration follows Sta
 
 The tray opens one settings window in the same Reactor process. Closing it keeps the controller running and writes any pending settings change without a prompt, except while saving is paused under [REQ-paused-saving](application.md#req-paused-saving--pause-saving-until-marked-values-are-fixed).
 
-A title bar shows Circadia's icon and name. A navigation pane, always expanded, shows the current phase art (the status illustration of REQ-status-display), the name Circadia, and one status line, and lists four pages: Schedule, shown first, App suppression, Transitions, and General.
+A title bar shows Circadia's icon and name. A navigation pane shows the current phase art (the status illustration of REQ-status-display), the name Circadia, and one status line, and lists four pages: Schedule, shown first, App suppression, Transitions, and General. At a window client width of at least 800 effective pixels, the pane is expanded beside the page. Below 800 effective pixels, the pane is hidden and a hamburger menu button opens it as a left-side overlay without moving or narrowing the page. Selecting a page, pressing Escape, or clicking outside dismisses the overlay. Resizing preserves the selected page and valid edits.
 
-Settings controls and tray commands are keyboard reachable with visible focus and accessible names. A screen reader identifies roles, values, validation, and disabled reasons, and announces status and error changes. At 100%, 150%, and 200% scaling, including moving settings between displays, controls remain readable and operable without clipping labels or action targets.
+At 100% scaling, settings is usable on 1280×720 and 1366×768 displays, including the space occupied by the taskbar. Its initial window and dialogs fit the monitor's available desktop area. Content scrolls vertically when needed, and rows wrap or rearrange at narrower widths so labels and actions remain reachable without horizontal clipping.
+
+Settings controls and tray commands are keyboard reachable with visible focus and accessible names. A screen reader identifies roles, values, validation, and disabled reasons. Automatic status announcements identify changes in control mode, phase, failure, and recovery. Changes only to a temperature, progress value, or playback clock do not trigger announcements; those values remain readable on demand. At 100% scaling, controls remain readable and operable without clipping labels or action targets. Verification above 100%, including moving settings between displays with different scales, is post-MVP work under [Future work](SPEC.md#future-work).
 
 The distributed executable and bundled runtime support direct launch and a user-created shortcut. An installer or automatic Start menu entry is unnecessary.
 
@@ -32,7 +34,13 @@ The distributed executable and bundled runtime support direct launch and a user-
 - Startup restores the configuration backup with Start minimized on: only the tray icon appears.
 - The user changes Bedtime and closes settings at once: the window closes without a prompt, and the change is in the configuration file.
 - A keyboard-only user changes Wake, starts and stops Preview, and starts manual suppression: each action is reachable and announced with its state.
-- Settings moves between 100% and 200% displays and is also tested at 150%: controls remain readable and usable.
+- A scheduled transition changes temperature while its mode and phase stay the same: the temperature remains readable on demand without repeated status announcements. Entering the destination phase produces an announcement.
+- Preview starts, advances through clock and temperature values, then ends: its start and end are announced without announcing every changing value.
+- Settings is displayed at 100% scaling: every page and dialog can be scrolled through its full content, with readable labels and operable action targets.
+- Settings opens on a 1280×720 or 1366×768 display at 100% scaling: its title bar and window controls fit the available desktop area, and scrolling reaches every setting and dialog action.
+- The client width changes from 800 to 799 effective pixels: the expanded pane becomes a hamburger menu; opening its overlay preserves the page's width and scroll position.
+- A user selects General in the narrow overlay and dismisses it, then widens settings to 800 effective pixels: General remains selected in the expanded navigation pane.
+- A keyboard user opens narrow navigation and presses Escape: the overlay closes and keyboard focus returns to its menu button.
 
 ### REQ-settings-appearance — Follow Windows themes
 
@@ -119,7 +127,9 @@ Settings shows each problem next to its source:
 
 - Invalid input: the field shows that its value is invalid, why, and that the change is not applied or saved until corrected. A field marked under [REQ-recover-invalid-fields](application.md#req-recover-invalid-fields--recover-invalid-configuration-values-field-by-field) shows the value in use, and its error quotes the file's text and names the value in use. A missing key is noted at its field without an error mark. An ordering or equality error appears on the field the user just edited and names both values, for example "Morning and evening (1900 K) can't be lower than Bedtime (2400 K)." While a field with invalid input is on another page, the current page shows a banner naming the problem with a command that opens that page, and the navigation pane marks that page.
 - Feature problems: a solar calculation failure or timing conflict, a location failure, and a sign-in registration mismatch or failure appear beside the related setting.
-- App-wide problems: a configuration error, paused saving and unknown configuration keys, a configuration file restored from its backup, unavailable control or output, failed observation, failed configuration or backup writes, a failed cleanup when management turned off, and the crash notice of REQ-crash-notice appear as banners at the top of every page, with their commands beside them, such as Retry, Reset to default settings, Open folder, and Report a problem.
+- App-wide problems: a configuration error, paused saving and unknown configuration keys, a configuration file restored from its backup, failed schedule evaluation, unavailable control or output, failed observation, failed configuration or backup writes, a failed cleanup when management turned off, and the crash notice of REQ-crash-notice appear as banners at the top of every page, with their commands beside them, such as Retry, Reset to default settings, Open folder, and Report a problem.
+
+Failed schedule evaluation shows a non-dismissible warning with Retry when a last scheduled temperature is retained, or a non-dismissible error with Retry when control stops without one. The warning explains that the last scheduled temperature is retained; active suppression still follows REQ-schedule-evaluation-failure.
 
 A banner or field error disappears when its condition ends, except the crash notice and the restored-backup banner, which stay until the user dismisses them. Circadia does not show error popups or notifications, and it does not open settings because of an error. Errors do not disable unrelated editing, except during a configuration error and for tray toggles while saving is paused. A screen reader announces a new or changed error.
 
@@ -129,6 +139,8 @@ A banner or field error disappears when its condition ends, except the crash not
 - The user is on the Schedule page with the same invalid Wake: only the field shows the error.
 - Solar calculation fails: the error appears beside the solar timing setting, and the graph shows the fallback.
 - A native write fails: every page shows the output banner with Retry, and Retry is an explicit retry action.
+- Time-zone evaluation fails after the schedule stored 3400 K: every page shows a warning that the last scheduled temperature is retained and offers Retry. Without a last scheduled temperature, every page instead shows an error that control is unavailable with Retry.
+- Retry successfully evaluates the schedule: the schedule-failure banner disappears and recovery is announced.
 - The failure recovers: the banner disappears without user action.
 - Sign-in registration fails: the error and a retry appear at the Start at sign-in switch.
 - An error appears while a screen reader runs: the reader announces it without the user moving focus.

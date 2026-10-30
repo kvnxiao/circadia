@@ -11,6 +11,12 @@ use std::io;
 use std::path::Path;
 use winsafe::HWND;
 
+#[cfg(feature = "graph-measurement")]
+#[path = "location/consent.rs"]
+mod consent;
+#[cfg(feature = "graph-measurement")]
+pub(super) use consent::run;
+
 pub(super) fn exercise(
     automation: &Automation,
     settings: &HWND,

@@ -247,6 +247,21 @@ pub(super) fn position(schedule: &CalculatedSchedule, at: Timestamp) -> Option<P
     starts(events, index).map(Position::Steady)
 }
 
+pub(super) fn preview_deadline(snapshot: &ControllerSnapshot) -> Option<Instant> {
+    snapshot
+        .preview_deadline
+        .filter(|_| snapshot.preview_active)
+        .and_then(|deadline| snapshot.origin.checked_add(deadline))
+}
+
+pub(super) fn preview_active(snapshot: &ControllerSnapshot, now: Instant) -> bool {
+    snapshot.preview_active && preview_deadline(snapshot).is_none_or(|deadline| now < deadline)
+}
+
+pub(super) fn preview_stopped(deadline: Option<Instant>, stopped: Option<Instant>) -> bool {
+    stopped.is_some() && deadline == stopped
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Control<'a> {
     pub(super) management: ManagementState,
@@ -261,20 +276,30 @@ pub(super) struct Control<'a> {
 }
 
 impl<'a> Control<'a> {
-    pub(super) fn new(snapshot: &'a ControllerSnapshot, now: Instant) -> Self {
+    pub(super) fn new(
+        snapshot: &'a ControllerSnapshot,
+        now: Instant,
+        stopped: Option<Instant>,
+    ) -> Self {
         let managing = snapshot.management.is_on();
+        let preview_active =
+            preview_active(snapshot, now) && !preview_stopped(preview_deadline(snapshot), stopped);
         Self {
             management: snapshot.management,
             scheduling: snapshot.scheduling,
             suppression: snapshot.suppression,
-            preview_active: snapshot.preview_active,
-            playback: snapshot.preview.as_ref().and_then(|preview| {
-                let started = snapshot.origin.checked_add(preview.start)?;
-                preview
-                    .playback
-                    .at(now.saturating_duration_since(started))
-                    .ok()
-            }),
+            preview_active,
+            playback: snapshot
+                .preview
+                .as_ref()
+                .filter(|_| preview_active)
+                .and_then(|preview| {
+                    let started = snapshot.origin.checked_add(preview.start)?;
+                    preview
+                        .playback
+                        .at(now.saturating_duration_since(started))
+                        .ok()
+                }),
             schedule: snapshot
                 .calculation
                 .as_ref()
@@ -376,7 +401,7 @@ pub(super) fn with_latest(
         .map(|calculation| calculation.revision);
     match latest {
         Some(latest)
-            if !snapshot.preview_active
+            if !preview_active(&snapshot, Instant::now())
                 && latest.request.purpose == CalculationPurpose::Schedule
                 && current.is_none_or(|current| latest.revision > current) =>
         {
@@ -475,6 +500,80 @@ pub(super) fn status_line(
 
 pub(super) fn tooltip(text: &Text, status: &str) -> String {
     text!(text, "tooltip", status = status)
+}
+
+pub(super) fn announcement(
+    text: &Text,
+    control: &Control<'_>,
+    stored: Stored,
+    current: Timestamp,
+) -> String {
+    if stored.error {
+        return text!(
+            text,
+            "announcement",
+            status = text!(text, "status-configuration-error")
+        );
+    }
+    let mode = match control.management {
+        ManagementState::Off => "off",
+        ManagementState::TurningOn => "starting",
+        ManagementState::On => "on",
+        ManagementState::TurningOff => "stopping",
+        ManagementState::Exiting => "exiting",
+    };
+    let mut parts = vec![text!(text, "announcement-management", mode = mode)];
+    if control.management.is_on() {
+        let mut phase = control.phase(current);
+        if control.preview_active {
+            phase.name = match (phase.picture, phase.progress) {
+                (Picture::Phase(picture), Some(_)) => PhaseName::Shifting(picture),
+                (Picture::Phase(picture), None) => PhaseName::Current(picture),
+                (Picture::NotManaging, _) => PhaseName::NotManaging,
+            };
+        }
+        let phase_text = if control.preview_active {
+            if control.playback.is_none() {
+                text!(text, "preview-starting")
+            } else {
+                text!(text, "announcement-preview", phase = phase.label(text))
+            }
+        } else if phase.badge.is_some() {
+            text!(text, "announcement-phase", phase = phase.art_name(text))
+        } else if control.schedule.is_some() {
+            text!(text, "announcement-phase", phase = phase.label(text))
+        } else {
+            String::new()
+        };
+        if !phase_text.is_empty() {
+            parts.push(phase_text);
+        }
+        parts.push(match control.scheduling {
+            SchedulingState::Waiting | SchedulingState::Evaluating => {
+                text!(text, "status-calculating")
+            }
+            SchedulingState::Available => text!(text, "announcement-schedule-available"),
+            SchedulingState::SolarFallback => text!(text, "announcement-solar-fallback"),
+            SchedulingState::Retained => text!(text, "announcement-schedule-retained"),
+            SchedulingState::Stopped => text!(text, "status-control-unavailable"),
+        });
+        if control.output_failed {
+            parts.push(text!(text, "status-output-unavailable"));
+        }
+        if control.observation_failed {
+            parts.push(text!(text, "status-observation-failed"));
+        }
+    }
+    if stored.paused {
+        parts.push(text!(text, "status-saving-paused"));
+    }
+    if stored.failed {
+        parts.push(text!(text, "status-write-failed"));
+    }
+    if stored.restored {
+        parts.push(text!(text, "status-backup-restored"));
+    }
+    text!(text, "announcement", status = parts.join(" "))
 }
 
 pub(super) fn manual_label(text: &Text, manual: ManualCommand) -> String {
@@ -663,6 +762,137 @@ mod tests {
         ))
     }
 
+    #[test_case("2026-10-27T22:10:00Z"; "early transition")]
+    #[test_case("2026-10-27T22:40:00Z"; "later transition")]
+    fn semantic_status_omits_changing_temperature_and_progress(current: &str) {
+        let schedule = calculated(ConfigInput::default());
+        assert_eq!(
+            plain(&announcement(
+                &english(),
+                &control(&schedule),
+                Stored::default(),
+                at(current)
+            )),
+            "Circadia. Managing Night Light. Shifting to bedtime. Schedule available."
+        );
+    }
+
+    #[test_case("2026-10-27T22:10:00Z", "Shifting to bedtime"; "early Preview transition")]
+    #[test_case("2026-10-27T22:40:00Z", "Shifting to bedtime"; "later Preview transition")]
+    #[test_case("2026-10-27T23:30:00Z", "Bedtime"; "Preview phase boundary")]
+    fn preview_announces_phase_changes_without_playback_numbers(playback: &str, phase: &str) {
+        let schedule = calculated(ConfigInput::default());
+        let control = Control {
+            preview_active: true,
+            playback: Some(at(playback)),
+            ..control(&schedule)
+        };
+        assert_eq!(
+            plain(&announcement(
+                &english(),
+                &control,
+                Stored::default(),
+                at("2026-10-27T13:00:00Z")
+            )),
+            format!("Circadia. Managing Night Light. Preview. {phase}. Schedule available.")
+        );
+    }
+
+    #[test_case(ManagementState::Off, "Not managing Night Light."; "off")]
+    #[test_case(ManagementState::TurningOn, "Turning on Night Light management. Daytime. Schedule available."; "starting")]
+    #[test_case(ManagementState::On, "Managing Night Light. Daytime. Schedule available."; "Preview ended")]
+    #[test_case(ManagementState::TurningOff, "Turning off Night Light management."; "stopping")]
+    #[test_case(ManagementState::Exiting, "Exiting Circadia."; "exiting")]
+    fn semantic_status_announces_management_mode(management: ManagementState, expected: &str) {
+        let schedule = calculated(ConfigInput::default());
+        let control = Control {
+            management,
+            ..control(&schedule)
+        };
+        assert_eq!(
+            plain(&announcement(
+                &english(),
+                &control,
+                Stored::default(),
+                at("2026-10-27T13:00:00Z")
+            )),
+            format!("Circadia. {expected}")
+        );
+    }
+
+    #[test_case(SchedulingState::Retained, "The schedule is unavailable; using its last temperature."; "retained failure")]
+    #[test_case(SchedulingState::Stopped, "Control is unavailable; starting suppression is disabled."; "stopped failure")]
+    #[test_case(SchedulingState::SolarFallback, "Solar timing is unavailable; following Wake and Bedtime only."; "solar failure")]
+    #[test_case(SchedulingState::Available, "Schedule available."; "schedule recovery")]
+    fn semantic_status_announces_schedule_failure_and_recovery(
+        scheduling: SchedulingState,
+        expected: &str,
+    ) {
+        let schedule = calculated(ConfigInput::default());
+        for last_scheduled in [2400, 3400] {
+            let control = Control {
+                scheduling,
+                last_scheduled: Some(last_scheduled),
+                ..control(&schedule)
+            };
+            assert_eq!(
+                plain(&announcement(
+                    &english(),
+                    &control,
+                    Stored::default(),
+                    at("2026-10-27T13:00:00Z")
+                )),
+                format!("Circadia. Managing Night Light. Daytime. {expected}")
+            );
+        }
+    }
+
+    #[test_case((false, false), ""; "native recovery")]
+    #[test_case((true, false), " Output is unavailable."; "output failure")]
+    #[test_case((false, true), " Control continues without change observation."; "observation failure")]
+    fn semantic_status_announces_native_failure_and_recovery(
+        (output_failed, observation_failed): (bool, bool),
+        expected: &str,
+    ) {
+        let schedule = calculated(ConfigInput::default());
+        let control = Control {
+            output_failed,
+            observation_failed,
+            ..control(&schedule)
+        };
+        assert_eq!(
+            plain(&announcement(
+                &english(),
+                &control,
+                Stored::default(),
+                at("2026-10-27T13:00:00Z")
+            )),
+            format!("Circadia. Managing Night Light. Daytime. Schedule available.{expected}")
+        );
+    }
+
+    #[test_case(1000; "earlier manual expiry")]
+    #[test_case(2000; "later manual expiry")]
+    fn suppression_announcements_omit_the_expiry_clock(expiry: u64) {
+        let schedule = calculated(ConfigInput::default());
+        let control = Control {
+            suppression: SuppressionState {
+                manual_deadline: Some(Duration::from_secs(expiry)),
+                automatic: false,
+            },
+            ..control(&schedule)
+        };
+        assert_eq!(
+            plain(&announcement(
+                &english(),
+                &control,
+                Stored::default(),
+                at("2026-10-27T13:00:00Z")
+            )),
+            "Circadia. Managing Night Light. Suppressed for 1 hour. Schedule available."
+        );
+    }
+
     #[test]
     fn management_off_shows_not_managing_with_the_not_managing_art() {
         let schedule = calculated(ConfigInput::default());
@@ -807,6 +1037,56 @@ mod tests {
             let kept = with_latest(Arc::new(current), latest);
             assert_eq!(revision(&kept), Some(3));
         }
+    }
+
+    #[test]
+    fn preview_ui_ends_at_the_deadline_even_with_calculation_pending() {
+        let mut state = snapshot(ConfigInput::default());
+        state.preview_active = true;
+        state.preview_deadline = Some(Duration::from_secs(10));
+        let deadline = state.origin + Duration::from_secs(10);
+        assert!(preview_active(
+            &state,
+            deadline
+                .checked_sub(Duration::from_nanos(1))
+                .expect("before deadline")
+        ));
+        assert!(!preview_active(&state, deadline));
+        assert!(!preview_active(&state, deadline + Duration::from_secs(1)));
+        state.preview_deadline = Some(Duration::from_secs(20));
+        assert!(preview_active(&state, deadline));
+    }
+
+    #[test]
+    fn stopped_preview_disappears_from_the_tooltip_before_the_native_snapshot_changes() {
+        let input = ConfigInput {
+            preview_seconds: 10,
+            ..ConfigInput::default()
+        };
+        let config = input.clone().validate().expect("valid Preview settings");
+        let mut state = snapshot(input);
+        let mut zone = crate::WindowsZone::named("UTC", false).expect("UTC rules");
+        state.preview_active = true;
+        state.preview_deadline = Some(Duration::from_secs(10));
+        state.preview = Some(crate::RunningPreview {
+            playback: Arc::new(
+                crate::Playback::capture(&config, &mut zone, at("2026-10-27T12:00:00Z"))
+                    .expect("captured Preview"),
+            ),
+            start: Duration::ZERO,
+            end: Duration::from_secs(10),
+        });
+        let now = state.origin + Duration::from_secs(1);
+        let stopped = Some(state.origin + Duration::from_secs(10));
+        let current = "2026-10-27T13:00:00Z";
+        let active = Control::new(&state, now, None);
+        assert!(line(&active, Stored::default(), current).starts_with("Previewing"));
+        let control = Control::new(&state, now, stopped);
+        let tooltip = tooltip(&english(), &line(&control, Stored::default(), current));
+        assert!(!tooltip.contains("Previewing"), "{tooltip}");
+        assert!(tooltip.contains("Managing Night Light"), "{tooltip}");
+        state.preview_deadline = Some(Duration::from_secs(20));
+        assert!(Control::new(&state, now, stopped).preview_active);
     }
 
     #[test]
@@ -996,7 +1276,7 @@ mod tests {
                 DiagnosticOperation::NativeActivationWrite,
             )),
         );
-        let control = Control::new(&state, Instant::now());
+        let control = Control::new(&state, Instant::now(), None);
         assert!(!control.output_failed);
         assert_eq!(
             line(&control, Stored::default(), "2026-10-27T13:00:00Z"),
@@ -1022,6 +1302,7 @@ mod tests {
                 result: Ok(calculated(ConfigInput::default())),
             })),
             preview_active: false,
+            preview_deadline: None,
             suppression: SuppressionState {
                 automatic: false,
                 manual_deadline: None,
@@ -1176,7 +1457,7 @@ mod tests {
                 .iter()
                 .flat_map(|state| stored.iter().map(move |stored| (state, *stored)));
             for (state, stored) in pairs {
-                let control = Control::new(state, Instant::now());
+                let control = Control::new(state, Instant::now(), None);
                 let line = status_line(&text, &region, Some(&control), stored, noon);
                 tooltips.push(tooltip(&text, &line));
             }

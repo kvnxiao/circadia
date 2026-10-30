@@ -185,6 +185,58 @@ fn suppression_replacement_starts_at_the_last_stored_step() {
     assert_eq!(output.fade_deadline(), Some(Duration::from_millis(900)));
 }
 
+#[cfg(feature = "output-measurement")]
+#[test_case::test_case(1000)]
+#[test_case::test_case(61_000)]
+fn measurement_preserves_scheduled_deadline_after_independent_fade_cleanup(completed: u64) {
+    let mut output = TemperatureOutput::default();
+    output
+        .update(
+            OutputTarget::Schedule {
+                curve: Arc::new(
+                    Curve::new(
+                        vec![
+                            Target {
+                                instant: Timestamp::from_second(0).expect("start"),
+                                kelvin: 2400,
+                            },
+                            Target {
+                                instant: Timestamp::from_second(120).expect("end"),
+                                kelvin: 6200,
+                            },
+                        ],
+                        1,
+                    )
+                    .expect("curve"),
+                ),
+                valid: TimeInterval {
+                    start: Timestamp::from_second(0).expect("start"),
+                    end: Timestamp::from_second(120).expect("end"),
+                },
+            },
+            OutputUpdate::Fade,
+            moment(0),
+        )
+        .expect("schedule");
+    let start = output
+        .prepare(fresh(6500, false), moment(0), Duration::from_secs(1))
+        .expect("selection")
+        .expect("startup fade");
+    apply(&mut output, start, Duration::ZERO);
+    let last = output
+        .prepare(fresh(6500, true), moment(999), Duration::from_secs(1))
+        .expect("selection")
+        .expect("last rounded fade value");
+    assert_eq!(last.temperature.kelvin(), 2400);
+    apply(&mut output, last, Duration::from_millis(999));
+    assert!(output.measured_deadlines().change.is_none());
+    output.cleaned_up(moment(completed)).expect("cleanup");
+    assert_eq!(
+        output.measured_deadlines().change,
+        Some(Duration::from_nanos(60_078_947_369))
+    );
+}
+
 #[test]
 fn interference_during_a_correction_keeps_the_original_deadline() {
     let mut output = initialized(3400);

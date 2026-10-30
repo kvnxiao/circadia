@@ -1,10 +1,12 @@
 ---
-date: 2026-10-16
+date: 2026-10-29
 questions:
   - Does the pinned Reactor and bundled native runtime require a Windows 11 build newer than 22000?
 observed-in:
   - windows-reactor and windows-reactor-setup revision 722f202100c3bd428627941d3834d87ad6679d1c
   - Microsoft.WindowsAppSDK.Runtime 2.5.1 x64 package and extracted AppxManifest.xml
+  - windows-reactor and windows-reactor-setup revision 8786f59d1f6bc216324b202ec17d3de696d3b843
+  - Microsoft.WindowsAppSDK.Runtime 2.6.4 x64 package and extracted AppxManifest.xml, inspected 2026-10-29
   - Microsoft Windows App SDK and Mica documentation retrieved 2026-10-16
   - Existing Reactor probe validation on Windows 11 x64 build 26300.9711
 recheck-when: Reactor or the bundled runtime changes, required APIs change, or the minimum-build release test fails.
@@ -12,9 +14,24 @@ recheck-when: Reactor or the bundled runtime changes, required APIs change, or t
 
 # Windows version compatibility
 
-Windows 11 x64 build 22000 is the dependency-based minimum for the current draft. The bundled runtime declares a lower Windows 10 minimum, and Microsoft's Mica documentation supports build 22000. This establishes a compatibility baseline, not a successful Circadia run on that build. Existing runtime evidence is limited to build 26300.9711.
+Windows 11 x64 build 22000 remains the dependency-based minimum after the update to Windows App SDK runtime 2.6.4. The bundled runtime declares a lower Windows 10 minimum, and Microsoft's Mica documentation supports build 22000. This establishes a compatibility baseline, not a successful Circadia run on that build. Existing runtime evidence is limited to build 26300.9711.
 
-## Pinned dependency evidence
+## Runtime 2.6.4 recheck
+
+**Source inspection, 2026-10-29:** The [setup helper at `8786f59`](https://github.com/microsoft/windows-rs/blob/8786f59d1f6bc216324b202ec17d3de696d3b843/crates/libs/reactor-setup/src/lib.rs) stages `Microsoft.WindowsAppSDK.Runtime` 2.6.4. Reactor's installed-runtime bootstrap requires at least 2.6.4. Self-contained builds use the files staged beside the executable.
+
+**Package inspection:** The extracted x64 manifest identifies `Microsoft.WindowsAppRuntime.2`, version `2.6.4.0`, and `Windows.Universal` with `MinVersion="10.0.17763.0"`. Its SHA-256 is `a649edd31504060956bc540073178bfd32bc1dc76aa1443378ad998abf5803ed`. The declared minimum is unchanged from 2.5.1. [Versioned Microsoft package](https://www.nuget.org/packages/Microsoft.WindowsAppSDK.Runtime/2.6.4).
+
+After a self-contained build, reproduce the package check in MSYS2 Bash:
+
+```bash
+rg 'Identity Name=|TargetDeviceFamily' "$LOCALAPPDATA/windows-reactor-setup/temp/v1/Microsoft.WindowsAppSDK.Runtime-2.6.4/.msix_extract-x64/AppxManifest.xml"
+sha256sum "$LOCALAPPDATA/windows-reactor-setup/temp/v1/Microsoft.WindowsAppSDK.Runtime-2.6.4/.msix_extract-x64/AppxManifest.xml"
+```
+
+The application, Windows Reactor lifecycle probe, and settings-design rendering probe compile with Rust 1.95 and stage the new runtime successfully. Minimum-build execution remains a release check.
+
+## Runtime 2.5.1 evidence
 
 **Observed in the pinned setup source:** `windows-reactor-setup` downloads `Microsoft.WindowsAppSDK.Runtime` 2.5.1 and extracts the x64 `Microsoft.WindowsAppRuntime.2.msix`. Self-contained staging copies the required runtime files beside the executable. This deployment does not depend on a separately installed Windows App Runtime. [Pinned setup source](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor-setup/src/lib.rs).
 

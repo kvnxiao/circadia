@@ -1,26 +1,25 @@
 use std::io;
 use std::time::Instant;
-use windows::Win32::Foundation::HWND;
-use windows::Win32::System::Com::CLSCTX_INPROC_SERVER;
-use windows::Win32::System::Com::CoCreateInstance;
-use windows::Win32::UI::Accessibility::CUIAutomation;
-use windows::Win32::UI::Accessibility::IUIAutomation;
-use windows::Win32::UI::Accessibility::IUIAutomationElement;
-use windows::Win32::UI::Accessibility::IUIAutomationInvokePattern;
-use windows::Win32::UI::Accessibility::IUIAutomationValuePattern;
-use windows::Win32::UI::Accessibility::IUIAutomationWindowPattern;
-use windows::Win32::UI::Accessibility::TreeScope_Descendants;
-use windows::Win32::UI::Accessibility::UIA_ButtonControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_CheckBoxControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_ComboBoxControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_EditControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_HyperlinkControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_InvokePatternId;
-use windows::Win32::UI::Accessibility::UIA_SliderControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_SpinnerControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_ValuePatternId;
-use windows::Win32::UI::Accessibility::UIA_WindowPatternId;
-use windows::Win32::UI::Accessibility::WindowVisualState_Minimized;
+use windows::Win32::combaseapi::CoCreateInstance;
+use windows::Win32::uiautomationclient::CUIAutomation;
+use windows::Win32::uiautomationclient::IUIAutomation;
+use windows::Win32::uiautomationclient::IUIAutomationElement;
+use windows::Win32::uiautomationclient::IUIAutomationInvokePattern;
+use windows::Win32::uiautomationclient::IUIAutomationValuePattern;
+use windows::Win32::uiautomationclient::IUIAutomationWindowPattern;
+use windows::Win32::uiautomationclient::TreeScope_Descendants;
+use windows::Win32::uiautomationclient::UIA_ButtonControlTypeId;
+use windows::Win32::uiautomationclient::UIA_CheckBoxControlTypeId;
+use windows::Win32::uiautomationclient::UIA_ComboBoxControlTypeId;
+use windows::Win32::uiautomationclient::UIA_EditControlTypeId;
+use windows::Win32::uiautomationclient::UIA_HyperlinkControlTypeId;
+use windows::Win32::uiautomationclient::UIA_InvokePatternId;
+use windows::Win32::uiautomationclient::UIA_SliderControlTypeId;
+use windows::Win32::uiautomationclient::UIA_SpinnerControlTypeId;
+use windows::Win32::uiautomationclient::UIA_ValuePatternId;
+use windows::Win32::uiautomationclient::UIA_WindowPatternId;
+use windows::Win32::uiautomationcore::WindowVisualState_Minimized;
+use windows::Win32::wtypesbase::CLSCTX_INPROC_SERVER;
 use winsafe::co;
 use winsafe::guard::CoUninitializeGuard;
 
@@ -32,6 +31,139 @@ pub(super) struct Automation {
 impl Automation {
     #[expect(
         unsafe_code,
+        reason = "enumerate scroll patterns in the process-checked window"
+    )]
+    pub(super) fn scrolls(&self, window: &winsafe::HWND, process: u32) -> io::Result<Vec<Scroll>> {
+        use windows::Win32::uiautomationclient::UIA_ScrollPatternId;
+        let mut scrolls = Vec::new();
+        for element in self.elements(window, process)? {
+            // SAFETY: The live element returns its visibility into
+            // binding-owned storage.
+            if unsafe { element.CurrentIsOffscreen() }
+                .map_err(io::Error::other)?
+                .as_bool()
+            {
+                continue;
+            }
+            // SAFETY: The identifier matches the requested interface;
+            // unsupported patterns fail.
+            let Some(pattern) =
+                optional_scroll(unsafe { element.GetCurrentPatternAs(UIA_ScrollPatternId) })?
+            else {
+                continue;
+            };
+            let scroll = Scroll {
+                id: element_id(&element)?,
+                pattern,
+            };
+            if scroll.state()?.is_some() {
+                scrolls.push(scroll);
+            }
+        }
+        Ok(scrolls)
+    }
+
+    #[expect(
+        unsafe_code,
+        reason = "open and select a process-checked language combo box"
+    )]
+    pub(super) fn expand(&self, window: &winsafe::HWND, process: u32, id: &str) -> io::Result<()> {
+        use windows::Win32::uiautomationclient::IUIAutomationExpandCollapsePattern;
+        use windows::Win32::uiautomationclient::UIA_ExpandCollapsePatternId;
+        let element = self
+            .find(window, process, id)?
+            .ok_or_else(|| io::Error::other("combo box is absent"))?;
+        // SAFETY: The pattern identifier matches the requested interface.
+        let pattern: IUIAutomationExpandCollapsePattern =
+            unsafe { element.GetCurrentPatternAs(UIA_ExpandCollapsePatternId) }
+                .map_err(io::Error::other)?;
+        // SAFETY: The live pattern belongs to the checked window.
+        unsafe { pattern.Expand() }.ok().map_err(io::Error::other)
+    }
+
+    #[expect(
+        unsafe_code,
+        reason = "select a named language item within the process-checked popup"
+    )]
+    pub(super) fn select_language(
+        &self,
+        window: &winsafe::HWND,
+        process: u32,
+        label: &str,
+    ) -> io::Result<bool> {
+        use windows::Win32::uiautomationclient::IUIAutomationSelectionItemPattern;
+        use windows::Win32::uiautomationclient::UIA_ListItemControlTypeId;
+        use windows::Win32::uiautomationclient::UIA_SelectionItemPatternId;
+        for element in self.elements(window, process)? {
+            let control = Control::read(&element)?;
+            if control.name != label || control.kind != UIA_ListItemControlTypeId {
+                continue;
+            }
+            // SAFETY: The pattern identifier matches the requested interface.
+            let pattern: IUIAutomationSelectionItemPattern =
+                unsafe { element.GetCurrentPatternAs(UIA_SelectionItemPatternId) }
+                    .map_err(io::Error::other)?;
+            // SAFETY: The live pattern belongs to the checked window.
+            unsafe { pattern.Select() }.ok().map_err(io::Error::other)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    #[cfg(feature = "graph-measurement")]
+    #[expect(
+        unsafe_code,
+        reason = "read a process-checked control's screen bounds for pixel capture"
+    )]
+    pub(super) fn bounds(
+        &self,
+        window: &winsafe::HWND,
+        process: u32,
+        id: &str,
+    ) -> io::Result<winsafe::RECT> {
+        let graph = self
+            .find(window, process, id)?
+            .ok_or_else(|| io::Error::other(format!("control {id} is absent")))?;
+        // SAFETY: The process-checked live element returns an owned rectangle.
+        let bounds = unsafe { graph.CurrentBoundingRectangle() }.map_err(io::Error::other)?;
+        Ok(winsafe::RECT {
+            left: bounds.left,
+            top: bounds.top,
+            right: bounds.right,
+            bottom: bounds.bottom,
+        })
+    }
+
+    #[cfg(feature = "graph-measurement")]
+    pub(super) fn show_graph(&self, window: &winsafe::HWND, process: u32) -> io::Result<bool> {
+        self.show_control(window, process, circadia::automation_id::GRAPH)
+    }
+
+    #[cfg(feature = "graph-measurement")]
+    #[expect(
+        unsafe_code,
+        reason = "read the live-region setting from the process-checked automation element"
+    )]
+    pub(super) fn live_setting(
+        &self,
+        window: &winsafe::HWND,
+        process: u32,
+        id: &str,
+    ) -> io::Result<Option<i32>> {
+        use windows::Win32::uiautomationclient::IUIAutomationElement2;
+        use windows::core::Interface;
+        self.find(window, process, id)?
+            .map(|element| {
+                let element: IUIAutomationElement2 = element.cast().map_err(io::Error::other)?;
+                // SAFETY: The live interface returns a scalar through owned
+                // binding storage.
+                unsafe { element.CurrentLiveSetting() }.map_err(io::Error::other)
+            })
+            .transpose()
+    }
+
+    #[expect(
+        unsafe_code,
         reason = "read a number control through its UI Automation range value pattern"
     )]
     pub(super) fn number(
@@ -40,8 +172,8 @@ impl Automation {
         process: u32,
         id: &str,
     ) -> io::Result<Option<f64>> {
-        use windows::Win32::UI::Accessibility::IUIAutomationRangeValuePattern;
-        use windows::Win32::UI::Accessibility::UIA_RangeValuePatternId;
+        use windows::Win32::uiautomationclient::IUIAutomationRangeValuePattern;
+        use windows::Win32::uiautomationclient::UIA_RangeValuePatternId;
         self.find(window, process, id)?
             .map(|element| {
                 // SAFETY: The pattern identifier matches the requested
@@ -55,13 +187,41 @@ impl Automation {
             .transpose()
     }
 
+    #[cfg(feature = "graph-measurement")]
+    #[expect(
+        unsafe_code,
+        reason = "read range semantics from the process-checked native progress control"
+    )]
+    pub(super) fn range(
+        &self,
+        window: &winsafe::HWND,
+        process: u32,
+        id: &str,
+    ) -> io::Result<(f64, f64, f64)> {
+        let element = self
+            .find(window, process, id)?
+            .ok_or_else(|| io::Error::other(format!("control {id} is absent")))?;
+        // SAFETY: The pattern identifier matches the owned interface.
+        let pattern: windows::Win32::uiautomationclient::IUIAutomationRangeValuePattern = unsafe {
+            element.GetCurrentPatternAs(windows::Win32::uiautomationclient::UIA_RangeValuePatternId)
+        }
+        .map_err(io::Error::other)?;
+        // SAFETY: Each getter returns a scalar through binding-owned storage.
+        let value = unsafe { pattern.CurrentValue() }.map_err(io::Error::other)?;
+        // SAFETY: The live interface writes only its owned scalar output.
+        let minimum = unsafe { pattern.CurrentMinimum() }.map_err(io::Error::other)?;
+        // SAFETY: The live interface writes only its owned scalar output.
+        let maximum = unsafe { pattern.CurrentMaximum() }.map_err(io::Error::other)?;
+        Ok((value, minimum, maximum))
+    }
+
     #[expect(
         unsafe_code,
         reason = "select a navigation item in the owned settings window"
     )]
     pub(super) fn select(&self, window: &winsafe::HWND, process: u32, id: &str) -> io::Result<()> {
-        use windows::Win32::UI::Accessibility::IUIAutomationSelectionItemPattern;
-        use windows::Win32::UI::Accessibility::UIA_SelectionItemPatternId;
+        use windows::Win32::uiautomationclient::IUIAutomationSelectionItemPattern;
+        use windows::Win32::uiautomationclient::UIA_SelectionItemPatternId;
         let element = self
             .find(window, process, id)?
             .ok_or_else(|| io::Error::other(format!("control {id} is absent")))?;
@@ -70,7 +230,7 @@ impl Automation {
             unsafe { element.GetCurrentPatternAs(UIA_SelectionItemPatternId) }
                 .map_err(io::Error::other)?;
         // SAFETY: The live pattern has no borrowed inputs or output pointers.
-        unsafe { pattern.Select() }.map_err(io::Error::other)
+        unsafe { pattern.Select() }.ok().map_err(io::Error::other)
     }
 
     #[expect(
@@ -84,8 +244,8 @@ impl Automation {
         id: &str,
         value: f64,
     ) -> io::Result<()> {
-        use windows::Win32::UI::Accessibility::IUIAutomationRangeValuePattern;
-        use windows::Win32::UI::Accessibility::UIA_RangeValuePatternId;
+        use windows::Win32::uiautomationclient::IUIAutomationRangeValuePattern;
+        use windows::Win32::uiautomationclient::UIA_RangeValuePatternId;
         let element = self
             .find(window, process, id)?
             .ok_or_else(|| io::Error::other(format!("control {id} is absent")))?;
@@ -94,7 +254,9 @@ impl Automation {
             unsafe { element.GetCurrentPatternAs(UIA_RangeValuePatternId) }
                 .map_err(io::Error::other)?;
         // SAFETY: The live pattern takes a scalar.
-        unsafe { pattern.SetValue(value) }.map_err(io::Error::other)
+        unsafe { pattern.SetValue(value) }
+            .ok()
+            .map_err(io::Error::other)
     }
 
     #[expect(
@@ -102,8 +264,8 @@ impl Automation {
         reason = "toggle an identified control in the owned settings window"
     )]
     pub(super) fn toggle(&self, window: &winsafe::HWND, process: u32, id: &str) -> io::Result<()> {
-        use windows::Win32::UI::Accessibility::IUIAutomationTogglePattern;
-        use windows::Win32::UI::Accessibility::UIA_TogglePatternId;
+        use windows::Win32::uiautomationclient::IUIAutomationTogglePattern;
+        use windows::Win32::uiautomationclient::UIA_TogglePatternId;
         let element = self
             .find(window, process, id)?
             .ok_or_else(|| io::Error::other("toggle control not found"))?;
@@ -113,19 +275,23 @@ impl Automation {
             unsafe { element.GetCurrentPatternAs(UIA_TogglePatternId) }
                 .map_err(io::Error::other)?;
         // SAFETY: The pattern belongs to the process-checked settings control.
-        unsafe { pattern.Toggle() }.map_err(io::Error::other)
+        unsafe { pattern.Toggle() }.ok().map_err(io::Error::other)
     }
 
-    #[cfg(feature = "graph-measurement")]
     #[expect(
         unsafe_code,
         reason = "query and scroll the owned settings viewport through live UI Automation interfaces"
     )]
-    pub(super) fn show_graph(&self, window: &winsafe::HWND, process: u32) -> io::Result<bool> {
+    pub(super) fn show_control(
+        &self,
+        window: &winsafe::HWND,
+        process: u32,
+        id: &str,
+    ) -> io::Result<bool> {
         use circadia::automation_id;
-        use windows::Win32::UI::Accessibility::IUIAutomationScrollPattern;
-        use windows::Win32::UI::Accessibility::UIA_ScrollPatternId;
-        let Some(graph) = self.find(window, process, automation_id::GRAPH)? else {
+        use windows::Win32::uiautomationclient::IUIAutomationScrollPattern;
+        use windows::Win32::uiautomationclient::UIA_ScrollPatternId;
+        let Some(graph) = self.find(window, process, id)? else {
             return Err(io::Error::other(
                 "generated graph has no UI Automation element",
             ));
@@ -177,6 +343,7 @@ impl Automation {
         // SAFETY: Both percentages are valid; -1 preserves horizontal
         // scrolling.
         unsafe { pattern.SetScrollPercent(-1.0, next.clamp(0.0, 100.0)) }
+            .ok()
             .map_err(io::Error::other)?;
         Ok(false)
     }
@@ -222,7 +389,7 @@ impl Automation {
                 // SAFETY: The binding returns an owned BSTR from the live
                 // pattern.
                 unsafe { pattern.CurrentValue() }
-                    .map(|value| value.to_string())
+                    .map(|value| value.display().to_string())
                     .map_err(io::Error::other)
             })
             .transpose()
@@ -247,7 +414,9 @@ impl Automation {
             unsafe { element.GetCurrentPatternAs(UIA_ValuePatternId) }.map_err(io::Error::other)?;
         let value = windows::core::BSTR::from(value);
         // SAFETY: The owned BSTR remains live for this synchronous call.
-        unsafe { pattern.SetValue(&value) }.map_err(io::Error::other)
+        unsafe { pattern.SetValue(&value) }
+            .ok()
+            .map_err(io::Error::other)
     }
 
     #[expect(
@@ -286,7 +455,7 @@ impl Automation {
             unsafe { element.GetCurrentPatternAs(UIA_InvokePatternId) }
                 .map_err(io::Error::other)?;
         // SAFETY: The live pattern has no borrowed arguments.
-        unsafe { pattern.Invoke() }.map_err(io::Error::other)?;
+        unsafe { pattern.Invoke() }.ok().map_err(io::Error::other)?;
         Ok(true)
     }
 
@@ -353,9 +522,9 @@ impl Automation {
         process: u32,
         id: &str,
     ) -> io::Result<Option<bool>> {
-        use windows::Win32::UI::Accessibility::IUIAutomationTogglePattern;
-        use windows::Win32::UI::Accessibility::ToggleState_On;
-        use windows::Win32::UI::Accessibility::UIA_TogglePatternId;
+        use windows::Win32::uiautomationclient::IUIAutomationTogglePattern;
+        use windows::Win32::uiautomationclient::UIA_TogglePatternId;
+        use windows::Win32::uiautomationcore::ToggleState_On;
         self.find(window, process, id)?
             .map(|element| {
                 // SAFETY: The requested interface matches the toggle pattern
@@ -386,7 +555,7 @@ impl Automation {
             .ok_or_else(|| io::Error::other(format!("control {id} is absent")))?;
         // SAFETY: The live element belongs to the checked settings process;
         // SetFocus has no pointer parameters.
-        unsafe { element.SetFocus() }.map_err(io::Error::other)
+        unsafe { element.SetFocus() }.ok().map_err(io::Error::other)
     }
 
     #[expect(
@@ -398,8 +567,9 @@ impl Automation {
             winsafe::CoInitializeEx(co::COINIT::MULTITHREADED).map_err(io::Error::other)?;
         // SAFETY: COM is initialized on this thread. The owned client drops
         // before its apartment guard, and this tool uses both on this thread.
-        let client = unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }
-            .map_err(io::Error::other)?;
+        let client =
+            unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER.cast_unsigned()) }
+                .map_err(io::Error::other)?;
         Ok(Self {
             client,
             _apartment: apartment,
@@ -417,7 +587,7 @@ impl Automation {
     ) -> io::Result<IUIAutomationElement> {
         // SAFETY: The handle is used as an opaque window identifier. COM is
         // initialized and owns the returned interface; stale handles can fail.
-        let root = unsafe { self.client.ElementFromHandle(HWND(window.ptr())) }
+        let root = unsafe { self.client.ElementFromHandle(window.ptr().cast()) }
             .map_err(io::Error::other)?;
         // SAFETY: The interface is live in this apartment; the binding owns
         // its output storage.
@@ -492,7 +662,7 @@ impl Automation {
                 // SAFETY: The element is live in the initialized apartment;
                 // the binding returns an owned BSTR.
                 unsafe { element.CurrentName() }
-                    .map(|name| name.to_string())
+                    .map(|name| name.display().to_string())
                     .map_err(io::Error::other)
             })
             .transpose()
@@ -579,7 +749,7 @@ impl Automation {
                 // SAFETY: The element is live in the initialized apartment;
                 // the binding returns an owned BSTR.
                 unsafe { element.CurrentName() }
-                    .map(|name| name.to_string())
+                    .map(|name| name.display().to_string())
                     .map_err(io::Error::other)
             })
             .collect()
@@ -598,7 +768,7 @@ impl Automation {
             unsafe { element.GetCurrentPatternAs(UIA_InvokePatternId) }
                 .map_err(io::Error::other)?;
         // SAFETY: The live pattern has no borrowed inputs or output pointers.
-        unsafe { pattern.Invoke() }.map_err(io::Error::other)
+        unsafe { pattern.Invoke() }.ok().map_err(io::Error::other)
     }
 
     #[expect(
@@ -611,7 +781,7 @@ impl Automation {
         let pattern: IUIAutomationWindowPattern =
             unsafe { root.GetCurrentPatternAs(UIA_WindowPatternId) }.map_err(io::Error::other)?;
         // SAFETY: The live pattern has no borrowed inputs or output pointers.
-        unsafe { pattern.Close() }.map_err(io::Error::other)
+        unsafe { pattern.Close() }.ok().map_err(io::Error::other)
     }
 
     #[expect(
@@ -622,7 +792,7 @@ impl Automation {
         let root = self.root(window, process)?;
         // SAFETY: The live interface belongs to the checked child process;
         // SetFocus has no pointer parameters.
-        unsafe { root.SetFocus() }.map_err(io::Error::other)
+        unsafe { root.SetFocus() }.ok().map_err(io::Error::other)
     }
 
     #[expect(
@@ -636,6 +806,68 @@ impl Automation {
             unsafe { root.GetCurrentPatternAs(UIA_WindowPatternId) }.map_err(io::Error::other)?;
         // SAFETY: The live pattern receives a documented scalar state.
         unsafe { pattern.SetWindowVisualState(WindowVisualState_Minimized) }
+            .ok()
+            .map_err(io::Error::other)
+    }
+}
+
+pub(super) struct Scroll {
+    pub(super) id: String,
+    pattern: windows::Win32::uiautomationclient::IUIAutomationScrollPattern,
+}
+
+fn optional_scroll(
+    result: windows_core::Result<windows::Win32::uiautomationclient::IUIAutomationScrollPattern>,
+) -> io::Result<Option<windows::Win32::uiautomationclient::IUIAutomationScrollPattern>> {
+    match result {
+        Ok(pattern) => Ok(Some(pattern)),
+        // WinUI can return S_OK with a null pattern; the projection reports Error::empty().
+        Err(error)
+            if error.code().0 == 0
+                || error.code().0 == windows_sys::Win32::winerror::E_NOINTERFACE
+                || error.code().0.cast_unsigned()
+                    == windows::Win32::uiautomationcoreapi::UIA_E_NOTSUPPORTED =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(io::Error::other(error)),
+    }
+}
+
+impl Scroll {
+    #[expect(
+        unsafe_code,
+        reason = "read scalar scroll metadata from the live UI Automation pattern"
+    )]
+    pub(super) fn state(&self) -> io::Result<Option<(f64, f64)>> {
+        // SAFETY: The live pattern writes scalar results into binding-owned
+        // storage.
+        if !unsafe { self.pattern.CurrentVerticallyScrollable() }
+            .map_err(io::Error::other)?
+            .as_bool()
+        {
+            return Ok(None);
+        }
+        // SAFETY: The live pattern writes a scalar into binding-owned storage.
+        let position =
+            unsafe { self.pattern.CurrentVerticalScrollPercent() }.map_err(io::Error::other)?;
+        // SAFETY: The live pattern writes a scalar into binding-owned storage.
+        let view = unsafe { self.pattern.CurrentVerticalViewSize() }.map_err(io::Error::other)?;
+        Ok(Some((position, view)))
+    }
+
+    #[expect(
+        unsafe_code,
+        reason = "scroll a process-checked viewport with validated percentages"
+    )]
+    pub(super) fn set(&self, position: f64) -> io::Result<()> {
+        if !position.is_finite() || !(0.0..=100.0).contains(&position) {
+            return Err(io::Error::other("invalid scroll percentage"));
+        }
+        // SAFETY: The live pattern accepts a finite percentage; -1 preserves
+        // horizontal scrolling.
+        unsafe { self.pattern.SetScrollPercent(-1.0, position) }
+            .ok()
             .map_err(io::Error::other)
     }
 }
@@ -665,8 +897,8 @@ impl Control {
         let bounds = unsafe { element.CurrentBoundingRectangle() }.map_err(io::Error::other)?;
         Ok(Self {
             id: element_id(element)?,
-            name: name.to_string(),
-            kind: kind.0,
+            name: name.display().to_string(),
+            kind,
             enabled: enabled.as_bool(),
             bounds: (bounds.left, bounds.top, bounds.right, bounds.bottom),
         })
@@ -682,8 +914,7 @@ impl Control {
             UIA_SliderControlTypeId,
             UIA_SpinnerControlTypeId,
         ]
-        .iter()
-        .any(|kind| kind.0 == self.kind)
+        .contains(&self.kind)
     }
 }
 
@@ -753,8 +984,8 @@ pub(super) fn wait_until<T>(
                 .is_some_and(|source| {
                     matches!(
                         source.code().0.cast_unsigned(),
-                        windows::Win32::UI::Accessibility::UIA_E_ELEMENTNOTAVAILABLE
-                            | windows::Win32::UI::Accessibility::UIA_E_TIMEOUT
+                        windows::Win32::uiautomationcoreapi::UIA_E_ELEMENTNOTAVAILABLE
+                            | windows::Win32::uiautomationcoreapi::UIA_E_TIMEOUT
                     )
                 }) =>
         {
@@ -771,7 +1002,7 @@ pub(super) fn wait_until<T>(
 fn element_id(element: &IUIAutomationElement) -> io::Result<String> {
     // SAFETY: The live interface returns an owned BSTR through the binding.
     unsafe { element.CurrentAutomationId() }
-        .map(|id| id.to_string())
+        .map(|id| id.display().to_string())
         .map_err(io::Error::other)
 }
 
@@ -779,8 +1010,24 @@ fn element_id(element: &IUIAutomationElement) -> io::Result<String> {
 mod tests {
     use super::*;
     use test_case::test_case;
-    use windows::Win32::UI::Accessibility::UIA_E_ELEMENTNOTAVAILABLE;
-    use windows::Win32::UI::Accessibility::UIA_E_TIMEOUT;
+    use windows::Win32::uiautomationcoreapi::UIA_E_ELEMENTNOTAVAILABLE;
+    use windows::Win32::uiautomationcoreapi::UIA_E_TIMEOUT;
+
+    #[test_case(0 ; "null successful pattern")]
+    #[test_case(windows_sys::Win32::winerror::E_NOINTERFACE.cast_unsigned() ; "unsupported interface")]
+    #[test_case(windows::Win32::uiautomationcoreapi::UIA_E_NOTSUPPORTED ; "unsupported pattern")]
+    fn absent_scroll_patterns_are_skipped(code: u32) {
+        let error = windows_core::Error::from_hresult(windows_core::HRESULT(code.cast_signed()));
+        assert!(matches!(optional_scroll(Err(error)), Ok(None)));
+    }
+
+    #[test_case(UIA_E_ELEMENTNOTAVAILABLE)]
+    #[test_case(UIA_E_TIMEOUT)]
+    #[test_case(0x8007_0005)]
+    fn scroll_observation_failures_are_reported(code: u32) {
+        let error = windows_core::Error::from_hresult(windows_core::HRESULT(code.cast_signed()));
+        assert!(optional_scroll(Err(error)).is_err());
+    }
 
     const ID_METHODS: [&str; 11] = [
         "invoke",

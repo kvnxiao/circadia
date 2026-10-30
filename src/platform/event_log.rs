@@ -1,14 +1,14 @@
 use std::io;
-use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
-use windows_sys::Win32::Foundation::ERROR_NO_MORE_ITEMS;
-use windows_sys::Win32::System::EventLog::EVT_HANDLE;
-use windows_sys::Win32::System::EventLog::EvtClose;
-use windows_sys::Win32::System::EventLog::EvtNext;
-use windows_sys::Win32::System::EventLog::EvtQuery;
-use windows_sys::Win32::System::EventLog::EvtQueryChannelPath;
-use windows_sys::Win32::System::EventLog::EvtQueryReverseDirection;
-use windows_sys::Win32::System::EventLog::EvtRender;
-use windows_sys::Win32::System::EventLog::EvtRenderEventXml;
+use windows_sys::Win32::winerror::ERROR_INSUFFICIENT_BUFFER;
+use windows_sys::Win32::winerror::ERROR_NO_MORE_ITEMS;
+use windows_sys::Win32::winevt::EVT_HANDLE;
+use windows_sys::Win32::winevt::EvtClose;
+use windows_sys::Win32::winevt::EvtNext;
+use windows_sys::Win32::winevt::EvtQuery;
+use windows_sys::Win32::winevt::EvtQueryChannelPath;
+use windows_sys::Win32::winevt::EvtQueryReverseDirection;
+use windows_sys::Win32::winevt::EvtRender;
+use windows_sys::Win32::winevt::EvtRenderEventXml;
 
 struct Handle(EVT_HANDLE);
 
@@ -34,17 +34,17 @@ pub(crate) fn query(xpath: &str) -> io::Result<Vec<String>> {
     // synchronous call; a zero session selects the local computer.
     let results = unsafe {
         EvtQuery(
-            0,
+            std::ptr::null_mut(),
             channel.as_ptr(),
             xpath.as_ptr(),
-            EvtQueryChannelPath | EvtQueryReverseDirection,
+            (EvtQueryChannelPath | EvtQueryReverseDirection).cast_unsigned(),
         )
     };
-    if results == 0 {
+    if results.is_null() {
         return Err(io::Error::last_os_error());
     }
     let results = Handle(results);
-    let mut raw = [0_isize; 16];
+    let mut raw = [std::ptr::null_mut(); 16];
     let mut returned = 0_u32;
     let capacity = u32::try_from(raw.len()).map_err(io::Error::other)?;
     // EvtNext fails with ERROR_TIMEOUT when the filtered scan has not produced
@@ -64,7 +64,7 @@ pub(crate) fn query(xpath: &str) -> io::Result<Vec<String>> {
     };
     if found == 0 {
         let error = io::Error::last_os_error();
-        return if error.raw_os_error() == Some(ERROR_NO_MORE_ITEMS.cast_signed()) {
+        return if error.raw_os_error() == Some(ERROR_NO_MORE_ITEMS) {
             Ok(Vec::new())
         } else {
             Err(error)
@@ -86,9 +86,9 @@ fn render(event: &Handle) -> io::Result<String> {
     // size through the writable outputs.
     let sized = unsafe {
         EvtRender(
-            0,
+            std::ptr::null_mut(),
             event.0,
-            EvtRenderEventXml,
+            EvtRenderEventXml.cast_unsigned(),
             0,
             std::ptr::null_mut(),
             &raw mut used,
@@ -97,7 +97,7 @@ fn render(event: &Handle) -> io::Result<String> {
     };
     if sized == 0 {
         let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER.cast_signed()) {
+        if error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER) {
             return Err(error);
         }
     }
@@ -107,9 +107,9 @@ fn render(event: &Handle) -> io::Result<String> {
     // synchronous call, and the outputs are writable.
     let rendered = unsafe {
         EvtRender(
-            0,
+            std::ptr::null_mut(),
             event.0,
-            EvtRenderEventXml,
+            EvtRenderEventXml.cast_unsigned(),
             size,
             buffer.as_mut_ptr().cast(),
             &raw mut used,

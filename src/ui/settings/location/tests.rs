@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
+use test_case::test_case;
 use tracing::Level;
 
 const NEW_YORK: Coordinates = Coordinates {
@@ -34,11 +35,20 @@ const DENIED: DiagnosticFailure = DiagnosticFailure {
 #[derive(Default)]
 struct FakeSource {
     background: std::cell::Cell<bool>,
+    allowed: std::cell::Cell<bool>,
     access: RefCell<Vec<Completed<()>>>,
     position: RefCell<Vec<Completed<Coordinates>>>,
 }
 
 impl Locate for FakeSource {
+    fn permission(&self) -> Result<(), DiagnosticFailure> {
+        if self.allowed.get() {
+            Ok(())
+        } else {
+            Err(DENIED)
+        }
+    }
+
     fn access(&self, completed: Completed<()>) -> Result<Option<Box<dyn Any>>, DiagnosticFailure> {
         if self.background.get() {
             return Ok(None);
@@ -86,7 +96,8 @@ impl Harness {
     }
 
     fn start(&mut self) -> Option<Result<Coordinates, DiagnosticFailure>> {
-        self.location.start(&self.source, self.events.deliver())
+        self.location
+            .start(&self.source, RequestMode::Foreground, self.events.deliver())
     }
 
     fn answer_access(&mut self, result: Result<(), DiagnosticFailure>) {
@@ -198,6 +209,7 @@ fn snapshot(preview_active: bool) -> Arc<ControllerSnapshot> {
         origin: std::time::Instant::now(),
         calculation: None,
         preview_active,
+        preview_deadline: preview_active.then_some(std::time::Duration::from_secs(10)),
         suppression: crate::SuppressionState {
             automatic: false,
             manual_deadline: None,
@@ -218,10 +230,12 @@ fn turning_the_toggle_on_requests_once_and_a_result_sends_one_configure() {
         ..ConfigInput::default()
     });
     desktop.set_settings_open(true);
-    assert!(starts_request(
+    assert!(!starts_request(
         &Message::WindowsLocation(true),
         &model(&desktop)
     ));
+    desktop.edit(vec![(Field::UseWindowsLocation, FieldValue::Switch(true))]);
+    desktop.pending.clear();
     let mut harness = Harness::new();
     assert_eq!(harness.start(), None);
     assert_eq!(harness.source.access.borrow().len(), 1);
@@ -229,7 +243,7 @@ fn turning_the_toggle_on_requests_once_and_a_result_sends_one_configure() {
     let results = harness.locate(SEATTLE);
     assert_eq!(results, [Ok(SEATTLE)]);
     assert!(!harness.location.requesting());
-    desktop.command(Command::Located(Ok(SEATTLE)));
+    desktop.located(Ok(SEATTLE));
     assert_eq!(configured_coordinates(&mut desktop), [Some(SEATTLE)]);
     let saved = fs_err::read_to_string(directory.path().join("config.toml")).expect("saved file");
     assert!(saved.contains("latitude = 47.6062"), "{saved}");
@@ -250,6 +264,43 @@ fn opening_settings_with_the_toggle_on_requests_and_switching_pages_does_not() {
         &model
     ));
     assert!(!starts_request(&Message::WindowsLocation(false), &model));
+}
+
+#[test_case((false, false); "foreground launch with solar timing off")]
+#[test_case((false, true); "foreground launch with solar timing on")]
+#[test_case((true, false); "tray launch with solar timing off")]
+#[test_case((true, true); "tray launch with solar timing on")]
+fn saved_location_requests_at_both_startup_preferences(
+    (start_minimized, solar_timing): (bool, bool),
+) {
+    let (_directory, desktop) = desktop(&ConfigInput {
+        solar_timing,
+        start_minimized,
+        ..located_file()
+    });
+    let model = model(&desktop);
+    let mut harness = Harness::new();
+    harness.source.allowed.set(true);
+    let mode = if desktop.configuration.borrow().opens_settings_at_launch() {
+        assert!(starts_request(&Message::Opened, &model));
+        RequestMode::Foreground
+    } else {
+        RequestMode::Background
+    };
+    assert_eq!(
+        harness
+            .location
+            .start(&harness.source, mode, harness.events.deliver()),
+        None
+    );
+    for page in ["general", "schedule"] {
+        assert!(!starts_request(
+            &Message::Navigate(Some(page.to_owned())),
+            &model
+        ));
+    }
+    assert!(harness.source.access.borrow().is_empty());
+    assert_eq!(harness.source.position.borrow().len(), 1);
 }
 
 #[test]
@@ -294,11 +345,13 @@ fn a_denied_request_shows_the_error_at_the_toggle_and_keeps_the_coordinates() {
     };
     assert_eq!(*name, "location");
     assert!(
-        message.text.starts_with("Windows denied location access"),
+        message
+            .text
+            .starts_with("Windows location access is not available"),
         "{}",
         message.text
     );
-    desktop.command(Command::Located(Err(DENIED)));
+    desktop.located(Err(DENIED));
     assert_eq!(configured_coordinates(&mut desktop), []);
     assert_eq!(accepted_coordinates(&desktop), Some(NEW_YORK));
     harness.location.cancel();
@@ -310,15 +363,15 @@ fn a_denied_request_logs_one_failure_record() {
     let (_directory, mut desktop) = desktop(&located_file());
     desktop.set_settings_open(true);
     let records = crate::log::capture(Level::INFO, || {
-        desktop.command(Command::Located(Err(DENIED)));
-        desktop.command(Command::Located(Err(DENIED)));
+        desktop.located(Err(DENIED));
+        desktop.located(Err(DENIED));
     });
     assert_eq!(
         records,
         ["WARN circadia::diagnostics: failure operation=location category=access_denied"]
     );
     let records = crate::log::capture(Level::INFO, || {
-        desktop.command(Command::Located(Ok(SEATTLE)));
+        desktop.located(Ok(SEATTLE));
     });
     assert_eq!(
         records,
@@ -327,21 +380,50 @@ fn a_denied_request_logs_one_failure_record() {
 }
 
 #[test]
-fn a_result_after_the_window_closed_changes_nothing() {
-    let mut harness = Harness::new();
-    assert_eq!(harness.start(), None);
-    harness.answer_access(Ok(()));
-    assert_eq!(harness.receive(), []);
-    harness.location.cancel();
-    harness.answer_position(Ok(SEATTLE));
-    assert_eq!(harness.receive(), []);
+fn a_result_after_the_window_closed_updates_the_saved_coordinates() {
     let (_directory, mut desktop) = desktop(&located_file());
     desktop.set_settings_open(true);
     desktop.settings_closed();
     desktop.pending.clear();
-    desktop.command(Command::Located(Ok(SEATTLE)));
-    assert_eq!(configured_coordinates(&mut desktop), []);
+    desktop.located(Ok(SEATTLE));
+    assert_eq!(configured_coordinates(&mut desktop), [Some(SEATTLE)]);
+    assert_eq!(accepted_coordinates(&desktop), Some(SEATTLE));
+}
+
+#[test]
+fn overlapping_requests_are_coalesced() {
+    let mut harness = Harness::new();
+    assert_eq!(harness.start(), None);
+    assert_eq!(harness.start(), None);
+    assert_eq!(harness.source.access.borrow().len(), 1);
+    assert_eq!(harness.locate(SEATTLE), [Ok(SEATTLE)]);
+}
+
+#[test]
+fn a_failure_remains_visible_while_a_new_request_is_pending() {
+    let mut harness = Harness::new();
+    assert_eq!(harness.start(), None);
+    harness.answer_access(Err(DENIED));
+    assert_eq!(harness.receive(), [Err(DENIED)]);
+    assert_eq!(harness.start(), None);
+    assert!(harness.location.requesting());
+    assert_eq!(harness.location.failure(), Some(DENIED));
+    assert_eq!(harness.locate(SEATTLE), [Ok(SEATTLE)]);
+    assert_eq!(harness.location.failure(), None);
+}
+
+#[test]
+fn turning_location_off_discards_a_position_held_for_preview() {
+    let (_directory, mut desktop) = desktop(&located_file());
+    desktop.snapshot = Some(snapshot(true));
+    desktop.set_settings_open(true);
+    desktop.located(Ok(SEATTLE));
+    desktop.edit(vec![(Field::UseWindowsLocation, FieldValue::Switch(false))]);
+    desktop.pending.clear();
+    desktop.snapshot = Some(snapshot(false));
+    desktop.release_location();
     assert_eq!(accepted_coordinates(&desktop), Some(NEW_YORK));
+    assert_eq!(configured_coordinates(&mut desktop), []);
 }
 
 #[test]
@@ -354,6 +436,7 @@ fn a_superseded_request_result_is_dropped() {
         .borrow_mut()
         .pop()
         .expect("first access");
+    harness.location.cancel();
     assert_eq!(harness.start(), None);
     first(Ok(()));
     assert_eq!(harness.receive(), []);
@@ -361,12 +444,60 @@ fn a_superseded_request_result_is_dropped() {
     assert_eq!(harness.locate(SEATTLE), [Ok(SEATTLE)]);
 }
 
+#[test_case(false; "during access")]
+#[test_case(true; "during acquisition")]
+fn cancellation_discards_late_results(acquiring: bool) {
+    let mut harness = Harness::new();
+    assert_eq!(harness.start(), None);
+    if acquiring {
+        harness.answer_access(Ok(()));
+        assert_eq!(harness.receive(), []);
+    }
+    harness.location.cancel();
+    if acquiring {
+        harness.answer_position(Ok(SEATTLE));
+    } else {
+        harness.answer_access(Ok(()));
+    }
+    assert_eq!(harness.receive(), []);
+    assert!(!harness.location.requesting());
+    assert!(harness.source.position.borrow().is_empty());
+}
+
+#[test_case(Command::Reset; "reset")]
+#[test_case(Command::Quit; "exit")]
+fn reset_and_exit_discard_held_and_late_results(command: Command) {
+    let (_directory, mut desktop) = desktop(&located_file());
+    desktop.snapshot = Some(snapshot(true));
+    desktop.located(Ok(SEATTLE));
+    let previous_completion = Arc::clone(&desktop.location_event);
+    desktop.command(command);
+    let expected = accepted_coordinates(&desktop);
+    desktop.pending.clear();
+    assert!(desktop.held_location.is_none());
+    assert!(!Arc::ptr_eq(&previous_completion, &desktop.location_event));
+    *previous_completion.lock().expect("obsolete completion") =
+        Some(Event::Position(1, Ok(SEATTLE)));
+    assert!(
+        desktop
+            .location_event
+            .lock()
+            .expect("current completion")
+            .is_none()
+    );
+    desktop.located(Ok(SEATTLE));
+    desktop.snapshot = Some(snapshot(false));
+    desktop.release_location();
+    assert_eq!(accepted_coordinates(&desktop), expected);
+    assert_eq!(configured_coordinates(&mut desktop), []);
+}
+
 #[test]
 fn a_result_during_preview_applies_when_playback_ends() {
     let (_directory, mut desktop) = desktop(&located_file());
     desktop.set_settings_open(true);
     desktop.snapshot = Some(snapshot(true));
-    desktop.command(Command::Located(Ok(SEATTLE)));
+    desktop.located(Ok(SEATTLE));
     assert_eq!(configured_coordinates(&mut desktop), []);
     assert_eq!(accepted_coordinates(&desktop), Some(NEW_YORK));
     desktop.release_location();
@@ -383,11 +514,61 @@ fn a_result_during_preview_applies_when_closing_settings_ends_playback() {
     let (_directory, mut desktop) = desktop(&located_file());
     desktop.set_settings_open(true);
     desktop.snapshot = Some(snapshot(true));
-    desktop.command(Command::Located(Ok(SEATTLE)));
+    desktop.located(Ok(SEATTLE));
     assert_eq!(configured_coordinates(&mut desktop), []);
     desktop.settings_closed();
     assert_eq!(configured_coordinates(&mut desktop), [Some(SEATTLE)]);
     assert_eq!(accepted_coordinates(&desktop), Some(SEATTLE));
+}
+
+#[test_case(false; "settings stays closed")]
+#[test_case(true; "settings reopens before native stop")]
+fn a_result_after_closure_ignores_the_preview_that_closure_ended(reopen: bool) {
+    let (_directory, mut desktop) = desktop(&located_file());
+    desktop.set_settings_open(true);
+    desktop.snapshot = Some(snapshot(true));
+    desktop.settings_closed();
+    desktop.pending.clear();
+    desktop.set_settings_open(reopen);
+    desktop.located(Ok(SEATTLE));
+    assert_eq!(configured_coordinates(&mut desktop), [Some(SEATTLE)]);
+    assert_eq!(accepted_coordinates(&desktop), Some(SEATTLE));
+}
+
+#[test]
+fn a_new_preview_after_reopening_still_defers_a_position() {
+    let (_directory, mut desktop) = desktop(&located_file());
+    desktop.set_settings_open(true);
+    desktop.snapshot = Some(snapshot(true));
+    desktop.settings_closed();
+    desktop.pending.clear();
+    desktop.set_settings_open(true);
+    let state = Arc::make_mut(desktop.snapshot.as_mut().expect("Preview snapshot"));
+    state.preview_deadline = Some(std::time::Duration::from_secs(11));
+    desktop.located(Ok(SEATTLE));
+    assert_eq!(configured_coordinates(&mut desktop), []);
+    assert_eq!(accepted_coordinates(&desktop), Some(NEW_YORK));
+    desktop.snapshot = Some(snapshot(false));
+    desktop.release_location();
+    assert_eq!(configured_coordinates(&mut desktop), [Some(SEATTLE)]);
+}
+
+#[test]
+fn the_logical_deadline_releases_location_while_the_snapshot_still_reports_preview() {
+    let (_directory, mut desktop) = desktop(&located_file());
+    desktop.set_settings_open(true);
+    desktop.snapshot = Some(snapshot(true));
+    desktop.located(Ok(SEATTLE));
+    desktop.command(Command::PreviewElapsed);
+    assert_eq!(configured_coordinates(&mut desktop), []);
+    let state = Arc::make_mut(desktop.snapshot.as_mut().expect("Preview snapshot"));
+    state.origin = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(11))
+        .expect("earlier fixture clock");
+    desktop.command(Command::PreviewElapsed);
+    assert_eq!(configured_coordinates(&mut desktop), [Some(SEATTLE)]);
+    desktop.command(Command::PreviewElapsed);
+    assert_eq!(configured_coordinates(&mut desktop), []);
 }
 
 #[test]
@@ -403,14 +584,43 @@ fn manual_coordinates_are_disabled_while_the_toggle_is_on() {
 }
 
 #[test]
-fn settings_in_the_background_does_not_ask_windows_or_report_a_failure() {
+fn background_position_acquisition_uses_prior_permission_without_requesting_consent() {
     let mut harness = Harness::new();
     harness.source.background.set(true);
+    harness.source.allowed.set(true);
     assert_eq!(harness.start(), None);
     assert!(harness.source.access.borrow().is_empty());
-    assert!(!harness.location.requesting());
-    assert_eq!(harness.location.failure(), None);
-    harness.source.background.set(false);
+    assert!(harness.location.requesting());
+    harness.answer_position(Ok(NEW_YORK));
+    assert_eq!(harness.receive(), [Ok(NEW_YORK)]);
+}
+
+#[test]
+fn denied_background_access_never_requests_consent_or_position() {
+    let mut harness = Harness::new();
+    assert_eq!(
+        harness.location.start(
+            &harness.source,
+            RequestMode::Background,
+            harness.events.deliver()
+        ),
+        Some(Err(DENIED))
+    );
+    assert!(harness.source.access.borrow().is_empty());
+    assert!(harness.source.position.borrow().is_empty());
+    assert_eq!(harness.location.failure(), Some(DENIED));
+}
+
+#[test]
+fn revoked_permission_during_acquisition_keeps_the_saved_preference_and_coordinates() {
+    let (_directory, mut desktop) = desktop(&located_file());
+    let mut harness = Harness::new();
+    harness.source.allowed.set(true);
     assert_eq!(harness.start(), None);
-    assert_eq!(harness.locate(NEW_YORK), [Ok(NEW_YORK)]);
+    harness.answer_position(Err(DENIED));
+    assert_eq!(harness.receive(), [Err(DENIED)]);
+    desktop.located(Err(DENIED));
+    assert!(desktop.location_enabled());
+    assert_eq!(accepted_coordinates(&desktop), Some(NEW_YORK));
+    assert_eq!(configured_coordinates(&mut desktop), []);
 }

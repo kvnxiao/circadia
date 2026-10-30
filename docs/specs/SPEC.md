@@ -22,14 +22,14 @@ Circadia does not write GPU gamma ramps or monitor calibration profiles. Success
 - Apply and save valid settings edits without a separate save step, and return to normal operation after startup without asking the user once Circadia has saved a configuration.
 - Present localizable text, with times and numbers in the user's regional format.
 - Keep a local log that lets developers trace failures and crashes.
-- Keep background work event-driven and settings responsive.
+- Keep background work event-driven and settings responsive, favoring approaches that reduce power use.
 - Favor straightforward implementations with few components and explicit state ownership.
 
 **Non-goals:**
 
 - Automatic fullscreen suppression in the MVP; see Future work.
 - Arbitrary curve-point editing, user-defined offsets, extra fixed-clock targets, or weekday-specific schedules.
-- Night-shift scheduling, multiple daily sleep periods, city/address search, or background location tracking.
+- Night-shift scheduling, multiple daily sleep periods, city/address search, or continuous location tracking.
 - Per-monitor temperature control, per-app suppression temperatures, or changes to calibration profiles.
 - Using the Windows Night Light schedule to drive Circadia's curve.
 - A service, elevated helper, watchdog, crash-reporting helper, or separate settings process.
@@ -161,7 +161,7 @@ Constant output does not cause repeated temperature operations. Resume and taskb
 - Relative focus times in the recent-app list while settings is visible.
 - Pending native recovery and rate-limited corrections of observed Night Light changes.
 
-Native recovery stops after success. Unchanged errors do not produce repeated identical log records. Hidden settings do not animate their graph or update relative times.
+Native recovery stops after success. Unchanged errors do not produce repeated identical log records. Closed or minimized settings do not animate their graph or update relative times. A graph on a settings page that is not selected does not animate.
 
 **Scenarios:**
 
@@ -170,6 +170,7 @@ Native recovery stops after success. Unchanged errors do not produce repeated id
 - A listed game remains focused over a scheduled transition: underlying intermediate temperature writes and their timers stop. A date change still recomputes required schedule inputs once.
 - A native read or write error persists without a resume event: only the native recovery sequence and explicit user actions attempt recovery; curve-output timers and notifications caused by Circadia's own writes do not create additional attempts.
 - Settings closes while the recent-app list shows relative times: the hidden list does not generate recurring UI updates.
+- Preview continues while settings is minimized or another settings page is selected: the graph does not animate; returning to the visible Schedule page shows the current playback instant.
 - Settings is visible during constant output: its current-time dot and relative focus times can update without causing a Night Light write.
 - Management is off for ten minutes: tracing shows no Night Light reads, writes, or watcher activity.
 
@@ -236,7 +237,7 @@ The [design documents](../design/README.md) describe the intended visual design 
 
 ## Security
 
-Wake and Bedtime clocks, temperature levels, coordinates, list entries (executable names, display names, and title conditions), cached application icons with their file paths, and preferences are stored per user. Circadia does not upload them or call a daily solar service. While Use my Windows location is on, turning it on and opening settings ask Windows for a position; that operating-system service can use network-backed positioning. Manual coordinates and disabled solar timing do not require location permission.
+Wake and Bedtime clocks, temperature levels, coordinates, list entries (executable names, display names, and title conditions), cached application icons with their file paths, and preferences are stored per user. Circadia does not upload them or call a daily solar service. Enabling Use my Windows location requires confirmation that Circadia requests positions through Windows, including at tray-only startup; that operating-system service can use network-backed positioning. The saved preference authorizes the requests defined by REQ-configure-solar-location, subject to current Windows permission. Manual coordinates do not require location permission.
 
 The local log stays on the computer and can include personal data; [REQ-local-log](diagnostics.md#req-local-log--keep-a-local-rotating-log) and [REQ-crash-notice](diagnostics.md#req-crash-notice--offer-to-report-a-crash) govern its content and how the user shares it.
 
@@ -250,13 +251,15 @@ Circadia writes its configuration and backup, its log, its icon cache, current-u
 
 That follow-up needs tests with mixed DPI, multiple monitors, fullscreen changes within one focused window, and shell overlays such as Game Bar, plus checks for maximized-window false positives. Its default and controls for excluding particular apps require a separate decision.
 
-**Location search and travel:** City/address search and background travel tracking require separate product and provider decisions. Circadia uses manually entered coordinates or a Windows position requested while settings is in the foreground, and keeps the saved coordinates between requests.
+**Location search and travel:** City/address search and continuous travel tracking require separate product and provider decisions. Circadia uses manually entered coordinates or one-time Windows position requests under the saved location preference, and keeps the saved coordinates between requests.
 
 **Dynamic tray icons:** A future version can show the current day or night phase. The MVP uses a static icon.
 
 **Additional schedule controls:** Separate morning/evening temperatures, per-transition durations, and arbitrary user points are outside the MVP. The schedule uses one middle temperature and one shared scheduled-transition duration.
 
 **Translations and right-to-left languages:** Additional languages ship once translated and reviewed. Right-to-left languages need mirrored layout, which requires a Reactor capability not available at the reference commit, and a decision on whether the schedule graph mirrors.
+
+**Display scaling above 100%:** After the MVP, run automated layout checks and full scrolling and screenshot inspection at 150% and 200%, including moving settings between displays with different scales. Inspect settings pages, dialogs, the tray menu, pseudo-localized text, and animated visuals for clipping or overlap. These checks do not block MVP acceptance, which requires the corresponding checks at 100% scaling.
 
 ## Explored alternatives
 
@@ -284,7 +287,7 @@ Verify graph latency, due output deadlines, configured rate limits, serialized w
 
 **Note:** The Windows Reactor UI probe uses predefined target times; it does not verify the complete application.
 
-**Before release:** Verify clean-machine deployment on the minimum and a current serviced Windows 11 build, resource use, display scaling, accessibility, the settings window's native controls, theme following, and translated layout under [interface.md](interface.md) and [localization.md](localization.md) in light, dark, and contrast themes, and foreground matching across representative applications, window modes, and elevation levels.
+**Before release:** Verify clean-machine deployment on the minimum and a current serviced Windows 11 build, resource use, accessibility, the settings window's native controls, theme following, and translated layout at 100% scaling under [interface.md](interface.md) and [localization.md](localization.md) in light, dark, and contrast themes, and foreground matching across representative applications, window modes, and elevation levels. Checks above 100% scaling are deferred to the post-MVP work above.
 
 Include these Windows checks, and the checks that area files list for their areas:
 

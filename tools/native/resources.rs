@@ -24,7 +24,7 @@ use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 use win_nightlight_lib::Nightlight;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
+use windows_sys::Win32::winuser::WM_ENDSESSION;
 use winsafe::HWND;
 
 pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {

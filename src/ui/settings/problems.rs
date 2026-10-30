@@ -250,11 +250,30 @@ fn crash(model: &Model, text: &Text) -> Option<Banner> {
 }
 
 fn control_unavailable(model: &Model, text: &Text) -> Option<Banner> {
-    (model.management.is_on() && model.scheduling == SchedulingState::Stopped).then(|| Banner {
+    if !model.management.is_on() {
+        return None;
+    }
+    let (severity, title, message) = match model.scheduling {
+        SchedulingState::Waiting
+        | SchedulingState::Evaluating
+        | SchedulingState::Available
+        | SchedulingState::SolarFallback => return None,
+        SchedulingState::Stopped => (
+            InfoBarSeverity::Error,
+            text!(text, "banner-schedule-title"),
+            text!(text, "banner-schedule-message"),
+        ),
+        SchedulingState::Retained => (
+            InfoBarSeverity::Warning,
+            text!(text, "banner-schedule-retained-title"),
+            text!(text, "banner-schedule-retained-message"),
+        ),
+    };
+    Some(Banner {
         id: automation_id::BANNER_SCHEDULE,
-        severity: InfoBarSeverity::Error,
-        title: text!(text, "banner-schedule-title"),
-        message: text!(text, "banner-schedule-message"),
+        severity,
+        title,
+        message,
         actions: vec![(Action::RetryNative, text!(text, "action-retry"))],
         dismiss: None,
         enabled: !model.retrying,

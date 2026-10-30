@@ -141,7 +141,7 @@ A native error does not disable Preview: the request retries access immediately,
 
 Each run captures the actual current instant T and its local clock in the current Windows time zone. The endpoint E is that clock on the following calendar date. A missing local endpoint advances to the first valid instant after the gap; a repeated endpoint uses its first occurrence. Playback uniformly maps the elapsed interval from T to E into the configured duration D. It uses actual dated schedules and solar results throughout, including any target adjustment across a clock change. It does not repeat a frozen graph image or assume that every day has 24 elapsed hours.
 
-The graph's time indicator follows playback and selects its displayed interval from the playback instant. The logical playback deadline is exactly D elapsed seconds after entry. Entry immediately requests the captured schedule's temperature at T; there is no ramp-up or extra return phase. A rerun captures a new current instant. A synchronous native call can finish after the deadline; cancellation prevents subsequent obsolete steps and waits for that call before cleanup or replacement.
+The graph's time indicator follows playback independently of Night Light calls and the configured output-rate ceiling. While visible, its motion follows Windows' display presentation cadence; no fixed sustained frame rate is guaranteed. It selects its displayed interval from the playback instant. The logical playback deadline is exactly D elapsed seconds after entry. At that deadline, settings ends its Preview state, returns the graph to actual current time, and enables editing without waiting for native output. Entry immediately requests the captured schedule's temperature at T; there is no ramp-up or extra return phase. A rerun captures a new current instant. A synchronous native call can finish after the deadline; cancellation prevents subsequent obsolete steps and waits for that call before cleanup or replacement.
 
 Playback stops on:
 
@@ -165,6 +165,8 @@ When playback completes or is stopped, the graph returns to actual current time 
 - A ten-second playback ends without suppression: it immediately selects the schedule at the actual current time, without adding entry or exit fades.
 - A user tries to edit the rate during playback: the edit is disabled. Stop restores editing.
 - Output fails during playback: graph time continues, and recovery uses its current position. Completion selects the current target even if native recovery remains pending.
+- A native call started during a ten-second Preview is still running at its deadline: the graph returns to current time, Preview status ends, editing becomes available, and a held location result applies. Cleanup and replacement output wait for the running call.
+- Preview runs with a 1 Hz output-rate ceiling: the visible graph moves between native calls according to the playback clock without increasing their permitted rate.
 - A listed game has kept automatic suppression active, and the user starts Preview: playback starts at once, and when it ends output fades from the last Preview value to 6500 K.
 - Manual suppression starts from the tray menu during Preview at 3000 K: playback continues; when it ends, output fades from 3000 K toward 6500 K without first applying a schedule temperature.
 - The user opens the tray menu or switches to a browser during playback: Preview continues to its deadline, and tray toggles remain available while it plays.

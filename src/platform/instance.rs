@@ -1,18 +1,18 @@
 use std::io;
 use std::os::windows::io::FromRawHandle;
 use std::os::windows::io::OwnedHandle;
-use windows_sys::Win32::Foundation::ERROR_ALREADY_EXISTS;
-use windows_sys::Win32::Foundation::GetLastError;
-use windows_sys::Win32::System::Threading::CreateMutexW;
-use windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_APP;
+use windows_sys::Win32::errhandlingapi::GetLastError;
+use windows_sys::Win32::synchapi::CreateMutexW;
+use windows_sys::Win32::winerror::ERROR_ALREADY_EXISTS;
+use windows_sys::Win32::winuser::PostMessageW;
+use windows_sys::Win32::winuser::WM_APP;
 use winsafe::HEVENT;
 use winsafe::HWND;
 use winsafe::co;
 use winsafe::guard::CloseHandleGuard;
 
 pub(crate) const EVENT_WINDOW_TITLE: &str = "Circadia event receiver";
-pub(crate) const ACTIVATE_SETTINGS: u32 = WM_APP + 1;
+pub(crate) const ACTIVATE_SETTINGS: u32 = WM_APP.cast_unsigned() + 1;
 
 /// Distinguish the session's controller owner from a subsequent invocation.
 #[derive(Debug)]
@@ -60,7 +60,7 @@ impl InstanceClaim {
         // SAFETY: The terminated name remains live, and null security
         // attributes select a noninheritable handle with the caller's
         // default security.
-        let mutex = unsafe { CreateMutexW(std::ptr::null(), 0, wide.as_ptr()) };
+        let mutex = unsafe { CreateMutexW(std::ptr::null_mut(), 0, wide.as_ptr()) };
         // SAFETY: Capture this thread's creation result before another Win32
         // call.
         let status = unsafe { GetLastError() };
@@ -77,7 +77,7 @@ impl InstanceClaim {
             _mutex: mutex,
             ready,
         };
-        if status == ERROR_ALREADY_EXISTS {
+        if status == ERROR_ALREADY_EXISTS.cast_unsigned() {
             Ok(Self::Existing(ExistingInstance(handles)))
         } else {
             handles.ready.ResetEvent().map_err(io::Error::other)?;
@@ -120,7 +120,7 @@ impl ExistingInstance {
         }
         // SAFETY: Both parameters are immediate zero values, so asynchronous
         // delivery retains no pointers. A stale HWND is reported by Windows.
-        if unsafe { PostMessageW(window.ptr(), ACTIVATE_SETTINGS, 0, 0) } == 0 {
+        if unsafe { PostMessageW(window.ptr().cast(), ACTIVATE_SETTINGS, 0, 0) } == 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(())

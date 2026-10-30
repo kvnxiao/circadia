@@ -48,6 +48,8 @@ use windows_reactor::VerticalAlignment;
 use windows_reactor::View;
 use windows_reactor::ViewContext;
 
+mod motion;
+
 pub(super) const PLOT_HEIGHT: f64 = 200.0;
 const COOLEST: f64 = 6500.0;
 const WARMEST: f64 = 1200.0;
@@ -247,7 +249,7 @@ impl PartialEq for SurfaceInput {
     clippy::cast_possible_truncation,
     reason = "drawing coordinates are window sizes far below the f32 range"
 )]
-fn narrow(value: f64) -> f32 {
+pub(super) fn narrow(value: f64) -> f32 {
     value as f32
 }
 
@@ -640,6 +642,21 @@ pub(super) struct Plot<'a> {
     pub(super) name: String,
     pub(super) chip: &'a dyn Fn(&LocalEvent) -> String,
     pub(super) hour: &'a dyn Fn(i8) -> String,
+    pub(super) animation: Option<View>,
+}
+
+pub(super) fn animated_marker(
+    calculation: &Calculation,
+    view: TimeInterval,
+    playing: &super::schedule::Playing,
+    palette: Palette,
+) -> View {
+    View::component::<motion::Marker>(motion::Input {
+        calculation: calculation.clone(),
+        view,
+        playing: playing.clone(),
+        palette,
+    })
 }
 
 pub(super) fn plot(plot: Plot<'_>) -> View {
@@ -650,6 +667,7 @@ pub(super) fn plot(plot: Plot<'_>) -> View {
         name,
         chip,
         hour,
+        animation,
     } = plot;
     let mut overlay: Vec<View> = Vec::new();
     let mut labels: Vec<View> = Vec::new();
@@ -674,10 +692,10 @@ pub(super) fn plot(plot: Plot<'_>) -> View {
             event_chip(event, chip(event), palette),
         ));
     }
-    if let Some((fraction, kelvin)) = layout.marker {
+    if let Some(animation) = animation {
+        overlay.push(animation);
+    } else if let Some((fraction, kelvin)) = layout.marker {
         let y = plot_y(kelvin) * PLOT_HEIGHT;
-        #[cfg(feature = "graph-measurement")]
-        crate::ui::measurement::marker(fraction, plot_y(kelvin));
         overlay.push(at_fraction(fraction, vertical(palette.secondary)));
         let fill = palette.contrast().map_or_else(
             || {

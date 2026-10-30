@@ -303,6 +303,99 @@ fn preview_is_ready_while_management_is_on_and_every_field_is_valid() {
 }
 
 #[test]
+fn an_expired_preview_snapshot_restores_editing_and_current_time() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = managed_configuration(&directory);
+    let mut snapshot = calculated(None, Vec::new());
+    let mut zone = crate::WindowsZone::named("UTC", false).expect("UTC rules");
+    let playback = crate::Playback::capture(
+        &Config::default(),
+        &mut zone,
+        "2026-10-27T12:00:00Z".parse().expect("UTC instant"),
+    )
+    .expect("captured playback");
+    snapshot.origin = Instant::now()
+        .checked_sub(Duration::from_secs(11))
+        .expect("earlier fixture clock");
+    snapshot.preview = Some(crate::RunningPreview {
+        playback: Arc::new(playback),
+        start: Duration::ZERO,
+        end: Duration::from_secs(10),
+    });
+    snapshot.preview_active = true;
+    snapshot.preview_deadline = Some(Duration::from_secs(10));
+    let model = Model::new(
+        &configuration,
+        Some(&snapshot),
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    );
+    assert!(model.editable());
+    assert!(!preview_view(&model, &english(), &region(), Instant::now()).playing);
+    assert!(model.playing.is_none());
+    assert!(!status::Control::new(&snapshot, Instant::now(), None).preview_active);
+}
+
+#[test]
+fn stopping_a_blocked_run_unlocks_editing_without_stopping_its_replacement() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = managed_configuration(&directory);
+    let mut snapshot = scheduled(ConfigInput::default());
+    let mut zone = crate::WindowsZone::named("UTC", false).expect("UTC rules");
+    let playback = Arc::new(
+        Playback::capture(
+            &Config::default(),
+            &mut zone,
+            "2026-10-27T12:00:00Z".parse().expect("UTC instant"),
+        )
+        .expect("playback"),
+    );
+    snapshot.preview_active = true;
+    snapshot.preview_deadline = Some(Duration::from_secs(10));
+    snapshot.preview = Some(crate::RunningPreview {
+        playback,
+        start: Duration::ZERO,
+        end: Duration::from_secs(10),
+    });
+    let stopped = snapshot.origin.checked_add(Duration::from_secs(10));
+    let model = snapshot_model(&configuration, &snapshot);
+    assert!(!model.editable());
+    let ended = model.with_stopped_preview(stopped);
+    assert!(ended.editable());
+    assert!(ended.playing.is_none());
+    assert!(!ended.control(Instant::now()).preview_active);
+    snapshot.preview_deadline = Some(Duration::from_secs(11));
+    let replacement = snapshot_model(&configuration, &snapshot).with_stopped_preview(stopped);
+    assert!(!replacement.editable());
+    assert!(replacement.playing.is_some());
+}
+
+#[test]
+fn native_temperature_status_changes_do_not_render_preview_at_the_output_rate() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = managed_configuration(&directory);
+    let mut snapshot = scheduled(ConfigInput::default());
+    snapshot.preview_active = true;
+    snapshot.preview_deadline = Some(Duration::from_secs(10));
+    let first = Model::new(
+        &configuration,
+        Some(&snapshot),
+        false,
+        "Preview 3400 K".into(),
+        &BTreeMap::new(),
+    );
+    let next = Model::new(
+        &configuration,
+        Some(&snapshot),
+        false,
+        "Preview 3500 K".into(),
+        &BTreeMap::new(),
+    );
+    assert_eq!(first, next);
+}
+
+#[test]
 fn preview_cannot_start_while_management_is_off_and_says_why() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let (configuration, _desktop) = desktop(&directory);
@@ -683,6 +776,7 @@ fn calculated(
         origin: Instant::now(),
         calculation: Some(Arc::new(result)),
         preview_active: false,
+        preview_deadline: None,
         suppression: crate::SuppressionState {
             automatic: false,
             manual_deadline: None,
@@ -820,7 +914,7 @@ fn a_partial_position_stays_editable_after_solar_timing_is_turned_off() {
 }
 
 #[test]
-fn minimized_settings_stop_the_graph_indicator_and_the_preview_tick() {
+fn visible_controls_determine_preview_ticks_and_graph_indicator_wakes() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let configuration = Configuration::load(directory.path(), "circadia.exe");
     let mut snapshot = calculated(None, Vec::new());
@@ -851,13 +945,19 @@ fn minimized_settings_stop_the_graph_indicator_and_the_preview_tick() {
         indicator_delay(Page::Transitions, &model, Visibility::Shown, now),
         None
     );
-    assert!(!playback_shown(Page::Schedule, &model, Visibility::Shown));
+    assert!(!preview_values_shown(
+        Page::Schedule,
+        &model,
+        Visibility::Shown,
+        true
+    ));
     snapshot.preview = Some(crate::RunningPreview {
         playback: Arc::new(playback),
         start: Duration::ZERO,
         end: Duration::from_secs(10),
     });
     snapshot.preview_active = true;
+    snapshot.preview_deadline = Some(Duration::from_secs(10));
     let playing = Model::new(
         &configuration,
         Some(&snapshot),
@@ -865,13 +965,30 @@ fn minimized_settings_stop_the_graph_indicator_and_the_preview_tick() {
         String::new(),
         &BTreeMap::new(),
     );
-    assert!(playback_shown(Page::Schedule, &playing, Visibility::Shown));
-    assert!(!playback_shown(
+    assert!(preview_values_shown(
         Page::Schedule,
         &playing,
-        Visibility::Minimized
+        Visibility::Shown,
+        false
     ));
-    assert!(!playback_shown(Page::General, &playing, Visibility::Shown));
+    assert!(!preview_values_shown(
+        Page::Schedule,
+        &playing,
+        Visibility::Minimized,
+        true
+    ));
+    assert!(!preview_values_shown(
+        Page::General,
+        &playing,
+        Visibility::Shown,
+        false
+    ));
+    assert!(preview_values_shown(
+        Page::General,
+        &playing,
+        Visibility::Shown,
+        true
+    ));
     assert_eq!(
         indicator_delay(Page::Schedule, &playing, Visibility::Shown, now),
         None
@@ -903,6 +1020,40 @@ fn scheduled(input: ConfigInput) -> ControllerSnapshot {
         .collect();
     snapshot.calculation = Some(Arc::new(result));
     snapshot
+}
+
+#[test_case(true, "2026-10-27T06:59:59Z", 1.0; "equal levels at Wake")]
+#[test_case(true, "2026-10-27T22:59:59Z", 1.0; "equal levels at Bedtime")]
+#[test_case(false, "2026-10-27T22:59:59.999Z", 0.001; "transition completion")]
+fn phase_changes_have_a_wake_independent_of_output_and_page(
+    equal: bool,
+    current: &str,
+    seconds: f64,
+) {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let configuration = Configuration::load(directory.path(), "circadia.exe");
+    let mut input = ConfigInput::default();
+    if equal {
+        input.daytime_kelvin = 3400;
+        input.middle_kelvin = 3400;
+        input.sleep_kelvin = 3400;
+    }
+    let snapshot = scheduled(input);
+    let model = snapshot_model(&configuration, &snapshot);
+    let now = Instant::now();
+    let current = current.parse().expect("UTC instant");
+    let schedule = model
+        .calculation
+        .as_ref()
+        .and_then(super::super::Calculation::schedule);
+    assert_eq!(
+        phase_deadline(&model, schedule, Visibility::Shown, now, current),
+        Some(now + Duration::from_secs_f64(seconds))
+    );
+    assert_eq!(
+        phase_deadline(&model, schedule, Visibility::Minimized, now, current),
+        None
+    );
 }
 
 fn sentence(model: &Model, current: &str) -> String {

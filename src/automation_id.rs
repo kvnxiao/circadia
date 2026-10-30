@@ -32,8 +32,12 @@ identifiers! {
     PAGE_TITLE = "page-title";
     /// Phase art in the navigation pane.
     PANE_ART = "pane-art";
+    /// Accessible phase progress in the navigation pane.
+    PANE_PROGRESS = "pane-art-progress";
     /// Status line in the navigation pane.
     PANE_STATUS = "pane-status";
+    /// Semantic status announcement in the navigation pane.
+    STATUS_ANNOUNCEMENT = "status-announcement";
     /// Navigation item of the Schedule page.
     NAV_SCHEDULE = "nav-schedule";
     /// Navigation item of the App suppression page.
@@ -60,7 +64,7 @@ identifiers! {
     BANNER_BACKUP_FAILED = "banner-backup-failed";
     /// Banner for a crash notice.
     BANNER_CRASH = "banner-crash";
-    /// Banner for stopped scheduling.
+    /// Banner for a schedule evaluation failure.
     BANNER_SCHEDULE = "banner-schedule";
     /// Banner for Night Light access failures.
     BANNER_NATIVE = "banner-native";
@@ -72,6 +76,8 @@ identifiers! {
     MANAGE_CHANGE = "manage-change";
     /// Phase art in the status section.
     STATUS_ART = "status-art";
+    /// Accessible phase progress in the status section.
+    STATUS_PROGRESS = "status-art-progress";
     /// Current temperature in the status section.
     STATUS_TEMPERATURE = "status-temperature";
     /// Sentence about the next scheduled change in the status section.

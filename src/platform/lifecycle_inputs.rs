@@ -1,12 +1,12 @@
 use std::io;
-use windows_sys::Win32::Foundation::SYSTEMTIME;
-use windows_sys::Win32::System::Power::CallNtPowerInformation;
-use windows_sys::Win32::System::Power::LastWakeTime;
-use windows_sys::Win32::System::Time::DYNAMIC_TIME_ZONE_INFORMATION;
-use windows_sys::Win32::System::Time::GetDynamicTimeZoneInformation;
-use windows_sys::Win32::System::Time::TIME_ZONE_ID_INVALID;
-use windows_sys::Win32::System::WindowsProgramming::QueryInterruptTimePrecise;
-use windows_sys::Win32::System::WindowsProgramming::QueryUnbiasedInterruptTimePrecise;
+use windows_sys::Win32::minwinbase::SYSTEMTIME;
+use windows_sys::Win32::powerbase::CallNtPowerInformation;
+use windows_sys::Win32::realtimeapiset::QueryInterruptTimePrecise;
+use windows_sys::Win32::realtimeapiset::QueryUnbiasedInterruptTimePrecise;
+use windows_sys::Win32::timezoneapi::DYNAMIC_TIME_ZONE_INFORMATION;
+use windows_sys::Win32::timezoneapi::GetDynamicTimeZoneInformation;
+use windows_sys::Win32::timezoneapi::TIME_ZONE_ID_INVALID;
+use windows_sys::Win32::winnt::LastWakeTime;
 use winsafe::HPROCESS;
 use winsafe::HWND;
 use winsafe::co;
@@ -33,7 +33,7 @@ impl ZoneIdentity {
         }
         Ok(Self {
             key: zone.TimeZoneKeyName,
-            disabled: zone.DynamicDaylightTimeDisabled,
+            disabled: zone.DynamicDaylightTimeDisabled != 0,
             biases: [zone.Bias, zone.StandardBias, zone.DaylightBias],
             standard: transition_fields(zone.StandardDate),
             daylight: transition_fields(zone.DaylightDate),
@@ -63,7 +63,7 @@ pub(crate) fn last_wake_time() -> io::Result<u64> {
     let status = unsafe {
         CallNtPowerInformation(
             LastWakeTime,
-            std::ptr::null(),
+            std::ptr::null_mut(),
             0,
             (&raw mut value).cast(),
             bytes,

@@ -4,38 +4,38 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::ffi::OsStringExt;
 use std::path::Path;
 use std::path::PathBuf;
-use windows_sys::Win32::Foundation::ERROR_RESOURCE_DATA_NOT_FOUND;
-use windows_sys::Win32::Foundation::ERROR_RESOURCE_TYPE_NOT_FOUND;
-use windows_sys::Win32::Foundation::S_FALSE;
-use windows_sys::Win32::Foundation::SetLastError;
-use windows_sys::Win32::Graphics::Gdi::BI_RGB;
-use windows_sys::Win32::Graphics::Gdi::BITMAP;
-use windows_sys::Win32::Graphics::Gdi::BITMAPINFO;
-use windows_sys::Win32::Graphics::Gdi::BITMAPINFOHEADER;
-use windows_sys::Win32::Graphics::Gdi::CreateCompatibleDC;
-use windows_sys::Win32::Graphics::Gdi::DIB_RGB_COLORS;
-use windows_sys::Win32::Graphics::Gdi::DeleteDC;
-use windows_sys::Win32::Graphics::Gdi::DeleteObject;
-use windows_sys::Win32::Graphics::Gdi::GetDIBits;
-use windows_sys::Win32::Graphics::Gdi::GetObjectW;
-use windows_sys::Win32::Graphics::Gdi::HBITMAP;
-use windows_sys::Win32::Graphics::Gdi::HDC;
-use windows_sys::Win32::Storage::FileSystem::FILE_VER_GET_LOCALISED;
-use windows_sys::Win32::Storage::FileSystem::GetFileAttributesExW;
-use windows_sys::Win32::Storage::FileSystem::GetFileExInfoStandard;
-use windows_sys::Win32::Storage::FileSystem::GetFileVersionInfoExW;
-use windows_sys::Win32::Storage::FileSystem::GetFileVersionInfoSizeExW;
-use windows_sys::Win32::Storage::FileSystem::VerQueryValueW;
-use windows_sys::Win32::Storage::FileSystem::WIN32_FILE_ATTRIBUTE_DATA;
-use windows_sys::Win32::UI::Shell::SHDefExtractIconW;
-use windows_sys::Win32::UI::Shell::SHGSI_ICONLOCATION;
-use windows_sys::Win32::UI::Shell::SHGetStockIconInfo;
-use windows_sys::Win32::UI::Shell::SHSTOCKICONINFO;
-use windows_sys::Win32::UI::Shell::SIID_APPLICATION;
-use windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon;
-use windows_sys::Win32::UI::WindowsAndMessaging::GetIconInfo;
-use windows_sys::Win32::UI::WindowsAndMessaging::HICON;
-use windows_sys::Win32::UI::WindowsAndMessaging::ICONINFO;
+use windows_sys::Win32::errhandlingapi::SetLastError;
+use windows_sys::Win32::fileapi::GetFileAttributesExW;
+use windows_sys::Win32::fileapi::WIN32_FILE_ATTRIBUTE_DATA;
+use windows_sys::Win32::minwinbase::GetFileExInfoStandard;
+use windows_sys::Win32::shellapi::SHGSI_ICONLOCATION;
+use windows_sys::Win32::shellapi::SHGetStockIconInfo;
+use windows_sys::Win32::shellapi::SHSTOCKICONINFO;
+use windows_sys::Win32::shellapi::SIID_APPLICATION;
+use windows_sys::Win32::shlobj_core::SHDefExtractIconW;
+use windows_sys::Win32::verrsrc::FILE_VER_GET_LOCALISED;
+use windows_sys::Win32::windef::HBITMAP;
+use windows_sys::Win32::windef::HDC;
+use windows_sys::Win32::windef::HICON;
+use windows_sys::Win32::winerror::ERROR_RESOURCE_DATA_NOT_FOUND;
+use windows_sys::Win32::winerror::ERROR_RESOURCE_TYPE_NOT_FOUND;
+use windows_sys::Win32::winerror::S_FALSE;
+use windows_sys::Win32::wingdi::BI_RGB;
+use windows_sys::Win32::wingdi::BITMAP;
+use windows_sys::Win32::wingdi::BITMAPINFO;
+use windows_sys::Win32::wingdi::BITMAPINFOHEADER;
+use windows_sys::Win32::wingdi::CreateCompatibleDC;
+use windows_sys::Win32::wingdi::DIB_RGB_COLORS;
+use windows_sys::Win32::wingdi::DeleteDC;
+use windows_sys::Win32::wingdi::DeleteObject;
+use windows_sys::Win32::wingdi::GetDIBits;
+use windows_sys::Win32::wingdi::GetObjectW;
+use windows_sys::Win32::winuser::DestroyIcon;
+use windows_sys::Win32::winuser::GetIconInfo;
+use windows_sys::Win32::winuser::ICONINFO;
+use windows_sys::Win32::winver::GetFileVersionInfoExW;
+use windows_sys::Win32::winver::GetFileVersionInfoSizeExW;
+use windows_sys::Win32::winver::VerQueryValueW;
 
 const ENGLISH_UNICODE: &str = "040904B0";
 
@@ -59,7 +59,11 @@ pub(crate) fn display_name(path: &Path) -> Option<String> {
     // SAFETY: The path is NUL-terminated and outlives the call, and the
     // handle is writable.
     let size = unsafe {
-        GetFileVersionInfoSizeExW(FILE_VER_GET_LOCALISED, path.as_ptr(), &raw mut handle)
+        GetFileVersionInfoSizeExW(
+            FILE_VER_GET_LOCALISED.cast_unsigned(),
+            path.as_ptr(),
+            &raw mut handle,
+        )
     };
     if size == 0 {
         return None;
@@ -69,7 +73,7 @@ pub(crate) fn display_name(path: &Path) -> Option<String> {
     // previous call reported for this file.
     let read = unsafe {
         GetFileVersionInfoExW(
-            FILE_VER_GET_LOCALISED,
+            FILE_VER_GET_LOCALISED.cast_unsigned(),
             path.as_ptr(),
             0,
             size,
@@ -202,7 +206,13 @@ pub(crate) fn generic_icon(pixels: u16) -> io::Result<Vec<u8>> {
     };
     // SAFETY: The structure is writable and its size field matches its type;
     // the location flag returns a path and index without an icon handle.
-    let result = unsafe { SHGetStockIconInfo(SIID_APPLICATION, SHGSI_ICONLOCATION, &raw mut info) };
+    let result = unsafe {
+        SHGetStockIconInfo(
+            SIID_APPLICATION,
+            SHGSI_ICONLOCATION.cast_unsigned(),
+            &raw mut info,
+        )
+    };
     if result != 0 {
         return Err(io::Error::from_raw_os_error(result));
     }
@@ -282,7 +292,7 @@ impl Icon {
                 let error = io::Error::last_os_error();
                 let missing = [ERROR_RESOURCE_TYPE_NOT_FOUND, ERROR_RESOURCE_DATA_NOT_FOUND]
                     .into_iter()
-                    .any(|code| error.raw_os_error() == i32::try_from(code).ok());
+                    .any(|code| error.raw_os_error() == Some(code));
                 if missing {
                     Ok(None)
                 } else {
@@ -352,7 +362,7 @@ impl Bitmap {
         let size = i32::try_from(size_of::<BITMAP>()).map_err(io::Error::other)?;
         // SAFETY: The bitmap handle is live until drop, and the structure is
         // writable for `size` bytes.
-        let written = unsafe { GetObjectW(self.0, size, (&raw mut bitmap).cast()) };
+        let written = unsafe { GetObjectW(self.0.cast(), size, (&raw mut bitmap).cast()) };
         if written == 0 {
             return Err(io::Error::other("reading the icon bitmap size failed"));
         }
@@ -366,7 +376,7 @@ impl Drop for Bitmap {
         if !self.0.is_null() {
             // SAFETY: GetIconInfo transfers ownership of its bitmaps to the
             // caller, and each is deleted once.
-            unsafe { DeleteObject(self.0) };
+            unsafe { DeleteObject(self.0.cast()) };
         }
     }
 }
@@ -402,7 +412,7 @@ impl DeviceContext {
                 biHeight: -height,
                 biPlanes: 1,
                 biBitCount: 32,
-                biCompression: BI_RGB,
+                biCompression: BI_RGB.cast_unsigned(),
                 ..BITMAPINFOHEADER::default()
             },
             ..BITMAPINFO::default()
@@ -419,7 +429,7 @@ impl DeviceContext {
                 lines,
                 pixels.as_mut_ptr().cast(),
                 &raw mut info,
-                DIB_RGB_COLORS,
+                DIB_RGB_COLORS.cast_unsigned(),
             )
         };
         if copied != height {

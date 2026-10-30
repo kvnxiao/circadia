@@ -174,7 +174,7 @@ The tray command indicates whether manual suppression is active, without a count
 
 **Before release:** Include these Windows checks:
 
-- Show extracted icons and the generic application icon in settings at 100% and 200% scaling.
+- Show extracted icons and the generic application icon in settings at 100% scaling. Verification at 200% is deferred to [post-MVP scaling checks](SPEC.md#future-work).
 - Add representative games protected by anti-cheat products while they run, and record whether their executable files can be read; a denied read shows the generic icon.
 - Measure first reads of display names and icons on a cold disk and under antivirus scanning, and confirm that due output steps and settings input are not delayed.
 - Match title conditions against representative applications whose titles change, such as Minecraft launchers and modpacks under `javaw.exe` and a browser, and record the delay from a title change to suppression.

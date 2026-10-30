@@ -5,6 +5,10 @@ edition = "2024"
 rust-version = "1.95"
 publish = false
 
+# The shared generated projection is outside this package's source directory.
+[package.metadata.cargo-machete]
+ignored = ["windows-collections", "windows-numerics", "windows-time"]
+
 [dependencies]
 anyhow = "1"
 fluent-pseudo = "0.3"
@@ -14,14 +18,18 @@ i18n-embed-fl = "0.10"
 num-traits = "0.2"
 png = "0.18"
 rust-embed = "8"
-windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", features = ["composition", "reactor"] }
-windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", default-features = false, features = ["reactor"] }
-windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac" }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", features = ["composition", "reactor"] }
+windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", default-features = false, features = ["reactor"] }
+windows-core = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-collections = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-numerics = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-time = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-sys = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", features = ["datetimeapi", "errhandlingapi", "minwinbase", "shellapi", "shlobj_core", "windef", "winerror", "wingdi", "winnls", "winuser"] }
 
 [build-dependencies]
 anyhow = "1"
-windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", optional = true }
+windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", optional = true }
 
 [dev-dependencies]
 fluent-syntax = "0.12"

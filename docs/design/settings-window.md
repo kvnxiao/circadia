@@ -2,6 +2,8 @@
 
 This document describes how the settings window, its dialogs, and the tray menu look. It applies the [design language](design-language.md) to each screen.
 
+Named typography styles and color tokens below use the definitions in that document. The mockups are the original HTML design export, which is not stored in the repository; this document records their relevant measurements.
+
 The spec defines behavior: what each control does, which values are valid, and when each state occurs. See the settings window and tray area in the [spec's area index](../specs/SPEC.md#area-specifications). This document shows how that behavior appears. Measurements are in effective pixels (epx) at 100% display scaling and are design guidance. Quoted text is English source text given as an example; the localized resources store the final wording, and the spec's values govern ranges and defaults.
 
 ## Interface labels and spec terms
@@ -26,11 +28,11 @@ Some interface labels differ from the spec's terms:
 - The window background is Mica and extends under the title bar. The window follows the light, dark, and contrast themes.
 - The title bar is the 48 epx tall form. The 16 epx app icon sits 16 epx from the left edge, vertically centered. The title "Circadia" follows 16 epx after the icon in the Caption style. The system minimize, maximize, and close buttons sit at the right edge, each 46 by 48 epx in the mockups. Windows' standard title bar is 32 epx tall; Circadia uses the taller form. Source: [Windows app title bar](https://learn.microsoft.com/en-us/windows/apps/design/basics/titlebar-design).
 - Below the title bar, the navigation pane fills the left side and the page content fills the right. Both sit directly on Mica. In contrast themes, a 1 epx border in the window text color separates the pane from the content, because both share the window color. Source: [Contrast themes: Borders](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/high-contrast-themes#borders).
-- The mockups draw the window 1200 epx wide. The Schedule page is taller than the window and scrolls.
+- The preferred window is 1200 epx wide; its initial size fits the monitor work area, including on 1280×720 and 1366×768 displays at 100% scaling. Pages scroll vertically when their content exceeds the available height.
 
 ## Navigation pane
 
-The pane is always expanded and about 300 epx wide. Its padding is 4 epx at the top, 16 epx at the sides, and 16 epx at the bottom, with 4 epx between items.
+At client widths of 800 epx and above, the pane is expanded and about 300 epx wide. Below 800 epx, a hamburger button opens the pane as a left-side overlay; there is no persistent icon rail, and opening the pane does not shift or narrow the page. Selecting a page, pressing Escape, or clicking outside closes the overlay. Its padding is 4 epx at the top, 16 epx at the sides, and 16 epx at the bottom, with 4 epx between items.
 
 **Pane header.** The header shows the current [phase art](#phase-art-in-the-window) at 60 epx, then, 14 epx to its right, "Circadia" in BodyStrong with a status line 2 epx below it in Caption and secondary text. The header has 4 epx of padding at the top and sides and 18 epx below it.
 
@@ -67,7 +69,7 @@ The status line summarizes the state and wraps to a second line instead of trunc
 | Row text | The title in Body, with the description 2 epx below in Caption and secondary text. |
 | Row controls | Aligned right, 12 epx apart. A toggle switch has its state text, "On" or "Off", on its left, as in Windows Settings. |
 | Nested row | Inside an expandable card: at least 56 epx tall, with 10 epx vertical padding, 16 epx right padding, and 52 epx left padding so the text lines up with the parent row's title (16 + 20 + 16 epx). A 1 epx divider runs above each nested row. |
-| Expand button | A 32 by 32 epx subtle button at the right end of the header row, with a 12 epx chevron that points down when collapsed and up when expanded. Its accessible name says what it expands, such as "Expand sunrise and sunset options". |
+| Expand button | A subtle button at least 40 by 40 epx at the right end of the header row, with a centered 12 epx chevron that points down when collapsed and up when expanded. Its accessible name says what it expands, such as "Expand sunrise and sunset options". |
 | Field error | Caption text in the critical color, 4 epx below the control, aligned right, at most 360 epx wide. See [Invalid input at the field](#invalid-input-at-the-field). |
 
 When a row's text and controls do not fit side by side, the controls move below the text inside the same card, as SettingsCard does in narrow windows. Text wraps; it does not clip. Source: [SettingsCard](https://learn.microsoft.com/en-us/dotnet/communitytoolkit/windows/settingscontrols/settingscard).
@@ -81,7 +83,8 @@ A disabled setting shows its controls' disabled state, and its description says 
 | Button | At least 32 epx tall, 12 epx horizontal padding, 8 epx between a glyph and its label. |
 | Accent button | Used only for "Add app" and each dialog's primary button. |
 | Subtle button | Transparent until hovered. Used for "Restore recommended colors", expand buttons, and remove buttons. |
-| Icon button | 32 by 32 epx subtle button with a 16 epx glyph and an accessible name. |
+| Icon button | Subtle button at least 40 by 40 epx, sized to fit its native padding and centered 16 epx glyph, with an accessible name. |
+| Row actions | A content-sized column anchored to the right edge; labels use the remaining width. Multiple actions extend left with 12 epx spacing. Non-interactive lock glyphs occupy the same 40 epx width as icon buttons, keeping their centers on the same vertical axis. |
 | Number field | 32 epx tall and 96 epx wide (120 epx for coordinates), with tabular numerals. Its unit, such as "K", "min", "ms", "s", or "Hz", follows it in secondary text. |
 | Slider | 220 epx wide. |
 | Time picker | 224 by 32 epx. See [Time picker](#time-picker). |
@@ -109,7 +112,7 @@ This card has 8 epx corners, unlike the 4 epx of other cards, and no padding of 
 The header row has 20 epx of padding at the top and sides and 12 epx at the bottom, with 20 epx between its parts:
 
 - **Left:** the [phase art](#phase-art-in-the-window) at 64 epx.
-- **Middle:** the current output temperature in the Title style with tabular numerals, such as "3400 K", or "Off" when Circadia is not managing Night Light. The [phase pill](#phase-pill) follows 12 epx to its right. Below them, 2 epx down, one status sentence in Body and secondary text.
+- **Middle:** Circadia's current target temperature in the Title style with tabular numerals, such as "3400 K", or "Off" when Circadia is not managing Night Light. This is the schedule, suppression, or Preview target, not confirmation of Windows' applied temperature. The [phase pill](#phase-pill) follows 12 epx to its right. Below them, 2 epx down, one status sentence in Body and secondary text.
 - **Right:** a button with a 16 epx sun glyph that reads "Suppress for 1 hour" or "Stop suppressing". It is disabled while Circadia is not managing Night Light.
 
 Example status sentences:
@@ -117,7 +120,7 @@ Example status sentences:
 | State | Sentence |
 | :-- | :-- |
 | Before the next change | "Next: 2400 K by 11:00 PM at bedtime, warming from 10:00 PM." It says "cooling" when the next target is higher. |
-| No transition before the next target that changes the temperature | "Holding until 11:00 PM." The sentence skips a target that does not change the temperature. |
+| The next temperature change is an immediate step | "Holding until 11:00 PM." The sentence skips a target that does not change the temperature. |
 | No later target in the graph changes the temperature | "Your schedule is at 3400 K." |
 | During a scheduled transition | "Reaches 2400 K by 11:00 PM (bedtime)." |
 | Preview playing | "Previewing 3:15 AM. Your schedule resumes when it ends." While suppression is active, the second sentence is "Suppression resumes when the preview ends." |
@@ -136,7 +139,7 @@ The pill names the current state. The first matching row applies:
 | Suppressed | Manual or automatic suppression is active. |
 | Shifting to <phase> | A scheduled transition is in progress. It names the phase the transition ends in, such as "Shifting to bedtime". |
 | Morning | Between Wake and Sunrise. |
-| Daytime | Between Sunrise, or Wake when Sunrise is not used, and Sunset. |
+| Daytime | From Sunrise, or Wake when Sunrise is not used, until Sunset, or Bedtime when Sunset is not used. |
 | Evening | Between Sunset and Bedtime. |
 | Bedtime | Between Bedtime and Wake. |
 
@@ -162,9 +165,9 @@ The graph shows the scheduled temperature over one day. It sits 20 epx from the 
 | Current-time line | A 1 epx vertical line in secondary text color, the full plot height, at the current time. |
 | Current-time dot | A 16 epx circle centered on the curve at the current time, filled with the kelvin color at that point, with a 2 epx ring in the primary text color. The mockups add a soft 14 epx glow in the output temperature's color (45% opacity in the dark theme, 60% in the light theme); the glow is optional. |
 
-**Chip glyphs.** Sunrise shows half a sun over a horizon with an upward arrow; Sunset shows the same with a downward arrow; Wake shows an alarm clock; Bedtime shows a crescent moon. The mockups drew 14 epx glyphs; 16 epx matches Segoe Fluent Icons' recommended sizes. Sunrise and Sunset glyphs use the sun's darker phase-art stop (`#FFAE2E` dark, `#B86E00` light). The mockups used `#E8901F`, which measures 2.49:1 on the light theme's white chip, below the 3:1 minimum for graphics. Wake and Bedtime glyphs use the primary text color.
+**Chip glyphs.** Sunrise shows half a sun over a horizon with an upward arrow; Sunset shows the same with a downward arrow; Wake shows an alarm clock; Bedtime shows a crescent moon. The mockups drew 14 epx glyphs; 16 epx matches Segoe Fluent Icons' recommended sizes. Sunrise and Sunset glyphs use the darker color from the sun illustration's gradient (`#FFAE2E` dark, `#B86E00` light). The mockups used `#E8901F`, which measures 2.49:1 on the light theme's white chip, below the 3:1 minimum for graphics. Wake and Bedtime glyphs use the primary text color.
 
-**Preview.** While Preview plays, the current-time line and dot move with the previewed instant. When the previewed instant passes the right edge, the graph shows the next day's view, and the line and dot continue from its left edge.
+**Preview.** While Preview plays, the current-time line and dot move continuously with the captured playback clock. Windows paces their compositor animation independently of Night Light calls. Numerical text refreshes less often than marker motion. When the previewed instant passes the right edge, the graph shows the next day's view, and the line and dot continue from its left edge. Hiding the graph stops its animation; returning resumes from the current playback position.
 
 **Contrast themes.**
 
@@ -193,7 +196,7 @@ When translated text does not fit, the text wraps within its column. If a column
 
 A 1 epx divider runs across the top of the footer. The footer has 12 epx vertical and 20 epx horizontal padding and 16 epx between its parts:
 
-- **Left:** a caption in Caption and secondary text. While Preview plays, a 3 epx progress bar (accent fill on a neutral track) appears 8 epx below the caption.
+- **Left:** a caption in Caption and secondary text. While Preview plays, a 3 epx progress bar (accent fill on a neutral track) appears 8 epx below the caption. Its fill advances linearly from playback start to deadline, independently of Night Light writes.
 - **Right:** a button at least 112 epx wide with a play glyph and "Preview", or a stop glyph and "Stop" while Preview plays.
 
 | State | Caption |
@@ -222,10 +225,10 @@ An expandable card in the Times group.
 
 1. **Use sunrise:** a checkbox at the row's left, then 16 epx, then the label and the description "Morning color from wake time, daytime color from sunrise. Today: 7:16 AM".
 2. **Use sunset:** the same layout, with "Evening color from sunset until bedtime. Today: 6:06 PM".
-3. **Use my Windows location:** the title, a description, and a toggle switch. While on: "Asks Windows for your position when you turn this on or open these settings. Last updated today." While off: "Enter coordinates below. Circadia never needs location access this way."
+3. **Use my Windows location:** the title, a description, and a toggle switch. While on: "Requests one position on startup and when settings opens, including while running in the tray." While off: "Enter coordinates below. Circadia never needs location access this way." Turning it on opens the [location consent dialog](#location-consent-dialog); the switch shows On after confirmation.
 4. **Coordinates:** the title, the description "Decimal degrees. North and east are positive.", and two number fields side by side, 12 epx apart, each 120 epx wide with a Caption label 4 epx above it: "Latitude" and "Longitude". The fields display and accept the locale's decimal separator. They are disabled while "Use my Windows location" is on.
 
-While the card's switch is off, the nested rows show their disabled state and the checkboxes keep their checked states. [Solar fallback](../specs/control.md#req-solar-calculation-failure--continue-with-the-wakebedtime-only-curve), [solar timing conflicts](../specs/schedule.md#req-compute-solar-events--calculate-optional-sunrise-and-sunset-targets-locally), and location failures appear inside this card as [feature messages](#feature-messages-in-their-cards).
+While the card's switch is off, the nested rows show their disabled state and the checkboxes keep their checked states. [Solar fallback](../specs/control.md#req-solar-calculation-failure--continue-with-the-wakebedtime-only-curve) means using Wake and Bedtime alone after solar calculation fails. A [solar timing conflict](../specs/schedule.md#req-compute-solar-events--calculate-optional-sunrise-and-sunset-targets-locally) occurs when both solar events are available but no Sunset follows Sunrise within the activity interval. These conditions and location failures appear inside this card as [feature messages](#feature-messages-in-their-cards).
 
 ### Color temperature
 
@@ -312,17 +315,19 @@ The first matching row applies:
 | Manual suppression | `day` | Badge with the timer glyph |
 | Automatic suppression | `day` | Badge with the app-window glyph |
 | A scheduled transition is in progress | The phase the transition ends in | Progress ring showing how much of the transition has elapsed |
-| Otherwise | The current phase: `morning` from Wake to Sunrise; `day` from Sunrise, or Wake when Sunrise is not used, to Sunset; `evening` from Sunset to Bedtime; `bedtime` from Bedtime to Wake | None |
+| Otherwise | The current phase: `morning` from Wake to Sunrise; `day` from Sunrise, or Wake when Sunrise is not used, to Sunset, or Bedtime when Sunset is not used; `evening` from Sunset to Bedtime; `bedtime` from Bedtime to Wake | None |
 
 The picture comes from the folder for the current theme: `assets/phase/dark/`, `assets/phase/light/`, or, in contrast themes, `assets/phase/hc/` drawn in the system colors.
 
 ### Progress ring and badge
 
-The progress ring and the badge are separate elements laid over the picture; the SVG files do not include them. Positions below use the picture's 64-unit grid.
+The progress ring and the badge are separate elements laid over the picture; the SVG files do not include them. Positions below use the picture's 64-unit grid. The plate is the background shape inside that picture.
 
 - **Composition.** The displayed square has the 64-unit picture plus a 6-unit margin on every side, 76 units across, so the ring fits. At 60 epx (navigation pane) the plate is about 47 epx across; at 64 epx (status card) it is about 51 epx.
 - **Progress ring.** A circle around the plate with its centerline at radius 35 and a 3-unit stroke. The track uses the divider color. The progress arc uses the accent color with round ends, starts at the top, and runs clockwise. In contrast themes, the track uses the window text color and the arc uses the highlight color.
 - **Badge.** A circle centered at (56, 56), radius 11, at the plate's lower right, filled with the accent color and separated from the plate by a 3-unit ring in the window's base background color. The [badge glyph](design-language.md#badge-glyphs) sits centered in it, about 11 units wide, in the text color for accent fills. In contrast themes, the fill uses the highlight color, the glyph the highlight text color, and the ring the window color.
+
+The ring advances continuously through the scheduled transition. During Preview it follows the playback clock; otherwise it follows actual time. The navigation pane's ring remains active while visible on another page. Minimizing or closing settings stops its animation, and returning resumes at the current position. Numerical progress remains available through the native accessible control.
 
 ### Accessible names
 
@@ -384,7 +389,7 @@ App-wide problems appear as banners at the top of every page:
 
 Each banner follows the standard Windows information bar: a severity glyph and color, a title that names the problem in plain words, a message that explains it and, for a failed operation, ends with the technical code (for example `0x80070005`), and its actions as buttons beside it. Examples of actions: "Retry" when settings could not be saved; "Reset to default settings" and "Open folder" when settings could not be read; "Open folder" and "Report a problem" for the crash notice. The spec defines each problem's actions and when its banner closes. Banners do not show raw library messages.
 
-Use the Error severity for a current failure, including invalid values in the settings file. The restored-backup and unrecognized-settings banners use the Warning severity. The crash notice reports an earlier event and uses the Informational severity. While settings cannot be read, every settings control shows its disabled state until the user resets the settings. Source: [InfoBar](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/infobar).
+Use the Error severity for a current failure, including invalid values in the settings file. A time-zone failure uses Warning while the last scheduled temperature remains in use, and Error when control stops without one. The time-zone failure banner is non-closable and offers Retry in both cases. The restored-backup and unrecognized-settings banners use Warning. The crash notice reports an earlier event and uses Informational. While settings cannot be read, every settings control shows its disabled state until the user resets the settings. Source: [InfoBar](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/infobar).
 
 ### Feature messages in their cards
 
@@ -399,6 +404,7 @@ A feature message is a nested row directly below the card's header row, visible 
 
 - From top to bottom: page title, app-wide banners (the first one is the problem the navigation status line names), the banner for other pages, then the page's cards.
 - Screen readers announce each banner, field message, and feature message when it appears, changes, or disappears.
+- One accessible status text announces management mode, schedule phase, failures, and recovery on every page without interrupting current screen-reader speech. Changing temperatures, progress percentages, and playback clocks remain available on demand without automatic announcements.
 - A banner does not appear and disappear in quick succession, so the page does not flash or jump. Source: [InfoBar: Enter and exit usability](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/infobar#enter-and-exit-usability).
 
 ## Time picker
@@ -421,6 +427,10 @@ A standard content dialog over a dimmed window, 500 epx wide in the mockups, wit
   - Three bullets, 4 epx apart and indented 20 epx: "Night Light stays on and follows Circadia's schedule." "The Windows Night Light schedule is turned off." "Changes you make in Windows Settings or Quick Settings are undone."
   - A closing paragraph in secondary text: "To give control back, turn this off or quit Circadia from the notification area. Quitting fades out and turns Night Light off."
 - **Footer:** 24 epx padding on the dialog footer fill with a 1 epx divider above it, and two equal-width buttons 8 epx apart: "Turn on" (accent, the default button, activated by Enter) and "Cancel" (activated by Esc).
+
+## Location consent dialog
+
+Use the same standard content dialog and footer as the Night Light consent dialog. The title reads "Use Windows location?". Three body paragraphs, 12 epx apart, explain when requests run, Windows location services and possible network-based positioning, and the saved preference and coordinates. The first paragraph explicitly includes startup with only the tray icon visible. The footer offers "Turn on" as the default action and "Cancel". Cancelling keeps the preference off.
 
 ## Add app dialog
 
@@ -469,7 +479,7 @@ The notification area icon's tooltip shows a short status, like the navigation p
 
 ## Accessibility and scaling
 
-- **Scaling.** No text or control clips at 100%, 150%, or 200% display scaling, or with the Windows text size setting raised. Check each page, dialog, and the tray menu at each scale.
+- **Scaling.** No text or control clips at 100%, 150%, or 200% display scaling, or with the Windows text size setting raised. MVP acceptance checks each page, dialog, and the tray menu at 100%. Verification at 150% and 200% is [post-MVP work](../specs/SPEC.md#future-work).
 - **Longer translations.** Translations can be much longer than English. Fixed widths are limits for layout, not for text: navigation labels and the status line wrap within the 300 epx pane, card controls move below their text when needed, buttons grow to fit their labels, and the event summary row wraps or becomes two rows of two columns. Test with a pseudo-localized build, which lengthens and accents every string. Source: [Adjust layout and fonts, and support RTL](https://learn.microsoft.com/en-us/windows/apps/design/globalizing/adjust-layout-and-fonts--and-support-rtl).
 - **Right-to-left languages** are out of scope for the first release, so this design does not define a mirrored layout or the graph's direction in it.
 - **Keyboard.** Every control is reachable with Tab in reading order and shows the system focus visual. Static text and the graph are not tab stops.

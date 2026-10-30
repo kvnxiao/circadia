@@ -1,19 +1,19 @@
 use std::io;
-use windows_sys::Win32::Foundation::SYSTEMTIME;
-use windows_sys::Win32::Globalization::GetLocaleInfoEx;
-use windows_sys::Win32::Globalization::GetNumberFormatEx;
-use windows_sys::Win32::Globalization::GetTimeFormatEx;
-use windows_sys::Win32::Globalization::GetUserPreferredUILanguages;
-use windows_sys::Win32::Globalization::LOCALE_ILZERO;
-use windows_sys::Win32::Globalization::LOCALE_INEGNUMBER;
-use windows_sys::Win32::Globalization::LOCALE_S1159;
-use windows_sys::Win32::Globalization::LOCALE_S2359;
-use windows_sys::Win32::Globalization::LOCALE_SDECIMAL;
-use windows_sys::Win32::Globalization::LOCALE_SNEGATIVESIGN;
-use windows_sys::Win32::Globalization::LOCALE_SSHORTTIME;
-use windows_sys::Win32::Globalization::MUI_LANGUAGE_NAME;
-use windows_sys::Win32::Globalization::NUMBERFMTW;
-use windows_sys::Win32::Globalization::SetProcessPreferredUILanguages;
+use windows_sys::Win32::datetimeapi::GetTimeFormatEx;
+use windows_sys::Win32::minwinbase::SYSTEMTIME;
+use windows_sys::Win32::winnls::GetLocaleInfoEx;
+use windows_sys::Win32::winnls::GetNumberFormatEx;
+use windows_sys::Win32::winnls::GetUserPreferredUILanguages;
+use windows_sys::Win32::winnls::LOCALE_ILZERO;
+use windows_sys::Win32::winnls::LOCALE_INEGNUMBER;
+use windows_sys::Win32::winnls::LOCALE_S1159;
+use windows_sys::Win32::winnls::LOCALE_S2359;
+use windows_sys::Win32::winnls::LOCALE_SDECIMAL;
+use windows_sys::Win32::winnls::LOCALE_SNEGATIVESIGN;
+use windows_sys::Win32::winnls::LOCALE_SSHORTTIME;
+use windows_sys::Win32::winnls::MUI_LANGUAGE_NAME;
+use windows_sys::Win32::winnls::NUMBERFMTW;
+use windows_sys::Win32::winnls::SetProcessPreferredUILanguages;
 
 #[expect(unsafe_code, reason = "read the user's preferred UI language list")]
 pub(crate) fn preferred_ui_languages() -> io::Result<Vec<String>> {
@@ -23,7 +23,7 @@ pub(crate) fn preferred_ui_languages() -> io::Result<Vec<String>> {
     // length; both counters are writable.
     let sized = unsafe {
         GetUserPreferredUILanguages(
-            MUI_LANGUAGE_NAME,
+            MUI_LANGUAGE_NAME.cast_unsigned(),
             &raw mut count,
             std::ptr::null_mut(),
             &raw mut length,
@@ -37,7 +37,7 @@ pub(crate) fn preferred_ui_languages() -> io::Result<Vec<String>> {
     // that the previous call reported.
     let read = unsafe {
         GetUserPreferredUILanguages(
-            MUI_LANGUAGE_NAME,
+            MUI_LANGUAGE_NAME.cast_unsigned(),
             &raw mut count,
             buffer.as_mut_ptr(),
             &raw mut length,
@@ -59,8 +59,13 @@ pub(crate) fn prefer_ui_language(tag: &str) -> io::Result<()> {
     let mut count = 0_u32;
     // SAFETY: The list is double-NUL-terminated and outlives the call, and
     // the count is writable.
-    if unsafe { SetProcessPreferredUILanguages(MUI_LANGUAGE_NAME, list.as_ptr(), &raw mut count) }
-        == 0
+    if unsafe {
+        SetProcessPreferredUILanguages(
+            MUI_LANGUAGE_NAME.cast_unsigned(),
+            list.as_ptr(),
+            &raw mut count,
+        )
+    } == 0
     {
         return Err(io::Error::last_os_error());
     }
@@ -126,7 +131,7 @@ impl RegionalFormat {
     }
 
     fn capture_locale(locale: Option<Vec<u16>>) -> io::Result<Self> {
-        let info = |kind| locale_info(locale.as_deref(), kind);
+        let info = |kind: i32| locale_info(locale.as_deref(), kind.cast_unsigned());
         let number = |kind| {
             info(kind)?
                 .parse::<u32>()

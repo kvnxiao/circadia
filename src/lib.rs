@@ -238,6 +238,8 @@ pub use suppression::SuppressionState;
 #[cfg(all(windows, feature = "graph-measurement"))]
 pub use ui::measurement::GraphMeasurement;
 #[cfg(all(windows, feature = "graph-measurement"))]
+pub use ui::measurement::LocationMeasurement;
+#[cfg(all(windows, feature = "graph-measurement"))]
 pub use ui::measurement::SettingsMeasurement;
 #[cfg(all(windows, feature = "graph-measurement"))]
 pub use ui::measurement::SimulatedNativeCall;

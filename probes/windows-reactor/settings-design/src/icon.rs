@@ -1,24 +1,24 @@
 use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
-use windows_sys::Win32::Foundation::S_FALSE;
-use windows_sys::Win32::Graphics::Gdi::BI_RGB;
-use windows_sys::Win32::Graphics::Gdi::BITMAP;
-use windows_sys::Win32::Graphics::Gdi::BITMAPINFO;
-use windows_sys::Win32::Graphics::Gdi::BITMAPINFOHEADER;
-use windows_sys::Win32::Graphics::Gdi::CreateCompatibleDC;
-use windows_sys::Win32::Graphics::Gdi::DIB_RGB_COLORS;
-use windows_sys::Win32::Graphics::Gdi::DeleteDC;
-use windows_sys::Win32::Graphics::Gdi::DeleteObject;
-use windows_sys::Win32::Graphics::Gdi::GetDIBits;
-use windows_sys::Win32::Graphics::Gdi::GetObjectW;
-use windows_sys::Win32::Graphics::Gdi::HBITMAP;
-use windows_sys::Win32::Graphics::Gdi::HDC;
-use windows_sys::Win32::UI::Shell::SHDefExtractIconW;
-use windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon;
-use windows_sys::Win32::UI::WindowsAndMessaging::GetIconInfo;
-use windows_sys::Win32::UI::WindowsAndMessaging::HICON;
-use windows_sys::Win32::UI::WindowsAndMessaging::ICONINFO;
+use windows_sys::Win32::shlobj_core::SHDefExtractIconW;
+use windows_sys::Win32::windef::HBITMAP;
+use windows_sys::Win32::windef::HDC;
+use windows_sys::Win32::windef::HICON;
+use windows_sys::Win32::winerror::S_FALSE;
+use windows_sys::Win32::wingdi::BI_RGB;
+use windows_sys::Win32::wingdi::BITMAP;
+use windows_sys::Win32::wingdi::BITMAPINFO;
+use windows_sys::Win32::wingdi::BITMAPINFOHEADER;
+use windows_sys::Win32::wingdi::CreateCompatibleDC;
+use windows_sys::Win32::wingdi::DIB_RGB_COLORS;
+use windows_sys::Win32::wingdi::DeleteDC;
+use windows_sys::Win32::wingdi::DeleteObject;
+use windows_sys::Win32::wingdi::GetDIBits;
+use windows_sys::Win32::wingdi::GetObjectW;
+use windows_sys::Win32::winuser::DestroyIcon;
+use windows_sys::Win32::winuser::GetIconInfo;
+use windows_sys::Win32::winuser::ICONINFO;
 
 /// Extract a file's first icon at a square pixel size and encode it as PNG.
 ///
@@ -151,7 +151,7 @@ impl Bitmap {
         let size = i32::try_from(size_of::<BITMAP>()).map_err(io::Error::other)?;
         // SAFETY: The bitmap handle is live until drop, and the structure is
         // writable for `size` bytes.
-        let written = unsafe { GetObjectW(self.0, size, (&raw mut bitmap).cast()) };
+        let written = unsafe { GetObjectW(self.0.cast(), size, (&raw mut bitmap).cast()) };
         if written == 0 {
             return Err(io::Error::other("reading the icon bitmap size failed"));
         }
@@ -165,7 +165,7 @@ impl Drop for Bitmap {
         if !self.0.is_null() {
             // SAFETY: GetIconInfo transfers ownership of its bitmaps to the
             // caller, and each is deleted once.
-            unsafe { DeleteObject(self.0) };
+            unsafe { DeleteObject(self.0.cast()) };
         }
     }
 }
@@ -201,7 +201,7 @@ impl DeviceContext {
                 biHeight: -height,
                 biPlanes: 1,
                 biBitCount: 32,
-                biCompression: BI_RGB,
+                biCompression: BI_RGB.cast_unsigned(),
                 ..BITMAPINFOHEADER::default()
             },
             ..BITMAPINFO::default()
@@ -218,7 +218,7 @@ impl DeviceContext {
                 lines,
                 pixels.as_mut_ptr().cast(),
                 &raw mut info,
-                DIB_RGB_COLORS,
+                DIB_RGB_COLORS.cast_unsigned(),
             )
         };
         if copied != height {

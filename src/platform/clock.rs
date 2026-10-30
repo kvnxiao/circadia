@@ -9,13 +9,13 @@ use jiff::tz::Offset;
 use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
-use windows_sys::Win32::Foundation::SYSTEMTIME;
-use windows_sys::Win32::System::Time::DYNAMIC_TIME_ZONE_INFORMATION;
-use windows_sys::Win32::System::Time::GetDynamicTimeZoneInformation;
-use windows_sys::Win32::System::Time::GetTimeZoneInformationForYear;
-use windows_sys::Win32::System::Time::SystemTimeToTzSpecificLocalTime;
-use windows_sys::Win32::System::Time::TIME_ZONE_ID_INVALID;
-use windows_sys::Win32::System::Time::TIME_ZONE_INFORMATION;
+use windows_sys::Win32::minwinbase::SYSTEMTIME;
+use windows_sys::Win32::timezoneapi::DYNAMIC_TIME_ZONE_INFORMATION;
+use windows_sys::Win32::timezoneapi::GetDynamicTimeZoneInformation;
+use windows_sys::Win32::timezoneapi::GetTimeZoneInformationForYear;
+use windows_sys::Win32::timezoneapi::SystemTimeToTzSpecificLocalTime;
+use windows_sys::Win32::timezoneapi::TIME_ZONE_ID_INVALID;
+use windows_sys::Win32::timezoneapi::TIME_ZONE_INFORMATION;
 
 /// Read boot-relative elapsed time, including sleep and hibernation.
 pub fn elapsed_since_boot() -> Duration {
@@ -200,16 +200,12 @@ impl WindowsZone {
         // SAFETY: Both structures are initialized and valid for the call, which
         // retains neither pointer.
         if unsafe {
-            GetTimeZoneInformationForYear(
-                u16::try_from(year)?,
-                &raw const self.zone,
-                &raw mut rules,
-            )
+            GetTimeZoneInformationForYear(u16::try_from(year)?, &raw mut self.zone, &raw mut rules)
         } == 0
         {
             return Err(ScheduleError::windows(io::Error::last_os_error()));
         }
-        if self.zone.DynamicDaylightTimeDisabled {
+        if self.zone.DynamicDaylightTimeDisabled != 0 {
             rules.Bias = rules
                 .Bias
                 .checked_add(rules.StandardBias)
@@ -229,15 +225,15 @@ impl WindowsZone {
         reason = "enumeration writes only the caller-owned output structure"
     )]
     pub(crate) fn named(name: &str, disabled: bool) -> Result<Self, ScheduleError> {
-        use windows_sys::Win32::Foundation::ERROR_NO_MORE_ITEMS;
-        use windows_sys::Win32::System::Time::EnumDynamicTimeZoneInformation;
+        use windows_sys::Win32::timezoneapi::EnumDynamicTimeZoneInformation;
+        use windows_sys::Win32::winerror::ERROR_NO_MORE_ITEMS;
 
         for index in 0..u32::MAX {
             let mut zone = DYNAMIC_TIME_ZONE_INFORMATION::default();
             // SAFETY: The initialized output structure remains valid throughout
             // synchronous enumeration.
             let status = unsafe { EnumDynamicTimeZoneInformation(index, &raw mut zone) };
-            if status == ERROR_NO_MORE_ITEMS {
+            if status == ERROR_NO_MORE_ITEMS.cast_unsigned() {
                 break;
             }
             if status != 0 {
@@ -252,7 +248,7 @@ impl WindowsZone {
                 .take_while(|character| *character != 0)
                 .collect();
             if String::from_utf16_lossy(&key) == name {
-                zone.DynamicDaylightTimeDisabled = disabled;
+                zone.DynamicDaylightTimeDisabled = u8::from(disabled);
                 return Ok(Self {
                     zone,
                     years: BTreeMap::new(),

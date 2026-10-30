@@ -1,10 +1,15 @@
 ---
-date: 2026-10-24
+date: 2026-10-29
 questions:
   - How does windows-reactor at windows-rs ebc5a99 support each element of Circadia's settings window, tray menu, and icon design?
   - Which elements have no direct Reactor equivalent, and which approach was selected for each gap?
   - How do the selected approaches render and behave in a running window, and what do the graph renderers cost?
+  - Can finite compositor keyframes move the Preview marker independently of UI timers, and does detaching and dropping the visuals end their animations?
+  - Can public composition APIs interpolate a bar, phase arc, and dot color while native controls retain accessible range values?
 observed-in:
+  - The settings-design progress probe at microsoft/windows-rs 5cfe2c96ea029b119d5e07fca2a92d7628c22aeb on Windows 11 x64 build 26300.9711 at 100% scaling, debug build with bundled Windows App SDK 2.6.4, 2026-10-29
+  - The settings-design motion probe at microsoft/windows-rs 8786f59d1f6bc216324b202ec17d3de696d3b843 on Windows 11 x64 build 26300.9711 at 100% scaling, Rust 1.99.0, debug build with bundled Windows App SDK 2.6.4, 2026-10-29
+  - Microsoft Learn CompositionScopedBatch and CompositionObject.Close documentation retrieved 2026-10-29
   - The settings-design rendering probe at microsoft/windows-rs 0496ec19116f1dac690daf31fcb96769118d9bac on Windows 11 x64 build 26300.9711 at 100% scaling, dark and light window themes, Rust 1.99.0, debug build with the installed Windows App SDK runtime 2.5.1, 2026-10-24
   - microsoft/windows-rs master ebc5a99d08be3f23cef4d428661357fad3d1c0db (committed 2026-10-23), source inspection and a cargo doc build of windows-reactor without dependencies; compared with the previous reference pin 722f202100c3bd428627941d3834d87ad6679d1c (2026-10-16)
   - Windows App SDK runtime 2.5.1 staged by windows-reactor-setup at ebc5a99
@@ -99,7 +104,7 @@ A `ListView` does not scroll its selected item into view when the flyout opens, 
 
 ## Recommendation
 
-Build the redesigned pages with the controls and workarounds in the table above at the current reference pin, `0496ec1`, with these choices from the rendering probe:
+The rendering probe at `0496ec1` supported these implementation choices. Its [dependency validation](../../probes/windows-reactor/settings-design/README.md#dependency-validation-on-2026-10-29) records the later checks at `8786f59`; the probe README identifies its current pin.
 
 - Draw the graph and slider strips with `windows-canvas` into composition surfaces that share one Direct3D device, attached through `ElementRef<Grid>::request_set_child_visual`, and redraw them only when the curve, size, scale, or theme changes. Release the device when settings closes and recreate it after a device loss; the probe kept its device for the life of the process and did not test either rule.
 - Close the time-picker flyout from Accept and Cancel by changing the picker button's key and then requesting focus on the new button, and rotate each list so that the current value is visible when the flyout opens.
@@ -126,6 +131,50 @@ The probe drew the Schedule page's graph and its three slider strips three ways 
 Latency runs from the message that changes Bedtime to the end of the drawing callback, not to a displayed frame. The measured spans are below the 100 ms bound of [REQ-display-generated-curve](../specs/interface.md#req-display-generated-curve--display-the-schedule-without-point-editing); the XAML renderer's drawing time and the display latency were not measured. The CPU values are zero, one, and two scheduler ticks, so they do not show how often the process woke. The composition surface redrew after edits, resizing to 900 and 1500 epx widths, and a runtime theme switch, and the XAML overlay stayed aligned. The XAML rectangles leave visible gaps in the gradient.
 
 **Observed in windows-rs `0496ec1` source:** Reactor subscribes every swap-chain panel to `CompositionTarget::Rendering` for the panel's lifetime and checks for invalidation on each frame, even for a `windows-canvas` view created with an `Invalidator` (the `windows-canvas` handle that requests a redraw). A composition surface does not need a frame subscription.
+
+### Finite compositor motion and removal
+
+**Measured on 2026-10-29:** the isolated [motion experiment](../../probes/windows-reactor/settings-design/README.md#finite-compositor-motion-experiment) moved a line and dot with linear compositor keyframes at `8786f59`. It did not register an application frame callback or animation timer. Captured screen pixels showed forward motion, reverse motion after replacement, a bend in the path, and a stable final position. Removing the marker removed its pixels. The corrected harness closed its window after capture. Earlier captures obscured by another window are excluded.
+
+The `results/motion-visible/` run measured these completion notifications:
+
+| Operation | Configured duration | Time from animation setup to completion callback |
+| :-- | --: | --: |
+| Replace the first animated marker | 20 s | 3.929 s |
+| Remove the replacement marker | 20 s | 3.952 s |
+| Let the finite path finish | 4 s | 4.172 s |
+
+The probe removed the animated container from its parent and dropped its visual references. It retained each batch subscription until the completion callback; the subscription count returned to zero after removal and finite completion. Microsoft documents that [a scoped batch completes when its tracked animations and effects finish](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.composition.compositionscopedbatch). This run therefore supports detaching and dropping these visuals as the cleanup mechanism at the tested revision. Callback timing includes delivery delay and does not identify the exact displayed endpoint frame.
+
+Two-second idle, removed, and completed samples each recorded zero additional process CPU time. From the final idle sample through both sets of 20 forward and reverse pixel captures, the process recorded 0.109375 CPU seconds, including control handling and harness interaction. The combined wall-clock interval was not recorded. Handles stabilized at 889 and private bytes at 154,669,056 after removal and completion. These short, coarse samples do not establish battery use, refresh cadence, or long-term resource growth.
+
+The subsequent `results/motion-verified/` run passed independent assertions for forward movement, replacement direction, the bend, removal, and the stable endpoint. Its cancelled batches completed at 3.896 and 3.863 seconds from setup, and finite completion was reported at 4.170 seconds. The removed two-second sample recorded 0.03125 CPU seconds; idle and completed samples recorded zero. The interval from the final idle sample through both capture sets recorded 0.859375 CPU seconds. This variation prevents attributing a CPU reduction to the animation approach from these samples.
+
+The dependency wrapper exposes keyframes, `start_animation`, and visual removal. It does not expose `StopAnimation` or `Close`. Microsoft separately documents [CompositionObject.Close](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.composition.compositionobject.close) as releasing resources through `Windows.Foundation.IClosable`; the tested cleanup did not need that operation. Recheck removal and completion after a dependency or runtime upgrade.
+
+### Progress and color animation
+
+**Source inspection at `5cfe2c9`:** the public `Microsoft.UI.Composition` metadata supports a stroked ellipse with animated `TrimEnd`, `ColorKeyFrameAnimation` on a color brush, and explicit `StopAnimation`. Rust bindings generated for only the required APIs by the same revision's `windows-bindgen` use the compositor supplied by Reactor. The probe uses linear interpolation and RGB color interpolation, with no application frame callback or animation timer.
+
+The generation inputs from that windows-rs checkout are:
+
+| Metadata path | SHA-256 |
+| :-- | :-- |
+| `crates/tools/reactor-metadata/winmd/Microsoft.UI.winmd` | `f70326853a3244cbdc647e690e538d1769752136df8548dacb2e0f8c804327b1` |
+| `crates/tools/reactor-metadata/winmd/Microsoft.Graphics.winmd` | `1c03e7417160d5cced840295da2b9b47e80079aee5ccdfd8f04d85665d36bf3f` |
+| `crates/libs/default/Windows.winmd` | `06cbb9a5febd5f5d9d06a31f2643bb95f7935a5a43f7d287c6f356ef1dd45ac8` |
+
+The application and probe share [`src/ui/composition/bindings.rs`](../../src/ui/composition/bindings.rs). From the repository root, regenerate it with a windows-rs checkout at the reference commit:
+
+```bash
+just composition-bindings /path/to/windows-rs
+```
+
+The generator rejects a checkout at a different commit. [`tools/composition-bindings.txt`](../../tools/composition-bindings.txt) selects the required APIs. `just check-composition-bindings` locates Cargo's pinned checkout, regenerates into a temporary directory, and compares bytes without changing the checked-in file. `just check` includes this check.
+
+**Measured on 2026-10-29:** the [progress experiment](../../probes/windows-reactor/settings-design/README.md#progress-ring-and-color-animation-experiment) captured intermediate bar widths, ring arcs, and dot colors over six seconds. Native ProgressBar and ProgressRing controls at zero opacity retained their UI Automation range patterns, including updated values, and were reported as on-screen. The finite batch completed after 6.256 seconds. Explicit stop and removal ended a separate 20-second batch after 0.514 seconds; all rendered pixels disappeared and batch subscriptions returned to zero.
+
+The run passed at 100% scaling on Windows 11 build 26300.9711 with bundled runtime 2.6.4. It establishes the public API route and accessible range exposure for the tested arrangement. It does not establish Narrator delivery, monitor presentation cadence, or behavior at other scales. Separate application checks must verify that the visuals follow the schedule and Preview clocks and stop when hidden or cancelled. They must also verify that Preview ends at its deadline while a synchronous Night Light call is still running on the controller thread.
 
 ### Other results
 

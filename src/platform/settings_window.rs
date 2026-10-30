@@ -2,13 +2,13 @@ use crate::platform::win_event::WinEventHook;
 use std::io;
 use std::path::Path;
 use windows_reactor::WindowHandle;
-use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-use windows_sys::Win32::UI::WindowsAndMessaging::EVENT_SYSTEM_MINIMIZEEND;
-use windows_sys::Win32::UI::WindowsAndMessaging::EVENT_SYSTEM_MINIMIZESTART;
-use windows_sys::Win32::UI::WindowsAndMessaging::IsIconic;
-use windows_sys::Win32::UI::WindowsAndMessaging::SW_RESTORE;
-use windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
-use windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow;
+use windows_sys::Win32::winuser::EVENT_SYSTEM_MINIMIZEEND;
+use windows_sys::Win32::winuser::EVENT_SYSTEM_MINIMIZESTART;
+use windows_sys::Win32::winuser::GetDpiForWindow;
+use windows_sys::Win32::winuser::IsIconic;
+use windows_sys::Win32::winuser::SW_RESTORE;
+use windows_sys::Win32::winuser::SetForegroundWindow;
+use windows_sys::Win32::winuser::ShowWindow;
 use winsafe::prelude::Handle;
 
 pub(crate) fn open_folder(directory: &Path) -> io::Result<()> {
@@ -31,7 +31,7 @@ pub(crate) fn open_page(target: &str) -> io::Result<()> {
     reason = "activate the live settings window supplied by Reactor"
 )]
 pub(crate) fn activate(window: &WindowHandle<'_>) {
-    let window = window.as_raw();
+    let window = window.as_raw().cast();
     // SAFETY: Reactor keeps this window alive on its owning UI thread for the
     // callback.
     if unsafe { IsIconic(window) } != 0 {
@@ -52,7 +52,7 @@ pub(crate) fn activate(window: &WindowHandle<'_>) {
 pub(crate) fn dpi(window: &WindowHandle<'_>) -> u32 {
     // SAFETY: Reactor keeps this window alive on its owning UI thread for the
     // callback.
-    unsafe { GetDpiForWindow(window.as_raw()) }
+    unsafe { GetDpiForWindow(window.as_raw().cast()) }
 }
 
 // Settings is the only window in this process that can be minimized, so the
@@ -61,6 +61,6 @@ pub(crate) fn minimize_events(notify: impl Fn(bool) + 'static) -> io::Result<Win
     WinEventHook::listen(
         EVENT_SYSTEM_MINIMIZESTART..=EVENT_SYSTEM_MINIMIZEEND,
         std::process::id(),
-        move |event| notify(event.event == EVENT_SYSTEM_MINIMIZESTART),
+        move |event| notify(event.event.cast_signed() == EVENT_SYSTEM_MINIMIZESTART),
     )
 }

@@ -1,3 +1,4 @@
+mod composition;
 mod configuration;
 mod crash_notice;
 mod file_info;
@@ -50,6 +51,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Duration;
 use windows_reactor::App;
@@ -242,6 +244,7 @@ enum Message {
     Closed,
     Edit(Vec<(Field, FieldValue)>),
     Write,
+    RequestLocation,
     Command(settings::Command),
     Native(DesktopEvent),
     Menu(Key),
@@ -395,13 +398,18 @@ struct Desktop {
     directory: PathBuf,
     zone: Option<ZoneIdentity>,
     contrast: Option<crate::platform::contrast::ContrastColors>,
+    visual_revision: u64,
     resume: ResumeEpoch,
     taskbar: Option<ShellIdentity>,
     taskbar_epoch: u64,
     registration: Box<dyn Registrar>,
     sign_in: SignIn,
     location_log: crate::DiagnosticLog,
+    location: settings::location::Location,
+    location_source: Box<dyn settings::location::Locate>,
+    location_event: Arc<Mutex<Option<settings::location::Event>>>,
     held_location: Option<crate::Coordinates>,
+    stopped_preview: Option<std::time::Instant>,
 }
 
 impl Application for Desktop {
@@ -450,6 +458,9 @@ impl Application for Desktop {
             Message::Closed => self.settings_closed(),
             Message::Edit(edits) => self.edit(edits),
             Message::Write => self.configuration.borrow_mut().write(),
+            Message::RequestLocation => {
+                self.request_location(settings::location::RequestMode::Foreground);
+            }
             Message::Command(command) => self.command(command),
             Message::Native(event) => self.native_event(event, context),
             Message::Menu(key) => self.menu(&key, context),
@@ -461,6 +472,7 @@ impl Application for Desktop {
             self.quit();
         }
         if !self.exiting {
+            self.release_location();
             self.flush();
         } else if self.exit_ready() {
             context.exit();
@@ -469,10 +481,9 @@ impl Application for Desktop {
 
     fn view(&self, input: &Input, context: &ApplicationViewContext<Self>) -> ApplicationView {
         let configuration = self.configuration.borrow();
-        let control = self
-            .snapshot
-            .as_deref()
-            .map(|snapshot| status::Control::new(snapshot, std::time::Instant::now()));
+        let control = self.snapshot.as_deref().map(|snapshot| {
+            status::Control::new(snapshot, std::time::Instant::now(), self.stopped_preview)
+        });
         let line = status::status_line(
             &input.text,
             &input.regional_format,
@@ -508,6 +519,7 @@ impl Application for Desktop {
             line.clone(),
             &names,
         )
+        .with_stopped_preview(self.stopped_preview)
         .with_crash(self.crash.as_ref());
         ApplicationView::new()
             .window::<settings::Settings>(
@@ -518,7 +530,9 @@ impl Application for Desktop {
                     model: Rc::new(model),
                     icons: self.icons.view(),
                     sign_in: self.sign_in.status(),
+                    location: self.location.status(),
                     contrast: self.contrast,
+                    visual_revision: self.visual_revision,
                     activation: self.settings_activation,
                     exiting: self.exiting,
                     opened: context.message(Message::Opened),
@@ -526,6 +540,7 @@ impl Application for Desktop {
                     edit: context.callback(Message::Edit),
                     write: context.message(Message::Write),
                     command: context.callback(Message::Command),
+                    request_location: context.message(Message::RequestLocation),
                 },
             )
             .notify_icon(
@@ -545,6 +560,10 @@ impl Desktop {
         directory: PathBuf,
         registration: Box<dyn Registrar>,
     ) -> Self {
+        let location_source: Box<dyn settings::location::Locate> =
+            Box::new(settings::location::WindowsLocation);
+        #[cfg(feature = "graph-measurement")]
+        let location_source = measurement::location_source().unwrap_or(location_source);
         Self {
             session: None,
             file_info: None,
@@ -563,19 +582,25 @@ impl Desktop {
             directory,
             zone: ZoneIdentity::current().ok(),
             contrast: settings::contrast_colors(),
+            visual_revision: 0,
             resume: ResumeEpoch::default(),
             taskbar: None,
             taskbar_epoch: 0,
             registration,
             sign_in: SignIn::default(),
             location_log: crate::DiagnosticLog::default(),
+            location: settings::location::Location::default(),
+            location_source,
+            location_event: Arc::default(),
             held_location: None,
+            stopped_preview: None,
         }
     }
 
     fn settings_closed(&mut self) {
         self.set_settings_open(false);
         if !self.exiting {
+            self.stopped_preview = self.snapshot.as_deref().and_then(status::preview_deadline);
             self.queue(ControllerCommand::StopPreview);
             // Closing settings ends Preview, so a position held for playback
             // applies now.
@@ -586,7 +611,7 @@ impl Desktop {
     }
 
     fn located(&mut self, result: Result<crate::Coordinates, crate::DiagnosticFailure>) {
-        if !self.settings_open {
+        if self.exiting || !self.location_enabled() {
             return;
         }
         match result {
@@ -602,11 +627,71 @@ impl Desktop {
         }
     }
 
+    fn location_enabled(&self) -> bool {
+        self.configuration
+            .borrow()
+            .accepted()
+            .is_some_and(|config| config.input().use_windows_location)
+    }
+
+    fn cancel_location(&mut self) {
+        self.location.cancel();
+        self.location_event = Arc::default();
+        self.held_location = None;
+    }
+
+    fn deliver_location(
+        &self,
+    ) -> Option<impl Fn(settings::location::Event) + Clone + Send + 'static> {
+        let wake = self.session.as_ref()?.wake.clone();
+        let completed = Arc::clone(&self.location_event);
+        Some(move |event| {
+            if let Ok(mut completed) = completed.lock() {
+                *completed = Some(event);
+            }
+            let _notified = wake.notify();
+        })
+    }
+
+    fn request_location(&mut self, mode: settings::location::RequestMode) {
+        if self.exiting || !self.location_enabled() || self.location.status().requesting {
+            return;
+        }
+        self.location_event = Arc::default();
+        let Some(deliver) = self.deliver_location() else {
+            return;
+        };
+        if let Some(result) = self.location.start(&*self.location_source, mode, deliver) {
+            self.located(result);
+        }
+    }
+
+    fn receive_location(&mut self) {
+        let event = self
+            .location_event
+            .lock()
+            .ok()
+            .and_then(|mut event| event.take());
+        let Some(event) = event else { return };
+        let Some(deliver) = self.deliver_location() else {
+            return;
+        };
+        if let Some(result) = self
+            .location
+            .receive(event, &*self.location_source, deliver)
+        {
+            self.located(result);
+        }
+    }
+
     fn release_location(&mut self) {
         if !self
             .snapshot
             .as_ref()
-            .is_some_and(|snapshot| snapshot.preview_active)
+            .filter(|snapshot| {
+                !status::preview_stopped(status::preview_deadline(snapshot), self.stopped_preview)
+            })
+            .is_some_and(|snapshot| status::preview_active(snapshot, std::time::Instant::now()))
         {
             self.apply_location();
         }
@@ -655,6 +740,8 @@ impl Desktop {
                 self.session = Some(session);
                 if self.configuration.borrow().opens_settings_at_launch() {
                     context.show_window("settings");
+                } else {
+                    self.request_location(settings::location::RequestMode::Background);
                 }
             }
             Err(error) => {
@@ -685,6 +772,7 @@ impl Desktop {
         match command {
             settings::Command::Quit => self.quit(),
             settings::Command::Reset => {
+                self.cancel_location();
                 let config = self.configuration.borrow_mut().reset();
                 self.configure(Some(config));
             }
@@ -719,6 +807,7 @@ impl Desktop {
                 }
             }
             settings::Command::StopPreview => self.queue(ControllerCommand::StopPreview),
+            settings::Command::PreviewElapsed => self.release_location(),
             settings::Command::Manual(command) => self.queue(ControllerCommand::Manual(command)),
             settings::Command::Add(list, files) => self.add(list, &files),
             settings::Command::Remove(list, index, executable) => {
@@ -745,7 +834,6 @@ impl Desktop {
                 self.configure(changed);
             }
             settings::Command::Icons(executables) => self.request_icons(&executables),
-            settings::Command::Located(result) => self.located(result),
             settings::Command::Browsed(file) => {
                 if let Some(file_info) = &mut self.file_info {
                     file_info.request(&file.executable, &file.path);
@@ -838,6 +926,9 @@ impl Desktop {
             });
         let changed = self.configuration.borrow_mut().edit(edits);
         self.configure(changed);
+        if !self.location_enabled() {
+            self.cancel_location();
+        }
         if let Some(enabled) = sign_in
             && self.sign_in_preference() == Some(enabled)
         {
@@ -891,6 +982,17 @@ impl Desktop {
         if self.exiting || self.fatal.is_some() {
             return;
         }
+        let stops_preview = matches!(
+            command,
+            ControllerCommand::StopPreview
+                | ControllerCommand::Lock
+                | ControllerCommand::Suspend
+                | ControllerCommand::Resume { .. }
+                | ControllerCommand::Recompute(Recompute::Clock)
+        ) || matches!(&command, ControllerCommand::Configure { config, .. } if !config.input().manage_night_light);
+        if stops_preview {
+            self.stopped_preview = self.snapshot.as_deref().and_then(status::preview_deadline);
+        }
         // Each Configure has the whole configuration, so a newer one replaces a
         // directly preceding pending Configure. Otherwise a slider drag while
         // the controller is blocked exhausts the queue.
@@ -927,6 +1029,10 @@ impl Desktop {
                     if matches!(command, ControllerCommand::Recompute(Recompute::Retry)) =>
                 {
                     self.retry = Some(receipt.id);
+                }
+                #[cfg(feature = "graph-measurement")]
+                Ok(receipt) if matches!(command, ControllerCommand::Preview(_)) => {
+                    measurement::preview_submitted(receipt.submitted_at);
                 }
                 Ok(_receipt) => {}
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
@@ -994,11 +1100,13 @@ impl Desktop {
             DesktopEvent::Activate => self.open_settings(context),
             DesktopEvent::WorkerChanged => self.refresh(),
             DesktopEvent::ClockChanged => {
+                self.visual_revision = self.visual_revision.wrapping_add(1);
                 self.zone = ZoneIdentity::current().ok();
                 self.queue(ControllerCommand::Recompute(Recompute::Clock));
             }
             DesktopEvent::SettingsChanged => {
                 self.contrast = settings::contrast_colors();
+                self.visual_revision = self.visual_revision.wrapping_add(1);
                 let current = ZoneIdentity::current().ok();
                 if current.is_none() || current != self.zone {
                     self.zone = current;
@@ -1014,6 +1122,7 @@ impl Desktop {
                 self.queue(ControllerCommand::Suspend);
             }
             DesktopEvent::AutomaticResume | DesktopEvent::UserResume => {
+                self.visual_revision = self.visual_revision.wrapping_add(1);
                 let stamp = last_wake_time()
                     .inspect_err(|error| tracing::warn!(%error, "reading the last wake time"))
                     .ok();
@@ -1048,6 +1157,7 @@ impl Desktop {
     }
 
     fn refresh(&mut self) {
+        self.receive_location();
         let previous = self.snapshot.clone();
         let Some(session) = &mut self.session else {
             return;
@@ -1087,6 +1197,7 @@ impl Desktop {
     }
 
     fn begin_exit(&mut self) {
+        self.cancel_location();
         if !self.exiting {
             self.configuration.borrow_mut().exit();
         }
@@ -1223,12 +1334,12 @@ mod tests {
         reason = "keep the intentional child abort out of Windows Error Reporting"
     )]
     fn suppress_crash_reporting() {
-        use windows_sys::Win32::System::Diagnostics::Debug::SEM_FAILCRITICALERRORS;
-        use windows_sys::Win32::System::Diagnostics::Debug::SEM_NOGPFAULTERRORBOX;
-        use windows_sys::Win32::System::Diagnostics::Debug::SetErrorMode;
+        use windows_sys::Win32::errhandlingapi::SetErrorMode;
+        use windows_sys::Win32::winbase::SEM_FAILCRITICALERRORS;
+        use windows_sys::Win32::winbase::SEM_NOGPFAULTERRORBOX;
         // SAFETY: SetErrorMode changes only this child process's error mode
         // and takes no pointers.
-        unsafe { SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX) };
+        unsafe { SetErrorMode((SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX).cast_unsigned()) };
     }
 
     fn crash_record(run: &ChildRun) -> &str {
@@ -1383,12 +1494,7 @@ mod tests {
         // be null; the call does not return because no handler
         // continues it.
         unsafe {
-            windows_sys::Win32::System::Diagnostics::Debug::RaiseException(
-                0xE000_0001,
-                0,
-                0,
-                std::ptr::null(),
-            );
+            windows_sys::Win32::errhandlingapi::RaiseException(0xE000_0001, 0, 0, std::ptr::null());
         };
     }
 
@@ -1745,6 +1851,7 @@ mod tests {
                 origin: std::time::Instant::now(),
                 calculation: None,
                 preview_active: false,
+                preview_deadline: None,
                 suppression: crate::SuppressionState {
                     automatic: false,
                     manual_deadline: None,

@@ -5,6 +5,7 @@ use crate::ManagementState;
 use crate::l10n::LanguageTag;
 use crate::ui::configuration::Configuration;
 use std::collections::BTreeMap;
+use test_case::test_case;
 
 struct Fixture {
     directory: tempfile::TempDir,
@@ -501,25 +502,29 @@ fn retry_is_disabled_while_an_earlier_retry_is_unprocessed() {
     assert!(!native_banner(&fixture, &model).enabled);
 }
 
-#[test]
-fn a_time_zone_failure_without_a_last_temperature_shows_retry_on_every_page() {
+#[test_case(SchedulingState::Stopped, InfoBarSeverity::Error; "no retained temperature")]
+#[test_case(SchedulingState::Retained, InfoBarSeverity::Warning; "retained temperature")]
+fn a_time_zone_failure_shows_retry_on_every_page(
+    state: SchedulingState,
+    severity: InfoBarSeverity,
+) {
     let fixture = Fixture::new();
     let (_configuration, mut model) = native_model(&fixture, ManagementState::On, &[]);
-    model.scheduling = SchedulingState::Stopped;
+    model.scheduling = state;
     for page in Page::ALL {
         let page_banners = banners(&model, &fixture.text, &fixture.region, page);
         let [banner] = page_banners.as_slice() else {
             panic!("one banner on {page:?}, got {page_banners:?}");
         };
         assert_eq!(banner.id, "banner-schedule");
-        assert_eq!(banner.severity, InfoBarSeverity::Error);
+        assert_eq!(banner.severity, severity);
         assert_eq!(banner.dismiss, None);
         assert!(banner.enabled);
         assert_eq!(banner.actions, [(Action::RetryNative, "Retry".to_owned())]);
     }
     model.retrying = true;
     assert!(!banners(&model, &fixture.text, &fixture.region, Page::Schedule)[0].enabled);
-    model.scheduling = SchedulingState::Retained;
+    model.scheduling = SchedulingState::Available;
     assert_eq!(
         ids(&banners(
             &model,

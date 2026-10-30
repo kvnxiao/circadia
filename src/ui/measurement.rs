@@ -10,9 +10,11 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
-use windows_reactor::LiveRenderingSubscription;
+use windows_reactor::test::LiveRenderingSubscription;
 
+mod location;
 mod native;
+pub use location::LocationMeasurement;
 pub use native::SimulatedNativeCall;
 pub use native::SimulatedNativeFault;
 
@@ -30,8 +32,6 @@ struct Sample {
 #[derive(Default)]
 struct Frames {
     sample: Option<Sample>,
-    staged_position: Option<(f64, f64)>,
-    position: Option<(u64, f64, f64)>,
     error: Option<String>,
 }
 
@@ -43,6 +43,7 @@ struct Gate {
 
 #[derive(Default)]
 struct Shared {
+    location: Mutex<Option<location::Simulation>>,
     solar_failure: AtomicBool,
     frames: Mutex<Frames>,
     rendered: Condvar,
@@ -52,6 +53,13 @@ struct Shared {
     ready: Condvar,
     native: Mutex<native::Simulation>,
     settings: Mutex<Option<SettingsMeasurement>>,
+    preview_submitted: Mutex<Option<Instant>>,
+}
+
+pub(super) fn location_source() -> Option<Box<dyn super::settings::location::Locate>> {
+    let measurement = ACTIVE.get()?;
+    measurement.0.location.lock().ok()?.as_ref()?;
+    Some(Box::new(location::Source(Arc::clone(&measurement.0))))
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -81,6 +89,18 @@ pub struct SettingsMeasurement {
 }
 
 impl GraphMeasurement {
+    /// Return the latest Preview command's queue-admission time.
+    ///
+    /// # Errors
+    /// Report poisoned measurement synchronization.
+    pub fn preview_submitted_at(&self) -> io::Result<Option<Instant>> {
+        self.0
+            .preview_submitted
+            .lock()
+            .map(|value| *value)
+            .map_err(|_error| io::Error::other("Preview measurement lock failed"))
+    }
+
     /// Read the latest settings focus and temperature diagnostics.
     ///
     /// # Errors
@@ -200,19 +220,6 @@ impl GraphMeasurement {
             })
     }
 
-    /// Return the last rendered dot and its change counter.
-    ///
-    /// # Errors
-    /// Report poisoned measurement synchronization.
-    pub fn position(&self) -> io::Result<Option<(u64, f64, f64)>> {
-        Ok(self
-            .0
-            .frames
-            .lock()
-            .map_err(|_error| io::Error::other("measurement lock failed"))?
-            .position)
-    }
-
     /// Hold or release subsequent simulated temperature operations.
     ///
     /// # Errors
@@ -255,6 +262,26 @@ impl GraphMeasurement {
         Ok(())
     }
 
+    /// Submit a retry before clearing simulated failures.
+    ///
+    /// - The callback must not wait for the controller or access this
+    ///   simulation.
+    /// - Simulated operations wait until the callback returns.
+    ///
+    /// # Errors
+    /// Report poisoned synchronization or callback failure; keep failures on
+    /// error.
+    pub fn retry_native(&self, submit: impl FnOnce() -> io::Result<()>) -> io::Result<()> {
+        let mut simulation = self
+            .0
+            .native
+            .lock()
+            .map_err(|_error| io::Error::other("native simulation lock failed"))?;
+        submit()?;
+        simulation.faults.clear();
+        Ok(())
+    }
+
     /// Read completed simulated calls, including failures and stored values.
     ///
     /// # Errors
@@ -271,6 +298,14 @@ impl GraphMeasurement {
             ));
         }
         Ok(simulation.calls.clone())
+    }
+}
+
+pub(super) fn preview_submitted(at: Instant) {
+    if let Some(measurement) = ACTIVE.get()
+        && let Ok(mut value) = measurement.0.preview_submitted.lock()
+    {
+        *value = Some(at);
     }
 }
 
@@ -324,16 +359,9 @@ pub(super) fn drawn(config: &Config) {
     }
 }
 
-pub(super) fn marker(x: f64, y: f64) {
-    let Some(active) = ACTIVE.get() else { return };
-    if let Ok(mut frames) = active.0.frames.lock() {
-        frames.staged_position = Some((x, y));
-    }
-}
-
 pub(super) fn subscribe() -> Option<LiveRenderingSubscription> {
     let active = ACTIVE.get()?;
-    match windows_reactor::subscribe_live_rendering(rendering) {
+    match windows_reactor::test::subscribe_live_rendering(rendering) {
         Ok(subscription) => Some(subscription),
         Err(error) => {
             if let Ok(mut frames) = active.0.frames.lock() {
@@ -350,17 +378,6 @@ fn rendering() {
     let Ok(mut frames) = active.0.frames.lock() else {
         return;
     };
-    if let Some((x, y)) = frames.staged_position {
-        let changed = frames.position.is_none_or(|(_, prior_x, prior_y)| {
-            (x - prior_x).abs() > f64::EPSILON || (y - prior_y).abs() > f64::EPSILON
-        });
-        if changed {
-            let count = frames
-                .position
-                .map_or(1, |(count, _, _)| count.saturating_add(1));
-            frames.position = Some((count, x, y));
-        }
-    }
     if let Some(sample) = &mut frames.sample
         && sample.staged
         && sample.elapsed.is_none()
