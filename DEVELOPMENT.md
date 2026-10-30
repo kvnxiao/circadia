@@ -44,7 +44,7 @@ Compiling the installer does not install or launch it. Check installation, upgra
 
 ## Routine checks
 
-Formatting requires nightly rustfmt. Dependency checks require `cargo-audit` and `cargo-machete`; the minimum-version and generated-binding checks require `jq`.
+Formatting requires nightly rustfmt, and binding generation requires stable rustfmt (`rustup component add rustfmt --toolchain stable`). Dependency checks require `cargo-audit` and `cargo-machete`; the minimum-version and generated-binding checks require `jq`.
 
 ```bash
 just fmt
@@ -75,7 +75,11 @@ The [CI workflow](.github/workflows/ci.yml) runs on pull requests, pushes to `ma
 - Rust formatting and workflow syntax on Linux.
 - Rust dependency advisories and unused dependencies on Linux.
 
-Rust jobs cache dependencies separately by project and check group; Python caches locked dependencies. Superseded runs are cancelled, and a failed Rust matrix job does not cancel the others. Formatting runs separately so compiled checks do not install nightly Rust. `just fmt-check` and `just clippy` run individually; `just lint` still runs both.
+A preparation job caches Cargo Git sources before the Rust matrix starts. Its shared key hashes the Git source URLs and revisions in the application and Reactor probe lockfiles, so registry-only dependency updates preserve this cache. On a cache miss, it fetches the locked dependencies and saves the Git sources before compilation. The four Rust jobs using Reactor and the installer restore this cache when their separate project/check-group dependency caches do not have an exact hit. Exact dependency-cache hits already include Git sources. Python caches locked dependencies.
+
+GitHub scopes pull-request caches to that pull request; caches saved on `main` are also available to pull requests. Cache eviction or a cache-service failure can still require Cargo to fetch sources again.
+
+Superseded runs are cancelled, and a failed Rust matrix job does not cancel the others. Formatting runs separately so compiled checks do not install nightly Rust. The bindings check installs stable rustfmt for code generation; the generated file uses LF line endings on every checkout. `just fmt-check` and `just clippy` run individually; `just lint` still runs both.
 
 CI executes test harnesses, including unit tests of native-check helpers, but does not launch the desktop application or probe windows. Desktop automation, screenshots, live Night Light checks, host-setting exercises, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
 
