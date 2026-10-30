@@ -64,9 +64,9 @@ The Schedule page has, in order:
 The App suppression page has:
 
 - An explanation of automatic suppression, and the manual suppression command with the interval's end time while it is active.
-- Recently focused: the recent-app history, each entry with its icon, display name, executable file name, time since it had focus, and either an Add command or, when the app has a suppression entry, an indication that it is on the list with a Remove command. An app with an exclusion without a title condition shows that it is excluded.
-- The suppression list with its count, each entry with its icon, its display name or title text, its executable file name, a command that edits its title condition, and a Remove command, and an Add app command. Add app opens a dialog that lists, as checkboxes with their icons, the recent apps that have no suppression entry, and offers Browse, which selects an executable file. Its Add command names the number of chosen apps and is unavailable while none is chosen. An entry that an exclusion makes inactive is marked inactive.
-- Never suppress: the fixed exclusions, which cannot be removed, and the user exclusions with commands that edit their title conditions and Remove commands, each with its icon, and an Add exclusion command. Add exclusion opens the same dialog for the exclusion list, listing the recent apps that have no exclusion. In either dialog, browsing to an executable that already has an entry on that list adds nothing and shows the message of REQ-edit-executable-list.
+- Recently focused: each installation's icon, display name, executable filename, time since focus, and folder when needed to distinguish same-name installations. Add creates a filename-only rule. An installation covered by one suppression rule shows that it is listed and offers Remove for that rule. When multiple rules cover it, the row shows that it is listed and directs edits to the rules below instead of choosing a rule to remove. A covering exclusion without a title condition shows that it is excluded.
+- The suppression list with its count, each entry's icon, display name or title text, filename, folder for a restricted rule, an edit-conditions command, and Remove. Add app opens a dialog with recent installations as checkbox candidates, Browse, and an optional “Only this installation” choice for each candidate. Duplicate scopes cannot be added, but the user can change a candidate's restriction to choose a distinct scope. The Add command names the number of chosen rules and is unavailable while none is chosen. Exclusions mark an entry inactive only under REQ-edit-executable-list.
+- Never suppress: the fixed exclusions, which cannot be edited or removed, and the user exclusions with the same conditions and Remove commands as suppression rules. Add exclusion opens the same selection dialog for the exclusion list. Both dialogs explain duplicates without adding another rule in the same scope; overlap between the two lists preserves both entries and follows exclusion precedence.
 - Switch delay: the focus delay in milliseconds.
 
 The Transitions page has the scheduled transition duration, labeled Transition length, with a slider and number field and a worked example of a transition that reaches the evening temperature at sunset; Fade duration, the ordinary fade; Preview length; and Maximum update rate, the output-rate ceiling.
@@ -78,10 +78,11 @@ The General page has the interface language of REQ-interface-language; Start at 
 - Solar timing is disabled: Morning and evening is marked as not used and remains editable.
 - Daytime is 5000 K and the user chooses Restore recommended colors: Daytime, Morning and evening, and Bedtime become 6500 K, 3400 K, and 2400 K in one edit.
 - Two recent apps are chosen in the Add app dialog: its command reads "Add 2 apps"; with none chosen, the command is unavailable.
-- An app with a suppression entry appears in Recently focused: it shows that it is on the list and offers Remove.
-- `browser.exe` is on both the suppression and exclusion lists: its suppression entry is marked inactive.
-- The recent apps include `game.exe`, which is on the suppression list, and `browser.exe`, which is excluded: Add exclusion lists `game.exe` and not `browser.exe`, its command is unavailable until the user chooses an app, and choosing `game.exe` adds it to the exclusion list.
-- `javaw.exe` has the suppression entry "Minecraft (javaw.exe)" and is a recent app: Add app does not list it, and browsing to `javaw.exe` adds nothing and says that it is already on the list.
+- An installation covered by one suppression entry appears in Recently focused: it shows that it is on the list and offers Remove for that entry. Multiple covering entries remain editable in the rule list.
+- `browser.exe` has filename-only, title-free entries on both the suppression and exclusion lists: its suppression entry is marked inactive.
+- A recent `game.exe` is on the suppression list: Add exclusion can add the same scope, retaining the suppression entry and applying exclusion precedence.
+- `javaw.exe` already has a filename-only rule: choosing its default scope in Add app reports that it is already listed; selecting “Only this installation” permits a distinct path-restricted rule.
+- Two installations named `browser.exe` appear in Add app at 640 effective pixels of client width: their folders and restriction choices wrap, both selection controls remain usable, and adding one restricted installation does not add the other.
 
 ### REQ-status-display — Show control status and phase
 
@@ -213,7 +214,7 @@ Circadia shows one static tray icon. Its tooltip follows REQ-status-display. Its
 
 1. Open Circadia settings.
 2. Suppress for 1 hour while manual suppression is inactive, or Stop suppressing while it is active. Starting is unavailable while management is off or starting suppression is disabled.
-3. A caption, Suppress while focused, that cannot be selected, followed by up to three of the most recent apps from the recent-app history as tray toggles. Each toggle shows its display name and executable file name, for example "Counter-Strike 2 (cs2.exe)", and a check mark while the app has a suppression entry. A toggle whose entry has a title condition shows the entry's title text in place of the display name and is unavailable. An app with an exclusion without a title condition is unavailable and labeled as excluded. The toggles are unavailable during a configuration error and while saving is paused, and the caption then states the reason.
+3. A caption, Suppress while focused, that cannot be selected, followed by up to three recent installations as tray toggles under REQ-edit-executable-list. Each shows its display name and filename, with a folder when same-name installations need distinguishing. A covering suppression rule supplies a check mark; a sole title-conditioned rule supplies its title text. Restricted or overlapping rules make the toggle unavailable. A covering title-free exclusion makes it unavailable and labeled as excluded. All toggles are unavailable during a configuration error and while saving is paused, and the caption then states the reason.
 4. Quit Circadia.
 
 Menu labels change only when the state they show changes. Explorer recreation restores exactly one working icon in the existing process and requests the application refresh defined by REQ-target-recompute.
@@ -221,9 +222,11 @@ Menu labels change only when the state they show changes. Explorer recreation re
 **Scenarios:**
 
 - Manual suppression is inactive: the menu offers Suppress for 1 hour; after the user selects it, the menu offers Stop suppressing.
-- An app with a suppression entry without a title condition is among the three most recent: its toggle has a check mark, and selecting it removes that entry.
-- An app without a suppression entry is among them: its toggle has no check mark, and selecting it adds an entry without a title condition.
+- An app covered only by a filename-only suppression entry without a title condition is among the three most recent: its toggle has a check mark, and selecting it removes that entry.
+- An app without a covering suppression entry is among them: its toggle has no check mark, and selecting it adds a filename-only entry without a title condition.
 - `javaw.exe` has the entry "Minecraft (javaw.exe)" with a title condition: its toggle reads "✓ Minecraft (javaw.exe)" and is unavailable.
+- A recent app is covered by a path-restricted rule or by multiple suppression rules: its toggle is checked and unavailable; opening Settings permits explicit edits to those rules.
+- Two recent installations have the same filename: the menu identifies each folder and applies each item's availability to that installation.
 - Only one app has had focus since Circadia started: the caption is followed by one toggle.
 - Management is off: Suppress for 1 hour is unavailable, and the toggles still work.
 - Explorer restarts: one restored icon opens its context menu, and the controller requests the current native output without restarting the process.
