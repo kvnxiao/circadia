@@ -41,8 +41,8 @@ Circadia requires Windows 11 x64 with working native Night Light. The intended m
 
 ### Install the latest development build
 
-1. Sign in to GitHub and open the [Tests and code quality runs for `main`](https://github.com/kvnxiao/circadia/actions/workflows/checks.yml?query=branch%3Amain+event%3Apush).
-2. Open the newest successful run with a completed **Windows packaging / Unsigned x64 installer** job. Under **Artifacts**, download **Circadia-windows-x64-unsigned** and extract the ZIP.
+1. Sign in to GitHub and open the [Windows packaging runs](https://github.com/kvnxiao/circadia/actions/workflows/windows-installer.yml).
+2. Open the newest successful run with a completed **Unsigned x64 installer** job. Under **Artifacts**, download **Circadia-windows-x64-unsigned** and extract the ZIP.
 3. Run `Circadia-<version>-<commit>-windows-x64-unsigned-setup.exe`. If Circadia is already running, choose **Quit** from its tray menu before continuing.
 4. Finish setup, then open **Circadia** from the Windows Start menu.
 

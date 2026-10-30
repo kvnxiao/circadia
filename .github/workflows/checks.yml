@@ -28,11 +28,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       application: ${{ steps.scope.outputs.application }}
-      solar: ${{ steps.scope.outputs.solar }}
-      reactor: ${{ steps.scope.outputs.reactor }}
-      settings: ${{ steps.scope.outputs.settings }}
-      python: ${{ steps.scope.outputs.python }}
-      git: ${{ steps.scope.outputs.git }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -58,12 +53,7 @@ jobs:
       - name: Install nightly rustfmt
         run: rustup toolchain install nightly --profile minimal --component rustfmt
       - name: Check Rust formatting
-        run: |
-          just fmt-check
-          just --justfile tools/solar-calculation/justfile fmt-check
-          just --justfile tools/windows-reactor/justfile fmt-check
-          just --justfile tools/windows-reactor/settings-design/justfile fmt-check
-          rustfmt +nightly --check --edition 2024 tools/solar-timing/solar-timing.rs
+        run: just fmt-check
       - name: Test workflow selection
         run: node --test .github/scripts/check-scope.test.mjs
       - name: Check workflows
@@ -78,7 +68,7 @@ jobs:
     name: Cargo Git sources
     needs: changes
     env:
-      RUN_CHECKS: ${{ needs.changes.outputs.git }}
+      RUN_CHECKS: ${{ needs.changes.outputs.application }}
     runs-on: windows-2025
     timeout-minutes: 15
     outputs:
@@ -103,7 +93,7 @@ jobs:
         if: env.RUN_CHECKS == 'true'
         id: key
         run: |
-          sources=$(sed -n '/^source = "git+/p' Cargo.lock tools/windows-reactor/Cargo.lock tools/windows-reactor/settings-design/Cargo.lock | tr -d '\r' | LC_ALL=C sort -u | sha256sum)
+          sources=$(sed -n '/^source = "git+/p' Cargo.lock | tr -d '\r' | LC_ALL=C sort -u | sha256sum)
           echo "value=cargo-git-v1-Windows-${sources%% *}" >> "$GITHUB_OUTPUT"
       - name: Look up shared Git sources
         if: env.RUN_CHECKS == 'true'
@@ -118,10 +108,7 @@ jobs:
         run: rustup toolchain install stable --profile minimal
       - name: Fetch locked dependencies
         if: env.RUN_CHECKS == 'true' && (steps.sources.outputs.cache-hit != 'true')
-        run: |
-          for manifest in Cargo.toml tools/windows-reactor/Cargo.toml tools/windows-reactor/settings-design/Cargo.toml; do
-            cargo +stable fetch --locked --manifest-path "$manifest" --target x86_64-pc-windows-msvc
-          done
+        run: cargo +stable fetch --locked --target x86_64-pc-windows-msvc
       - name: Save shared Git sources before checks
         if: env.RUN_CHECKS == 'true' && (steps.sources.outputs.cache-hit != 'true')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -150,21 +137,6 @@ jobs:
             recipes: clippy doc check-composition-bindings
             scope: application
             cache: application-checks
-          - name: Solar calculation checks
-            project: tools/solar-calculation
-            recipes: clippy test doc
-            scope: solar
-            cache: solar
-          - name: Reactor probe checks
-            project: tools/windows-reactor
-            recipes: clippy test doc
-            scope: reactor
-            cache: reactor
-          - name: Settings probe checks
-            project: tools/windows-reactor/settings-design
-            recipes: clippy test doc
-            scope: settings
-            cache: settings
     defaults:
       run:
         shell: bash
@@ -200,7 +172,7 @@ jobs:
           cache-bin: false
           cache-directories: '!~/.cargo/git'
       - name: Restore shared Git sources
-        if: env.RUN_CHECKS == 'true' && (matrix.cache != 'solar')
+        if: env.RUN_CHECKS == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
@@ -212,51 +184,6 @@ jobs:
         run: |
           read -r -a recipes <<< "$CHECK_RECIPES"
           just "${recipes[@]}"
-      - name: Compile and lint the solar timing binary
-        if: env.RUN_CHECKS == 'true' && (matrix.cache == 'solar')
-        run: |
-          timing_project=$(mktemp -d)
-          cp -R src fixtures.json Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml clippy.toml justfile "$timing_project/"
-          cp ../solar-timing/solar-timing.rs "$timing_project/src/bin/"
-          cat ../solar-timing/timing.just >> "$timing_project/justfile"
-          just --justfile "$timing_project/justfile" clippy timing-build
-
-  python:
-    name: Python tools checks
-    needs: changes
-    env:
-      RUN_CHECKS: ${{ needs.changes.outputs.python }}
-    runs-on: windows-2025
-    timeout-minutes: 15
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Report check scope
-        working-directory: ${{ github.workspace }}
-        run: |
-          if [[ "$RUN_CHECKS" == true ]]; then
-            echo "Affected files require these checks."
-          else
-            echo "No affected files; checks pass without rebuilding."
-          fi
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.RUN_CHECKS == 'true'
-        with:
-          persist-credentials: false
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
-        if: env.RUN_CHECKS == 'true'
-        with:
-          tool: just
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        if: env.RUN_CHECKS == 'true'
-        with:
-          version-file: tools/pyproject.toml
-          python-version: '3.15'
-          enable-cache: true
-          cache-dependency-glob: tools/uv.lock
-      - run: just --justfile tools/justfile check
-        if: env.RUN_CHECKS == 'true'
 
   dependencies:
     name: Rust dependency audit
@@ -269,16 +196,12 @@ jobs:
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: just,cargo-audit,cargo-machete
-      - run: |
-          just dependencies
-          just --justfile tools/solar-calculation/justfile dependencies
-          just --justfile tools/windows-reactor/justfile dependencies
-          just --justfile tools/windows-reactor/settings-design/justfile dependencies
+      - run: just dependencies
 
   required:
     name: All required checks
     if: always()
-    needs: [changes, formatting, cargo-git, rust, python, dependencies]
+    needs: [changes, formatting, cargo-git, rust, dependencies]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -286,11 +209,3 @@ jobs:
         env:
           RESULTS: ${{ toJSON(needs) }}
         run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
-
-  installer:
-    name: Windows packaging
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [required, cargo-git]
-    uses: ./.github/workflows/windows-installer.yml
-    with:
-      git-cache-key: ${{ needs.cargo-git.outputs.cache-key }}

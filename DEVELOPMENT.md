@@ -44,7 +44,7 @@ Compiling the installer does not install or launch it. Check installation, upgra
 
 ## Routine checks
 
-Formatting requires nightly rustfmt, and binding generation requires stable rustfmt (`rustup component add rustfmt --toolchain stable`). Dependency checks require `cargo-audit` and `cargo-machete`; the minimum-version and generated-binding checks require `jq`.
+Formatting requires nightly rustfmt, and binding generation requires stable rustfmt (`rustup component add rustfmt --toolchain stable`). Dependency checks require `cargo-audit`, `cargo-machete`, and `jq`; the minimum-version and generated-binding checks also require `jq`.
 
 ```bash
 just fmt
@@ -66,20 +66,31 @@ Read a native check's instructions before running it. Some send mouse and keyboa
 
 ## Continuous integration
 
-The [Tests and code quality workflow](.github/workflows/checks.yml) runs on pull requests, pushes to `main`, merge queues, and manual dispatch. Independent jobs check:
+The [Tests and code quality workflow](.github/workflows/checks.yml) and [Tools and probes workflow](.github/workflows/tools.yml) run independently on pull requests, pushes to `main`, merge queues, and manual dispatch.
 
-- Application unit tests and release-text tests on Windows.
-- Application Clippy, rustdoc, and generated composition bindings on Windows.
-- Each standalone Rust probe with Clippy, unit tests, and rustdoc on Windows, plus compilation and Clippy for the solar timing binary.
-- Python tools with Ruff formatting and linting, ty, pytest, and dependency auditing on Windows with Python 3.15.
-- Rust formatting and workflow syntax on Linux.
+Application CI checks:
+
+- Unit tests and release-text tests on Windows.
+- Clippy, rustdoc, and generated composition bindings on Windows.
+- Rust formatting, workflow syntax, workflow-selection tests, and the installer shell script on Linux.
 - Rust dependency advisories and unused dependencies on Linux.
 
-Pull requests select expensive checks from changed paths. Unaffected jobs run a success step without installing tools, restoring caches, or compiling code; their job names remain present with a passing status. Shared composition code and assets also select the Settings probe. Unknown paths select all checks. Pushes to `main`, merge queues, and manual runs always select the full suite.
+Tool and probe CI checks:
 
-Use **All required checks** as the branch-protection status. It fails if any check fails, is cancelled, or is unexpectedly skipped. Formatting, workflow-selection tests, and dependency audits always run. The selector compares the complete pull-request diff, including deleted and renamed paths.
+- Each standalone Rust probe with Clippy, unit tests, and rustdoc on Windows.
+- Compilation and Clippy for the solar timing binary in the solar calculation job.
+- Python tools with Ruff formatting and linting, ty, pytest, and dependency auditing on Windows with Python 3.15.
+- Probe Rust formatting, dependency advisories, and unused dependencies on Linux.
 
-When selected checks need Reactor, a preparation job caches Cargo Git sources before the Rust matrix starts. Its shared key hashes the Git source URLs and revisions in the application and Reactor probe lockfiles, so registry-only dependency updates preserve this cache. On a cache miss, it fetches the locked dependencies and saves the Git sources before compilation. The four Rust jobs using Reactor and the installer restore this shared cache. Separate caches store registry dependencies and compiled artifacts by project and check group; they exclude Cargo's Git directory to avoid storing duplicate source archives. Python caches locked dependencies.
+The solar and Python jobs can start after path selection; they do not wait for Reactor dependencies. Each workflow prepares Cargo Git sources for its own Reactor-dependent Rust jobs. Application checks and probe checks do not wait for each other.
+
+Pull requests select expensive checks from changed paths. Unaffected jobs run a success step without installing tools, restoring caches, or compiling code; their job names remain present with a passing status. Shared composition code and assets also select the [settings-design experiment](tools/windows-reactor/settings-design/README.md). Unknown paths select all checks. Pushes to `main`, merge queues, and manual runs always select the full suite in the triggered workflow.
+
+Use both **All required checks** and **All tool and probe checks** as branch-protection statuses. Each fails if a job in its workflow fails, is cancelled, or is unexpectedly skipped. Formatting and dependency audits always run in their owning workflow. The shared selector compares the complete pull-request diff, including deleted and renamed paths.
+
+The application dependency audit checks the root lockfile and derives the unused-dependency scan's manifest list from Cargo workspace metadata. Standalone probe manifests are checked by tool and probe CI.
+
+The two preparation jobs cache Cargo Git sources independently. Each key hashes the Git source URLs and revisions in that workflow's lockfiles. Matching source sets reuse the same cache, and registry-only dependency updates preserve it. On a cache miss, each job fetches its own locked dependencies and saves the Git sources before its Rust matrix starts. Concurrent cold-cache runs may fetch the same sources; cache reuse does not determine check results. The four Rust jobs using Reactor and the installer restore the cache matching their source sets. Separate caches store registry dependencies and compiled artifacts by project and check group; they exclude Cargo's Git directory to avoid storing duplicate source archives. Python caches locked dependencies.
 
 GitHub scopes pull-request caches to that pull request; caches saved on `main` are also available to pull requests. Cache eviction or a cache-service failure can still require Cargo to fetch sources again.
 
@@ -89,7 +100,7 @@ Superseded runs are cancelled, and a failed Rust matrix job does not cancel the 
 
 CI executes test harnesses, including unit tests of native-check helpers, but does not launch the desktop application or probe windows. Desktop automation, screenshots, live Night Light checks, host-setting exercises, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
 
-On a push to `main`, the reusable [Windows packaging workflow](.github/workflows/windows-installer.yml) runs after **All required checks** passes. Its **Unsigned x64 installer** job builds the package. It builds the current commit's installer and uploads **Circadia-windows-x64-unsigned**, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual workflow dispatch do not build an installer.
+The separate [Windows packaging workflow](.github/workflows/windows-installer.yml) starts when application CI completes successfully for a push to `main`. It checks out that run's exact commit and does not wait for tool and probe CI. Its **Unsigned x64 installer** job uploads **Circadia-windows-x64-unsigned**, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual workflow dispatch do not build an installer.
 
 External actions use full commit pins. [Dependabot](.github/dependabot.yml) proposes weekly action updates for review.
 

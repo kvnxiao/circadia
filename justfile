@@ -96,8 +96,13 @@ doc:
     RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -D warnings" cargo +stable doc --workspace --all-features --no-deps --locked
 
 dependencies:
+    #!/usr/bin/env bash
+    set -euo pipefail
     cargo +stable audit
-    cargo +stable machete
+    metadata=$(cargo +stable metadata --no-deps --format-version 1 --locked)
+    manifests=$(jq -ber '.packages[].manifest_path' <<< "$metadata")
+    mapfile -t manifest_paths <<< "$manifests"
+    cargo +stable machete "${manifest_paths[@]}"
 
 check: lint test test-release-text doc dependencies check-composition-bindings
 

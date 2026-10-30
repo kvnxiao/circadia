@@ -1,14 +1,17 @@
 name: Windows packaging
 
 on:
-  workflow_call:
-    inputs:
-      git-cache-key:
-        required: true
-        type: string
+  workflow_run:
+    workflows: [Tests and code quality]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,6 +20,10 @@ env:
 jobs:
   package:
     name: Unsigned x64 installer
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: windows-2025
     timeout-minutes: 30
     defaults:
@@ -26,6 +33,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: just,cargo-bundle-licenses@4.2.0
@@ -36,11 +44,16 @@ jobs:
           key: installer-release
           cache-bin: false
           cache-directories: '!~/.cargo/git'
+      - name: Compute Git source cache key
+        id: key
+        run: |
+          sources=$(sed -n '/^source = "git+/p' Cargo.lock | tr -d '\r' | LC_ALL=C sort -u | sha256sum)
+          echo "value=cargo-git-v1-Windows-${sources%% *}" >> "$GITHUB_OUTPUT"
       - name: Restore shared Git sources
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
-          key: ${{ inputs.git-cache-key }}
+          key: ${{ steps.key.outputs.value }}
       - name: Build unsigned installer
         run: just installer
       - name: Upload installer and checksum
