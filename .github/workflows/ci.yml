@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  formatting:
+    name: Rust formatting and workflow lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just,actionlint
+      - name: Install nightly rustfmt
+        run: rustup toolchain install nightly --profile minimal --component rustfmt
+      - name: Check Rust formatting
+        run: |
+          just fmt-check
+          just --justfile tools/solar-calculation/justfile fmt-check
+          just --justfile tools/windows-reactor/justfile fmt-check
+          just --justfile tools/windows-reactor/settings-design/justfile fmt-check
+          rustfmt +nightly --check --edition 2024 tools/solar-timing/solar-timing.rs
+      - name: Check workflows
+        run: actionlint -color
+
+  rust:
+    name: ${{ matrix.name }}
+    runs-on: windows-2025
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Application unit tests
+            project: .
+            recipes: test test-release-text
+            cache: application-tests
+          - name: Application Clippy, docs, and bindings
+            project: .
+            recipes: clippy doc check-composition-bindings
+            cache: application-checks
+          - name: Solar probe checks
+            project: tools/solar-calculation
+            recipes: clippy test doc
+            cache: solar
+          - name: Reactor probe checks
+            project: tools/windows-reactor
+            recipes: clippy test doc
+            cache: reactor
+          - name: Settings probe checks
+            project: tools/windows-reactor/settings-design
+            recipes: clippy test doc
+            cache: settings
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal --component clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.cache }}
+          workspaces: ${{ matrix.project }} -> target
+          cache-bin: false
+      - name: Run checks
+        env:
+          CHECK_RECIPES: ${{ matrix.recipes }}
+        run: |
+          read -r -a recipes <<< "$CHECK_RECIPES"
+          just "${recipes[@]}"
+      - name: Compile and lint the solar timing binary
+        if: matrix.cache == 'solar'
+        run: |
+          timing_project=$(mktemp -d)
+          cp -R src fixtures.json Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml clippy.toml justfile "$timing_project/"
+          cp ../solar-timing/solar-timing.rs "$timing_project/src/bin/"
+          cat ../solar-timing/timing.just >> "$timing_project/justfile"
+          just --justfile "$timing_project/justfile" clippy timing-build
+
+  python:
+    name: Python tools lint, types, formatting, and unit tests
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version-file: tools/pyproject.toml
+          python-version: '3.15'
+          enable-cache: true
+          cache-dependency-glob: tools/uv.lock
+      - run: just --justfile tools/justfile check
+
+  dependencies:
+    name: Rust dependency checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just,cargo-audit,cargo-machete
+      - run: |
+          just dependencies
+          just --justfile tools/solar-calculation/justfile dependencies
+          just --justfile tools/windows-reactor/justfile dependencies
+          just --justfile tools/windows-reactor/settings-design/justfile dependencies
