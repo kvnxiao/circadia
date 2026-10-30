@@ -207,6 +207,16 @@ jobs:
         with:
           path: ~/.cargo/git
           key: ${{ needs.cargo-git.outputs.cache-key }}
+      - name: Locate runtime cache
+        if: env.RUN_CHECKS == 'true' && matrix.cache != 'solar'
+        id: runtime
+        run: echo "path=$(cygpath -m "$LOCALAPPDATA")/windows-reactor-setup/temp/v1" >> "$GITHUB_OUTPUT"
+      - name: Cache Windows runtime packages
+        if: env.RUN_CHECKS == 'true' && matrix.cache != 'solar'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.runtime.outputs.path }}
+          key: reactor-runtime-v1-${{ runner.os }}-${{ runner.arch }}-${{ needs.cargo-git.outputs.cache-key }}
       - name: Run checks
         if: env.RUN_CHECKS == 'true'
         env:
