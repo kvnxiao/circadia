@@ -7,6 +7,7 @@ use crate::EventKind;
 use crate::LocalEvent;
 use crate::ManagementState;
 use crate::ManualCommand;
+use crate::RecentApp;
 use crate::SchedulingState;
 use crate::Segment;
 use crate::SuppressionState;
@@ -637,7 +638,6 @@ pub(super) fn menu_items(
         } else {
             recent.condition.as_str()
         };
-        let listed = if recent.included { "yes" } else { "no" };
         let action = if recent.included { "remove" } else { "add" };
         let path = recent.path.to_string_lossy();
         let regex = snapshot
@@ -655,40 +655,13 @@ pub(super) fn menu_items(
             .nth(1)
             .and_then(|_| crate::ExecutablePath::new(&path).ok())
             .map(|path| path.folder().to_owned());
-        let label = |label: String| {
-            folder.as_ref().map_or_else(
-                || label.clone(),
-                |folder| {
-                    text!(
-                        text,
-                        "tray-installation",
-                        app = label.as_str(),
-                        folder = folder.as_str()
-                    )
-                },
-            )
-        };
+        let label = recent_label(text, recent, name, folder.as_deref());
         if recent.excluded {
-            MenuItem::disabled(
-                key,
-                label(text!(
-                    text,
-                    "tray-app-excluded",
-                    listed = listed,
-                    name = name,
-                    executable = executable
-                )),
-            )
+            MenuItem::disabled(key, label)
         } else {
             item(
                 key,
-                label(text!(
-                    text,
-                    "tray-app",
-                    listed = listed,
-                    name = name,
-                    executable = executable
-                )),
+                label,
                 toggles == Toggles::Available && (!recent.included || recent.removable),
             )
         }
@@ -696,6 +669,76 @@ pub(super) fn menu_items(
     items.push(MenuItem::separator("separator-quit"));
     items.push(MenuItem::item("quit", text!(text, "tray-quit")));
     items
+}
+
+fn recent_label(text: &Text, recent: &RecentApp, name: &str, folder: Option<&str>) -> String {
+    let format = |[name, executable, directory]: [&str; 3]| {
+        let listed = if recent.included { "yes" } else { "no" };
+        let app = if recent.excluded {
+            text!(
+                text,
+                "tray-app-excluded",
+                listed = listed,
+                name = name,
+                executable = executable
+            )
+        } else {
+            text!(
+                text,
+                "tray-app",
+                listed = listed,
+                name = name,
+                executable = executable
+            )
+        };
+        if folder.is_some() {
+            text!(
+                text,
+                "tray-installation",
+                app = app.as_str(),
+                folder = directory
+            )
+        } else {
+            app
+        }
+    };
+    let mut budget = 96_usize.saturating_sub(format([""; 3]).chars().count());
+    let mut fields = [name, recent.executable.as_str(), folder.unwrap_or_default()]
+        .map(|value| (value, value.chars().take(budget + 1).count(), 0));
+    let count = fields.len();
+    let mut ordered = fields.each_mut();
+    ordered.sort_by_key(|(_, length, _)| *length);
+    for (position, (_, length, limit)) in ordered.into_iter().enumerate() {
+        *limit = (*length).min(budget / (count - position));
+        budget -= *limit;
+    }
+    let bounded = fields.map(|(value, _, limit)| middle_ellipsis(value, limit));
+    format(bounded.each_ref().map(String::as_str))
+}
+
+fn middle_ellipsis(value: &str, limit: usize) -> String {
+    if value.chars().take(limit + 1).count() <= limit {
+        return value.to_owned();
+    }
+    if limit == 0 {
+        return String::new();
+    }
+    let prefix = (limit - 1).div_ceil(2);
+    let suffix = (limit - 1) / 2;
+    value
+        .chars()
+        .take(prefix)
+        .chain(std::iter::once('…'))
+        .chain(
+            value
+                .chars()
+                .rev()
+                .take(suffix)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev(),
+        )
+        .collect()
 }
 
 pub(super) fn manual_available(
@@ -1575,6 +1618,81 @@ mod tests {
         label
             .replace(['\u{2068}', '\u{2069}'], "")
             .replace('\u{a0}', " ")
+    }
+
+    #[test_case("", 0, "")]
+    #[test_case("browser.exe", 11, "browser.exe")]
+    #[test_case("browser.exe", 10, "brows….exe")]
+    #[test_case("browser.exe", 1, "…")]
+    #[test_case("browser.exe", 0, "")]
+    #[test_case("🦀海🪟ブラウザ.exe", 7, "🦀海🪟…exe")]
+    fn tray_ellipsis_preserves_both_ends(value: &str, limit: usize, expected: &str) {
+        assert_eq!(middle_ellipsis(value, limit), expected);
+    }
+
+    #[test_case("en-US")]
+    #[cfg_attr(debug_assertions, test_case("qps-Ploc"))]
+    fn tray_names_share_space_without_shortening_a_small_filename(language: &str) {
+        let language = crate::l10n::resolve(Some(language), None, &[]).expect("language");
+        let text = Text::load(&language).expect("catalog");
+        let mut app = recent("app.exe");
+        app.condition = "Long window title ".repeat(20);
+        for folder in [None, Some("C:/Apps")] {
+            let label = recent_label(&text, &app, &app.condition, folder);
+            assert!(label.chars().count() <= 96, "{label}");
+            assert!(plain(&label).contains("(app.exe)"), "{label}");
+            if folder.is_some() {
+                assert!(plain(&label).contains("C:/Apps"), "{label}");
+            }
+        }
+    }
+
+    #[test]
+    fn long_tray_labels_keep_state_and_full_action_identity() {
+        let executable = format!("{}.exe", "VeryLongApplication".repeat(12));
+        let folder = format!("C:/Apps/{}/installation-a", "folder".repeat(50));
+        let path = format!("{folder}/{executable}");
+        let mut app = recent(&executable);
+        app.path = path.clone().into();
+        app.included = true;
+        app.excluded = true;
+        app.condition = "窗口🦀e\u{301}".repeat(80);
+        let mut other = app.clone();
+        other.path = format!("C:/Other/{executable}").into();
+        let mut state = snapshot(ConfigInput::default());
+        state.recent = vec![app, other];
+        let items = menu_items(
+            &english(),
+            Some(&state),
+            ManualCommand::Start,
+            Toggles::Available,
+            &BTreeMap::new(),
+        );
+        let MenuItem::Item {
+            key,
+            label,
+            enabled,
+        } = &items[5]
+        else {
+            panic!("recent app is a menu item");
+        };
+        assert_eq!(key.as_str(), Some(format!("remove:0:{path}").as_str()));
+        assert!(!enabled);
+        assert!(label.chars().count() <= 96, "{label}");
+        assert!(plain(label).starts_with("✓ "));
+        assert!(plain(label).contains(".exe) (excluded)"));
+        assert!(plain(label).ends_with("-a"));
+        assert!(label.contains('…'));
+        let mut depth = 0;
+        for character in label.chars() {
+            match character {
+                '\u{2068}' => depth += 1,
+                '\u{2069}' => depth -= 1,
+                _ => {}
+            }
+            assert!(depth >= 0, "balanced localization isolates: {label}");
+        }
+        assert_eq!(depth, 0);
     }
 
     fn labels(items: &[MenuItem]) -> Vec<(String, String, bool)> {

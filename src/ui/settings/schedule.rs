@@ -915,15 +915,19 @@ fn management_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             .controls(
                 settings.with_feedback(
                     Field::ManageNightLight,
-                    ToggleSwitch::new()
-                        .is_on(view.on)
-                        .is_enabled(view.enabled)
-                        .automation_id(automation_id::MANAGE)
-                        .automation_name(title)
-                        .on_toggled(context.callback(Message::Manage))
-                        .into(),
+                    widgets::toggle(
+                        text,
+                        view.on,
+                        ToggleSwitch::new()
+                            .is_enabled(view.enabled)
+                            .automation_id(automation_id::MANAGE)
+                            .automation_name(title)
+                            .on_toggled(context.callback(Message::Manage)),
+                    )
+                    .into(),
                 ),
             )
+            .compact_actions()
             .view(settings.stacked()),
     )
 }
@@ -1505,35 +1509,38 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
                 .into(),
         );
     }
-    nested(
-        with_solar_feedback(
+    widgets::nested(&automation_id::row(automation_id::USE_WINDOWS_LOCATION))
+        .padding(Thickness::new(
+            52.0,
+            10.0,
+            widgets::COMPACT_ACTION_INSET,
+            10.0,
+        ))
+        .content(with_solar_feedback(
             settings,
             Field::UseWindowsLocation,
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto])
-                .rows([GridLength::Auto, GridLength::Auto])
-                .row_spacing(if settings.stacked() { 12.0 } else { 0.0 })
                 .column_spacing(16.0)
                 .children((
                     StackPanel::new()
                         .spacing(2.0)
                         .vertical_alignment(VerticalAlignment::Center)
                         .children(lines),
-                    ToggleSwitch::new()
-                        .grid_column(i32::from(!settings.stacked()))
-                        .grid_row(i32::from(settings.stacked()))
-                        .horizontal_alignment(HorizontalAlignment::Right)
-                        .is_on(on)
-                        .is_enabled(solar_options_enabled(model))
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .automation_id(automation_id::USE_WINDOWS_LOCATION)
-                        .automation_name(title)
-                        .on_toggled(context.callback(Message::WindowsLocation)),
+                    widgets::toggle(
+                        text,
+                        on,
+                        ToggleSwitch::new()
+                            .is_enabled(solar_options_enabled(model))
+                            .automation_id(automation_id::USE_WINDOWS_LOCATION)
+                            .automation_name(title)
+                            .on_toggled(context.callback(Message::WindowsLocation)),
+                    )
+                    .grid_column(1),
                 ))
                 .into(),
-        ),
-        &automation_id::row(automation_id::USE_WINDOWS_LOCATION),
-    )
+        ))
+        .into()
 }
 
 fn coordinate_field(
@@ -1646,14 +1653,17 @@ fn solar_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View 
                 .spacing(12.0)
                 .horizontal_alignment(HorizontalAlignment::Right)
                 .children((
-                    ToggleSwitch::new()
-                        .is_on(switch(model, Field::SolarTiming))
-                        .is_enabled(model.editable())
-                        .automation_id(automation_id::SOLAR_TIMING)
-                        .automation_name(&title)
-                        .on_toggled(context.callback(|on| {
-                            Message::Edit(vec![(Field::SolarTiming, FieldValue::Switch(on))])
-                        })),
+                    widgets::toggle(
+                        text,
+                        switch(model, Field::SolarTiming),
+                        ToggleSwitch::new()
+                            .is_enabled(model.editable())
+                            .automation_id(automation_id::SOLAR_TIMING)
+                            .automation_name(&title)
+                            .on_toggled(context.callback(|on| {
+                                Message::Edit(vec![(Field::SolarTiming, FieldValue::Switch(on))])
+                            })),
+                    ),
                     widgets::expand_button(
                         expansion,
                         expand_name,
@@ -1663,6 +1673,7 @@ fn solar_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View 
                 ))
                 .into(),
         )])
+        .compact_actions()
         .view(settings.stacked());
     let mut rows = vec![header];
     rows.extend(

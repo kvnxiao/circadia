@@ -18,6 +18,12 @@ tray-app-excluded =
 app-entry-name = { $name } ({ $executable })
 tray-quit = Quit Circadia
 
+toggle-state =
+    { $on ->
+        [yes] On
+       *[no] Off
+    }
+
 tooltip = Circadia: { $status }
 
 status-starting = Starting Circadia.

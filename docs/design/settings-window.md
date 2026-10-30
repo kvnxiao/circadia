@@ -64,15 +64,17 @@ The status line summarizes the state and wraps to a second line instead of trunc
 | Element | Appearance |
 | :-- | :-- |
 | Card | Card fill, a 1 epx card outline, and 4 epx corners. Cards in a group are 4 epx apart. |
-| Card row | At least 68 epx tall, with 12 epx vertical and 16 epx horizontal padding and 16 epx between the glyph, the text, and the controls. |
+| Card row | At least 68 epx tall, with 12 epx vertical padding, 16 epx left padding, and 16 epx between the glyph, the text, and the controls. The right inset follows the action's visible edge, as described below. |
 | Row glyph | 20 epx, at the left. When the row's controls are taller than one line, such as a slider with an error message, the glyph and text align to the top with a 6 epx offset. |
 | Row text | The title in Body, with the description 2 epx below in Caption and secondary text. |
-| Row controls | Aligned right, 12 epx apart. A toggle switch has its state text, "On" or "Off", on its left, as in Windows Settings. |
-| Nested row | Inside an expandable card: at least 56 epx tall, with 10 epx vertical padding, 16 epx right padding, and 52 epx left padding so the text lines up with the parent row's title (16 + 20 + 16 epx). A 1 epx divider runs above each nested row. |
+| Row controls | Aligned right, 12 epx apart. The rightmost button, dropdown, or visible switch track ends 16 epx inside the card. A toggle switch has its localized state text, "On" or "Off", on its left, as in Windows Settings. |
+| Nested row | Inside an expandable card: at least 56 epx tall, with 10 epx vertical padding, the same right action inset as a card row, and 52 epx left padding so the text lines up with the parent row's title (16 + 20 + 16 epx). A 1 epx divider runs above each nested row. |
 | Expand button | A subtle button at least 40 by 40 epx at the right end of the header row, with a centered 12 epx chevron that points down when collapsed and up when expanded. Its accessible name says what it expands, such as "Expand sunrise and sunset options". |
 | Field error | Caption text in the critical color, 4 epx below the control, aligned right, at most 360 epx wide. See [Invalid input at the field](#invalid-input-at-the-field). |
 
-When a row's text and controls do not fit side by side, the controls move below the text inside the same card, as SettingsCard does in narrow windows. Text wraps; it does not clip. Source: [SettingsCard](https://learn.microsoft.com/en-us/dotnet/communitytoolkit/windows/settingscontrols/settingscard).
+Compact switches and icon actions stay beside wrapping descriptions at supported window widths. Wider controls move below the text when the horizontal arrangement does not fit, as SettingsCard does in narrow windows. Validation messages can also move the control group below its description. Text wraps; it does not clip. Source: [SettingsCard](https://learn.microsoft.com/en-us/dotnet/communitytoolkit/windows/settingscontrols/settingscard).
+
+The rightmost icon button or lock glyph uses a 40 epx action area whose right edge is 4 epx inside the card. Its center sits 24 epx from the card edge, while its 16 epx glyph ends at the same visible inset as ordinary controls. Each compact switch uses a 52 epx action area with a 40 epx track and its state label in the preceding column. Its action area uses the same 4 epx inset. These areas preserve native hit testing and focus visuals.
 
 A disabled setting shows its controls' disabled state, and its description says why when the reason is not visible nearby. Source: [Guidelines for app settings](https://learn.microsoft.com/en-us/windows/apps/design/app-settings/guidelines-for-app-settings#recommended-page-content). While Preview plays, every editable control shows its disabled state.
 
@@ -84,7 +86,7 @@ A disabled setting shows its controls' disabled state, and its description says 
 | Accent button | Used only for "Add app" and each dialog's primary button. |
 | Subtle button | Transparent until hovered. Used for "Restore recommended colors", expand buttons, and remove buttons. |
 | Icon button | Subtle button at least 40 by 40 epx, sized to fit its native padding and centered 16 epx glyph, with an accessible name. |
-| Row actions | A content-sized column anchored to the right edge; labels use the remaining width. Multiple actions extend left with 12 epx spacing. Non-interactive lock glyphs occupy the same 40 epx width as icon buttons, keeping their centers on the same vertical axis. |
+| Row actions | A content-sized column anchored to the right; labels use the remaining width. Multiple actions extend left with 12 epx spacing. Non-interactive lock glyphs occupy the same 40 epx width as icon buttons, keeping their centers on the same vertical axis. |
 | Number field | 32 epx tall and 96 epx wide (120 epx for coordinates), with tabular numerals. Its unit, such as "K", "min", "ms", "s", or "Hz", follows it in secondary text. |
 | Slider | Up to 220 epx wide; shrinks to reserve the number field and the unit's measured width. |
 | Time picker | 224 by 32 epx. See [Time picker](#time-picker). |
@@ -480,7 +482,9 @@ The tray menu opens from Circadia's notification area icon in the Windows 11 men
 7. Separator
 8. "Quit Circadia"
 
-The check mark is the text character "✓" followed by a space, because the menu cannot show a native checked state.
+The check mark is the text character "✓" followed by a space.
+
+Recent-app labels use at most 96 Unicode scalar values, including punctuation and localization formatting. Short fields keep their full text. After punctuation, status markers, formatting, and short fields, the remaining character budget is shared between long names, filenames, and folders. Each shortened field uses a middle ellipsis. The check mark and excluded label remain visible. Truncation changes presentation only: actions use the complete executable identity, and Settings shows the full name, filename, and folder.
 
 The notification area icon's tooltip shows a short status, like the navigation pane's status line. Translations keep it under 128 UTF-16 code units, the limit the spec sets.
 
