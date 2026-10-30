@@ -75,7 +75,7 @@ The [CI workflow](.github/workflows/ci.yml) runs on pull requests, pushes to `ma
 - Rust formatting and workflow syntax on Linux.
 - Rust dependency advisories and unused dependencies on Linux.
 
-A preparation job caches Cargo Git sources before the Rust matrix starts. Its shared key hashes the Git source URLs and revisions in the application and Reactor probe lockfiles, so registry-only dependency updates preserve this cache. On a cache miss, it fetches the locked dependencies and saves the Git sources before compilation. The four Rust jobs using Reactor and the installer restore this cache when their separate project/check-group dependency caches do not have an exact hit. Exact dependency-cache hits already include Git sources. Python caches locked dependencies.
+A preparation job caches Cargo Git sources before the Rust matrix starts. Its shared key hashes the Git source URLs and revisions in the application and Reactor probe lockfiles, so registry-only dependency updates preserve this cache. On a cache miss, it fetches the locked dependencies and saves the Git sources before compilation. The four Rust jobs using Reactor and the installer restore this shared cache. Separate caches store registry dependencies and compiled artifacts by project and check group; they exclude Cargo's Git directory to avoid storing duplicate source archives. Python caches locked dependencies.
 
 GitHub scopes pull-request caches to that pull request; caches saved on `main` are also available to pull requests. Cache eviction or a cache-service failure can still require Cargo to fetch sources again.
 
