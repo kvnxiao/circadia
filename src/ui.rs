@@ -68,8 +68,8 @@ use windows_reactor::NotifyIcon;
 ///
 /// - An explicit directory isolates configuration, backup, and log files.
 /// - `verbose` records debug detail for this process only.
-/// - `language` forces an interface language, including `qps-Ploc`, for this
-///   process only.
+/// - `language` forces an interface language, including debug-only `qps-Ploc`,
+///   for this process only.
 /// - A second invocation only activates settings in the existing process and
 ///   does not log or validate `language`.
 /// - Normal startup can change live Night Light; graceful exit requests off.
@@ -1569,7 +1569,7 @@ mod tests {
             std::process::id()
         );
         let claim = InstanceClaim::acquire_named(&name).expect("first claim");
-        let Ok(Launch::Primary(_, preferred, None)) = launch(claim, Some("qps-Ploc"), || {
+        let Ok(Launch::Primary(_, preferred, None)) = launch(claim, Some("en-US"), || {
             panic!("a forced language reads no Windows languages")
         }) else {
             panic!("a first launch starts the application");
@@ -1595,6 +1595,7 @@ mod tests {
         assert_eq!(language.to_string(), "en-US");
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn a_forced_pseudo_locale_overrides_the_saved_language_without_changing_it() {
         let directory = tempfile::tempdir().expect("temporary data directory");

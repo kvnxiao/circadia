@@ -46,7 +46,7 @@ Settings offers an interface language setting, saved with the configuration: Use
 
 A change takes effect at the next launch. After the user changes the setting, settings states that Circadia must restart to use the new language and offers Quit Circadia; Circadia does not restart itself. A change to the Windows display language also takes effect at Circadia's next launch. Built-in text of native Windows controls can follow the Windows display language instead of the selected language.
 
-A developer-only command-line option forces an interface language, including the pseudo-locale, for one process run without changing the saved setting.
+Debug builds provide a developer-only command-line option that forces an interface language, including the pseudo-locale, for one process run without changing the saved setting. Release builds embed only real language catalogs and exclude the pseudo-localization generator and the developer language override.
 
 **Intent:** Follow Windows by default while letting the user choose another shipped language.
 
@@ -56,6 +56,7 @@ A developer-only command-line option forces an interface language, including the
 - The user selects another shipped language: the interface keeps its current language, settings says a restart is needed and offers Quit Circadia, and the new language appears after the user starts Circadia again.
 - The user changes the Windows display language and signs in again: Circadia starts in the new language when it ships that language.
 - A developer starts Circadia with the language option set to the pseudo-locale: the interface is pseudo-localized, and the saved setting is unchanged.
+- A release build is started with the developer language option: it reports a usage error before opening settings or accessing Night Light. Its normal language setting offers only shipped real languages.
 
 ## Regional formats
 

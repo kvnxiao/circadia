@@ -226,13 +226,21 @@ pub(super) fn expand_button(
     .into()
 }
 
-pub(super) fn nested_row(glyph: FontIcon, text: Vec<View>, action: Option<View>, id: &str) -> View {
+pub(super) fn nested_row(
+    glyph: FontIcon,
+    text: Vec<View>,
+    action: Option<View>,
+    id: &str,
+    stacked: bool,
+) -> View {
     nested(id)
         .automation_live_setting(AutomationLiveSetting::Assertive)
         .content(
             Grid::new()
                 .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                .rows([GridLength::Auto, GridLength::Auto])
                 .column_spacing(12.0)
+                .row_spacing(if stacked { 12.0 } else { 0.0 })
                 .children((
                     glyph
                         .font_size(16.0)
@@ -240,11 +248,15 @@ pub(super) fn nested_row(glyph: FontIcon, text: Vec<View>, action: Option<View>,
                         .margin(Thickness::new(0.0, 2.0, 0.0, 0.0)),
                     StackPanel::new()
                         .grid_column(1)
+                        .grid_column_span(if stacked { 2 } else { 1 })
                         .spacing(2.0)
                         .vertical_alignment(VerticalAlignment::Center)
                         .children(text),
                     StackPanel::new()
-                        .grid_column(2)
+                        .grid_column(if stacked { 1 } else { 2 })
+                        .grid_row(i32::from(stacked))
+                        .grid_column_span(if stacked { 2 } else { 1 })
+                        .horizontal_alignment(HorizontalAlignment::Right)
                         .vertical_alignment(VerticalAlignment::Center)
                         .children(action.into_iter().collect::<Vec<_>>()),
                 )),
@@ -255,8 +267,8 @@ pub(super) fn nested_row(glyph: FontIcon, text: Vec<View>, action: Option<View>,
 pub(super) fn feature_row(
     message: FeatureMessage,
     name: &str,
-    retry_enabled: bool,
-    retry: Callback<()>,
+    retry: Option<Callback<()>>,
+    stacked: bool,
 ) -> View {
     let glyph = match message.severity {
         Severity::Error => FontIcon::new()
@@ -265,12 +277,14 @@ pub(super) fn feature_row(
         Severity::Warning => FontIcon::new().glyph("\u{E7BA}"),
     };
     let action = message.retry.map(|label| {
-        Button::new()
+        let button = Button::new()
             .automation_id(automation_id::retry(name))
-            .is_enabled(retry_enabled)
-            .on_click(retry)
-            .content(label)
-            .into()
+            .is_enabled(retry.is_some())
+            .content(label);
+        match retry {
+            Some(retry) => button.on_click(retry).into(),
+            None => button.into(),
+        }
     });
     nested_row(
         glyph,
@@ -281,6 +295,7 @@ pub(super) fn feature_row(
         ],
         action,
         &automation_id::row(name),
+        stacked,
     )
 }
 
@@ -328,7 +343,7 @@ impl Row {
         self
     }
 
-    pub(super) fn view(self) -> View {
+    pub(super) fn view(self, stacked: bool) -> View {
         let top = self.controls.len() > 1;
         let alignment = if top {
             VerticalAlignment::Top
@@ -342,6 +357,7 @@ impl Row {
             .content(
                 Grid::new()
                     .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                    .rows([GridLength::Auto, GridLength::Auto])
                     .children((
                         Border::new()
                             .vertical_alignment(alignment)
@@ -351,6 +367,7 @@ impl Row {
                             })),
                         StackPanel::new()
                             .grid_column(1)
+                            .grid_column_span(if stacked { 2 } else { 1 })
                             .spacing(2.0)
                             .vertical_alignment(alignment)
                             .margin(Thickness::new(0.0, offset, 0.0, 0.0))
@@ -361,10 +378,21 @@ impl Row {
                                     .collect::<Vec<View>>(),
                             ),
                         StackPanel::new()
-                            .grid_column(2)
+                            .grid_column(if stacked { 1 } else { 2 })
+                            .grid_row(i32::from(stacked))
+                            .grid_column_span(if stacked { 2 } else { 1 })
                             .vertical_alignment(alignment)
                             .horizontal_alignment(HorizontalAlignment::Right)
-                            .margin(Thickness::new(16.0, 0.0, 0.0, 0.0))
+                            .margin(Thickness::new(
+                                if stacked { 0.0 } else { 16.0 },
+                                if stacked && !self.controls.is_empty() {
+                                    12.0
+                                } else {
+                                    0.0
+                                },
+                                0.0,
+                                0.0,
+                            ))
                             .children(self.controls),
                     )),
             )

@@ -283,6 +283,18 @@ pub(super) fn show_page(
     process: u32,
     navigation: &str,
 ) -> io::Result<()> {
+    if !crate::automation::wait("navigation visibility after layout", || {
+        automation.visible(settings, process, navigation).map(Some)
+    })? {
+        let button = automation.navigation_button(settings, process)?;
+        automation.invoke(settings, process, &button)?;
+        crate::automation::wait("navigation overlay available", || {
+            Ok(automation
+                .visible(settings, process, navigation)?
+                .then_some(()))
+        })?;
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
     let content = match navigation {
         automation_id::NAV_SCHEDULE => automation_id::MANAGE,
         automation_id::NAV_APPS => automation_id::ADD_EXCLUSION,
@@ -293,7 +305,9 @@ pub(super) fn show_page(
     crate::automation::wait("navigation item", || {
         automation.enabled(settings, process, navigation)
     })?;
-    automation.select(settings, process, navigation)?;
+    automation
+        .select(settings, process, navigation)
+        .map_err(|error| io::Error::other(format!("selecting {navigation}: {error}")))?;
     crate::automation::wait(&format!("{navigation} content"), || {
         automation.enabled(settings, process, content)
     })?;
@@ -648,8 +662,12 @@ impl Process {
     }
 
     pub(super) fn foreground_fixture() -> io::Result<Self> {
+        Self::foreground_fixture_at(&std::env::current_exe()?)
+    }
+
+    pub(super) fn foreground_fixture_at(executable: &Path) -> io::Result<Self> {
         Ok(Self {
-            child: Command::new(std::env::current_exe()?)
+            child: Command::new(executable)
                 .arg("--foreground-fixture")
                 .spawn()?,
             foreground_fixture: true,

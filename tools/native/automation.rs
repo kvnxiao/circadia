@@ -110,7 +110,6 @@ impl Automation {
         Ok(false)
     }
 
-    #[cfg(feature = "graph-measurement")]
     #[expect(
         unsafe_code,
         reason = "read a process-checked control's screen bounds for pixel capture"
@@ -132,6 +131,53 @@ impl Automation {
             right: bounds.right,
             bottom: bounds.bottom,
         })
+    }
+
+    #[expect(
+        unsafe_code,
+        reason = "read visibility from the process-checked automation element"
+    )]
+    pub(super) fn visible(
+        &self,
+        window: &winsafe::HWND,
+        process: u32,
+        id: &str,
+    ) -> io::Result<bool> {
+        let Some(element) = self.find(window, process, id)? else {
+            return Ok(false);
+        };
+        // SAFETY: The live process-checked element returns a scalar visibility
+        // flag.
+        Ok(!unsafe { element.CurrentIsOffscreen() }
+            .map_err(io::Error::other)?
+            .as_bool())
+    }
+
+    pub(super) fn navigation_button(
+        &self,
+        window: &winsafe::HWND,
+        process: u32,
+    ) -> io::Result<String> {
+        let controls = self.controls_within(window, process, circadia::automation_id::TITLE_BAR)?;
+        let buttons: Vec<_> = controls
+            .iter()
+            .filter(|control| {
+                control.kind == UIA_ButtonControlTypeId
+                    && control.bounds.2 > control.bounds.0
+                    && control.bounds.3 > control.bounds.1
+            })
+            .collect();
+        let [button] = buttons.as_slice() else {
+            return Err(io::Error::other(format!(
+                "expected one native titlebar menu button, found {buttons:?}"
+            )));
+        };
+        if button.id.is_empty() {
+            return Err(io::Error::other(
+                "native titlebar menu button lacks an automation identifier",
+            ));
+        }
+        Ok(button.id.clone())
     }
 
     #[cfg(feature = "graph-measurement")]
@@ -305,7 +351,11 @@ impl Automation {
         // binding storage.
         let bounds = unsafe { graph.CurrentBoundingRectangle() }.map_err(io::Error::other)?;
         // SAFETY: The viewport is an owned UI Automation element.
-        let viewport = unsafe { scroll.CurrentBoundingRectangle() }.map_err(io::Error::other)?;
+        let mut viewport =
+            unsafe { scroll.CurrentBoundingRectangle() }.map_err(io::Error::other)?;
+        let outer = window.GetWindowRect().map_err(io::Error::other)?;
+        viewport.top = viewport.top.max(outer.top);
+        viewport.bottom = viewport.bottom.min(outer.bottom);
         if bounds.top >= viewport.top
             && bounds.bottom <= viewport.bottom
             && bounds.bottom > bounds.top
@@ -600,7 +650,7 @@ impl Automation {
         Ok(root)
     }
 
-    fn find(
+    pub(super) fn find(
         &self,
         window: &winsafe::HWND,
         process: u32,
@@ -614,6 +664,27 @@ impl Automation {
                     .transpose()
             })
             .transpose()
+    }
+
+    #[expect(
+        unsafe_code,
+        reason = "compare two process-checked UI Automation elements"
+    )]
+    pub(super) fn same_control(
+        &self,
+        window: &winsafe::HWND,
+        process: u32,
+        id: &str,
+        previous: &IUIAutomationElement,
+    ) -> io::Result<bool> {
+        let current = self
+            .find(window, process, id)?
+            .ok_or_else(|| io::Error::other(format!("control {id} is absent")))?;
+        // SAFETY: Both elements and the client remain live in the initialized
+        // apartment.
+        unsafe { self.client.CompareElements(previous, &current) }
+            .map(windows_core::BOOL::as_bool)
+            .map_err(io::Error::other)
     }
 
     pub(super) fn elements(
@@ -925,13 +996,17 @@ pub(super) struct Focused {
 }
 
 pub(super) fn press_tab() -> io::Result<()> {
+    press_key(co::VK::TAB)
+}
+
+pub(super) fn press_key(key: co::VK) -> io::Result<()> {
     let inputs = [
         winsafe::HwKbMouse::Kb(winsafe::KEYBDINPUT {
-            wVk: co::VK::TAB,
+            wVk: key,
             ..winsafe::KEYBDINPUT::default()
         }),
         winsafe::HwKbMouse::Kb(winsafe::KEYBDINPUT {
-            wVk: co::VK::TAB,
+            wVk: key,
             dwFlags: co::KEYEVENTF::KEYUP,
             ..winsafe::KEYBDINPUT::default()
         }),
@@ -940,7 +1015,7 @@ pub(super) fn press_tab() -> io::Result<()> {
     if usize::try_from(sent).ok() == Some(inputs.len()) {
         Ok(())
     } else {
-        Err(io::Error::other("Tab keyboard input was incomplete"))
+        Err(io::Error::other("keyboard input was incomplete"))
     }
 }
 
@@ -1004,6 +1079,25 @@ fn element_id(element: &IUIAutomationElement) -> io::Result<String> {
     unsafe { element.CurrentAutomationId() }
         .map(|id| id.display().to_string())
         .map_err(io::Error::other)
+}
+
+pub(super) fn click_point(x: i32, y: i32) -> io::Result<()> {
+    winsafe::SetCursorPos(x, y).map_err(io::Error::other)?;
+    let inputs = [
+        winsafe::HwKbMouse::Mouse(winsafe::MOUSEINPUT {
+            dwFlags: winsafe::co::MOUSEEVENTF::LEFTDOWN,
+            ..winsafe::MOUSEINPUT::default()
+        }),
+        winsafe::HwKbMouse::Mouse(winsafe::MOUSEINPUT {
+            dwFlags: winsafe::co::MOUSEEVENTF::LEFTUP,
+            ..winsafe::MOUSEINPUT::default()
+        }),
+    ];
+    crate::lifecycle::require(
+        winsafe::SendInput(&inputs).map_err(io::Error::other)? == 2,
+        "mouse click was incomplete",
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -322,6 +322,27 @@ fn browsing_to_a_listed_executable_adds_nothing_and_suggests_a_regular_expressio
 }
 
 #[test]
+fn browsed_candidate_keeps_its_section_when_it_enters_recent_history() {
+    let fixture = Fixture::new(None);
+    let model = fixture.model(Vec::new());
+    let mut dialog = AddDialog::new(Field::Suppression);
+    assert!(dialog.browsed(&model, file("game.exe")));
+    for recent in [vec![recent_app("game.exe", None)], Vec::new()] {
+        let model = fixture.model(recent);
+        let view = dialog_view(&model, &english(), &region(), &dialog);
+        assert_eq!(
+            view.rows,
+            [DialogRow {
+                executable: "game.exe".into(),
+                name: "Game".into(),
+                checked: true,
+                browsed: true,
+            }]
+        );
+    }
+}
+
+#[test]
 fn add_exclusion_omits_apps_that_have_an_exclusion_and_lists_suppressed_ones() {
     let fixture = Fixture::new(Some(&entries_file(&["game.exe"], &["browser.exe"])));
     let model = fixture.model(vec![

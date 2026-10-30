@@ -253,7 +253,7 @@ pub(super) fn open(automation: &Automation, process: u32) -> io::Result<Menu> {
     })?;
     open_menu(&icon)?;
     let quit = &crate::lifecycle::text()?.tray_quit;
-    crate::lifecycle::wait("tray menu items through Quit", || {
+    crate::automation::wait("tray menu items through Quit", || {
         menu_items(automation, process, quit)
     })
 }

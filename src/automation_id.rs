@@ -36,7 +36,7 @@ identifiers! {
     PANE_PROGRESS = "pane-art-progress";
     /// Status line in the navigation pane.
     PANE_STATUS = "pane-status";
-    /// Semantic status announcement in the navigation pane.
+    /// Semantic status announcement independent of navigation visibility.
     STATUS_ANNOUNCEMENT = "status-announcement";
     /// Navigation item of the Schedule page.
     NAV_SCHEDULE = "nav-schedule";

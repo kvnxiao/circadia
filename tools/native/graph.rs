@@ -268,7 +268,12 @@ fn motion_lifecycle(
 ) -> io::Result<()> {
     let process = std::process::id();
     inactive(activity, "completed Preview")?;
-    automation.select(settings, process, automation_id::NAV_TRANSITIONS)?;
+    crate::lifecycle::show_page(
+        automation,
+        settings,
+        process,
+        automation_id::NAV_TRANSITIONS,
+    )?;
     wait("Preview duration control", || {
         automation.number(settings, process, automation_id::PREVIEW_LENGTH_NUMBER)
     })?;
@@ -279,7 +284,7 @@ fn motion_lifecycle(
         20.0,
     )?;
     automation.set_number(settings, process, automation_id::RATE_NUMBER, 1.0)?;
-    automation.select(settings, process, automation_id::NAV_SCHEDULE)?;
+    crate::lifecycle::show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     wait("visible graph for cadence measurement", || {
         Ok(automation.show_graph(settings, process)?.then_some(()))
     })?;
@@ -288,9 +293,18 @@ fn motion_lifecycle(
         Ok(animation_active(activity)?.then_some(()))
     })?;
     native_cadence(measurement, automation, settings, activity)?;
-    automation.select(settings, process, automation_id::NAV_GENERAL)?;
+    crate::lifecycle::show_page(automation, settings, process, automation_id::NAV_GENERAL)?;
     inactive(activity, "off-page Preview")?;
-    automation.select(settings, process, automation_id::NAV_SCHEDULE)?;
+    let client = settings.GetClientRect().map_err(io::Error::other)?;
+    crate::responsive::resize_client(settings, 700, 600)?;
+    progress::hidden(activity)?;
+    inactive(activity, "Preview with hidden navigation pane")?;
+    require(
+        automation.visible(settings, process, automation_id::STATUS_ANNOUNCEMENT)?,
+        "semantic status is unavailable while the navigation pane is hidden",
+    )?;
+    crate::responsive::resize_client(settings, client.right, client.bottom)?;
+    crate::lifecycle::show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     wait("compositor resumes on Schedule", || {
         Ok(animation_active(activity)?.then_some(()))
     })?;
@@ -622,7 +636,12 @@ fn resume_preview(
             .enabled(settings, process, automation_id::PREVIEW)?
             .filter(|enabled| *enabled))
     })?;
-    automation.select(settings, process, automation_id::NAV_TRANSITIONS)?;
+    crate::lifecycle::show_page(
+        automation,
+        settings,
+        process,
+        automation_id::NAV_TRANSITIONS,
+    )?;
     wait("Transitions page", || {
         automation.number(settings, process, automation_id::PREVIEW_LENGTH_NUMBER)
     })?;
@@ -638,7 +657,7 @@ fn resume_preview(
             .number(settings, process, automation_id::PREVIEW_LENGTH_NUMBER)?
             .filter(|value| (value - 60.0).abs() < f64::EPSILON))
     })?;
-    automation.select(settings, process, automation_id::NAV_SCHEDULE)?;
+    crate::lifecycle::show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     wait("graph visible again", || {
         Ok(automation.show_graph(settings, process)?.then_some(()))
     })?;

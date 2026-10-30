@@ -189,7 +189,7 @@ fn number_row(
     let (field, title) = (number.field, number.title.to_owned());
     Row::new(glyph, title, description)
         .controls(settings.with_feedback(field, settings.number_controls(number, context)))
-        .view()
+        .view(settings.stacked())
 }
 
 #[expect(
@@ -234,7 +234,7 @@ fn example_view(example: Example) -> View {
         })
         .collect();
     let (ramp, sunset) = (ramp / width, lead / width);
-    let short = example.minutes * 2 < LEAD_MINUTES;
+    let start_on_right = ramp < sunset / 2.0;
     StackPanel::new()
         .margin(Thickness::new(52.0, 4.0, 16.0, 20.0))
         .spacing(8.0)
@@ -262,38 +262,38 @@ fn example_view(example: Example) -> View {
                         .vertical_alignment(VerticalAlignment::Top)
                         .margin(Thickness::new(0.0, evening - 20.0, 8.0, 0.0)),
                 )),
-            Grid::new().height(16.0).children((
-                at(
-                    ramp,
-                    label(example.start_label, short)
-                        .automation_id(automation_id::TRANSITION_EXAMPLE_START)
-                        .into(),
-                ),
-                at(
-                    sunset,
-                    label(example.sunset_label, false)
+            Grid::new()
+                .columns([
+                    GridLength::Star(ramp.max(0.001)),
+                    GridLength::Star(sunset - ramp),
+                    GridLength::Star(1.0 - sunset),
+                ])
+                .children((
+                    widgets::caption(example.start_label)
+                        .grid_column(i32::from(start_on_right))
+                        .text_alignment(if start_on_right {
+                            TextAlignment::Left
+                        } else {
+                            TextAlignment::Right
+                        })
+                        .margin(Thickness::new(
+                            if start_on_right { 4.0 } else { 0.0 },
+                            0.0,
+                            if start_on_right { 0.0 } else { 4.0 },
+                            0.0,
+                        ))
+                        .automation_id(automation_id::TRANSITION_EXAMPLE_START),
+                    widgets::caption(example.sunset_label)
+                        .grid_column(2)
+                        .margin(Thickness::new(4.0, 0.0, 0.0, 0.0))
                         .font_weight(FontWeight::SEMI_BOLD)
-                        .automation_id(automation_id::TRANSITION_EXAMPLE_SUNSET)
-                        .into(),
-                ),
-            )),
+                        .automation_id(automation_id::TRANSITION_EXAMPLE_SUNSET),
+                )),
             widgets::caption(example.caption)
                 .margin(Thickness::new(0.0, 4.0, 0.0, 0.0))
                 .automation_id(automation_id::TRANSITION_EXAMPLE_CAPTION),
         ))
         .into()
-}
-
-fn label(text: String, before: bool) -> windows_reactor::TextBlock {
-    let (left, alignment) = if before {
-        (-164.0, TextAlignment::Right)
-    } else {
-        (4.0, TextAlignment::Left)
-    };
-    widgets::caption(text)
-        .width(160.0)
-        .canvas_left(left)
-        .text_alignment(alignment)
 }
 
 fn at(fraction: f64, child: View) -> View {

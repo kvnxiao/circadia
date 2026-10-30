@@ -28,7 +28,7 @@ Some interface labels differ from the spec's terms:
 - The window background is Mica and extends under the title bar. The window follows the light, dark, and contrast themes.
 - The title bar is the 48 epx tall form. The 16 epx app icon sits 16 epx from the left edge, vertically centered. The title "Circadia" follows 16 epx after the icon in the Caption style. The system minimize, maximize, and close buttons sit at the right edge, each 46 by 48 epx in the mockups. Windows' standard title bar is 32 epx tall; Circadia uses the taller form. Source: [Windows app title bar](https://learn.microsoft.com/en-us/windows/apps/design/basics/titlebar-design).
 - Below the title bar, the navigation pane fills the left side and the page content fills the right. Both sit directly on Mica. In contrast themes, a 1 epx border in the window text color separates the pane from the content, because both share the window color. Source: [Contrast themes: Borders](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/high-contrast-themes#borders).
-- The preferred window is 1200 epx wide; its initial size fits the monitor work area, including on 1280×720 and 1366×768 displays at 100% scaling. Pages scroll vertically when their content exceeds the available height.
+- The preferred window is 1200 epx wide; its initial size fits the monitor work area, including on 1280×720 and 1366×768 displays at 100% scaling. The minimum client area is 640×480 epx. Pages scroll vertically when their content exceeds the available height.
 
 ## Navigation pane
 
@@ -86,7 +86,7 @@ A disabled setting shows its controls' disabled state, and its description says 
 | Icon button | Subtle button at least 40 by 40 epx, sized to fit its native padding and centered 16 epx glyph, with an accessible name. |
 | Row actions | A content-sized column anchored to the right edge; labels use the remaining width. Multiple actions extend left with 12 epx spacing. Non-interactive lock glyphs occupy the same 40 epx width as icon buttons, keeping their centers on the same vertical axis. |
 | Number field | 32 epx tall and 96 epx wide (120 epx for coordinates), with tabular numerals. Its unit, such as "K", "min", "ms", "s", or "Hz", follows it in secondary text. |
-| Slider | 220 epx wide. |
+| Slider | Up to 220 epx wide; shrinks to reserve the number field and the unit's measured width. |
 | Time picker | 224 by 32 epx. See [Time picker](#time-picker). |
 | Phase pill | 22 epx tall, fully rounded, 8 epx horizontal padding, Caption text in the primary text color on a subtle neutral fill. |
 | App icon | The app's own icon at 32 epx (28 epx in the Add app dialog), drawn without a plate or border. See [App icons](#app-icons). |
@@ -198,6 +198,8 @@ A 1 epx divider runs across the top of the footer. The footer has 12 epx vertica
 
 - **Left:** a caption in Caption and secondary text. While Preview plays, a 3 epx progress bar (accent fill on a neutral track) appears 8 epx below the caption. Its fill advances linearly from playback start to deadline, independently of Night Light writes.
 - **Right:** a button at least 112 epx wide with a play glyph and "Preview", or a stop glyph and "Stop" while Preview plays.
+
+On natural completion, display the progress bar at full width for 200 ms before removing it. This completion feedback does not extend playback or delay editing, the graph's return to current time, or removal of Windows Night Light's temporary preview state. Stop and other cancellations remove the bar immediately. Starting another Preview or hiding the Schedule page clears the previous completion feedback.
 
 | State | Caption |
 | :-- | :-- |

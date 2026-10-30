@@ -293,7 +293,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         context,
                     ),
                 ))
-                .view(),
+                .view(settings.stacked()),
             ),
         ]),
         widgets::section(text!(text, "section-night-light"), false),
@@ -307,12 +307,12 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 &settings.input.model,
                 text,
             ))])
-            .view(),
+            .view(settings.stacked()),
         ),
         widgets::section(text!(text, "section-troubleshooting"), false),
         widgets::group(vec![
             folder_card(
-                text,
+                settings,
                 "\u{E8B7}",
                 text!(text, "settings-file-title"),
                 text!(text, "settings-file-description"),
@@ -321,7 +321,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 context,
             ),
             folder_card(
-                text,
+                settings,
                 "\u{E8A5}",
                 text!(text, "logs-title"),
                 text!(text, "logs-description"),
@@ -331,7 +331,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             ),
         ]),
         widgets::section(text!(text, "section-about"), false),
-        about_card(text, context),
+        about_card(settings, context),
     ]
 }
 
@@ -350,7 +350,7 @@ pub(super) fn version_text(text: &Text) -> String {
 }
 
 fn folder_card(
-    text: &Text,
+    settings: &Settings,
     glyph: &'static str,
     title: String,
     description: String,
@@ -358,6 +358,7 @@ fn folder_card(
     id: &str,
     context: &ViewContext<'_, Settings>,
 ) -> View {
+    let text = &settings.input.text;
     let name = text!(text, "open-folder-name", name = title.as_str());
     widgets::card(
         Row::new(glyph, title, description)
@@ -369,11 +370,12 @@ fn folder_card(
                     .content(text!(text, "action-open-folder"))
                     .into(),
             ])
-            .view(),
+            .view(settings.stacked()),
     )
 }
 
-fn about_card(text: &Text, context: &ViewContext<'_, Settings>) -> View {
+fn about_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
+    let text = &settings.input.text;
     widgets::card(
         Row::new("", text!(text, "app-name"), version_text(text))
             .icon(
@@ -390,7 +392,7 @@ fn about_card(text: &Text, context: &ViewContext<'_, Settings>) -> View {
                     .content(text!(text, "action-quit"))
                     .into(),
             ])
-            .view(),
+            .view(settings.stacked()),
     )
 }
 
@@ -440,14 +442,18 @@ fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
                 context,
             ),
         ))
-        .view(),
+        .view(settings.stacked()),
     ];
     if let Some(message) = view.message {
         rows.push(widgets::feature_row(
             message,
             automation_id::SIGN_IN,
-            settings.input.model.editable(),
-            context.message(Message::Command(Command::RetrySignIn)),
+            settings
+                .input
+                .model
+                .editable()
+                .then(|| context.message(Message::Command(Command::RetrySignIn))),
+            settings.stacked(),
         ));
     }
     widgets::card(StackPanel::new().children(rows))
@@ -472,7 +478,7 @@ fn language_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
     let mut rows = vec![
         Row::new("\u{F2B7}", title, text!(text, "language-description"))
             .controls(settings.with_feedback(Field::InterfaceLanguage, combo))
-            .view(),
+            .view(settings.stacked()),
     ];
     if let Some(prompt) = restart_prompt(model, text) {
         rows.push(widgets::nested_row(
@@ -491,6 +497,7 @@ fn language_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
                     .into(),
             ),
             automation_id::RESTART_PROMPT,
+            settings.stacked(),
         ));
     }
     widgets::card(StackPanel::new().children(rows))

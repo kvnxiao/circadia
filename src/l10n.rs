@@ -4,6 +4,7 @@ use i18n_embed::LanguageLoader;
 use i18n_embed::fluent::FluentLanguageLoader;
 use i18n_embed::unic_langid::LanguageIdentifier;
 use rust_embed::RustEmbed;
+#[cfg(any(debug_assertions, test))]
 use std::borrow::Cow;
 use std::sync::OnceLock;
 
@@ -14,7 +15,10 @@ struct Catalogs;
 macro_rules! text {
     ($text:expr, $($message:tt)+) => {{
         let text: &$crate::l10n::Text = &$text;
-        text.finish(::i18n_embed_fl::fl!(text.loader(), $($message)+))
+        let message = ::i18n_embed_fl::fl!(text.loader(), $($message)+);
+        #[cfg(debug_assertions)]
+        let message = text.finish(message);
+        message
     }};
 }
 
@@ -28,10 +32,12 @@ impl LanguageTag {
         Self(english())
     }
 
+    #[cfg(debug_assertions)]
     pub(crate) fn pseudo() -> Self {
         Self("qps-Ploc".parse().unwrap_or_default())
     }
 
+    #[cfg(debug_assertions)]
     fn is_pseudo(&self) -> bool {
         *self == Self::pseudo()
     }
@@ -109,8 +115,14 @@ fn select(
 ) -> Result<LanguageTag, UnknownLanguage> {
     let parse = |tag: &str| tag.parse().ok().map(LanguageTag);
     if let Some(forced) = forced {
-        return parse(forced)
-            .filter(|tag| tag.is_pseudo() || shipped.contains(tag))
+        let tag = parse(forced).ok_or_else(|| UnknownLanguage(forced.to_owned()))?;
+        #[cfg(debug_assertions)]
+        if tag.is_pseudo() {
+            return Ok(tag);
+        }
+        return shipped
+            .contains(&tag)
+            .then_some(tag)
             .ok_or_else(|| UnknownLanguage(forced.to_owned()));
     }
     let matching = |tag: &str| {
@@ -134,6 +146,7 @@ fn select(
 
 pub(crate) struct Text {
     loader: FluentLanguageLoader,
+    #[cfg(debug_assertions)]
     pseudo: bool,
 }
 
@@ -144,25 +157,38 @@ impl Text {
 
     fn load_from(assets: &dyn I18nAssets, language: &LanguageTag) -> Result<Self, I18nEmbedError> {
         let loader = FluentLanguageLoader::new(env!("CARGO_PKG_NAME"), english());
+        #[cfg(debug_assertions)]
         let pseudo = language.is_pseudo();
+        #[cfg(debug_assertions)]
         let catalog = if pseudo {
             english()
         } else {
             language.0.clone()
         };
+        #[cfg(not(debug_assertions))]
+        let catalog = language.0.clone();
         loader.load_languages(assets, &[catalog])?;
+        #[cfg(debug_assertions)]
         if pseudo {
             loader.with_bundles_mut(|bundle| bundle.set_transform(Some(pseudo_text)));
         }
-        Ok(Self { loader, pseudo })
+        Ok(Self {
+            loader,
+            #[cfg(debug_assertions)]
+            pseudo,
+        })
     }
 
     pub(crate) fn loader(&self) -> &FluentLanguageLoader {
         &self.loader
     }
 
+    #[cfg(debug_assertions)]
     pub(crate) fn finish(&self, message: String) -> String {
-        if self.pseudo { pad(&message) } else { message }
+        if self.pseudo {
+            return pad(&message);
+        }
+        message
     }
 }
 
@@ -193,8 +219,7 @@ pub struct InterfaceText {
 }
 
 impl InterfaceText {
-    /// Load the text of the interface language `language`, such as `en-US` or
-    /// `qps-Ploc`.
+    /// Load a shipped interface language, or `qps-Ploc` in debug builds.
     ///
     /// # Errors
     /// Report a language that Circadia does not ship or a catalog that does
@@ -222,6 +247,7 @@ impl InterfaceText {
     }
 }
 
+#[cfg(debug_assertions)]
 fn pseudo_text(text: &str) -> Cow<'_, str> {
     fluent_pseudo::transform(text, false, false)
 }
@@ -230,6 +256,7 @@ fn pseudo_text(text: &str) -> Cow<'_, str> {
 // translated, so the padding adds 40% of that text's length; a nested
 // pseudo-localized value is already padded. Accenting replaces each letter
 // with one character, so the transformed text is as long as the English text.
+#[cfg(debug_assertions)]
 fn pad(message: &str) -> String {
     let mut depth = 0_usize;
     let mut translated = 0_usize;
@@ -420,6 +447,7 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
         assert_eq!(text.tooltip_prefix, "Circadia: ");
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn interface_text_in_the_pseudo_locale_is_bracketed() {
         let text = InterfaceText::load("qps-Ploc").expect("pseudo-locale text");
@@ -436,6 +464,20 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
         );
     }
 
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn release_builds_reject_the_pseudo_locale() {
+        assert_eq!(
+            resolve(Some("qps-Ploc"), Some("en-US"), &[]),
+            Err(UnknownLanguage("qps-Ploc".to_owned()))
+        );
+        assert_eq!(
+            InterfaceText::load("qps-Ploc").map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::InvalidInput)
+        );
+    }
+
+    #[cfg(debug_assertions)]
     #[test]
     fn a_forced_pseudo_locale_wins_over_every_other_input() {
         assert_eq!(
@@ -521,6 +563,7 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
         }
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn pseudo_locale_brackets_and_lengthens_the_complete_message() {
         let english = Text::load(&LanguageTag::english()).expect("English catalog loads");
@@ -536,6 +579,7 @@ fixture-order = { $other_field } ({ $other } K) darf nicht höher sein als { $fi
         assert!(!translated.contains("Quit Circadia"), "{translated}");
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn pseudo_locale_keeps_values_unchanged() {
         let pseudo = Text::load_from(&FIXTURE, &LanguageTag::pseudo()).expect("fixture loads");

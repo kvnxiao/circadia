@@ -25,6 +25,9 @@ pub(super) fn exercise(
     directory: &Path,
 ) -> io::Result<()> {
     editable(automation, settings, process)?;
+    let initial = settings.GetClientRect().map_err(io::Error::other)?;
+    crate::responsive::exercise(automation, settings, process)?;
+    crate::responsive::resize_client(settings, initial.right, initial.bottom)?;
     check_pages(automation, settings, process)?;
     crate::picker::exercise(automation, settings, process, directory)?;
     crate::location::exercise(automation, settings, process, directory)?;

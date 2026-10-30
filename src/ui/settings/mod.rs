@@ -1,6 +1,7 @@
 mod apps;
 pub(super) mod general;
 mod graph;
+mod layout;
 pub(super) mod location;
 mod palette;
 mod phase;
@@ -78,6 +79,9 @@ use windows_reactor::VerticalAlignment;
 use windows_reactor::View;
 use windows_reactor::ViewContext;
 use windows_reactor::WindowBackdrop;
+use windows_reactor::WindowConstraints;
+use windows_reactor::WindowPlacement;
+use windows_reactor::WindowSize;
 use windows_reactor::WindowTheme;
 use windows_reactor::WindowTitleBarHeight;
 use windows_reactor::WindowVisuals;
@@ -472,6 +476,9 @@ pub(super) enum Consent {
 #[derive(Clone)]
 pub(super) enum Message {
     Navigate(Option<String>),
+    Size(WindowSize),
+    Pane(bool),
+    TogglePane,
     Placed,
     Dpi(u32),
     Opened,
@@ -518,6 +525,9 @@ pub(super) struct Settings {
     input: Input,
     page: Page,
     placed: bool,
+    placement: Option<WindowPlacement>,
+    width: f64,
+    pane_open: bool,
     write: PendingWrite,
     timer: Option<ComponentTimer>,
     tick: Option<ComponentTimer>,
@@ -550,6 +560,25 @@ pub(super) fn contrast_colors() -> Option<crate::platform::contrast::ContrastCol
 }
 
 impl Settings {
+    fn expanded_navigation(&self) -> bool {
+        layout::expanded(self.width)
+    }
+
+    fn pane_visible(&self) -> bool {
+        self.expanded_navigation() || self.pane_open
+    }
+
+    fn stacked(&self) -> bool {
+        layout::stacked(self.width)
+    }
+
+    fn resized(&mut self, size: WindowSize) {
+        if self.expanded_navigation() != layout::expanded(size.width) {
+            self.pane_open = false;
+        }
+        self.width = size.width;
+    }
+
     fn palette(&self) -> palette::Palette {
         palette::Palette::new(palette::Theme::new(self.scheme, self.input.contrast))
     }
@@ -643,7 +672,7 @@ impl Settings {
             self.page,
             &self.input.model,
             self.visibility,
-            self.phase().progress.is_some(),
+            self.pane_visible() && self.phase().progress.is_some(),
         ) {
             self.tick = None;
         } else if self.tick.is_none()
@@ -801,13 +830,16 @@ impl Settings {
         }
     }
 
-    fn title_bar(text: &Text) -> View {
+    fn title_bar(&self, context: &ViewContext<'_, Self>) -> View {
+        let text = &self.input.text;
         TitleBar::new()
             .preferred_height(WindowTitleBarHeight::Tall)
             .height(48.0)
             .title(text!(text, "app-name"))
             .icon(Icon::image_svg(EncodedImage::from_static(APP_ICON)))
             .automation_id(automation_id::TITLE_BAR)
+            .is_pane_toggle_button_visible(!self.expanded_navigation())
+            .on_pane_toggle_requested(context.callback(|()| Message::TogglePane))
             .into()
     }
 
@@ -856,17 +888,6 @@ impl Settings {
         let model = &self.input.model;
         let mut control = model.control(Instant::now());
         control.schedule = control.schedule.or_else(|| self.schedule());
-        let announcement = status::announcement(
-            text,
-            &control,
-            status::Stored {
-                error: model.error.is_some(),
-                paused: model.paused,
-                failed: model.write_error.is_some(),
-                restored: model.restore.is_some(),
-            },
-            Timestamp::now(),
-        );
         let caption = status::status_line(
             text,
             &self.input.region,
@@ -890,7 +911,9 @@ impl Settings {
                     palette,
                     60.0,
                     automation_id::PANE_ART,
-                    self.phase_motion(Instant::now(), Timestamp::now()),
+                    self.pane_visible()
+                        .then(|| self.phase_motion(Instant::now(), Timestamp::now()))
+                        .flatten(),
                     self.accents,
                 ),
                 StackPanel::new()
@@ -898,15 +921,37 @@ impl Settings {
                     .spacing(2.0)
                     .vertical_alignment(VerticalAlignment::Center)
                     .children((
-                        widgets::strong(text!(text, "app-name"))
-                            .automation_id(automation_id::STATUS_ANNOUNCEMENT)
-                            .automation_name(announcement)
-                            .automation_live_setting(AutomationLiveSetting::Polite),
+                        widgets::strong(text!(text, "app-name")),
                         widgets::caption(caption)
                             .foreground(palette.secondary)
                             .automation_id(automation_id::PANE_STATUS),
                     )),
             ))
+            .into()
+    }
+
+    fn announcement(&self) -> View {
+        let model = &self.input.model;
+        let mut control = model.control(Instant::now());
+        control.schedule = control.schedule.or_else(|| self.schedule());
+        let announcement = status::announcement(
+            &self.input.text,
+            &control,
+            status::Stored {
+                error: model.error.is_some(),
+                paused: model.paused,
+                failed: model.write_error.is_some(),
+                restored: model.restore.is_some(),
+            },
+            Timestamp::now(),
+        );
+        widgets::caption(&announcement)
+            .automation_id(automation_id::STATUS_ANNOUNCEMENT)
+            .automation_name(announcement)
+            .automation_live_setting(AutomationLiveSetting::Polite)
+            .opacity(0.0)
+            .width(1.0)
+            .height(1.0)
             .into()
     }
 
@@ -948,7 +993,11 @@ impl Settings {
         )
     }
 
-    fn banner(banner: Banner, context: &ViewContext<'_, Self>) -> windows_reactor::KeyedView {
+    fn banner(
+        &self,
+        banner: Banner,
+        context: &ViewContext<'_, Self>,
+    ) -> windows_reactor::KeyedView {
         let actions: Vec<View> = banner
             .actions
             .into_iter()
@@ -998,12 +1047,26 @@ impl Settings {
             banner.id,
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto])
+                .rows([GridLength::Auto, GridLength::Auto])
                 .column_spacing(8.0)
                 .margin(Thickness::new(0.0, 0.0, 0.0, 12.0))
                 .children((
-                    info,
+                    info.grid_column_span(if self.stacked() { 2 } else { 1 }),
                     StackPanel::new()
-                        .grid_column(1)
+                        .grid_column(i32::from(!self.stacked()))
+                        .grid_column_span(if self.stacked() { 2 } else { 1 })
+                        .grid_row(i32::from(self.stacked()))
+                        .horizontal_alignment(HorizontalAlignment::Right)
+                        .margin(Thickness::new(
+                            0.0,
+                            if self.stacked() && !actions.is_empty() {
+                                8.0
+                            } else {
+                                0.0
+                            },
+                            0.0,
+                            0.0,
+                        ))
                         .orientation(Orientation::Horizontal)
                         .spacing(8.0)
                         .vertical_alignment(VerticalAlignment::Center)
@@ -1058,8 +1121,10 @@ impl Settings {
         let editable = self.input.model.editable();
         let mut controls: Vec<View> = Vec::new();
         if let Some(slider) = slider {
+            let slider_width = 220.0;
             let control = Slider::new()
-                .width(220.0)
+                .max_width(slider_width)
+                .horizontal_alignment(HorizontalAlignment::Stretch)
                 .minimum(minimum)
                 .maximum(maximum)
                 .step_frequency(step)
@@ -1074,9 +1139,9 @@ impl Settings {
                 field,
                 Field::DaytimeKelvin | Field::MiddleKelvin | Field::SleepKelvin
             );
-            controls.push(if kelvin && self.palette().contrast().is_none() {
+            let control: View = if kelvin && self.palette().contrast().is_none() {
                 StackPanel::new()
-                    .width(220.0)
+                    .max_width(slider_width)
                     .children((
                         control,
                         Border::new()
@@ -1087,10 +1152,18 @@ impl Settings {
                     .into()
             } else {
                 control.into()
-            });
+            };
+            // An auto-sized host needs a preferred width while the slider
+            // remains stretchable.
+            controls.push(
+                Grid::new()
+                    .children((Border::new().width(slider_width).height(0.0), control))
+                    .into(),
+            );
         }
         controls.push(
             NumberBox::new()
+                .grid_column(i32::from(slider.is_some()))
                 .width(96.0)
                 .minimum(minimum)
                 .maximum(maximum)
@@ -1105,12 +1178,17 @@ impl Settings {
         );
         controls.push(
             widgets::body(unit)
+                .grid_column(i32::from(slider.is_some()) + 1)
                 .margin(Thickness::new(0.0, 6.0, 0.0, 0.0))
                 .into(),
         );
-        StackPanel::new()
-            .orientation(Orientation::Horizontal)
-            .spacing(12.0)
+        Grid::new()
+            .columns(if slider.is_some() {
+                vec![GridLength::STAR, GridLength::Auto, GridLength::Auto]
+            } else {
+                vec![GridLength::Auto, GridLength::Auto]
+            })
+            .column_spacing(12.0)
             .children(controls)
             .into()
     }
@@ -1145,6 +1223,13 @@ impl Component for Settings {
             input: input.clone(),
             page: Page::Schedule,
             placed: false,
+            placement: crate::platform::settings_window::initial_placement()
+                .inspect_err(
+                    |error| tracing::warn!(%error, "fitting the settings window to its monitor"),
+                )
+                .ok(),
+            width: 1200.0,
+            pane_open: false,
             write: PendingWrite::default(),
             timer: None,
             tick: None,
@@ -1201,6 +1286,9 @@ impl Component for Settings {
 
     fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
         match message {
+            Message::Size(size) => self.resized(size),
+            Message::Pane(open) => self.pane_open = !self.expanded_navigation() && open,
+            Message::TogglePane => self.pane_open = !self.pane_open,
             message @ (Message::Opened
             | Message::SolarExpand(_)
             | Message::WindowsLocation(_)
@@ -1212,6 +1300,7 @@ impl Component for Settings {
                     .find(|page| tag.as_deref() == Some(page.tag()))
                 {
                     self.page = page;
+                    self.pane_open = false;
                 }
             }
             Message::Placed => {
@@ -1299,12 +1388,20 @@ impl Component for Settings {
         crate::activity::record(crate::ActivityEvent::SettingsView);
         let text = Rc::clone(&self.input.text);
         context.window_title(text!(text, "app-name"));
-        context.window_visuals(
-            WindowVisuals::new()
-                .theme(WindowTheme::System)
-                .backdrop(WindowBackdrop::Mica)
-                .client_size(1200.0, 1000.0),
-        );
+        let mut visuals = WindowVisuals::new()
+            .theme(WindowTheme::System)
+            .backdrop(WindowBackdrop::Mica)
+            .client_size(1200.0, 1000.0)
+            .constraints(WindowConstraints {
+                min_width: Some(640.0),
+                min_height: Some(480.0),
+                ..WindowConstraints::default()
+            });
+        if let Some(placement) = self.placement {
+            visuals = visuals.initial_placement(placement);
+        }
+        context.window_visuals(visuals);
+        context.on_window_size(context.callback(Message::Size));
         context.on_window_placement(context.callback(|_| Message::Placed));
         context.on_color_scheme(context.callback(Message::Scheme));
         let mut children: Vec<View> = vec![
@@ -1316,7 +1413,7 @@ impl Component for Settings {
                 .keyed_children(
                     problems::banners(&self.input.model, &text, &self.input.region, self.page)
                         .into_iter()
-                        .map(|banner| Self::banner(banner, context)),
+                        .map(|banner| self.banner(banner, context)),
                 )
                 .into(),
         ];
@@ -1325,16 +1422,26 @@ impl Component for Settings {
         let column = Border::new()
             .max_width(1000.0)
             .horizontal_alignment(HorizontalAlignment::Left)
-            .padding(Thickness::new(20.0, 0.0, 40.0, 40.0))
+            .padding(Thickness::new(
+                layout::CONTENT_LEFT,
+                0.0,
+                layout::CONTENT_RIGHT,
+                40.0,
+            ))
             .content(StackPanel::new().children(children));
         let navigation = NavigationView::new()
-            .pane_display_mode(NavigationViewPaneDisplayMode::Left)
+            .pane_display_mode(if self.expanded_navigation() {
+                NavigationViewPaneDisplayMode::Left
+            } else {
+                NavigationViewPaneDisplayMode::LeftMinimal
+            })
             .is_pane_toggle_button_visible(false)
             .is_settings_visible(false)
             .is_back_button_visible(NavigationViewBackButtonVisible::Collapsed)
             .always_show_header(false)
-            .open_pane_length(300.0)
-            .is_pane_open(true)
+            .open_pane_length(layout::PANE_WIDTH)
+            .is_pane_open(self.pane_visible())
+            .on_is_pane_open_changed(context.callback(Message::Pane))
             .pane_header(self.pane_header(&self.palette()))
             .keyed_menu_items(
                 Page::ALL
@@ -1353,7 +1460,7 @@ impl Component for Settings {
             );
         Grid::new()
             .rows([GridLength::Auto, GridLength::STAR])
-            .children((Self::title_bar(&text), navigation))
+            .children((self.title_bar(context), navigation, self.announcement()))
             .content_dialog(schedule::consent_dialog(&text, self.consent, context))
     }
 }
