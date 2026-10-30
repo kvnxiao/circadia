@@ -66,7 +66,7 @@ Read a native check's instructions before running it. Some send mouse and keyboa
 
 ## Continuous integration
 
-The [CI workflow](.github/workflows/ci.yml) runs on pull requests, pushes to `main`, merge queues, and manual dispatch. Independent jobs check:
+The [Tests and code quality workflow](.github/workflows/checks.yml) runs on pull requests, pushes to `main`, merge queues, and manual dispatch. Independent jobs check:
 
 - Application unit tests and release-text tests on Windows.
 - Application Clippy, rustdoc, and generated composition bindings on Windows.
@@ -75,7 +75,11 @@ The [CI workflow](.github/workflows/ci.yml) runs on pull requests, pushes to `ma
 - Rust formatting and workflow syntax on Linux.
 - Rust dependency advisories and unused dependencies on Linux.
 
-A preparation job caches Cargo Git sources before the Rust matrix starts. Its shared key hashes the Git source URLs and revisions in the application and Reactor probe lockfiles, so registry-only dependency updates preserve this cache. On a cache miss, it fetches the locked dependencies and saves the Git sources before compilation. The four Rust jobs using Reactor and the installer restore this shared cache. Separate caches store registry dependencies and compiled artifacts by project and check group; they exclude Cargo's Git directory to avoid storing duplicate source archives. Python caches locked dependencies.
+Pull requests select expensive checks from changed paths. Unaffected jobs run a success step without installing tools, restoring caches, or compiling code; their job names remain present with a passing status. Shared composition code and assets also select the Settings probe. Unknown paths select all checks. Pushes to `main`, merge queues, and manual runs always select the full suite.
+
+Use **All required checks** as the branch-protection status. It fails if any check fails, is cancelled, or is unexpectedly skipped. Formatting, workflow-selection tests, and dependency audits always run. The selector compares the complete pull-request diff, including deleted and renamed paths.
+
+When selected checks need Reactor, a preparation job caches Cargo Git sources before the Rust matrix starts. Its shared key hashes the Git source URLs and revisions in the application and Reactor probe lockfiles, so registry-only dependency updates preserve this cache. On a cache miss, it fetches the locked dependencies and saves the Git sources before compilation. The four Rust jobs using Reactor and the installer restore this shared cache. Separate caches store registry dependencies and compiled artifacts by project and check group; they exclude Cargo's Git directory to avoid storing duplicate source archives. Python caches locked dependencies.
 
 GitHub scopes pull-request caches to that pull request; caches saved on `main` are also available to pull requests. Cache eviction or a cache-service failure can still require Cargo to fetch sources again.
 
@@ -83,7 +87,7 @@ Superseded runs are cancelled, and a failed Rust matrix job does not cancel the 
 
 CI executes test harnesses, including unit tests of native-check helpers, but does not launch the desktop application or probe windows. Desktop automation, screenshots, live Night Light checks, host-setting exercises, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
 
-On a push to `main`, an additional **Unsigned Windows installer** job waits for all check jobs to pass. It builds the current commit's installer and uploads **Circadia-windows-x64-unsigned**, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual workflow dispatch do not build an installer.
+On a push to `main`, the reusable [Windows packaging workflow](.github/workflows/windows-installer.yml) runs after **All required checks** passes. Its **Unsigned x64 installer** job builds the package. It builds the current commit's installer and uploads **Circadia-windows-x64-unsigned**, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual workflow dispatch do not build an installer.
 
 External actions use full commit pins. [Dependabot](.github/dependabot.yml) proposes weekly action updates for review.
 
