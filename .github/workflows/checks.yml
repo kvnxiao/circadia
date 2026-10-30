@@ -1,4 +1,4 @@
-name: CI
+name: Tests and code quality
 
 on:
   push:
@@ -19,6 +19,28 @@ env:
   CARGO_INCREMENTAL: '0'
 
 jobs:
+  changes:
+    name: Select affected checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      application: ${{ steps.scope.outputs.application }}
+      solar: ${{ steps.scope.outputs.solar }}
+      reactor: ${{ steps.scope.outputs.reactor }}
+      settings: ${{ steps.scope.outputs.settings }}
+      python: ${{ steps.scope.outputs.python }}
+      git: ${{ steps.scope.outputs.git }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Select checks from changed paths
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node .github/scripts/check-scope.mjs
+
   formatting:
     name: Rust formatting and workflow lint
     runs-on: ubuntu-24.04
@@ -47,13 +69,18 @@ jobs:
           just --justfile tools/windows-reactor/justfile fmt-check
           just --justfile tools/windows-reactor/settings-design/justfile fmt-check
           rustfmt +nightly --check --edition 2024 tools/solar-timing/solar-timing.rs
+      - name: Test workflow selection
+        run: node --test .github/scripts/check-scope.test.mjs
       - name: Check workflows
         run: actionlint -color
       - name: Check installer shell script
         run: shellcheck packaging/build-installer.sh
 
   cargo-git:
-    name: Prepare Cargo Git sources
+    name: Cargo Git sources
+    needs: changes
+    env:
+      RUN_CHECKS: ${{ needs.changes.outputs.git }}
     runs-on: windows-2025
     timeout-minutes: 15
     outputs:
@@ -62,15 +89,26 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Report check scope
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [[ "$RUN_CHECKS" == true ]]; then
+            echo "Affected files require these checks."
+          else
+            echo "No affected files; checks pass without rebuilding."
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.RUN_CHECKS == 'true'
         with:
           persist-credentials: false
       - name: Compute Git source cache key
+        if: env.RUN_CHECKS == 'true'
         id: key
         run: |
           sources=$(sed -n '/^source = "git+/p' Cargo.lock tools/windows-reactor/Cargo.lock tools/windows-reactor/settings-design/Cargo.lock | tr -d '\r' | LC_ALL=C sort -u | sha256sum)
           echo "value=cargo-git-v1-Windows-${sources%% *}" >> "$GITHUB_OUTPUT"
       - name: Look up shared Git sources
+        if: env.RUN_CHECKS == 'true'
         id: sources
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -78,16 +116,16 @@ jobs:
           key: ${{ steps.key.outputs.value }}
           lookup-only: true
       - name: Install stable Rust
-        if: steps.sources.outputs.cache-hit != 'true'
+        if: env.RUN_CHECKS == 'true' && (steps.sources.outputs.cache-hit != 'true')
         run: rustup toolchain install stable --profile minimal
       - name: Fetch locked dependencies
-        if: steps.sources.outputs.cache-hit != 'true'
+        if: env.RUN_CHECKS == 'true' && (steps.sources.outputs.cache-hit != 'true')
         run: |
           for manifest in Cargo.toml tools/windows-reactor/Cargo.toml tools/windows-reactor/settings-design/Cargo.toml; do
             cargo +stable fetch --locked --manifest-path "$manifest" --target x86_64-pc-windows-msvc
           done
       - name: Save shared Git sources before checks
-        if: steps.sources.outputs.cache-hit != 'true'
+        if: env.RUN_CHECKS == 'true' && (steps.sources.outputs.cache-hit != 'true')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
@@ -95,69 +133,89 @@ jobs:
 
   rust:
     name: ${{ matrix.name }}
-    needs: cargo-git
+    needs: [changes, cargo-git]
+    env:
+      RUN_CHECKS: ${{ needs.changes.outputs[matrix.scope] }}
     runs-on: windows-2025
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Application unit tests
+          - name: Application tests
             project: .
             recipes: test test-release-text
+            scope: application
             cache: application-tests
-          - name: Application Clippy, docs, and bindings
+          - name: Application lint, docs, and bindings
             project: .
             recipes: clippy doc check-composition-bindings
+            scope: application
             cache: application-checks
-          - name: Solar probe checks
+          - name: Solar calculation checks
             project: tools/solar-calculation
             recipes: clippy test doc
+            scope: solar
             cache: solar
           - name: Reactor probe checks
             project: tools/windows-reactor
             recipes: clippy test doc
+            scope: reactor
             cache: reactor
           - name: Settings probe checks
             project: tools/windows-reactor/settings-design
             recipes: clippy test doc
+            scope: settings
             cache: settings
     defaults:
       run:
         shell: bash
         working-directory: ${{ matrix.project }}
     steps:
+      - name: Report check scope
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [[ "$RUN_CHECKS" == true ]]; then
+            echo "Affected files require these checks."
+          else
+            echo "No affected files; checks pass without rebuilding."
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.RUN_CHECKS == 'true'
         with:
           persist-credentials: false
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        if: env.RUN_CHECKS == 'true'
         with:
           tool: just
       - name: Install stable Rust
+        if: env.RUN_CHECKS == 'true'
         run: rustup toolchain install stable --profile minimal --component clippy
       - name: Install binding generator formatter
-        if: matrix.cache == 'application-checks'
+        if: env.RUN_CHECKS == 'true' && (matrix.cache == 'application-checks')
         run: rustup component add rustfmt --toolchain stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: env.RUN_CHECKS == 'true'
         with:
           key: ${{ matrix.cache }}
           workspaces: ${{ matrix.project }} -> target
           cache-bin: false
           cache-directories: '!~/.cargo/git'
       - name: Restore shared Git sources
-        if: matrix.cache != 'solar'
+        if: env.RUN_CHECKS == 'true' && (matrix.cache != 'solar')
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
           key: ${{ needs.cargo-git.outputs.cache-key }}
       - name: Run checks
+        if: env.RUN_CHECKS == 'true'
         env:
           CHECK_RECIPES: ${{ matrix.recipes }}
         run: |
           read -r -a recipes <<< "$CHECK_RECIPES"
           just "${recipes[@]}"
       - name: Compile and lint the solar timing binary
-        if: matrix.cache == 'solar'
+        if: env.RUN_CHECKS == 'true' && (matrix.cache == 'solar')
         run: |
           timing_project=$(mktemp -d)
           cp -R src fixtures.json Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml clippy.toml justfile "$timing_project/"
@@ -166,29 +224,44 @@ jobs:
           just --justfile "$timing_project/justfile" clippy timing-build
 
   python:
-    name: Python tools lint, types, formatting, and unit tests
+    name: Python tools checks
+    needs: changes
+    env:
+      RUN_CHECKS: ${{ needs.changes.outputs.python }}
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
       run:
         shell: bash
     steps:
+      - name: Report check scope
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [[ "$RUN_CHECKS" == true ]]; then
+            echo "Affected files require these checks."
+          else
+            echo "No affected files; checks pass without rebuilding."
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.RUN_CHECKS == 'true'
         with:
           persist-credentials: false
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        if: env.RUN_CHECKS == 'true'
         with:
           tool: just
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: env.RUN_CHECKS == 'true'
         with:
           version-file: tools/pyproject.toml
           python-version: '3.15'
           enable-cache: true
           cache-dependency-glob: tools/uv.lock
       - run: just --justfile tools/justfile check
+        if: env.RUN_CHECKS == 'true'
 
   dependencies:
-    name: Rust dependency checks
+    name: Rust dependency audit
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -204,50 +277,22 @@ jobs:
           just --justfile tools/windows-reactor/justfile dependencies
           just --justfile tools/windows-reactor/settings-design/justfile dependencies
 
-  installer:
-    name: Unsigned Windows installer
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [formatting, cargo-git, rust, python, dependencies]
-    runs-on: windows-2025
-    timeout-minutes: 30
-    defaults:
-      run:
-        shell: bash
+  required:
+    name: All required checks
+    if: always()
+    needs: [changes, formatting, cargo-git, rust, python, dependencies]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
-        with:
-          tool: just,cargo-bundle-licenses@4.2.0
-      - name: Install stable Rust
-        run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          key: installer-release
-          cache-bin: false
-          cache-directories: '!~/.cargo/git'
-      - name: Restore shared Git sources
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/git
-          key: ${{ needs.cargo-git.outputs.cache-key }}
-      - name: Build unsigned installer
-        run: just installer
-      - name: Upload installer and checksum
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: Circadia-windows-x64-unsigned
-          path: |
-            target/installer/*-setup.exe
-            target/installer/*-setup.exe.sha256
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 90
-      - name: Archive matching debug symbols
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: Circadia-windows-x64-symbols
-          path: target/x86_64-pc-windows-msvc/release/circadia.pdb
-          if-no-files-found: error
-          retention-days: 90
+      - name: Require every check to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
+
+  installer:
+    name: Windows packaging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [required, cargo-git]
+    uses: ./.github/workflows/windows-installer.yml
+    with:
+      git-cache-key: ${{ needs.cargo-git.outputs.cache-key }}
