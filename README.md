@@ -70,3 +70,5 @@ While management is on, Circadia keeps Night Light enabled, disables Windows' ow
 [Report a problem](https://github.com/kvnxiao/circadia/issues/new?template=bug_report.md) with the relevant log from **General → Logs → Open folder**. Logs can include coordinates, executable names, paths, and window titles; remove personal information before sharing them. Circadia does not upload logs automatically.
 
 Circadia is licensed under the [MIT License](LICENSE).
+
+This temporary documentation change verifies workflow check selection.
