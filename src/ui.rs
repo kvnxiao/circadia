@@ -163,7 +163,7 @@ fn run_with_native(
     if let Err(error) = crate::platform::nls::prefer_ui_language(&language.to_string()) {
         tracing::warn!(%error, "Windows controls keep the Windows display language");
     }
-    let text = Text::load(&language).map_err(io::Error::other)?;
+    let text = Text::load(&language)?;
     let regional_format = RegionalFormat::capture_user_default()?;
     let configuration = Rc::new(RefCell::new(configuration));
     let crash = crash_notice::pending(

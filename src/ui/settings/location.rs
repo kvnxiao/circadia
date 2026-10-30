@@ -6,7 +6,7 @@ use crate::DiagnosticFailure;
 use crate::Field;
 use crate::FieldValue;
 use crate::l10n::Text;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use crate::platform::location::Request;
 use std::any::Any;
 
@@ -187,10 +187,11 @@ pub(super) fn starts_request(message: &Message, model: &Model) -> bool {
 }
 
 pub(super) fn failure_message(text: &Text, failure: DiagnosticFailure) -> String {
+    bind_text!(fl, text);
     let message = match failure.category {
-        DiagnosticCategory::AccessDenied => text!(text, "location-denied"),
-        DiagnosticCategory::Unavailable => text!(text, "location-disabled"),
-        _ => text!(text, "location-unavailable"),
+        DiagnosticCategory::AccessDenied => fl!("location-denied"),
+        DiagnosticCategory::Unavailable => fl!("location-disabled"),
+        _ => fl!("location-unavailable"),
     };
     super::problems::with_code(text, message, failure)
 }

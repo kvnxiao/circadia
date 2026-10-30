@@ -34,7 +34,7 @@ use crate::SuppressionState;
 use crate::WindowsZone;
 use crate::automation_id;
 use crate::l10n::Text;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use crate::log::run::CrashSummary;
 use crate::platform::nls::RegionalFormat;
 use jiff::Timestamp;
@@ -120,11 +120,12 @@ impl Page {
     }
 
     fn label(self, text: &Text) -> String {
+        bind_text!(fl, text);
         match self {
-            Self::Schedule => text!(text, "nav-schedule"),
-            Self::Apps => text!(text, "nav-apps"),
-            Self::Transitions => text!(text, "nav-transitions"),
-            Self::General => text!(text, "nav-general"),
+            Self::Schedule => fl!("nav-schedule"),
+            Self::Apps => fl!("nav-apps"),
+            Self::Transitions => fl!("nav-transitions"),
+            Self::General => fl!("nav-general"),
         }
     }
 
@@ -756,8 +757,9 @@ impl Settings {
 
     fn browse(&self, context: &ComponentContext<Self>) {
         let text = &self.input.text;
-        let title = text!(text, "dialog-file-title");
-        let file_types = text!(text, "dialog-file-types");
+        bind_text!(fl, text);
+        let title = fl!("dialog-file-title");
+        let file_types = fl!("dialog-file-types");
         let _queued = context.run_window(move |window| {
             match crate::platform::picker::executable(&window, &title, &file_types) {
                 Ok(file) => Message::Picked(
@@ -922,10 +924,11 @@ impl Settings {
 
     fn title_bar(&self, context: &ViewContext<'_, Self>) -> View {
         let text = &self.input.text;
+        bind_text!(fl, text);
         TitleBar::new()
             .preferred_height(WindowTitleBarHeight::Tall)
             .height(48.0)
-            .title(text!(text, "app-name"))
+            .title(fl!("app-name"))
             .icon(Icon::image_svg(EncodedImage::from_static(APP_ICON)))
             .automation_id(automation_id::TITLE_BAR)
             .is_pane_toggle_button_visible(!self.expanded_navigation())
@@ -974,6 +977,7 @@ impl Settings {
 
     fn pane_header(&self, palette: &palette::Palette) -> View {
         let text = &self.input.text;
+        bind_text!(fl, text);
         let phase = self.phase();
         let model = &self.input.model;
         let mut control = model.control(Instant::now());
@@ -1011,7 +1015,7 @@ impl Settings {
                     .spacing(2.0)
                     .vertical_alignment(VerticalAlignment::Center)
                     .children((
-                        widgets::strong(text!(text, "app-name")),
+                        widgets::strong(fl!("app-name")),
                         widgets::caption(caption)
                             .foreground(palette.secondary)
                             .automation_id(automation_id::PANE_STATUS),
@@ -1047,10 +1051,11 @@ impl Settings {
 
     fn nav_item(&self, page: Page, marked: bool) -> windows_reactor::KeyedView {
         let text = &self.input.text;
+        bind_text!(fl, text);
         let label = page.label(text);
         let (name, content): (String, View) = if marked {
             (
-                text!(text, "nav-invalid", page = label.as_str()),
+                fl!("nav-invalid", page = label.as_str()),
                 Grid::new()
                     .columns([GridLength::STAR, GridLength::Auto])
                     .children((
@@ -1453,7 +1458,8 @@ impl Component for Settings {
         #[cfg(feature = "graph-measurement")]
         crate::activity::record(crate::ActivityEvent::SettingsView);
         let text = Rc::clone(&self.input.text);
-        context.window_title(text!(text, "app-name"));
+        bind_text!(fl, text);
+        context.window_title(fl!("app-name"));
         let mut visuals = WindowVisuals::new()
             .theme(WindowTheme::System)
             .backdrop(WindowBackdrop::Mica)

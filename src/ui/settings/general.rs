@@ -19,7 +19,7 @@ use crate::FieldValue;
 use crate::automation_id;
 use crate::l10n::Text;
 use crate::l10n::WINDOWS;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use crate::platform::startup::Effective;
 use crate::platform::startup::Registration;
 #[cfg(test)]
@@ -122,6 +122,7 @@ pub(super) fn sign_in_view(
     status: SignInStatus,
     text: &Text,
 ) -> SignInView {
+    bind_text!(fl, text);
     let on = match (status.effective, status.failure) {
         (Some(Ok(effective)), _) => effective == Effective::Enabled,
         (_, Some((requested, _))) => !requested,
@@ -139,31 +140,27 @@ pub(super) fn sign_in_view(
             severity: Severity::Error,
             text: problems::with_code(
                 text,
-                text!(
-                    text,
-                    "sign-in-failed",
-                    state = if on { "on" } else { "off" }
-                ),
+                fl!("sign-in-failed", state = if on { "on" } else { "off" }),
                 failure,
             ),
-            retry: Some(text!(text, "action-retry")),
+            retry: Some(fl!("action-retry")),
         }),
         (None, Some(Err(failure))) => Some(FeatureMessage {
             severity: Severity::Error,
-            text: problems::with_code(text, text!(text, "sign-in-read-failed"), failure),
+            text: problems::with_code(text, fl!("sign-in-read-failed"), failure),
             retry: None,
         }),
         (None, Some(Ok(Effective::DisabledByWindows))) if preference == Some(true) => {
-            warning(text!(text, "sign-in-disabled-by-windows"))
+            warning(fl!("sign-in-disabled-by-windows"))
         }
         (None, Some(Ok(Effective::NotRegistered))) if preference == Some(true) => {
-            warning(text!(text, "sign-in-not-registered"))
+            warning(fl!("sign-in-not-registered"))
         }
         (None, Some(Ok(Effective::DifferentCommand))) if preference == Some(true) => {
-            warning(text!(text, "sign-in-other-location"))
+            warning(fl!("sign-in-other-location"))
         }
         (None, Some(Ok(Effective::Enabled))) if preference == Some(false) => {
-            warning(text!(text, "sign-in-still-registered"))
+            warning(fl!("sign-in-still-registered"))
         }
         (None, _) => None,
     };
@@ -234,8 +231,9 @@ fn language_values() -> Vec<String> {
 }
 
 pub(super) fn language_label(text: &Text, language: &str) -> String {
+    bind_text!(fl, text);
     if language == WINDOWS {
-        text!(text, "language-windows")
+        fl!("language-windows")
     } else {
         crate::l10n::language_name(language)
     }
@@ -260,27 +258,29 @@ pub(super) fn language_edits(index: Option<usize>) -> Option<Vec<(Field, FieldVa
 }
 
 pub(super) fn restart_prompt(model: &Model, text: &Text) -> Option<RestartPrompt> {
+    bind_text!(fl, text);
     (model.config().input().interface_language != model.launch_language).then(|| RestartPrompt {
-        title: text!(text, "restart-title"),
-        description: text!(text, "restart-description"),
-        action: text!(text, "action-quit"),
+        title: fl!("restart-title"),
+        description: fl!("restart-description"),
+        action: fl!("action-quit"),
     })
 }
 
 pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vec<View> {
     let text = &settings.input.text;
-    let minimized = text!(text, "start-minimized-title");
+    bind_text!(fl, text);
+    let minimized = fl!("start-minimized-title");
     vec![
-        widgets::section(text!(text, "section-language"), true),
+        widgets::section(fl!("section-language"), true),
         language_card(settings, context),
-        widgets::section(text!(text, "section-startup"), false),
+        widgets::section(fl!("section-startup"), false),
         widgets::group(vec![
             sign_in_card(settings, context),
             widgets::card(
                 Row::new(
                     "\u{E73F}",
                     minimized.clone(),
-                    text!(text, "start-minimized-description"),
+                    fl!("start-minimized-description"),
                 )
                 .controls(settings.with_feedback(
                     Field::StartMinimized,
@@ -297,12 +297,12 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 .view(settings.stacked()),
             ),
         ]),
-        widgets::section(text!(text, "section-night-light"), false),
+        widgets::section(fl!("section-night-light"), false),
         widgets::card(
             Row::new(
                 "\u{EA18}",
-                text!(text, "night-light-title"),
-                text!(text, "night-light-description"),
+                fl!("night-light-title"),
+                fl!("night-light-description"),
             )
             .controls(vec![widgets::pill(management_label(
                 &settings.input.model,
@@ -310,13 +310,13 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             ))])
             .view(settings.stacked()),
         ),
-        widgets::section(text!(text, "section-troubleshooting"), false),
+        widgets::section(fl!("section-troubleshooting"), false),
         widgets::group(vec![
             folder_card(
                 settings,
                 "\u{E8B7}",
-                text!(text, "settings-file-title"),
-                text!(text, "settings-file-description"),
+                fl!("settings-file-title"),
+                fl!("settings-file-description"),
                 Folder::Data,
                 automation_id::OPEN_SETTINGS_FOLDER,
                 context,
@@ -324,30 +324,32 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             folder_card(
                 settings,
                 "\u{E8A5}",
-                text!(text, "logs-title"),
-                text!(text, "logs-description"),
+                fl!("logs-title"),
+                fl!("logs-description"),
                 Folder::Logs,
                 automation_id::OPEN_LOGS_FOLDER,
                 context,
             ),
         ]),
-        widgets::section(text!(text, "section-about"), false),
+        widgets::section(fl!("section-about"), false),
         about_card(settings, context),
     ]
 }
 
 pub(super) fn management_label(model: &Model, text: &Text) -> String {
+    bind_text!(fl, text);
     schedule::change_line(model, text).unwrap_or_else(|| {
         if model.managing() {
-            text!(text, "night-light-managing")
+            fl!("night-light-managing")
         } else {
-            text!(text, "night-light-not-managing")
+            fl!("night-light-not-managing")
         }
     })
 }
 
 pub(super) fn version_text(text: &Text) -> String {
-    text!(text, "about-version", version = env!("CARGO_PKG_VERSION"))
+    bind_text!(fl, text);
+    fl!("about-version", version = env!("CARGO_PKG_VERSION"))
 }
 
 fn folder_card(
@@ -360,7 +362,8 @@ fn folder_card(
     context: &ViewContext<'_, Settings>,
 ) -> View {
     let text = &settings.input.text;
-    let name = text!(text, "open-folder-name", name = title.as_str());
+    bind_text!(fl, text);
+    let name = fl!("open-folder-name", name = title.as_str());
     widgets::card(
         Row::new(glyph, title, description)
             .controls(vec![
@@ -368,7 +371,7 @@ fn folder_card(
                     .automation_id(id)
                     .automation_name(name)
                     .on_click(context.message(Message::Command(Command::OpenFolder(folder))))
-                    .content(text!(text, "action-open-folder"))
+                    .content(fl!("action-open-folder"))
                     .into(),
             ])
             .view(settings.stacked()),
@@ -377,8 +380,9 @@ fn folder_card(
 
 fn about_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let text = &settings.input.text;
+    bind_text!(fl, text);
     widgets::card(
-        Row::new("", text!(text, "app-name"), version_text(text))
+        Row::new("", fl!("app-name"), version_text(text))
             .icon(
                 Image::new()
                     .source_svg(EncodedImage::from_static(APP_ICON))
@@ -390,7 +394,7 @@ fn about_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View 
                 Button::new()
                     .automation_id(automation_id::ABOUT_QUIT)
                     .on_click(context.message(Message::Command(Command::Quit)))
-                    .content(text!(text, "action-quit"))
+                    .content(fl!("action-quit"))
                     .into(),
             ])
             .view(settings.stacked()),
@@ -420,7 +424,8 @@ fn switch(
 
 fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let text = &settings.input.text;
-    let title = text!(text, "sign-in-title");
+    bind_text!(fl, text);
+    let title = fl!("sign-in-title");
     let model = &settings.input.model;
     let view = sign_in_view(
         model
@@ -431,23 +436,19 @@ fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
         text,
     );
     let mut rows = vec![
-        Row::new(
-            "\u{E7E8}",
-            title.clone(),
-            text!(text, "sign-in-description"),
-        )
-        .controls(settings.with_feedback(
-            Field::StartAtSignIn,
-            switch(
-                settings,
+        Row::new("\u{E7E8}", title.clone(), fl!("sign-in-description"))
+            .controls(settings.with_feedback(
                 Field::StartAtSignIn,
-                view.on,
-                (automation_id::SIGN_IN, &title),
-                context,
-            ),
-        ))
-        .compact_actions()
-        .view(settings.stacked()),
+                switch(
+                    settings,
+                    Field::StartAtSignIn,
+                    view.on,
+                    (automation_id::SIGN_IN, &title),
+                    context,
+                ),
+            ))
+            .compact_actions()
+            .view(settings.stacked()),
     ];
     if let Some(message) = view.message {
         rows.push(widgets::feature_row(
@@ -466,7 +467,8 @@ fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
 
 fn language_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let (text, model) = (&settings.input.text, &settings.input.model);
-    let title = text!(text, "language-title");
+    bind_text!(fl, text);
+    let title = fl!("language-title");
     let options = languages(text);
     let selected = match model.value(Field::InterfaceLanguage) {
         FieldValue::Language(language) => options.iter().position(|(value, _)| *value == language),
@@ -481,7 +483,7 @@ fn language_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
         .on_selection_changed(context.callback(Message::Language))
         .into();
     let mut rows = vec![
-        Row::new("\u{F2B7}", title, text!(text, "language-description"))
+        Row::new("\u{F2B7}", title, fl!("language-description"))
             .controls(settings.with_feedback(Field::InterfaceLanguage, combo))
             .view(settings.stacked()),
     ];

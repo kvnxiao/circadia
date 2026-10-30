@@ -12,7 +12,7 @@ use crate::SchedulingState;
 use crate::Segment;
 use crate::SuppressionState;
 use crate::l10n::Text;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use crate::platform::nls::RegionalFormat;
 use crate::ui::configuration::Configuration;
 use crate::ui::configuration::Toggles;
@@ -97,27 +97,28 @@ pub(super) struct Phase {
 
 impl Phase {
     pub(super) fn label(&self, text: &Text) -> String {
+        bind_text!(fl, text);
         match self.name {
-            PhaseName::NotManaging => text!(text, "phase-name", phase = "not-managing"),
-            PhaseName::Preview => text!(text, "phase-name", phase = "preview"),
-            PhaseName::Suppressed => text!(text, "phase-name", phase = "suppressed"),
-            PhaseName::Shifting(to) => text!(text, "phase-shifting", phase = to.key()),
-            PhaseName::Current(phase) => text!(text, "phase-name", phase = phase.key()),
+            PhaseName::NotManaging => fl!("phase-name", phase = "not-managing"),
+            PhaseName::Preview => fl!("phase-name", phase = "preview"),
+            PhaseName::Suppressed => fl!("phase-name", phase = "suppressed"),
+            PhaseName::Shifting(to) => fl!("phase-shifting", phase = to.key()),
+            PhaseName::Current(phase) => fl!("phase-name", phase = phase.key()),
         }
     }
 
     pub(super) fn art_name(&self, text: &Text) -> String {
+        bind_text!(fl, text);
         match (self.picture, self.badge, self.progress) {
-            (Picture::NotManaging, ..) => text!(text, "phase-art-not-managing"),
-            (_, Some(Badge::Timer), _) => text!(text, "phase-art-manual"),
-            (_, Some(Badge::AppWindow), _) => text!(text, "phase-art-automatic"),
-            (Picture::Phase(phase), None, Some(progress)) => text!(
-                text,
+            (Picture::NotManaging, ..) => fl!("phase-art-not-managing"),
+            (_, Some(Badge::Timer), _) => fl!("phase-art-manual"),
+            (_, Some(Badge::AppWindow), _) => fl!("phase-art-automatic"),
+            (Picture::Phase(phase), None, Some(progress)) => fl!(
                 "phase-art-shifting",
                 phase = phase.key(),
                 percent = percent(progress)
             ),
-            (Picture::Phase(phase), None, None) => text!(text, "phase-name", phase = phase.key()),
+            (Picture::Phase(phase), None, None) => fl!("phase-name", phase = phase.key()),
         }
     }
 }
@@ -428,31 +429,31 @@ pub(super) fn status_line(
     stored: Stored,
     current: Timestamp,
 ) -> String {
+    bind_text!(fl, text);
     if stored.error {
-        return text!(text, "status-configuration-error");
+        return fl!("status-configuration-error");
     }
     let Some(control) = control else {
-        return text!(text, "status-starting");
+        return fl!("status-starting");
     };
     if !control.management.is_on() {
-        return text!(text, "status-not-managing");
+        return fl!("status-not-managing");
     }
     if control.scheduling == SchedulingState::Stopped {
-        return text!(text, "status-control-unavailable");
+        return fl!("status-control-unavailable");
     }
     if control.output_failed {
         return if control.suppression.active() {
-            text!(text, "status-output-unavailable-suppressed")
+            fl!("status-output-unavailable-suppressed")
         } else {
-            text!(text, "status-output-unavailable")
+            fl!("status-output-unavailable")
         };
     }
     if control.scheduling == SchedulingState::Retained {
         return control.last_scheduled.map_or_else(
-            || text!(text, "status-control-unavailable"),
+            || fl!("status-control-unavailable"),
             |value| {
-                text!(
-                    text,
+                fl!(
                     "status-schedule-retained",
                     kelvin = kelvin_text(region, value)
                 )
@@ -460,23 +461,23 @@ pub(super) fn status_line(
         );
     }
     if stored.paused {
-        return text!(text, "status-saving-paused");
+        return fl!("status-saving-paused");
     }
     if stored.failed {
-        return text!(text, "status-write-failed");
+        return fl!("status-write-failed");
     }
     if stored.restored {
-        return text!(text, "status-backup-restored");
+        return fl!("status-backup-restored");
     }
     let running = matches!(
         control.scheduling,
         SchedulingState::Available | SchedulingState::SolarFallback
     );
     if running && control.observation_failed {
-        return text!(text, "status-observation-failed");
+        return fl!("status-observation-failed");
     }
     let Some(value) = control.kelvin(current).filter(|_| running) else {
-        return text!(text, "status-calculating");
+        return fl!("status-calculating");
     };
     let state = if control.preview_active {
         "preview"
@@ -490,8 +491,7 @@ pub(super) fn status_line(
     } else {
         "available"
     };
-    text!(
-        text,
+    fl!(
         "status-managing",
         state = state,
         solar = solar,
@@ -500,7 +500,8 @@ pub(super) fn status_line(
 }
 
 pub(super) fn tooltip(text: &Text, status: &str) -> String {
-    text!(text, "tooltip", status = status)
+    bind_text!(fl, text);
+    fl!("tooltip", status = status)
 }
 
 pub(super) fn announcement(
@@ -509,12 +510,9 @@ pub(super) fn announcement(
     stored: Stored,
     current: Timestamp,
 ) -> String {
+    bind_text!(fl, text);
     if stored.error {
-        return text!(
-            text,
-            "announcement",
-            status = text!(text, "status-configuration-error")
-        );
+        return fl!("announcement", status = fl!("status-configuration-error"));
     }
     let mode = match control.management {
         ManagementState::Off => "off",
@@ -523,7 +521,7 @@ pub(super) fn announcement(
         ManagementState::TurningOff => "stopping",
         ManagementState::Exiting => "exiting",
     };
-    let mut parts = vec![text!(text, "announcement-management", mode = mode)];
+    let mut parts = vec![fl!("announcement-management", mode = mode)];
     if control.management.is_on() {
         let mut phase = control.phase(current);
         if control.preview_active {
@@ -535,14 +533,14 @@ pub(super) fn announcement(
         }
         let phase_text = if control.preview_active {
             if control.playback.is_none() {
-                text!(text, "preview-starting")
+                fl!("preview-starting")
             } else {
-                text!(text, "announcement-preview", phase = phase.label(text))
+                fl!("announcement-preview", phase = phase.label(text))
             }
         } else if phase.badge.is_some() {
-            text!(text, "announcement-phase", phase = phase.art_name(text))
+            fl!("announcement-phase", phase = phase.art_name(text))
         } else if control.schedule.is_some() {
-            text!(text, "announcement-phase", phase = phase.label(text))
+            fl!("announcement-phase", phase = phase.label(text))
         } else {
             String::new()
         };
@@ -551,36 +549,37 @@ pub(super) fn announcement(
         }
         parts.push(match control.scheduling {
             SchedulingState::Waiting | SchedulingState::Evaluating => {
-                text!(text, "status-calculating")
+                fl!("status-calculating")
             }
-            SchedulingState::Available => text!(text, "announcement-schedule-available"),
-            SchedulingState::SolarFallback => text!(text, "announcement-solar-fallback"),
-            SchedulingState::Retained => text!(text, "announcement-schedule-retained"),
-            SchedulingState::Stopped => text!(text, "status-control-unavailable"),
+            SchedulingState::Available => fl!("announcement-schedule-available"),
+            SchedulingState::SolarFallback => fl!("announcement-solar-fallback"),
+            SchedulingState::Retained => fl!("announcement-schedule-retained"),
+            SchedulingState::Stopped => fl!("status-control-unavailable"),
         });
         if control.output_failed {
-            parts.push(text!(text, "status-output-unavailable"));
+            parts.push(fl!("status-output-unavailable"));
         }
         if control.observation_failed {
-            parts.push(text!(text, "status-observation-failed"));
+            parts.push(fl!("status-observation-failed"));
         }
     }
     if stored.paused {
-        parts.push(text!(text, "status-saving-paused"));
+        parts.push(fl!("status-saving-paused"));
     }
     if stored.failed {
-        parts.push(text!(text, "status-write-failed"));
+        parts.push(fl!("status-write-failed"));
     }
     if stored.restored {
-        parts.push(text!(text, "status-backup-restored"));
+        parts.push(fl!("status-backup-restored"));
     }
-    text!(text, "announcement", status = parts.join(" "))
+    fl!("announcement", status = parts.join(" "))
 }
 
 pub(super) fn manual_label(text: &Text, manual: ManualCommand) -> String {
+    bind_text!(fl, text);
     match manual {
-        ManualCommand::Start => text!(text, "manual-title"),
-        ManualCommand::Stop => text!(text, "manual-stop"),
+        ManualCommand::Start => fl!("manual-title"),
+        ManualCommand::Stop => fl!("manual-stop"),
     }
 }
 
@@ -601,6 +600,7 @@ pub(super) fn menu_items(
     toggles: Toggles,
     names: &BTreeMap<crate::ExecutablePath, String>,
 ) -> Vec<MenuItem> {
+    bind_text!(fl, text);
     let manual_key = match manual {
         ManualCommand::Start => "manual-start",
         ManualCommand::Stop => "manual-stop",
@@ -618,11 +618,11 @@ pub(super) fn menu_items(
         Toggles::Paused => "paused",
     };
     let mut items = vec![
-        MenuItem::item("settings", text!(text, "tray-settings")),
+        MenuItem::item("settings", fl!("tray-settings")),
         MenuItem::separator("separator-manual"),
         item(manual_key, manual_label(text, manual), manual_enabled),
         MenuItem::separator("separator-recent"),
-        MenuItem::disabled("caption", text!(text, "tray-caption", reason = reason)),
+        MenuItem::disabled("caption", fl!("tray-caption", reason = reason)),
     ];
     let history = snapshot.map_or(&[][..], |snapshot| snapshot.recent.as_slice());
     items.extend(history.iter().take(3).map(|recent| {
@@ -667,24 +667,23 @@ pub(super) fn menu_items(
         }
     }));
     items.push(MenuItem::separator("separator-quit"));
-    items.push(MenuItem::item("quit", text!(text, "tray-quit")));
+    items.push(MenuItem::item("quit", fl!("tray-quit")));
     items
 }
 
 fn recent_label(text: &Text, recent: &RecentApp, name: &str, folder: Option<&str>) -> String {
+    bind_text!(fl, text);
     let format = |[name, executable, directory]: [&str; 3]| {
         let listed = if recent.included { "yes" } else { "no" };
         let app = if recent.excluded {
-            text!(
-                text,
+            fl!(
                 "tray-app-excluded",
                 listed = listed,
                 name = name,
                 executable = executable
             )
         } else {
-            text!(
-                text,
+            fl!(
                 "tray-app",
                 listed = listed,
                 name = name,
@@ -692,12 +691,7 @@ fn recent_label(text: &Text, recent: &RecentApp, name: &str, folder: Option<&str
             )
         };
         if folder.is_some() {
-            text!(
-                text,
-                "tray-installation",
-                app = app.as_str(),
-                folder = directory
-            )
+            fl!("tray-installation", app = app.as_str(), folder = directory)
         } else {
             app
         }

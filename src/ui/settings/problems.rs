@@ -11,7 +11,7 @@ use crate::Source;
 use crate::Unusable;
 use crate::automation_id;
 use crate::l10n::Text;
-use crate::l10n::text;
+use crate::l10n::bind_text;
 use crate::platform::nls::RegionalFormat;
 use crate::ui::configuration::FileProblem;
 use std::collections::BTreeSet;
@@ -100,6 +100,7 @@ pub(super) fn feedback(
     region: &RegionalFormat,
     field: Field,
 ) -> Option<Feedback> {
+    bind_text!(fl, text);
     let in_use = model.config().value(field);
     if let Some(kind) = model.errors.get(&field) {
         return Some(Feedback::Error(error_message(text, region, field, kind)));
@@ -112,7 +113,7 @@ pub(super) fn feedback(
     if let Some(source) = model.report.missing.get(&field) {
         return Some(Feedback::Note(format!(
             "{} {}",
-            text!(text, "missing-note"),
+            fl!("missing-note"),
             using(text, region, field, *source, &in_use)
         )));
     }
@@ -125,8 +126,8 @@ pub(super) fn feedback(
             .any(|missing| missing.strip_prefix(&prefix) == Some(key))
     };
     let notes: Vec<String> = [
-        missing("title").then(|| text!(text, "missing-entry-title-note")),
-        missing("regex").then(|| text!(text, "missing-entry-regex-note")),
+        missing("title").then(|| fl!("missing-entry-title-note")),
+        missing("regex").then(|| fl!("missing-entry-regex-note")),
     ]
     .into_iter()
     .flatten()
@@ -140,21 +141,21 @@ pub(super) fn banners(
     region: &RegionalFormat,
     page: Page,
 ) -> Vec<Banner> {
+    bind_text!(fl, text);
     let mut banners = Vec::new();
     if let Some(error) = model.error {
         banners.push(Banner {
             id: automation_id::BANNER_CONFIGURATION_ERROR,
             severity: InfoBarSeverity::Error,
-            title: text!(text, "banner-error-title"),
-            message: text!(
-                text,
+            title: fl!("banner-error-title"),
+            message: fl!(
                 "banner-error-message",
                 file = problem(text, error.file),
                 backup = problem(text, error.backup)
             ),
             actions: vec![
-                (Action::Reset, text!(text, "action-reset")),
-                (Action::OpenFolder, text!(text, "action-open-folder")),
+                (Action::Reset, fl!("action-reset")),
+                (Action::OpenFolder, fl!("action-open-folder")),
             ],
             dismiss: None,
             enabled: true,
@@ -169,8 +170,8 @@ pub(super) fn banners(
         banners.push(Banner {
             id: automation_id::BANNER_PAUSED,
             severity: InfoBarSeverity::Error,
-            title: text!(text, "banner-paused-title"),
-            message: text!(text, "banner-paused-message"),
+            title: fl!("banner-paused-title"),
+            message: fl!("banner-paused-message"),
             actions: Vec::new(),
             dismiss: None,
             enabled: true,
@@ -180,9 +181,9 @@ pub(super) fn banners(
         banners.push(Banner {
             id: automation_id::BANNER_WRITE_FAILED,
             severity: InfoBarSeverity::Error,
-            title: text!(text, "banner-write-title"),
-            message: with_code(text, text!(text, "banner-write-message"), failure),
-            actions: vec![(Action::Retry, text!(text, "action-retry"))],
+            title: fl!("banner-write-title"),
+            message: with_code(text, fl!("banner-write-message"), failure),
+            actions: vec![(Action::Retry, fl!("action-retry"))],
             dismiss: None,
             enabled: true,
         });
@@ -191,9 +192,8 @@ pub(super) fn banners(
         banners.push(Banner {
             id: automation_id::BANNER_RESTORED,
             severity: InfoBarSeverity::Warning,
-            title: text!(text, "banner-restored-title"),
-            message: text!(
-                text,
+            title: fl!("banner-restored-title"),
+            message: fl!(
                 "banner-restored-message",
                 problem = problem(text, problem_kind)
             ),
@@ -207,9 +207,8 @@ pub(super) fn banners(
         banners.push(Banner {
             id: automation_id::BANNER_UNKNOWN_KEYS,
             severity: InfoBarSeverity::Warning,
-            title: text!(text, "banner-unknown-title"),
-            message: text!(
-                text,
+            title: fl!("banner-unknown-title"),
+            message: fl!(
                 "banner-unknown-message",
                 keys = model.report.unknown.join(", ")
             ),
@@ -222,9 +221,9 @@ pub(super) fn banners(
         banners.push(Banner {
             id: automation_id::BANNER_BACKUP_FAILED,
             severity: InfoBarSeverity::Error,
-            title: text!(text, "banner-backup-title"),
-            message: with_code(text, text!(text, "banner-backup-message"), failure),
-            actions: vec![(Action::Retry, text!(text, "action-retry"))],
+            title: fl!("banner-backup-title"),
+            message: with_code(text, fl!("banner-backup-message"), failure),
+            actions: vec![(Action::Retry, fl!("action-retry"))],
             dismiss: None,
             enabled: true,
         });
@@ -235,14 +234,15 @@ pub(super) fn banners(
 }
 
 fn crash(model: &Model, text: &Text) -> Option<Banner> {
+    bind_text!(fl, text);
     model.crash.as_ref().map(|_| Banner {
         id: automation_id::BANNER_CRASH,
         severity: InfoBarSeverity::Informational,
-        title: text!(text, "banner-crash-title"),
-        message: text!(text, "banner-crash-message"),
+        title: fl!("banner-crash-title"),
+        message: fl!("banner-crash-message"),
         actions: vec![
-            (Action::OpenLogs, text!(text, "action-open-folder")),
-            (Action::Report, text!(text, "action-report")),
+            (Action::OpenLogs, fl!("action-open-folder")),
+            (Action::Report, fl!("action-report")),
         ],
         dismiss: Some(super::Command::DismissCrash),
         enabled: true,
@@ -250,6 +250,7 @@ fn crash(model: &Model, text: &Text) -> Option<Banner> {
 }
 
 fn control_unavailable(model: &Model, text: &Text) -> Option<Banner> {
+    bind_text!(fl, text);
     if !model.management.is_on() {
         return None;
     }
@@ -260,13 +261,13 @@ fn control_unavailable(model: &Model, text: &Text) -> Option<Banner> {
         | SchedulingState::SolarFallback => return None,
         SchedulingState::Stopped => (
             InfoBarSeverity::Error,
-            text!(text, "banner-schedule-title"),
-            text!(text, "banner-schedule-message"),
+            fl!("banner-schedule-title"),
+            fl!("banner-schedule-message"),
         ),
         SchedulingState::Retained => (
             InfoBarSeverity::Warning,
-            text!(text, "banner-schedule-retained-title"),
-            text!(text, "banner-schedule-retained-message"),
+            fl!("banner-schedule-retained-title"),
+            fl!("banner-schedule-retained-message"),
         ),
     };
     Some(Banner {
@@ -274,7 +275,7 @@ fn control_unavailable(model: &Model, text: &Text) -> Option<Banner> {
         severity,
         title,
         message,
-        actions: vec![(Action::RetryNative, text!(text, "action-retry"))],
+        actions: vec![(Action::RetryNative, fl!("action-retry"))],
         dismiss: None,
         enabled: !model.retrying,
     })
@@ -288,15 +289,16 @@ pub(super) fn output_failed(model: &Model) -> bool {
 }
 
 fn native(model: &Model, text: &Text) -> Option<Banner> {
+    bind_text!(fl, text);
     if model.native_errors.is_empty() {
         return None;
     }
     let managing = model.management.is_on();
     let output = output_failed(model);
     let title = match (managing, output) {
-        (false, _) => text!(text, "banner-native-off-title"),
-        (true, true) => text!(text, "banner-native-output-title"),
-        (true, false) => text!(text, "banner-native-observation-title"),
+        (false, _) => fl!("banner-native-off-title"),
+        (true, true) => fl!("banner-native-output-title"),
+        (true, false) => fl!("banner-native-observation-title"),
     };
     let mut lines: Vec<String> = model
         .native_errors
@@ -304,29 +306,24 @@ fn native(model: &Model, text: &Text) -> Option<Banner> {
         .map(|(operation, failure)| {
             with_code(
                 text,
-                text!(
-                    text,
+                fl!(
                     "native-failure",
-                    operation = text!(text, "native-operation", operation = operation.to_string()),
-                    category = text!(
-                        text,
-                        "native-category",
-                        category = failure.category.to_string()
-                    )
+                    operation = fl!("native-operation", operation = operation.to_string()),
+                    category = fl!("native-category", category = failure.category.to_string())
                 ),
                 *failure,
             )
         })
         .collect();
     if !managing {
-        lines.push(text!(text, "banner-native-retry-unavailable"));
+        lines.push(fl!("banner-native-retry-unavailable"));
     }
     Some(Banner {
         id: automation_id::BANNER_NATIVE,
         severity: InfoBarSeverity::Error,
         title,
         message: lines.join("\n"),
-        actions: vec![(Action::RetryNative, text!(text, "action-retry"))],
+        actions: vec![(Action::RetryNative, fl!("action-retry"))],
         dismiss: None,
         enabled: managing && !model.retrying,
     })
@@ -338,6 +335,7 @@ fn other_pages(
     region: &RegionalFormat,
     current: Page,
 ) -> Option<Banner> {
+    bind_text!(fl, text);
     let problems: Vec<(Field, &FieldErrorKind)> = model
         .errors
         .iter()
@@ -351,8 +349,7 @@ fn other_pages(
         .iter()
         .map(|(field, kind)| error_message(text, region, *field, kind))
         .collect();
-    lines.push(text!(
-        text,
+    lines.push(fl!(
         "banner-invalid-note",
         saving = if model.paused { "paused" } else { "automatic" }
     ));
@@ -360,14 +357,14 @@ fn other_pages(
     Some(Banner {
         id: automation_id::BANNER_INVALID_FIELDS,
         severity: InfoBarSeverity::Error,
-        title: text!(text, "banner-invalid-title", count = problems.len()),
+        title: fl!("banner-invalid-title", count = problems.len()),
         message: lines.join("\n"),
         actions: pages
             .into_iter()
             .map(|page| {
                 (
                     Action::GoTo(page),
-                    text!(text, "action-go-to", page = page.label(text)),
+                    fl!("action-go-to", page = page.label(text)),
                 )
             })
             .collect(),
@@ -377,23 +374,25 @@ fn other_pages(
 }
 
 fn problem(text: &Text, problem: FileProblem) -> String {
+    bind_text!(fl, text);
     match problem {
-        FileProblem::Missing => text!(text, "problem-missing"),
+        FileProblem::Missing => fl!("problem-missing"),
         FileProblem::Unreadable { code: Some(code) } => {
-            text!(text, "problem-unreadable-code", code = hex(code))
+            fl!("problem-unreadable-code", code = hex(code))
         }
-        FileProblem::Unreadable { code: None } => text!(text, "problem-unreadable"),
+        FileProblem::Unreadable { code: None } => fl!("problem-unreadable"),
         FileProblem::Unusable(Unusable::Syntax { line: Some(line) }) => {
-            text!(text, "problem-syntax-line", line = line)
+            fl!("problem-syntax-line", line = line)
         }
-        FileProblem::Unusable(Unusable::Syntax { line: None }) => text!(text, "problem-syntax"),
-        FileProblem::Unusable(Unusable::Version) => text!(text, "problem-version"),
+        FileProblem::Unusable(Unusable::Syntax { line: None }) => fl!("problem-syntax"),
+        FileProblem::Unusable(Unusable::Version) => fl!("problem-version"),
     }
 }
 
 pub(super) fn with_code(text: &Text, message: String, failure: DiagnosticFailure) -> String {
+    bind_text!(fl, text);
     match failure.code {
-        Some(code) => format!("{message} {}", text!(text, "error-code", code = hex(code))),
+        Some(code) => format!("{message} {}", fl!("error-code", code = hex(code))),
         None => message,
     }
 }
@@ -403,7 +402,8 @@ fn hex(code: i32) -> String {
 }
 
 fn name(text: &Text, field: Field) -> String {
-    text!(text, "field-name", field = field.key())
+    bind_text!(fl, text);
+    fl!("field-name", field = field.key())
 }
 
 pub(super) fn kelvin(region: &RegionalFormat, kelvin: i64) -> String {
@@ -430,6 +430,7 @@ pub(super) fn whole(region: &RegionalFormat, number: i64) -> String {
 }
 
 fn value(text: &Text, region: &RegionalFormat, field: Field, value: &FieldValue) -> String {
+    bind_text!(fl, text);
     match (field, value) {
         (_, FieldValue::Clock(minute)) => clock(region, *minute),
         (
@@ -437,15 +438,14 @@ fn value(text: &Text, region: &RegionalFormat, field: Field, value: &FieldValue)
             FieldValue::Number(n),
         ) => kelvin(region, *n),
         (_, FieldValue::Number(n)) => {
-            text!(
-                text,
+            fl!(
                 "value-number",
                 value = whole(region, *n),
                 unit = field.key()
             )
         }
-        (_, FieldValue::Switch(true)) => text!(text, "value-on"),
-        (_, FieldValue::Switch(false)) => text!(text, "value-off"),
+        (_, FieldValue::Switch(true)) => fl!("value-on"),
+        (_, FieldValue::Switch(false)) => fl!("value-off"),
         (_, FieldValue::Coordinates(Some(coordinates))) => {
             let degrees = |degrees: f64| {
                 region
@@ -458,8 +458,8 @@ fn value(text: &Text, region: &RegionalFormat, field: Field, value: &FieldValue)
                 degrees(coordinates.longitude)
             )
         }
-        (_, FieldValue::Coordinates(None)) => text!(text, "value-none"),
-        (_, FieldValue::Apps(entries)) => text!(text, "value-apps", count = entries.len()),
+        (_, FieldValue::Coordinates(None)) => fl!("value-none"),
+        (_, FieldValue::Apps(entries)) => fl!("value-apps", count = entries.len()),
         (_, FieldValue::Language(language)) => super::general::language_label(text, language),
     }
 }
@@ -471,10 +471,11 @@ fn using(
     source: Source,
     in_use: &FieldValue,
 ) -> String {
+    bind_text!(fl, text);
     let in_use = value(text, region, field, in_use);
     match source {
-        Source::Backup => text!(text, "using-backup", value = in_use),
-        Source::Default => text!(text, "using-default", value = in_use),
+        Source::Backup => fl!("using-backup", value = in_use),
+        Source::Default => fl!("using-default", value = in_use),
     }
 }
 
@@ -484,10 +485,10 @@ fn error_message(
     field: Field,
     kind: &FieldErrorKind,
 ) -> String {
+    bind_text!(fl, text);
     let field_name = name(text, field);
     match kind {
-        FieldErrorKind::SameClock { other } => text!(
-            text,
+        FieldErrorKind::SameClock { other } => fl!(
             "error-same-clock",
             field = field_name,
             other = name(text, *other)
@@ -496,8 +497,7 @@ fn error_message(
             kelvin: value,
             other,
             other_kelvin,
-        } => text!(
-            text,
+        } => fl!(
             "error-lower",
             field = field_name,
             value = kelvin(region, *value),
@@ -508,32 +508,30 @@ fn error_message(
             kelvin: value,
             other,
             other_kelvin,
-        } => text!(
-            text,
+        } => fl!(
             "error-higher",
             field = field_name,
             value = kelvin(region, *value),
             other = name(text, *other),
             other_value = kelvin(region, *other_kelvin)
         ),
-        FieldErrorKind::OutOfRange { minimum, maximum } => text!(
-            text,
+        FieldErrorKind::OutOfRange { minimum, maximum } => fl!(
             "error-range",
             field = field_name,
             minimum = value(text, region, field, &FieldValue::Number(*minimum)),
             maximum = value(text, region, field, &FieldValue::Number(*maximum))
         ),
         FieldErrorKind::CoordinatesRequired => {
-            text!(text, "error-coordinates-required", field = field_name)
+            fl!("error-coordinates-required", field = field_name)
         }
-        FieldErrorKind::Coordinates => text!(text, "error-coordinates"),
+        FieldErrorKind::Coordinates => fl!("error-coordinates"),
         FieldErrorKind::WrongType
         | FieldErrorKind::Clock
         | FieldErrorKind::Executable
         | FieldErrorKind::AlreadyListed
         | FieldErrorKind::FixedExclusion
         | FieldErrorKind::Language
-        | FieldErrorKind::Inconsistent => text!(text, "error-invalid", field = field_name),
+        | FieldErrorKind::Inconsistent => fl!("error-invalid", field = field_name),
     }
 }
 
@@ -544,10 +542,10 @@ fn mark_message(
     mark: &Mark,
     in_use: &FieldValue,
 ) -> String {
+    bind_text!(fl, text);
     let field_name = name(text, field);
     let problem = match &mark.kind {
-        FieldErrorKind::SameClock { other } => text!(
-            text,
+        FieldErrorKind::SameClock { other } => fl!(
             "mark-same-clock",
             field = field_name,
             file = mark.text.as_str(),
@@ -557,8 +555,7 @@ fn mark_message(
             kelvin: value,
             other,
             ..
-        } => text!(
-            text,
+        } => fl!(
             "mark-lower",
             field = field_name,
             file = kelvin(region, *value),
@@ -568,18 +565,16 @@ fn mark_message(
             kelvin: value,
             other,
             ..
-        } => text!(
-            text,
+        } => fl!(
             "mark-higher",
             field = field_name,
             file = kelvin(region, *value),
             other = name(text, *other)
         ),
         FieldErrorKind::CoordinatesRequired => {
-            text!(text, "mark-coordinates-required", field = field_name)
+            fl!("mark-coordinates-required", field = field_name)
         }
-        FieldErrorKind::Inconsistent => text!(
-            text,
+        FieldErrorKind::Inconsistent => fl!(
             "mark-inconsistent",
             field = field_name,
             file = mark.text.as_str()
@@ -591,8 +586,7 @@ fn mark_message(
         | FieldErrorKind::Executable
         | FieldErrorKind::AlreadyListed
         | FieldErrorKind::FixedExclusion
-        | FieldErrorKind::Language => text!(
-            text,
+        | FieldErrorKind::Language => fl!(
             "mark-invalid",
             field = field_name,
             file = mark.text.as_str()
