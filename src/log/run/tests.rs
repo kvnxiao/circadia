@@ -39,6 +39,40 @@ fn a_missing_marker_is_a_normal_previous_run() {
 }
 
 #[test]
+fn a_large_clock_reversal_does_not_hide_the_same_process_crash() {
+    let directory = data_directory(
+        Some("process_id=1234\nstarted=2026-10-25T08:00:00.000000Z\ncreated=0x123\n"),
+        &[
+            "2026-10-25T07:01:00.000000Z ERROR circadia::log: panic process_id=1234 created=0x123 message=\"after clock reversal\" frames=",
+        ],
+    );
+    assert_eq!(
+        previous_run(directory.path(), "circadia.exe", no_query),
+        PreviousRun::Crashed(CrashSummary {
+            kind: CrashKind::Panic,
+            time: timestamp("2026-10-25T07:01:00Z"),
+            description: "after clock reversal".into(),
+            module: None,
+            offset: None,
+        })
+    );
+}
+
+#[test]
+fn a_reused_process_id_does_not_match_another_process_creation() {
+    let directory = data_directory(
+        Some("process_id=1234\nstarted=2026-10-25T08:00:00.000000Z\ncreated=0x123\n"),
+        &[
+            "2026-10-25T08:01:00.000000Z ERROR circadia::log: panic process_id=1234 created=0x122 message=\"older process\" frames=",
+        ],
+    );
+    assert_eq!(
+        previous_run(directory.path(), "circadia.exe", |_| Ok(Vec::new())),
+        PreviousRun::Unexplained
+    );
+}
+
+#[test]
 fn a_marker_without_a_crash_record_or_event_is_an_unexplained_end() {
     let directory = data_directory(
         Some("process_id=1234\nstarted=2026-10-25T08:00:00.000000Z\n"),
@@ -119,10 +153,40 @@ fn a_panic_record_dated_before_the_marker_by_a_clock_correction_identifies_the_c
     );
 }
 
-#[test]
-fn the_application_log_accepts_the_crash_event_query() {
-    let xpath = event_query("circadia.exe", "2026-01-01T00:00:00.000000Z").expect("crash query");
+#[test_case::test_case(None)]
+#[test_case::test_case(Some((1234, 0x123)))]
+fn the_application_log_accepts_the_crash_event_query(process: Option<(u32, u64)>) {
+    let xpath =
+        event_query("circadia.exe", "2026-01-01T00:00:00.000000Z", process).expect("crash query");
     assert!(crate::platform::event_log::query(&xpath).is_ok(), "{xpath}");
+}
+
+#[test_case::test_case("0x1dd640d99055d33", true; "same process after clock reversal")]
+#[test_case::test_case("0x1dd640d99055d34", false; "different process with reused ID")]
+fn event_matching_uses_process_creation_time(created: &str, expected: bool) {
+    let directory = data_directory(
+        Some(&format!(
+            "process_id=1396\nstarted=2026-10-25T08:00:00Z\ncreated={created}\n"
+        )),
+        &[],
+    );
+    let previous = previous_run(
+        directory.path(),
+        "circadia-settings-design-probe.exe",
+        |xpath| {
+            if xpath.contains("EventID=1001") {
+                return Ok(Vec::new());
+            }
+            assert!(xpath.contains(&format!("Data[@Name='ProcessCreationTime']='{created}'")));
+            assert!(!xpath.contains("TimeCreated"));
+            Ok(vec![EVENT_1000.to_owned()])
+        },
+    );
+    assert_eq!(
+        matches!(previous, PreviousRun::Crashed(_)),
+        expected,
+        "{previous:?}"
+    );
 }
 
 #[test]
@@ -195,6 +259,7 @@ fn recorded_event_1000_parses_into_code_module_and_offset() {
         Some(CrashEvent {
             time: timestamp("2026-10-24T23:15:46.1893937Z"),
             process_id: 0x574,
+            created: Some(0x01dd_640d_9905_5d33),
             code: "0xc0000409".into(),
             module: "circadia-settings-design-probe.exe".into(),
             offset: "0xa481d5".into(),
@@ -209,13 +274,18 @@ fn begin_replaces_the_marker_with_one_for_this_process() {
     assert_eq!(begin(directory.path(), "circadia.exe"), PreviousRun::Normal);
     let marker = fs_err::read_to_string(directory.path().join("logs").join("run.marker"))
         .expect("run marker");
-    let (process, started) = marker.split_once('\n').expect("marker lines");
+    let mut lines = marker.lines();
+    let process = lines.next().expect("process ID");
+    let started = lines.next().expect("start time");
     assert_eq!(process, format!("process_id={}", std::process::id()));
-    let started = started
-        .strip_prefix("started=")
-        .and_then(|started| started.strip_suffix('\n'))
-        .expect("start time");
+    let started = started.strip_prefix("started=").expect("start time");
     assert!(started.parse::<Timestamp>().is_ok(), "{marker}");
+    let created = lines
+        .next()
+        .and_then(|line| line.strip_prefix("created="))
+        .and_then(creation_time);
+    assert_eq!(created, process_created());
+    assert!(created.is_some());
 }
 
 #[test]

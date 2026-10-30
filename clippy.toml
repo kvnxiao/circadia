@@ -5,3 +5,7 @@ allow-panic-in-tests = true
 avoid-breaking-exported-api = false
 excessive-nesting-threshold = 4
 max-fn-params-bools = 1
+await-holding-invalid-types = [
+    "tracing::span::Entered",
+    "tracing::span::EnteredSpan",
+]

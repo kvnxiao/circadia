@@ -4,7 +4,6 @@ use crate::CalculationRequest;
 use crate::CalculationResult;
 use crate::Config;
 use crate::ConfigInput;
-use crate::Schedule;
 use crate::WindowsZone;
 use crate::platform::contrast::ContrastColors;
 use std::sync::Arc;
@@ -16,30 +15,13 @@ pub(super) fn at(text: &str) -> Timestamp {
 
 pub(super) fn calculated(config: &Config, zone: &str, now: &str) -> CalculatedSchedule {
     let mut zone = WindowsZone::named(zone, false).expect("Windows zone rules");
-    let graph = crate::graph_interval(config, &mut zone, at(now)).expect("graph view");
-    let schedule =
-        Schedule::calculate(config, &mut zone, graph.start, graph.end).expect("schedule");
-    CalculatedSchedule {
-        curve: Arc::new(schedule.curve),
-        events: schedule
-            .events
-            .iter()
-            .map(|event| LocalEvent {
-                kind: event.kind,
-                instant: event.instant,
-                local: zone.local(event.instant).expect("local clock"),
-            })
-            .collect(),
-        gridlines: crate::gridlines(&mut zone, graph).expect("gridlines"),
-        valid: graph,
-        graph,
-        views: vec![graph],
-        preview: None,
-        next_date: graph.end,
-        solar_error: None,
-        conflicts: Vec::new(),
-        today: None,
+    CalculationRequest {
+        config: config.clone(),
+        at: at(now),
+        purpose: CalculationPurpose::Schedule,
     }
+    .calculate(&mut zone)
+    .expect("schedule fixture")
 }
 
 fn wake(clock: &str) -> Config {

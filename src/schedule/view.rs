@@ -287,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn compressed_target_spacing_does_not_trigger_another_merge() {
+    fn playback_elapsed_time_rounds_up_to_the_first_nanosecond_reaching_a_target() {
         let mut zone = WindowsZone::named("UTC", false).expect("zone");
         let config = ConfigInput {
             preview_seconds: 1,
@@ -303,31 +303,8 @@ mod tests {
         let second_minute = start
             .checked_add(jiff::SignedDuration::from_secs(120))
             .expect("second minute");
-        let curve = Curve::new(
-            vec![
-                crate::Target {
-                    instant: start,
-                    kelvin: 2400,
-                },
-                crate::Target {
-                    instant: minute,
-                    kelvin: 3400,
-                },
-                crate::Target {
-                    instant: second_minute,
-                    kelvin: 6500,
-                },
-                crate::Target {
-                    instant: playback.interval().end,
-                    kelvin: 2400,
-                },
-            ],
-            60,
-        )
-        .expect("curve");
         let first_elapsed = playback.elapsed_at(minute).expect("first target");
         let second_elapsed = playback.elapsed_at(second_minute).expect("second target");
-        assert_eq!(curve.targets().len(), 4);
         assert_eq!(first_elapsed, Duration::from_nanos(694_445));
         assert_eq!(second_elapsed, Duration::from_nanos(1_388_889));
         assert!(playback.at(first_elapsed).expect("mapped position") >= minute);

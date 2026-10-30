@@ -15,6 +15,7 @@ use jiff::SignedDuration;
 use jiff::Timestamp;
 use jiff::civil::DateTime;
 use jiff::civil::Time;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io;
 use std::sync::Arc;
@@ -50,6 +51,13 @@ pub struct CalculatedSchedule {
     pub curve: Arc<Curve>,
     /// Selected Wake, Sunrise, Sunset, and Bedtime targets of the curve.
     pub events: Vec<LocalEvent>,
+    /// Local clocks at changing segment starts, using the calculation's zone.
+    pub transition_starts: BTreeMap<Timestamp, DateTime>,
+    /// Adjusted Wake for the activity interval starting on the request's local
+    /// date.
+    pub today_wake: DateTime,
+    /// Adjusted Bedtime following today's Wake, including after midnight.
+    pub today_bedtime: DateTime,
     /// Local clock hours divisible by three across all graph views.
     pub gridlines: Vec<Gridline>,
     /// Bounds for which solar and clock inputs were evaluated.
@@ -345,97 +353,131 @@ fn calculate(request: &CalculationRequest) -> Result<CalculatedSchedule, Schedul
     #[cfg(feature = "graph-measurement")]
     crate::activity::record(crate::ActivityEvent::Calculation);
     let mut zone = WindowsZone::current()?;
-    let graph = graph_interval(&request.config, &mut zone, request.at)?;
-    let next_local = zone
-        .local(request.at)?
-        .date()
-        .tomorrow()?
-        .to_datetime(Time::midnight());
-    let next_date = zone.boundary(next_local)?;
-    let preview = if request.purpose == CalculationPurpose::Preview {
-        Some(Arc::new(Playback::capture(
-            &request.config,
-            &mut zone,
-            request.at,
-        )?))
-    } else {
-        None
-    };
-    let mut views = vec![graph];
-    let mut graph_end = graph.end;
-    let through = preview
-        .as_ref()
-        .map_or(next_date, |playback| playback.interval().end.max(next_date));
-    while graph_end <= through {
-        let view = graph_interval(&request.config, &mut zone, graph_end)?;
-        if view.start != graph_end || view.end <= graph_end {
-            return Err(ScheduleError::curve());
+    request.calculate(&mut zone)
+}
+
+impl CalculationRequest {
+    pub(crate) fn calculate(
+        &self,
+        zone: &mut WindowsZone,
+    ) -> Result<CalculatedSchedule, ScheduleError> {
+        let request = self;
+        let graph = graph_interval(&request.config, zone, request.at)?;
+        let next_local = zone
+            .local(request.at)?
+            .date()
+            .tomorrow()?
+            .to_datetime(Time::midnight());
+        let next_date = zone.boundary(next_local)?;
+        let preview = (request.purpose == CalculationPurpose::Preview)
+            .then(|| Playback::capture(&request.config, zone, request.at).map(Arc::new))
+            .transpose()?;
+        let mut views = vec![graph];
+        let mut graph_end = graph.end;
+        let through = preview
+            .as_ref()
+            .map_or(next_date, |playback| playback.interval().end.max(next_date));
+        while graph_end <= through {
+            let view = graph_interval(&request.config, zone, graph_end)?;
+            if view.start != graph_end || view.end <= graph_end {
+                return Err(ScheduleError::curve());
+            }
+            graph_end = view.end;
+            views.push(view);
         }
-        graph_end = view.end;
-        views.push(view);
+        let gridlines = gridlines(
+            zone,
+            TimeInterval {
+                start: graph.start,
+                end: graph_end,
+            },
+        )?;
+        let padding = SignedDuration::from_millis(request.config.input().ordinary_fade_ms);
+        let end = graph_end.max(next_date).checked_add(padding)?;
+        let valid = TimeInterval {
+            start: graph.start.min(request.at),
+            end,
+        };
+        let schedule = Schedule::calculate(&request.config, zone, valid.start, valid.end)?;
+        let (today_wake, today_bedtime) = today_clocks(&request.config, zone, request.at)?;
+        let transition_starts = schedule
+            .curve
+            .segments()
+            .iter()
+            .filter(|segment| segment.from != segment.to)
+            .map(|segment| Ok((segment.start, zone.local(segment.start)?)))
+            .collect::<Result<_, ScheduleError>>()?;
+        let conflicts = schedule
+            .conflicts
+            .into_iter()
+            .map(|interval| {
+                Ok(SolarConflict {
+                    interval,
+                    local_wake: zone.local(interval.wake)?,
+                    local_bedtime: zone.local(interval.bedtime)?,
+                })
+            })
+            .collect::<Result<_, ScheduleError>>()?;
+        let today = match solar_today(&request.config, zone, request.at) {
+            Ok(selection) => Some(SolarToday {
+                sunrise: selection
+                    .sunrise
+                    .map(|instant| zone.local(instant))
+                    .transpose()?,
+                sunset: selection
+                    .sunset
+                    .map(|instant| zone.local(instant))
+                    .transpose()?,
+            }),
+            Err(_) => None,
+        };
+        let events = schedule
+            .events
+            .iter()
+            .map(|event| {
+                Ok(LocalEvent {
+                    kind: event.kind,
+                    instant: event.instant,
+                    local: zone.local(event.instant)?,
+                })
+            })
+            .collect::<Result<_, ScheduleError>>()?;
+        Ok(CalculatedSchedule {
+            curve: Arc::new(schedule.curve),
+            events,
+            transition_starts,
+            today_wake,
+            today_bedtime,
+            gridlines,
+            valid,
+            graph,
+            views,
+            preview,
+            next_date,
+            solar_error: schedule.solar_error,
+            conflicts,
+            today,
+        })
     }
-    let gridlines = gridlines(
-        &mut zone,
-        TimeInterval {
-            start: graph.start,
-            end: graph_end,
-        },
-    )?;
-    let padding = SignedDuration::from_millis(request.config.input().ordinary_fade_ms);
-    let end = graph_end.max(next_date).checked_add(padding)?;
-    let valid = TimeInterval {
-        start: graph.start.min(request.at),
-        end,
-    };
-    let schedule = Schedule::calculate(&request.config, &mut zone, valid.start, valid.end)?;
-    let conflicts = schedule
-        .conflicts
-        .into_iter()
-        .map(|interval| {
-            Ok(SolarConflict {
-                interval,
-                local_wake: zone.local(interval.wake)?,
-                local_bedtime: zone.local(interval.bedtime)?,
-            })
-        })
-        .collect::<Result<_, ScheduleError>>()?;
-    let today = match solar_today(&request.config, &mut zone, request.at) {
-        Ok(selection) => Some(SolarToday {
-            sunrise: selection
-                .sunrise
-                .map(|instant| zone.local(instant))
-                .transpose()?,
-            sunset: selection
-                .sunset
-                .map(|instant| zone.local(instant))
-                .transpose()?,
-        }),
-        Err(_) => None,
-    };
-    let events = schedule
-        .events
+}
+
+fn today_clocks(
+    config: &Config,
+    zone: &mut WindowsZone,
+    at: Timestamp,
+) -> Result<(DateTime, DateTime), ScheduleError> {
+    let today = zone.local(at)?.date();
+    let anchors = crate::resolve_anchors(config, zone, today, today.tomorrow()?)?;
+    let (wake, bedtime) = anchors
         .iter()
-        .map(|event| {
-            Ok(LocalEvent {
-                kind: event.kind,
-                instant: event.instant,
-                local: zone.local(event.instant)?,
-            })
+        .zip(anchors.iter().skip(1))
+        .find(|(wake, bedtime)| {
+            wake.kind == crate::AnchorKind::Wake
+                && bedtime.kind == crate::AnchorKind::Bedtime
+                && wake.nominal.date() == today
         })
-        .collect::<Result<_, ScheduleError>>()?;
-    Ok(CalculatedSchedule {
-        curve: Arc::new(schedule.curve),
-        events,
-        gridlines,
-        valid,
-        graph,
-        views,
-        preview,
-        next_date,
-        solar_error: schedule.solar_error,
-        conflicts,
-        today,
-    })
+        .ok_or_else(ScheduleError::curve)?;
+    Ok((zone.local(wake.instant)?, zone.local(bedtime.instant)?))
 }
 
 #[cfg(test)]

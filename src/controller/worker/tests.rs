@@ -1393,11 +1393,11 @@ fn panic_cleanup_waits_for_a_120_ms_library_call_and_then_turns_night_light_off(
     blocked
         .recv_timeout(Duration::from_secs(10))
         .expect("native operation blocked");
+    let started = Instant::now();
     let call = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(120));
         release.send(()).expect("finish native call");
     });
-    let started = Instant::now();
     client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2));
     let waited = started.elapsed();
     call.join().expect("library call thread");

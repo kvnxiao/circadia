@@ -203,6 +203,23 @@ fn same_name_candidates_allow_distinct_restrictions_but_only_one_global_addition
 }
 
 #[test]
+fn a_recent_selection_that_disappears_does_not_block_a_new_installation() {
+    let fixture = Fixture::new(None);
+    let a = installation("A");
+    let b = installation("B");
+    let mut recent = recent_app("browser.exe", None);
+    recent.path.clone_from(&a.path);
+    let mut model = fixture.model(vec![recent]);
+    let mut dialog = AddDialog::new(Field::Suppression);
+    dialog.choose(&a.identity().expect("A"), true, &model);
+    assert_eq!(dialog.files(&model), [AppSelection::from(a)]);
+    model.recent[0].path.clone_from(&b.path);
+    dialog.choose(&b.identity().expect("B"), true, &model);
+    assert_eq!(dialog.files(&model), [AppSelection::from(b)]);
+    assert_eq!(dialog.chosen.len(), 1);
+}
+
+#[test]
 fn rule_editor_prefills_restrictions_checks_duplicates_and_keeps_cancel_local() {
     let mut fixture = Fixture::new(Some(&entries_file(&["browser.exe"], &[])));
     let a = installation("A");
@@ -1030,6 +1047,19 @@ fn each_app_row_requests_its_icon_once_per_page_view() {
         Vec::<crate::ExecutablePath>::new()
     );
     assert_eq!(requests.due(Page::Apps, None, &model), page);
+}
+
+#[test]
+fn an_app_that_returns_to_recent_history_requests_its_icon_again() {
+    let fixture = Fixture::new(None);
+    let mut model = fixture.model(vec![recent_app("game.exe", None)]);
+    let mut requests = IconRequests::default();
+    assert_eq!(requests.due(Page::Apps, None, &model), names(&["game.exe"]));
+    model.recent.clear();
+    assert_eq!(requests.due(Page::Apps, None, &model), Vec::new());
+    assert!(requests.requested.is_empty());
+    model.recent.push(recent_app("game.exe", None));
+    assert_eq!(requests.due(Page::Apps, None, &model), names(&["game.exe"]));
 }
 
 #[test]

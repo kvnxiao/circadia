@@ -59,6 +59,9 @@ fn result(revision: u64, request: CalculationRequest, kelvin: u16) -> Arc<Calcul
         result: Ok(CalculatedSchedule {
             curve,
             events: Vec::new(),
+            transition_starts: std::collections::BTreeMap::new(),
+            today_wake: "2026-10-27T07:00:00".parse().expect("fixture Wake"),
+            today_bedtime: "2026-10-27T23:00:00".parse().expect("fixture Bedtime"),
             gridlines: Vec::new(),
             valid,
             graph: valid,

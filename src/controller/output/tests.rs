@@ -70,6 +70,107 @@ fn initialized(value: u16) -> TemperatureOutput {
 }
 
 #[test]
+fn a_cancelled_live_edit_remains_due_until_its_temperature_is_stored() {
+    let mut output = initialized(3400);
+    output
+        .update(
+            OutputTarget::Retained(temperature(2400)),
+            OutputUpdate::LiveEdit,
+            moment(100),
+        )
+        .expect("live edit");
+    let request = output
+        .prepare(fresh(3400, false), moment(100), Duration::from_millis(500))
+        .expect("selection")
+        .expect("edited temperature");
+    assert_eq!(request.mode, TemperatureMode::Set);
+    output.completed(
+        &NativeAttempt {
+            cancelled: true,
+            ..NativeAttempt::default()
+        },
+        moment(100).elapsed,
+    );
+    assert_eq!(output.last_written(), Some(temperature(3400)));
+    assert_eq!(
+        output
+            .deadlines(moment(101))
+            .expect("retry deadline")
+            .change,
+        Some(moment(101).elapsed)
+    );
+    let retry = output
+        .prepare(fresh(3400, false), moment(101), Duration::from_millis(500))
+        .expect("retry selection")
+        .expect("retry temperature");
+    assert_eq!(retry.temperature.kelvin(), 2400);
+    assert_eq!(retry.mode, TemperatureMode::Set);
+    apply(&mut output, retry, moment(101).elapsed);
+    assert_eq!(
+        output.deadlines(moment(102)).expect("idle"),
+        OutputDeadlines::default()
+    );
+}
+
+#[test]
+fn cancelling_startup_preserves_the_fade_deadline_and_required_activation() {
+    let mut output = TemperatureOutput::default();
+    output
+        .update(
+            OutputTarget::Retained(temperature(2400)),
+            OutputUpdate::Fade,
+            moment(0),
+        )
+        .expect("target");
+    let start = output
+        .prepare(fresh(6500, false), moment(0), Duration::from_secs(2))
+        .expect("selection")
+        .expect("startup");
+    assert_eq!(start.mode, TemperatureMode::ApplyHeld);
+    output.completed(
+        &NativeAttempt {
+            cancelled: true,
+            ..NativeAttempt::default()
+        },
+        Duration::ZERO,
+    );
+    assert_eq!(output.fade_deadline(), Some(Duration::from_secs(2)));
+    let retry = output
+        .prepare(fresh(6500, false), moment(1000), Duration::from_secs(2))
+        .expect("selection")
+        .expect("retry");
+    assert_eq!(retry.mode, TemperatureMode::ApplyHeld);
+    assert_eq!(retry.temperature.kelvin(), 4450);
+    assert_eq!(output.fade_deadline(), Some(Duration::from_secs(2)));
+    apply(&mut output, retry, Duration::from_secs(1));
+    let end = output
+        .prepare(fresh(4450, true), moment(2000), Duration::from_secs(2))
+        .expect("selection")
+        .expect("finish");
+    output.completed(
+        &NativeAttempt {
+            stored: Some(end.temperature),
+            requested_stored: true,
+            cancelled: true,
+            ..NativeAttempt::default()
+        },
+        Duration::from_secs(2),
+    );
+    assert_eq!(output.last_written(), Some(temperature(2400)));
+    let cleanup = output
+        .prepare(fresh(2400, true), moment(2001), Duration::from_secs(2))
+        .expect("selection")
+        .expect("cleanup");
+    assert_eq!(cleanup.mode, TemperatureMode::FinishHeld);
+    apply(&mut output, cleanup, moment(2001).elapsed);
+    assert!(output.startup_complete());
+    assert_eq!(
+        output.deadlines(moment(2002)).expect("idle"),
+        OutputDeadlines::default()
+    );
+}
+
+#[test]
 fn startup_uses_the_ordinary_duration_and_completes_after_cleanup() {
     let mut output = TemperatureOutput::default();
     output

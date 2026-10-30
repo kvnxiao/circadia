@@ -314,6 +314,11 @@ impl RegionalFormat {
             Some((whole, fraction)) if !decimal.is_empty() => (whole, Some(fraction)),
             _ => (unsigned, None),
         };
+        let whole = if whole.is_empty() && fraction.is_some() {
+            "0"
+        } else {
+            whole
+        };
         let digits =
             |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
         if !digits(whole) || fraction.is_some_and(|fraction| !digits(fraction)) {
@@ -536,13 +541,31 @@ mod tests {
         );
     }
 
+    #[test_case("en-US", 0.5, ".5"; "positive period")]
+    #[test_case("en-US", -0.5, "-.5"; "negative period")]
+    #[test_case("de-DE", 0.5, ",5"; "positive comma")]
+    #[test_case("de-DE", -0.5, "-,5"; "negative comma")]
+    fn decimals_without_a_leading_zero_can_be_committed(locale: &str, value: f64, expected: &str) {
+        let format = RegionalFormat {
+            leading_zero: 0,
+            ..format(locale)
+        };
+        assert_eq!(
+            format.format_decimal(value, 6).expect("decimal formats"),
+            expected
+        );
+        assert_eq!(format.parse_decimal(expected), Some(value));
+        assert_eq!(format.parse_decimal(&format.decimal), None);
+    }
+
     #[test_case("47,5", Some(47.5); "comma decimal")]
     #[test_case("-74,006", Some(-74.006); "negative")]
     #[test_case(" 12 ", Some(12.0); "whole number with spaces")]
     #[test_case("47.5", None; "period rejected")]
     #[test_case("1.234,5", None; "grouping rejected")]
     #[test_case("40,", None; "missing fraction digits")]
-    #[test_case(",5", None; "missing whole digits")]
+    #[test_case(",5", Some(0.5); "omitted leading zero")]
+    #[test_case(",", None; "separator only")]
     #[test_case("", None; "empty")]
     #[test_case("-", None; "sign only")]
     #[test_case("--3", None; "double sign")]

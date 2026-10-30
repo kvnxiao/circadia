@@ -19,9 +19,10 @@ use windows_sys::Win32::winnt::RtlCaptureStackBackTrace;
 pub(crate) fn panic_record(info: &PanicHookInfo<'_>) -> String {
     let thread = std::thread::current();
     format!(
-        "{:.6} ERROR circadia::log: panic process_id={} thread={:?} location={:?} message={:?} frames={}\n",
+        "{:.6} ERROR circadia::log: panic process_id={} created={:#x} thread={:?} location={:?} message={:?} frames={}\n",
         jiff::Timestamp::now(),
         std::process::id(),
+        super::run::process_created().unwrap_or_default(),
         thread.name().unwrap_or("unnamed"),
         info.location().map(ToString::to_string).unwrap_or_default(),
         info.payload_as_str().unwrap_or("non-string payload"),
@@ -65,9 +66,10 @@ extern "system" fn record_exception(pointers: *const EXCEPTION_POINTERS) -> i32 
         let (module, offset) = module_offset(record.ExceptionAddress.cast_const())
             .unwrap_or_else(|| ("unknown".to_owned(), record.ExceptionAddress.addr()));
         let line = format!(
-            "{:.6} ERROR circadia::log: exception process_id={} thread={:?} code={:#010x} module={module} offset={offset:#x} frames={}\n",
+            "{:.6} ERROR circadia::log: exception process_id={} created={:#x} thread={:?} code={:#010x} module={module} offset={offset:#x} frames={}\n",
             jiff::Timestamp::now(),
             std::process::id(),
+            super::run::process_created().unwrap_or_default(),
             std::thread::current().name().unwrap_or("unnamed"),
             record.ExceptionCode,
             frames(),

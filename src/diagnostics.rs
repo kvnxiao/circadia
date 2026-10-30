@@ -241,18 +241,26 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary data directory");
         let blocked = directory.path().join("logs");
         fs_err::write(&blocked, "file instead of directory").expect("blocked log fixture");
-        let failure = DiagnosticFailure {
-            category: DiagnosticCategory::Io,
-            code: None,
-        };
+        let store = ConfigStore::new(directory.path());
+        let config = Config::default();
         tracing::dispatcher::with_default(
-            &subscriber(LogWriter::new(directory.path()), Level::INFO),
+            &subscriber(LogWriter::new(directory.path()), Level::DEBUG),
             || {
-                DiagnosticLog::default().failure(DiagnosticOperation::ConfigurationWrite, failure);
+                let saved = store
+                    .save(&config)
+                    .expect("primary saved with unavailable log");
+                assert!(saved.backup_error.is_none(), "{saved:?}");
             },
         );
-        let store = ConfigStore::new(directory.path());
-        assert!(store.save(&Config::default()).is_ok());
+        let primary = fs_err::read_to_string(store.primary_path()).expect("saved primary");
+        assert_eq!(
+            crate::load(&primary, None).expect("usable primary").0,
+            config
+        );
+        assert_eq!(
+            fs_err::read_to_string(store.backup_path()).expect("saved backup"),
+            primary
+        );
         assert_eq!(
             fs_err::read_to_string(blocked).expect("blocked fixture"),
             "file instead of directory"

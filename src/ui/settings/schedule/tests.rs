@@ -1,3 +1,7 @@
+use super::solar::coordinate_edit;
+use super::solar::coordinate_text;
+use super::solar::solar_feedback;
+use super::solar::solar_today_line;
 use super::*;
 use crate::ConfigInput;
 use crate::Coordinates;
@@ -6,6 +10,9 @@ use crate::ui::Desktop;
 use crate::ui::configuration::Configuration;
 use crate::ui::settings::Model;
 use crate::ui::settings::number_edits;
+use crate::ui::settings::problems::FeatureMessage;
+use crate::ui::settings::problems::Feedback;
+use crate::ui::settings::problems::Severity;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use test_case::test_case;
@@ -683,6 +690,53 @@ fn local(hour: i8, minute: i8) -> jiff::civil::DateTime {
     jiff::civil::date(2026, 10, 27).at(hour, minute, 0, 0)
 }
 
+#[test_case("2026-03-08T12:00:00Z", "07:00", "23:00", "8:00 AM", "11:00 PM"; "spring Wake")]
+#[test_case("2026-11-01T12:00:00Z", "07:00", "23:00", "6:00 AM", "11:00 PM"; "fall Wake")]
+#[test_case("2026-03-07T12:00:00Z", "23:00", "07:00", "11:00 PM", "8:00 AM"; "spring Bedtime after midnight")]
+#[test_case("2026-10-31T12:00:00Z", "23:00", "07:00", "11:00 PM", "6:00 AM"; "fall Bedtime after midnight")]
+fn the_summary_uses_adjusted_occurrences_and_entries_keep_configured_clocks(
+    now: &str,
+    wake: &str,
+    bedtime: &str,
+    expected_wake: &str,
+    expected_bedtime: &str,
+) {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let input = ConfigInput {
+        wake: wake.into(),
+        bedtime: bedtime.into(),
+        ..ConfigInput::default()
+    };
+    let config = input.validate().expect("valid schedule");
+    fs_err::write(
+        directory.path().join("config.toml"),
+        toml::to_string(config.input()).expect("fixture document"),
+    )
+    .expect("write fixture");
+    let configuration = Configuration::load(directory.path(), "circadia.exe");
+    let request = crate::CalculationRequest {
+        config,
+        at: now.parse().expect("UTC instant"),
+        purpose: crate::CalculationPurpose::Schedule,
+    };
+    let mut zone =
+        crate::WindowsZone::named("Eastern Standard Time", false).expect("Eastern rules");
+    let schedule = request.calculate(&mut zone).expect("dated schedule");
+    let mut model = Model::new(&configuration, None, false, String::new(), &BTreeMap::new());
+    model.calculation = Some(super::super::Calculation(Arc::new(
+        crate::CalculationResult {
+            revision: 1,
+            request,
+            result: Ok(schedule),
+        },
+    )));
+    let summary = event_summary(&model, &english(), &region());
+    assert_eq!(summary[0].time, expected_wake);
+    assert_eq!(summary[3].time, expected_bedtime);
+    assert_eq!(model.config().input().wake, wake);
+    assert_eq!(model.config().input().bedtime, bedtime);
+}
+
 #[test]
 fn the_card_shows_todays_event_times_and_off_for_a_disabled_or_absent_event() {
     let (_directory, configuration, mut desktop) = coordinate_desktop(Some(NEW_YORK));
@@ -751,6 +805,9 @@ fn calculated(
         result: Ok(crate::CalculatedSchedule {
             curve: Arc::new(curve),
             events: Vec::new(),
+            transition_starts: std::collections::BTreeMap::new(),
+            today_wake: "2026-10-27T07:00:00".parse().expect("fixture Wake"),
+            today_bedtime: "2026-10-27T23:00:00".parse().expect("fixture Bedtime"),
             gridlines: Vec::new(),
             valid: graph,
             graph,
@@ -1008,6 +1065,18 @@ fn scheduled(input: ConfigInput) -> ControllerSnapshot {
     let mut result = Arc::into_inner(snapshot.calculation.take().expect("calculation"))
         .expect("unshared calculation");
     let calculated = result.result.as_mut().expect("calculated schedule");
+    calculated.transition_starts = schedule
+        .curve
+        .segments()
+        .iter()
+        .filter(|segment| segment.from != segment.to)
+        .map(|segment| {
+            (
+                segment.start,
+                jiff::tz::Offset::UTC.to_datetime(segment.start),
+            )
+        })
+        .collect();
     calculated.curve = Arc::new(schedule.curve);
     calculated.events = schedule
         .events
@@ -1168,6 +1237,88 @@ fn the_summary_shows_todays_times_in_the_regional_format_with_each_temperature()
             column("Sunrise", "Off", "Not used", false),
         ]
     );
+}
+
+#[test_case(0, 960, "6500 K", "3400 K"; "coincident sunrise")]
+#[test_case(30, 30, "6500 K", "2400 K"; "merged solar targets")]
+#[test_case(960, 0, "3400 K", "2400 K"; "coincident sunset")]
+fn summary_temperatures_follow_merged_event_targets(
+    after_wake: i64,
+    before_bedtime: i64,
+    wake_kelvin: &str,
+    sunset_kelvin: &str,
+) {
+    let (_directory, configuration, mut desktop) = coordinate_desktop(Some(NEW_YORK));
+    desktop.edit(vec![(Field::SolarTiming, FieldValue::Switch(true))]);
+    let input = current(&configuration).config().input().clone();
+    let mut snapshot = scheduled(input);
+    let result =
+        Arc::get_mut(snapshot.calculation.as_mut().expect("calculation")).expect("owned result");
+    let schedule = result.result.as_mut().expect("schedule");
+    let wake: jiff::Timestamp = "2026-10-27T07:00:00Z".parse().expect("Wake");
+    let bedtime: jiff::Timestamp = "2026-10-27T23:00:00Z".parse().expect("Bedtime");
+    let sunrise = wake
+        .checked_add(jiff::SignedDuration::from_secs(after_wake))
+        .expect("Sunrise");
+    let sunset = bedtime
+        .checked_sub(jiff::SignedDuration::from_secs(before_bedtime))
+        .expect("Sunset");
+    let local = |instant: jiff::Timestamp| instant.to_zoned(jiff::tz::TimeZone::UTC).datetime();
+    schedule.curve = Arc::new(
+        crate::Curve::new(
+            vec![
+                crate::Target {
+                    instant: "2026-10-26T23:00:00Z".parse().expect("previous Bedtime"),
+                    kelvin: 2400,
+                },
+                crate::Target {
+                    instant: wake,
+                    kelvin: 3400,
+                },
+                crate::Target {
+                    instant: sunrise,
+                    kelvin: 6500,
+                },
+                crate::Target {
+                    instant: sunset,
+                    kelvin: 3400,
+                },
+                crate::Target {
+                    instant: bedtime,
+                    kelvin: 2400,
+                },
+                crate::Target {
+                    instant: "2026-10-28T07:00:00Z".parse().expect("next Wake"),
+                    kelvin: 3400,
+                },
+            ],
+            60,
+        )
+        .expect("curve"),
+    );
+    schedule.events = [
+        (crate::EventKind::Wake, wake),
+        (crate::EventKind::Sunrise, sunrise),
+        (crate::EventKind::Sunset, sunset),
+        (crate::EventKind::Bedtime, bedtime),
+    ]
+    .into_iter()
+    .map(|(kind, instant)| crate::LocalEvent {
+        kind,
+        instant,
+        local: local(instant),
+    })
+    .collect();
+    schedule.today = Some(crate::SolarToday {
+        sunrise: Some(local(sunrise)),
+        sunset: Some(local(sunset)),
+    });
+    let model = snapshot_model(&configuration.borrow(), &snapshot);
+    let columns = summary(&model);
+    assert_eq!(columns[0].2, wake_kelvin);
+    assert_eq!(columns[1].2, "6500 K");
+    assert_eq!(columns[2].2, sunset_kelvin);
+    assert_eq!(columns[3].2, "2400 K");
 }
 
 #[test]
