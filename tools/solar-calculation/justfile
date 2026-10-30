@@ -3,9 +3,13 @@ set shell := ["bash", "-uc"]
 fmt:
     cargo +nightly fmt --all
 
-lint:
+fmt-check:
     cargo +nightly fmt --all --check
+
+clippy:
     cargo +stable clippy --all-targets --locked -- -D warnings
+
+lint: fmt-check clippy
 
 fix:
     cargo +stable clippy --fix --all-targets --locked --allow-dirty --allow-no-vcs

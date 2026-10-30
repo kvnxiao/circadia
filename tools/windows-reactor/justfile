@@ -4,9 +4,13 @@ set windows-shell := ["bash", "-uc"]
 fmt:
     cargo +nightly fmt --all
 
-lint:
+fmt-check:
     cargo +nightly fmt --all --check
+
+clippy:
     cargo +stable clippy --all-targets --all-features --locked -- -D warnings
+
+lint: fmt-check clippy
 
 fix:
     cargo +stable clippy --fix --all-targets --all-features --locked --allow-dirty --allow-no-vcs

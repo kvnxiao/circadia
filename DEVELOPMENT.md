@@ -46,6 +46,23 @@ just --justfile tools/justfile python-audit
 
 Read a native check's instructions before running it. Some send mouse and keyboard input, change Night Light, or restart Explorer. Temporary configuration directories do not isolate Windows Night Light state.
 
+## Continuous integration
+
+The [CI workflow](.github/workflows/ci.yml) runs on pull requests, pushes to `main`, merge queues, and manual dispatch. Independent jobs check:
+
+- Application unit tests and release-text tests on Windows.
+- Application Clippy, rustdoc, and generated composition bindings on Windows.
+- Each standalone Rust probe with Clippy, unit tests, and rustdoc on Windows, plus compilation and Clippy for the solar timing binary.
+- Python tools with Ruff formatting and linting, ty, pytest, and dependency auditing on Windows with Python 3.15.
+- Rust formatting and workflow syntax on Linux.
+- Rust dependency advisories and unused dependencies on Linux.
+
+Rust jobs cache dependencies separately by project and check group; Python caches locked dependencies. Superseded runs are cancelled, and a failed Rust matrix job does not cancel the others. Formatting runs separately so compiled checks do not install nightly Rust. `just fmt-check` and `just clippy` run individually; `just lint` still runs both.
+
+CI executes test harnesses, including unit tests of native-check helpers, but does not launch the desktop application or probe windows. Desktop automation, screenshots, live Night Light checks, host-setting exercises, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
+
+External actions use full commit pins. [Dependabot](.github/dependabot.yml) proposes weekly action updates for review.
+
 ## Windows dependencies
 
 `Cargo.lock` pins resolved versions. While Reactor is in preview, `windows-reactor`, `windows-window`, and `windows-reactor-setup` track windows-rs `master` through one explicit Git revision. The application, [Reactor experiment](tools/windows-reactor/README.md), and [settings-design experiment](tools/windows-reactor/settings-design/README.md) use that revision. Direct Windows bindings also share it so their Rust COM types agree.

@@ -72,9 +72,13 @@ measure-resources args="":
     cargo +stable build --release --bin circadia --features self-contained --locked
     cargo +stable run --release --bin native-lifecycle --features native-tests --locked -- --measure-resources target/release/circadia.exe {{args}}
 
-lint:
+fmt-check:
     cargo +nightly fmt --all --check
+
+clippy:
     cargo +stable clippy {{clippy_scope}} -- -D warnings
+
+lint: fmt-check clippy
 
 fix:
     cargo +stable clippy --fix {{clippy_scope}} --allow-dirty
