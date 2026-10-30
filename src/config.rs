@@ -310,6 +310,8 @@ pub struct ConfigInput {
     pub start_at_sign_in: bool,
     /// Whether future launches initially show only the tray icon.
     pub start_minimized: bool,
+    /// Whether startup and daily checks look for application updates.
+    pub check_updates_automatically: bool,
     /// Whether Circadia controls Night Light; the user turns it on after
     /// accepting the consent prompt.
     pub manage_night_light: bool,
@@ -341,6 +343,7 @@ impl Default for ConfigInput {
             exclusions: Vec::new(),
             start_at_sign_in: false,
             start_minimized: true,
+            check_updates_automatically: true,
             manage_night_light: false,
             interface_language: crate::l10n::WINDOWS.into(),
         }
@@ -421,6 +424,8 @@ pub enum Field {
     StartAtSignIn,
     /// Start minimized.
     StartMinimized,
+    /// Automatic application update checks.
+    CheckUpdatesAutomatically,
     /// Night Light management.
     ManageNightLight,
     /// The interface language.
@@ -440,7 +445,7 @@ pub struct NumberRange {
 
 impl Field {
     /// Every field in file order.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Wake,
         Self::Bedtime,
         Self::DaytimeKelvin,
@@ -460,6 +465,7 @@ impl Field {
         Self::Exclusions,
         Self::StartAtSignIn,
         Self::StartMinimized,
+        Self::CheckUpdatesAutomatically,
         Self::ManageNightLight,
         Self::InterfaceLanguage,
     ];
@@ -486,6 +492,7 @@ impl Field {
             Self::Exclusions => "exclusions",
             Self::StartAtSignIn => "start_at_sign_in",
             Self::StartMinimized => "start_minimized",
+            Self::CheckUpdatesAutomatically => "check_updates_automatically",
             Self::ManageNightLight => "manage_night_light",
             Self::InterfaceLanguage => "interface_language",
         }
@@ -792,6 +799,9 @@ impl ConfigInput {
             }
             (Field::StartAtSignIn, FieldValue::Switch(value)) => self.start_at_sign_in = value,
             (Field::StartMinimized, FieldValue::Switch(value)) => self.start_minimized = value,
+            (Field::CheckUpdatesAutomatically, FieldValue::Switch(value)) => {
+                self.check_updates_automatically = value;
+            }
             (Field::ManageNightLight, FieldValue::Switch(value)) => {
                 self.manage_night_light = value;
             }
@@ -845,6 +855,9 @@ impl ConfigInput {
             Field::UseWindowsLocation => FieldValue::Switch(self.use_windows_location),
             Field::StartAtSignIn => FieldValue::Switch(self.start_at_sign_in),
             Field::StartMinimized => FieldValue::Switch(self.start_minimized),
+            Field::CheckUpdatesAutomatically => {
+                FieldValue::Switch(self.check_updates_automatically)
+            }
             Field::ManageNightLight => FieldValue::Switch(self.manage_night_light),
             Field::Coordinates => FieldValue::Coordinates(self.coordinates),
             Field::Suppression => FieldValue::Apps(self.suppression.clone()),

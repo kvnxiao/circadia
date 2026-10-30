@@ -327,7 +327,6 @@ pub(super) fn group(cards: Vec<View>) -> View {
 
 pub(super) struct Row {
     glyph: &'static str,
-    icon: Option<View>,
     title: String,
     description: String,
     detail: Option<View>,
@@ -344,7 +343,6 @@ impl Row {
     ) -> Self {
         Self {
             glyph,
-            icon: None,
             title: title.into(),
             description: description.into(),
             detail: None,
@@ -361,11 +359,6 @@ impl Row {
 
     pub(super) fn controls(mut self, controls: Vec<View>) -> Self {
         self.controls = controls;
-        self
-    }
-
-    pub(super) fn icon(mut self, icon: View) -> Self {
-        self.icon = Some(icon);
         self
     }
 
@@ -400,9 +393,7 @@ impl Row {
                         Border::new()
                             .vertical_alignment(alignment)
                             .margin(Thickness::new(0.0, offset, 16.0, 0.0))
-                            .content(self.icon.unwrap_or_else(|| {
-                                FontIcon::new().glyph(self.glyph).font_size(20.0).into()
-                            })),
+                            .content(FontIcon::new().glyph(self.glyph).font_size(20.0)),
                         StackPanel::new()
                             .grid_column(1)
                             .grid_column_span(if stacked { 2 } else { 1 })

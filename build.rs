@@ -11,6 +11,7 @@ use std::path::PathBuf;
 const ICON_SIZES: [u32; 8] = [16, 20, 24, 32, 40, 48, 64, 256];
 
 fn main() -> io::Result<()> {
+    build_identity()?;
     println!("cargo:rerun-if-changed=assets/icon/circadia.svg");
     println!("cargo:rerun-if-changed=Cargo.toml");
     let output = PathBuf::from(
@@ -41,6 +42,45 @@ fn main() -> io::Result<()> {
     }
     #[cfg(all(windows, feature = "self-contained"))]
     windows_reactor_setup::as_self_contained();
+    Ok(())
+}
+
+fn build_identity() -> io::Result<()> {
+    println!("cargo:rerun-if-env-changed=CIRCADIA_CHANNEL");
+    let channel = std::env::var("CIRCADIA_CHANNEL").unwrap_or_else(|_| "development".into());
+    if !matches!(channel.as_str(), "stable" | "preview" | "development") {
+        return Err(io::Error::other("invalid CIRCADIA_CHANNEL"));
+    }
+    let git = |args: &[&str]| -> Option<String> {
+        let result = std::process::Command::new("git").args(args).output().ok()?;
+        result
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&result.stdout).trim().to_owned())
+    };
+    for path in [
+        git(&["rev-parse", "--git-path", "HEAD"]),
+        git(&["symbolic-ref", "-q", "HEAD"])
+            .and_then(|reference| git(&["rev-parse", "--git-path", &reference])),
+        git(&["rev-parse", "--git-path", "packed-refs"]),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    let source = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    if channel != "development" && source == "unknown" {
+        return Err(io::Error::other("packaging requires a Git checkout"));
+    }
+    println!("cargo:rustc-env=CIRCADIA_CHANNEL={channel}");
+    println!("cargo:rustc-env=CIRCADIA_SOURCE_COMMIT={source}");
+    let commit = source.get(..12).unwrap_or(&source);
+    println!("cargo:rustc-env=CIRCADIA_COMMIT={commit}");
+    println!(
+        "cargo:rustc-env=CIRCADIA_ARCH={}",
+        std::env::var("CARGO_CFG_TARGET_ARCH").map_err(io::Error::other)?
+    );
     Ok(())
 }
 

@@ -198,7 +198,8 @@ app-name = { -brand-name }
 nav-schedule = Schedule
 nav-apps = App suppression
 nav-transitions = Transitions
-nav-general = General
+nav-general = Settings
+nav-about = About
 
 manage-title = Let { -brand-name } manage { -night-light }
 manage-description = While on, { -brand-name } fully controls { -windows } { -night-light } and reverts changes made in { -windows-settings } or { -quick-settings }.
@@ -432,7 +433,28 @@ logs-title = Logs
 logs-description = Log files for troubleshooting. They stay on this PC and are never uploaded automatically.
 open-folder-name = { $name }: Open folder
 section-about = About
-about-version = Version { $version }
+about-version = { $version } | { $commit } | { $architecture }
+section-application = Application
+quit-description = Close Circadia and stop managing Night Light.
+section-updates = Update settings
+updates-automatic = Check for updates automatically
+updates-automatic-description = Check at startup and once a day. Updates are downloaded and installed manually.
+updates-check = Check for updates
+updates-checking = Checking for updates…
+updates-current = Circadia is up to date
+updates-available = A new version of Circadia is available
+updates-download = Open download page
+updates-unpublished = No downloadable build is available yet
+updates-development = This development build is not connected to an update channel
+updates-failed = Could not check for updates. Check your connection and try again.
+updates-preview-download = Preview downloads require signing into GitHub.
+section-feedback = Feedback
+about-report = Report a bug
+about-report-description = Open a bug report on GitHub.
+section-other-links = Other links
+about-repository = GitHub repository
+about-contributing = Contribution guidelines
+about-license = License
 
 field-name =
     { $field ->
@@ -454,6 +476,7 @@ field-name =
         [suppression] Suppression list
         [exclusions] { -label-excluded-apps }
         [start_at_sign_in] Start at sign-in
+        [check_updates_automatically] { updates-automatic }
         [interface_language] { -label-language }
         [manage_night_light] Manage { -night-light }
        *[start_minimized] { -label-start-minimized }

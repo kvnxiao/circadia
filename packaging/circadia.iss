@@ -12,6 +12,7 @@
 AppId={{6AF5C441-7858-4D2F-A489-21831A014B9F}
 AppName=Circadia
 AppVersion={#AppVersion}
+VersionInfoVersion={#BaseVersion}
 AppVerName=Circadia {#AppVersion} ({#BuildRevision}, unsigned)
 AppPublisher=kvnxiao
 AppPublisherURL=https://github.com/kvnxiao/circadia

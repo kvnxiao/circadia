@@ -1,5 +1,5 @@
 ---
-date: 2026-10-29
+date: 2026-10-30
 questions:
   - Which published windows-rs and Reactor versions support Circadia's settings and tray requirements?
   - Can Rust code draw and edit a temperature curve with native WinUI 3 controls?
@@ -8,6 +8,7 @@ questions:
   - Can the graph support point insertion, reanchoring (changing the reference time that a point's signed offset is measured from), 10 K point increments, and a temperature background?
   - Which Reactor changes at the current reference pin affect Circadia, how does its failure policy end the process, and when do its text inputs report edits?
 observed-in:
+  - microsoft/windows-rs master 6d88349841f193536a73b63cece7f7e8fcf25953 (2026-10-30), current reference pin; upstream diff inspection, automated checks of both Reactor probes, and Circadia About UI inspection
   - windows 0.62.2 from the Cargo registry
   - windows-reactor and windows-reactor-setup 0.100.0, source revision a57cc321bfdbac6bb98c488ba49f399da8fcb98a
   - microsoft/windows-rs development revision 722f202100c3bd428627941d3834d87ad6679d1c (2026-10-16)
@@ -15,7 +16,7 @@ observed-in:
   - microsoft/windows-rs master 0496ec19116f1dac690daf31fcb96769118d9bac (2026-10-24), reference pin until 2026-10-29; source inspection of the two commits after ebc5a99, and the automated checks of Circadia 6e5a34f and the Windows Reactor probe with only the rev values and lockfiles changed; desktop checks of Circadia f841a1c and both Reactor probes on Windows 11 build 26300.9711 at 100% scaling, 2026-10-24; desktop checks of the redesigned settings window based on Circadia 4647f8b on the same build and scaling, 2026-10-27
   - microsoft/windows-rs master 8786f59d1f6bc216324b202ec17d3de696d3b843 (2026-10-29); source inspection of the 37 commits after 0496ec1 and automated checks of Circadia c453c2f with the dependency and measurement API changes, and both Reactor probes
   - microsoft/windows-rs master 5cfe2c96ea029b119d5e07fca2a92d7628c22aeb (2026-10-29); source inspection of the two commits after 8786f59
-  - microsoft/windows-rs master 3b6bea553787d9419b3fdd29e2c5436666d7325b (2026-10-29), the current reference pin; source inspection, application and probe automated checks, and Reactor desktop and motion/progress probes on Windows 11 build 26300.9711 at 100% scaling
+  - microsoft/windows-rs master 3b6bea553787d9419b3fdd29e2c5436666d7325b (2026-10-29), an earlier reference pin; source inspection, application and probe automated checks, and Reactor desktop and motion/progress probes on Windows 11 build 26300.9711 at 100% scaling
   - windows-reactor-setup at 8786f59, staging Microsoft.WindowsAppSDK.Runtime 2.6.4
   - windows-reactor-setup at ebc5a99 and 0496ec1, staging Microsoft.WindowsAppSDK.Runtime 2.5.1
   - microsoft/microsoft-ui-xaml controls/dev/NumberBox/NumberBox.cpp at 2b337b4b13f39dd6071da66dcffe4b3ae4ff4e86
@@ -28,11 +29,22 @@ recheck-when: Each bump of the reference windows-rs commit, and when Microsoft p
 
 The inspected Git versions of Reactor support an application-owned tray icon and settings windows that can close and reopen without ending the process. Published 0.100.0 ends its window runner when the last window closes. Version numbers alone do not distinguish the published crate from Git revisions that still declare 0.100.0.
 
-Circadia's reference pin is `3b6bea553787d9419b3fdd29e2c5436666d7325b`, with Windows App SDK runtime 2.6.4. Desktop observations below apply to their stated revisions on Windows 11 build 26300.9711. The [compatibility assessment](windows-compatibility.md) supports an intended build 22000 floor; execution on that minimum is unverified.
+Circadia's reference pin is `6d88349841f193536a73b63cece7f7e8fcf25953`, with Windows App SDK runtime 2.6.4. Desktop observations below apply to their stated revisions on Windows 11 build 26300.9711. The [compatibility assessment](windows-compatibility.md) supports an intended build 22000 floor; execution on that minimum is unverified.
 
 The retained graph experiment uses fixed anchor fixtures and arbitrary point editing. It verifies controls and pointer behavior, not Circadia's generated schedule, automatic saving, or Preview contract. [Settings design support](settings-design-support.md) covers the four-page design, segmented time entry, composition drawing, and finite animations. The [spec](../specs/SPEC.md) defines product behavior.
 
 ## Versions and evidence boundaries
+
+### Reference pin `6d88349`
+
+On 2026-10-30, source inspection of the [changes since `3b6bea5`](https://github.com/microsoft/windows-rs/compare/3b6bea553787d9419b3fdd29e2c5436666d7325b...6d88349841f193536a73b63cece7f7e8fcf25953) identified four Reactor changes relevant to Circadia:
+
+- [Queued native work always schedules a wake](https://github.com/microsoft/windows-rs/pull/5274), including observations without an application callback. Circadia receives this behavior through the dependency update. Its notifications from background workers to the UI remain necessary because they use a separate application-owned path.
+- [Event callbacks are paired with their values](https://github.com/microsoft/windows-rs/pull/5270) in `EventCall`, replacing separately supplied callback and payload types. Circadia uses typed control callbacks and does not construct the changed low-level events.
+- [Native events use an enum](https://github.com/microsoft/windows-rs/pull/5273), separating callback dispatch, observations, recorded writes, retirement, and realization. Circadia does not construct these internal event records.
+- [Attachment reconciliation is consolidated](https://github.com/microsoft/windows-rs/pull/5275) for dialogs, flyouts, menus, and tooltips. The application can keep its declarative control construction.
+
+Both retained Reactor probes pass their automated checks at this pin. The Reactor UI Automation script passed native control invocation, curve validation, and tray-process survival after graph closure. Circadia's About page was rendered at desktop and narrow widths with management off. These observations do not establish a performance improvement or replace the broader desktop, accessibility, and deployment acceptance checks. No new control API in this range requires an application redesign.
 
 | Package or source | Observed version | Implication |
 | :-- | :-- | :-- |
@@ -45,7 +57,7 @@ The retained graph experiment uses fixed anchor fixtures and arbitrary point edi
 | `windows-rs` previous reference pin | `0496ec19116f1dac690daf31fcb96769118d9bac`, committed 2026-10-24 | Reference pin from 2026-10-24 to 2026-10-29. Declares Reactor version 0.100.0 and stages runtime 2.5.1. See [Reference pin `0496ec1`](#api-and-runtime-changes). |
 | `windows-rs` previous reference pin | `8786f59d1f6bc216324b202ec17d3de696d3b843`, committed 2026-10-29 | First update on 2026-10-29. Declares Reactor version 0.100.0 and stages runtime 2.6.4. See [Reference pin `8786f59`](#api-and-runtime-changes). |
 | `windows-rs` previous reference pin | `5cfe2c96ea029b119d5e07fca2a92d7628c22aeb`, committed 2026-10-29 | Declares Reactor version 0.100.0 and stages runtime 2.6.4. See [Reference pin `5cfe2c9`](#api-and-runtime-changes). |
-| `windows-rs` reference pin | `3b6bea553787d9419b3fdd29e2c5436666d7325b`, retrieved 2026-10-29 | Latest inspected `master`; Reactor 0.100.0 with runtime 2.6.4. See [Reference pin `3b6bea5`](#api-and-runtime-changes). |
+| `windows-rs` previous reference pin | `3b6bea553787d9419b3fdd29e2c5436666d7325b`, retrieved 2026-10-29 | Inspected `master` on that date; Reactor 0.100.0 with runtime 2.6.4. See [Reference pin `3b6bea5`](#api-and-runtime-changes). |
 
 The published package's `.cargo_vcs_info.json` identifies release source `a57cc321bfdbac6bb98c488ba49f399da8fcb98a`. A manifest version alone does not distinguish that release from development source. The active probe has one manifest and lockfile for the reference pin. Spec approval and production integration remain separate from the recorded probe results.
 

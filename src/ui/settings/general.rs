@@ -1,4 +1,3 @@
-use super::APP_ICON;
 use super::Command;
 use super::Folder;
 use super::Message;
@@ -29,9 +28,7 @@ use std::io;
 use std::rc::Rc;
 use windows_reactor::Button;
 use windows_reactor::ComboBox;
-use windows_reactor::EncodedImage;
 use windows_reactor::FontIcon;
-use windows_reactor::Image;
 use windows_reactor::StackPanel;
 use windows_reactor::ThemeBrush;
 use windows_reactor::ToggleSwitch;
@@ -331,8 +328,8 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 context,
             ),
         ]),
-        widgets::section(fl!("section-about"), false),
-        about_card(settings, context),
+        widgets::section(fl!("section-application"), false),
+        quit_card(settings, context),
     ]
 }
 
@@ -345,11 +342,6 @@ pub(super) fn management_label(model: &Model, text: &Text) -> String {
             fl!("night-light-not-managing")
         }
     })
-}
-
-pub(super) fn version_text(text: &Text) -> String {
-    bind_text!(fl, text);
-    fl!("about-version", version = env!("CARGO_PKG_VERSION"))
 }
 
 fn folder_card(
@@ -378,18 +370,11 @@ fn folder_card(
     )
 }
 
-fn about_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
+fn quit_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let text = &settings.input.text;
     bind_text!(fl, text);
     widgets::card(
-        Row::new("", fl!("app-name"), version_text(text))
-            .icon(
-                Image::new()
-                    .source_svg(EncodedImage::from_static(APP_ICON))
-                    .width(32.0)
-                    .height(32.0)
-                    .into(),
-            )
+        Row::new("\u{E7E8}", fl!("action-quit"), fl!("quit-description"))
             .controls(vec![
                 Button::new()
                     .automation_id(automation_id::ABOUT_QUIT)
@@ -401,7 +386,7 @@ fn about_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View 
     )
 }
 
-fn switch(
+pub(super) fn switch(
     settings: &Settings,
     field: Field,
     on: bool,

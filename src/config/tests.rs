@@ -544,6 +544,25 @@ fn an_unreadable_format_or_another_version_is_unusable() {
 }
 
 #[test]
+fn automatic_update_preference_recovers_missing_and_invalid_fields() {
+    let missing = file(|table| {
+        table.remove("check_updates_automatically");
+    });
+    let (config, report) = load(&missing, None).expect("older configuration");
+    assert!(config.input().check_updates_automatically);
+    assert!(
+        report
+            .missing
+            .contains_key(&Field::CheckUpdatesAutomatically)
+    );
+    let invalid = file(|table| set(table, "check_updates_automatically", "yes"));
+    let backup = file(|table| set(table, "check_updates_automatically", false));
+    let (config, report) = load(&invalid, Some(&backup)).expect("field recovery");
+    assert!(!config.input().check_updates_automatically);
+    assert!(report.marks.contains_key(&Field::CheckUpdatesAutomatically));
+}
+
+#[test]
 fn filename_only_development_schema_is_rejected() {
     let file = file(|table| set(table, "schema_version", 2));
     assert_eq!(load(&file, None), Err(Unusable::Version));

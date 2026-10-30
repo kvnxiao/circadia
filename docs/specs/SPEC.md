@@ -169,6 +169,7 @@ Constant output does not cause repeated temperature operations. Resume and taskb
 - A pending configuration write after a settings edit.
 - Relative focus times in the recent-app list while settings is visible.
 - Pending native recovery and rate-limited corrections of observed Night Light changes.
+- Enabled daily application update checks and their bounded in-progress work under REQ-application-updates.
 
 Native recovery stops after success. Unchanged errors do not produce repeated identical log records. Closed or minimized settings do not animate their graph or update relative times. A graph on a settings page that is not selected does not animate.
 

@@ -16,6 +16,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
+  CIRCADIA_CHANNEL: preview
 
 jobs:
   package:
@@ -55,14 +56,15 @@ jobs:
           path: ~/.cargo/git
           key: ${{ steps.key.outputs.value }}
       - name: Build unsigned installer
+        id: build
         run: just installer
       - name: Upload installer and checksum
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: Circadia-windows-x64-unsigned
+          name: Circadia-windows-x64-unsigned-${{ github.event.workflow_run.head_sha }}
           path: |
-            target/installer/*-setup.exe
-            target/installer/*-setup.exe.sha256
+            ${{ steps.build.outputs.installer }}
+            ${{ steps.build.outputs.installer }}.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 90

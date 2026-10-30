@@ -7,7 +7,7 @@ labels: bug
 
 ## Circadia version
 
-<!-- The release you downloaded. If you are unsure, lines in the log that contain "start version=" show it. -->
+<!-- Copy the version, commit hash, and architecture from About. -->
 
 ## Windows build
 

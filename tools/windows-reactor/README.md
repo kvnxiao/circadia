@@ -4,7 +4,7 @@ This probe uses the selected Reactor revision to exercise a native temperature g
 
 ## Dependencies and environment
 
-The single crate pins `windows-reactor` and its optional setup helper to `windows-rs` revision `3b6bea553787d9419b3fdd29e2c5436666d7325b` (2026-10-29), the same reference pin as the application. The pin follows windows-rs `master` under the [tracking policy](../../docs/research/windows-reactor-ui.md#tracking-policy). Both still declare version 0.100.0, which does not identify the published release. `Cargo.lock` records the full dependency graph, including `winsafe` 0.0.29 and `num-traits` 0.2.19. The manifest declares Rust 1.95 as its minimum.
+The single crate pins `windows-reactor` and its optional setup helper to `windows-rs` revision `6d88349841f193536a73b63cece7f7e8fcf25953` (2026-10-30), the same reference pin as the application. The pin follows windows-rs `master` under the [tracking policy](../../docs/research/windows-reactor-ui.md#tracking-policy). Both still declare version 0.100.0, which does not identify the published release. `Cargo.lock` records the full dependency graph, including `winsafe` 0.0.29 and `num-traits` 0.2.19. The manifest declares Rust 1.95 as its minimum.
 
 Use Windows with Rust's MSVC toolchain, the linker and Windows SDK, stable Rust, nightly rustfmt, and `just`. Dependency checks also require `cargo-audit` and `cargo-machete`; the minimum-version check requires `jq` and Rust 1.95 installed through rustup. The recorded environment is Windows 11 x64 build 26300.9711 with Rust 1.99.0.
 
@@ -46,6 +46,8 @@ powershell.exe -NoProfile -File verify-native.ps1
 Each script terminates its own probe process in `finally` if necessary, closing that process's remaining windows. The scripts can change foreground focus; none changes Night Light or host time settings. For manual exploration, `just run-self-contained` starts tray-only; use the tray's Exit action when finished.
 
 ## Results and limits
+
+On 2026-10-30 at `6d88349`, `just check` and `just build-self-contained` passed. The UI Automation script passed native window creation, button invocation, curve validation, and tray-process survival after graph closure on the recorded Windows host at 100% scaling. Pointer, lifecycle, and native-picker scripts were not rerun at this pin.
 
 On 2026-10-29 at `3b6bea5`, `just check` passed all 18 tests, formatting, Clippy, rustdoc, and dependency checks. MSRV and bundled-build checks passed. All four desktop scripts passed on Windows 11 build 26300.9711 at 100% scaling with runtime 2.6.4. Each script cleaned up its probe process.
 

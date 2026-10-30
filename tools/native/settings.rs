@@ -37,11 +37,12 @@ pub(super) fn exercise(
     crate::preview::exercise(automation, native, settings, process, directory)
 }
 
-const NAVIGATION_ITEMS: [&str; 4] = [
+const NAVIGATION_ITEMS: [&str; 5] = [
     automation_id::NAV_SCHEDULE,
     automation_id::NAV_APPS,
     automation_id::NAV_TRANSITIONS,
     automation_id::NAV_GENERAL,
+    automation_id::NAV_ABOUT,
 ];
 
 fn check_pages(automation: &Automation, settings: &HWND, process: u32) -> io::Result<()> {
@@ -134,12 +135,12 @@ fn check_pages(automation: &Automation, settings: &HWND, process: u32) -> io::Re
             .then_some(()))
     })?;
     report(
-        "PASS: the navigation pane and the four pages show their content in the required order, Tab reaches every enabled control of each page with an accessible name, and Add app is unavailable while no app is chosen",
+        "PASS: the navigation pane and the five pages show their content in the required order, Tab reaches every enabled control of each page with an accessible name, and Add app is unavailable while no app is chosen",
     );
     Ok(())
 }
 
-fn pages() -> [(&'static str, Vec<String>); 4] {
+fn pages() -> [(&'static str, Vec<String>); 5] {
     let ids = |ids: &[&str]| ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
     let mut schedule = ids(&[
         automation_id::PAGE_TITLE,
@@ -176,6 +177,19 @@ fn pages() -> [(&'static str, Vec<String>); 4] {
     ]));
     [
         (automation_id::NAV_SCHEDULE, schedule),
+        (
+            automation_id::NAV_ABOUT,
+            ids(&[
+                automation_id::PAGE_TITLE,
+                automation_id::ABOUT_VERSION,
+                automation_id::CHECK_UPDATES,
+                automation_id::AUTOMATIC_UPDATES,
+                automation_id::REPORT_BUG,
+                automation_id::ABOUT_REPOSITORY,
+                automation_id::ABOUT_CONTRIBUTING,
+                automation_id::ABOUT_LICENSE,
+            ]),
+        ),
         (
             automation_id::NAV_APPS,
             ids(&[

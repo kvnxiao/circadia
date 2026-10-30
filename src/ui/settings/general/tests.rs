@@ -362,11 +362,11 @@ fn turning_the_switch_on_while_saving_is_paused_registers_and_writes_no_file() {
 }
 
 #[test]
-fn the_about_card_shows_the_running_version() {
-    assert_eq!(
-        version_text(&english()),
-        format!("Version \u{2068}{}\u{2069}", env!("CARGO_PKG_VERSION"))
-    );
+fn the_about_page_shows_the_running_build_identity() {
+    let version = crate::ui::settings::about::version_text(&english());
+    assert!(version.contains(env!("CARGO_PKG_VERSION")), "{version}");
+    assert!(version.contains(env!("CIRCADIA_COMMIT")), "{version}");
+    assert!(version.contains("x64"), "{version}");
 }
 
 #[test]

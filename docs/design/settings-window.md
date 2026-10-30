@@ -46,7 +46,7 @@ The status line summarizes the state and wraps to a second line instead of trunc
 | Not managing | "Not managing Night Light" |
 | An app-wide problem exists | Names the first app-wide problem, matching the tray tooltip. |
 
-**Items.** The pages are Schedule (selected when the window opens), App suppression, Transitions, and General. Each item is 36 epx tall with 4 epx corners and 12 epx horizontal padding: a 16 epx glyph, a 14 epx gap, and the label in Body. Hovering shows a subtle fill. The selected item shows the subtle fill and a 3 by 16 epx accent bar at its left edge, vertically centered. The glyphs are a clock (Schedule), a two-by-two grid of app tiles (App suppression), a line that steps down along a ramp (Transitions), and a gear (General), each taken from Segoe Fluent Icons.
+**Items.** The pages are Schedule (selected when the window opens), App suppression, Transitions, Settings, and About. Each item is 36 epx tall with 4 epx corners and 12 epx horizontal padding: a 16 epx glyph, a 14 epx gap, and the label in Body. Hovering shows a subtle fill. The selected item shows the subtle fill and a 3 by 16 epx accent bar at its left edge, vertically centered. The glyphs are a clock (Schedule), a two-by-two grid of app tiles (App suppression), a line that steps down along a ramp (Transitions), a gear (Settings), and an information circle (About), each taken from Segoe Fluent Icons.
 
 **Error marker.** While a page has an invalid field, its item shows a small dot in the critical color at its right end. The item's accessible name adds that the page has an invalid value.
 
@@ -288,9 +288,9 @@ The Transitions page has, in order:
 3. **Preview:** a Preview length card with a play glyph, the description "Preview plays the next 24 hours of your schedule in this many seconds. It takes priority over suppression while it plays.", a slider (1 to 60), a number field, and "s".
 4. **Output:** a Maximum update rate card with a line-chart glyph, the description "How many times per second Circadia may change the color during fades and previews. Lower values can look uneven. 1 to 240 Hz.", a number field, and "Hz".
 
-## General page
+## Settings page
 
-The General page has, in order:
+The Settings page has, in order:
 
 1. **Language:** see [Language drop-down and restart prompt](#language-drop-down-and-restart-prompt).
 2. **Startup:**
@@ -300,13 +300,23 @@ The General page has, in order:
 4. **Troubleshooting:**
    - "Settings file", with a folder glyph, the description "Changes are saved here as you make them, with a backup of the last good copy.", and an "Open folder" button.
    - "Logs", with a document glyph, the description "Log files for troubleshooting. They stay on this PC and are never uploaded automatically.", and an "Open folder" button.
-5. **About:** the 32 epx app icon in place of a glyph, the title "Circadia", the description "Version 1.2.3" (the running version), and a "Quit Circadia" button.
+5. **Application:** a Quit Circadia card with a power glyph, an explanation that quitting stops Night Light management, and a Quit Circadia button.
 
 ### Language drop-down and restart prompt
 
 The Language card has a language glyph, the title "Language", the description "The language Circadia's windows and menus use.", and a drop-down. The drop-down lists "Use Windows language" first, which is the default, and then each shipped language under its own name in that language, such as "English" or "Deutsch". A release that ships English only lists "Use Windows language" and "English".
 
 When the selected option differs from the option that was selected when Circadia started, a nested row appears in the same card: a 16 epx information glyph in the accent color, the text "Restart Circadia to use the new language." in Body, the line "Quit Circadia, then start it again." in Caption and secondary text, and a "Quit Circadia" button on the right. The row stays until Circadia restarts or the selection returns to that option. Screen readers announce the row when it appears.
+
+## About page
+
+The navigation pane places About immediately after Settings in the same group. Its glyph is an information circle.
+
+The page starts with a 64 epx app icon beside the name Circadia in 24 epx type. A wrapping caption below the name shows the version, commit hash, and architecture, separated by vertical bars. Preview packages show a version such as `0.1.0-preview`.
+
+An accent Check for updates button sits below the identity block. The result banner appears directly below it: neutral with a progress indicator while checking, green when current, informational with a download-page link when an update is available, or an error on failure. Each state has readable text and a screen-reader announcement. The progress indicator stops when the window is hidden or another page is selected.
+
+Update settings has one card, Check for updates automatically. Feedback has one card, Report a bug, with a bug glyph and an external-link action. Other links lists GitHub repository, Contribution guidelines, and License. Links appear in a row at wider widths and stack at narrow widths. The page uses the shared card surfaces, section spacing, and system theme colors.
 
 ## Phase art in the window
 

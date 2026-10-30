@@ -42,6 +42,16 @@ Uninstall removes the startup Run value only when its command exactly matches th
 
 Compiling the installer does not install or launch it. Check installation, upgrades, uninstall, and launch on a clean Windows 11 machine separately before treating a build as release-ready. The automated installer job does not establish those behaviors or the minimum Windows build's compatibility.
 
+### Build identity and releases
+
+Set the application version in `Cargo.toml`. The executable, About page, and installer derive their version from that value. `build.rs` embeds the source commit and target architecture. Local builds display a `-dev` suffix and do not check a distribution channel.
+
+The main packaging workflow sets `CIRCADIA_CHANNEL=preview`. These packages display `-preview`, and their artifact names include the exact packaged source commit. Update checks inspect available artifacts from successful builds and compare their source commits with the installed commit. Only a descendant source is offered, so rerunning CI for older source does not offer a downgrade. Among available descendants, the check selects the one furthest ahead in commit history. Checks inspect up to 20 recent successful packaging runs and stop after a shared 30-second network deadline.
+
+To publish a stable version, update Cargo's version, commit the change, and create a GitHub release with a matching `v` tag, such as `v0.1.0`. Publishing a non-prerelease starts the [Windows stable release workflow](.github/workflows/windows-release.yml), which builds that tag with `CIRCADIA_CHANNEL=stable` and attaches the installer and checksum. Saving a draft does not start packaging. About offers the release only after its installer and checksum are present. Matching symbols remain in the workflow artifacts.
+
+Automatic update checks default on, run at startup and daily, and save their preference through the same configuration path as other settings. They query public GitHub metadata without a token. Downloads open in the user's browser; preview artifact downloads require GitHub sign-in. The application does not install updates itself.
+
 ## Routine checks
 
 Formatting requires nightly rustfmt, and binding generation requires stable rustfmt (`rustup component add rustfmt --toolchain stable`). Dependency checks require `cargo-audit`, `cargo-machete`, and `jq`; the minimum-version and generated-binding checks also require `jq`.
@@ -100,7 +110,7 @@ Superseded runs are cancelled, and a failed Rust matrix job does not cancel the 
 
 CI executes test harnesses, including unit tests of native-check helpers, but does not launch the desktop application or probe windows. Desktop automation, screenshots, live Night Light checks, host-setting exercises, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
 
-The separate [Windows packaging workflow](.github/workflows/windows-installer.yml) starts when application CI completes successfully for a push to `main`. It checks out that run's exact commit and does not wait for tool and probe CI. Its **Unsigned x64 installer** job uploads **Circadia-windows-x64-unsigned**, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual workflow dispatch do not build an installer.
+The separate [Windows packaging workflow](.github/workflows/windows-installer.yml) starts when application CI completes successfully for a push to `main`. It checks out that run's exact commit and does not wait for tool and probe CI. Its **Unsigned x64 installer** job uploads `Circadia-windows-x64-unsigned-<commit>`, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual workflow dispatch do not build an installer.
 
 External actions use full commit pins. [Dependabot](.github/dependabot.yml) proposes weekly action updates for review.
 

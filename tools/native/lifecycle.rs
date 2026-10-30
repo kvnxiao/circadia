@@ -300,6 +300,7 @@ pub(super) fn show_page(
         automation_id::NAV_APPS => automation_id::ADD_EXCLUSION,
         automation_id::NAV_TRANSITIONS => automation_id::RATE_NUMBER,
         automation_id::NAV_GENERAL => automation_id::ABOUT_QUIT,
+        automation_id::NAV_ABOUT => automation_id::CHECK_UPDATES,
         _ => return Err(io::Error::other(format!("unknown page {navigation}"))),
     };
     crate::automation::wait("navigation item", || {

@@ -22,6 +22,26 @@ macro_rules! identifiers {
 }
 
 identifiers! {
+    /// About navigation item.
+    NAV_ABOUT = "nav-about";
+    /// Running build identity.
+    ABOUT_VERSION = "about-version";
+    /// Manual update check.
+    CHECK_UPDATES = "check-updates";
+    /// Automatic update preference.
+    AUTOMATIC_UPDATES = "automatic-updates";
+    /// Update check result.
+    UPDATE_STATUS = "update-status";
+    /// Available update download page.
+    UPDATE_DOWNLOAD = "update-download";
+    /// Bug report link.
+    REPORT_BUG = "report-bug";
+    /// Repository link.
+    ABOUT_REPOSITORY = "about-repository";
+    /// Contribution guidelines link.
+    ABOUT_CONTRIBUTING = "about-contributing";
+    /// License link.
+    ABOUT_LICENSE = "about-license";
     /// Title bar with Circadia's icon and name.
     TITLE_BAR = "title-bar";
     /// Navigation view that holds the pane and the page content.
