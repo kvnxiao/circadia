@@ -6,6 +6,7 @@ questions:
   - How long does the redesigned settings window take to show a schedule edit in its graph?
   - How much CPU, memory, and background activity does the redesigned settings window add while open, and what remains after it closes?
   - Does the compositor move the rendered Preview marker between native calls and stop animation in inactive views?
+  - Do Preview progress pixels follow the captured clock continuously through completion?
 observed-in:
   - Microsoft Windows API and MS-TSTS documentation retrieved 2026-10-22
   - windows-sys 0.61.2 WindowsProgramming and Wdk SystemInformation bindings
@@ -14,6 +15,7 @@ observed-in:
   - Circadia measure-resources and measure-activity on Windows 11 x64 build 26300 (UBR 0x25EF), 2026-10-27, Rust 1.99.0, windows-rs 0496ec1
   - Circadia measure-graph and measure-activity on Windows 11 x64 build 26300.9711, 2026-10-29, windows-rs 8786f59, working tree based on c453c2f
   - Circadia measure-graph and completion-only captures on Windows 11 x64 build 26300.9711, 2026-10-30, windows-rs 3b6bea5, working tree based on a0bf3e2
+  - Circadia Preview progress timing on the same machine and runtime, 2026-10-30, working tree based on f036f95
 recheck-when: Windows versions, target architecture, metadata bindings, sampling intervals, measurement scenarios, the graph renderer, or the settings window change.
 ---
 
@@ -93,9 +95,15 @@ A second run recorded 11 bar fill lengths, 17 ring arc lengths, and 20 dot color
 
 **Measured on 2026-10-30 at windows-rs `3b6bea5`:** the completion check sampled a one-second Preview with simulated native output blocked beyond its deadline. It required a full-width pixel frame and accessible progress of 100% while editing remained locked. The bar's visual duration was 900 ms; playback still lasted one second. Captures used the release measurement build, bundled runtime 2.6.4, and 100% scaling on the machine described above.
 
-An initial implementation failed intermittently: one capture reached only 621 of 633 pixels before removal. The compositor animation used a clock sample taken before its setup, and the visual-deadline wake updated only the native accessible value. The corrected implementation samples the clock after preparing the animation and uses that existing wake to replace the compositor fill with static full width.
+One capture reached only 621 of 633 pixels before removal. The tested correction sampled the clock after preparing the animation and used the visual-deadline wake to replace the compositor fill with static full width. These checks established a full-width frame, but did not check continuity into that frame.
 
 Two corrected runs observed the full frame 74.399 ms and 66.899 ms before the actual deadline. Editing became available 21.564 ms and 11.052 ms after that deadline; pixels disappeared 36.324 ms and 26.885 ms afterward. These are sampled observations, not timer guarantees. Both runs also passed checks for starting another Preview, Stop, page exit, minimize, and close. No application frame loop or post-deadline hold was added.
+
+**Continuity measured on 2026-10-30, based on `f036f95`:** separate capture timestamps exposed a terminal jump from 599 to 633 pixels in a one-second run. A ten-second run reached 606 of 633 pixels near the 9.9-second visual deadline, then changed to static full width. The sampled animated fill advanced at approximately 96% of the expected speed in both durations. Animation setup took microseconds after the monotonic clock sample used to calculate its remaining duration, and the captured host width was 633 pixels. These observations establish a duration-dependent discrepancy; they do not establish its cause inside Windows. Reading the animation controller's progress returned zero throughout visible motion and therefore did not measure the running animation.
+
+The application now updates the retained bar and Preview phase-ring visuals from monotonic elapsed time on the public [XAML Rendering event](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.media.compositiontarget.rendering). The callbacks update visual properties without rebuilding the settings tree or requesting Night Light writes. Each callback is removed when its indicator is removed or hidden. Leaving Schedule removes the bar and page ring; a visible navigation ring continues on other pages. Completion, Stop, minimize, and close remove all Preview progress callbacks. Ordinary schedule rings retain finite compositor keyframes. The bar retains its 100 ms early completion rule; each phase ring retains the fraction of its scheduled transition.
+
+The clock-driven runs observed full width 85.321 ms before the one-second deadline and 95.364 ms before the ten-second deadline. The ten-second terminal samples advanced through 630, 631, 632, and 633 pixels. The strengthened continuity check rejected the previous static replacement and passed both clock-driven runs. The full graph check captured 17 bar extents, 21 ring extents, and 28 dot colors during 900 ms with simulated output blocked; maximum graph-edit latency was 22.924 ms. These observations use the 480 Hz reference display at 100% scaling and do not guarantee every displayed frame or other refresh rates.
 
 The full graph regression passed all 15 latency samples, with a maximum of 23.172 ms. It captured 13 bar extents, 22 ring extents, and 25 marker colors during 900 ms of blocked output. The 1 Hz native-rate case captured 71 changed marker positions in 0.903 seconds. Inactive-view observations recorded zero animation starts, status/text timer callbacks, and settings UI rebuilds over their 600 ms intervals. These checks did not change Windows Night Light.
 

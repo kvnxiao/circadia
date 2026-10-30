@@ -33,23 +33,28 @@ pub(super) use rendered::Capture;
 
 pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     require(
-        arguments.len() == 1 || matches!(arguments, [_, mode] if mode == "--completion-only"),
-        "usage: native-lifecycle --measure-graph [--completion-only]",
+        arguments.len() == 1
+            || matches!(arguments, [_, mode] if mode == "--completion-only")
+            || matches!(arguments, [_, mode, duration] if mode == "--completion-only" && duration == "10"),
+        "usage: native-lifecycle --measure-graph [--completion-only [10]]",
     )?;
     crate::lifecycle::require_english()?;
     environment()?;
     let activity = ActivityMeasurement::start()?;
-    if arguments.len() == 2 {
+    if arguments.len() >= 2 {
+        let seconds: u32 = if arguments.len() == 3 { 10 } else { 1 };
         return desktop_check(
             ConfigInput {
                 start_minimized: false,
                 manage_night_light: true,
-                preview_seconds: 1,
+                preview_seconds: seconds.into(),
                 ordinary_fade_ms: 100,
                 ..ConfigInput::default()
             },
             &[],
-            move |measurement, _| progress::completion(measurement, &activity),
+            move |measurement, _| {
+                progress::completion(measurement, &activity, Duration::from_secs(seconds.into()))
+            },
         );
     }
     let input = ConfigInput {

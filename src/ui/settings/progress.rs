@@ -116,6 +116,13 @@ impl Timeline {
 }
 
 impl Frame {
+    fn fraction(&self, elapsed: Duration) -> f64 {
+        if elapsed >= self.remaining {
+            return self.to;
+        }
+        self.from + (self.to - self.from) * elapsed.as_secs_f64() / self.remaining.as_secs_f64()
+    }
+
     fn animation_duration(&self) -> Option<Duration> {
         (self.remaining >= MIN_ANIMATION_DURATION).then_some(self.remaining)
     }
@@ -123,7 +130,7 @@ impl Frame {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Shape {
-    Bar { complete: bool },
+    Bar,
     Ring,
 }
 
@@ -161,6 +168,7 @@ struct Progress {
     geometry: Option<api::CompositionGeometry>,
     metrics: (f64, f64, f64),
     animated: bool,
+    rendering: Option<windows_core::EventRevoker>,
 }
 
 impl Progress {
@@ -179,6 +187,7 @@ impl Progress {
     }
 
     fn clear(&mut self) {
+        self.rendering = None;
         if let Some(geometry) = self.geometry.take()
             && let Err(error) = geometry
                 .cast::<api::ICompositionObject>()
@@ -204,7 +213,7 @@ impl Progress {
     }
 
     fn draw(&mut self) -> windows_core::Result<()> {
-        let Some(root) = &self.root else {
+        let Some(root) = self.root.clone() else {
             return Ok(());
         };
         let compositor = root.compositor();
@@ -214,15 +223,8 @@ impl Progress {
             return Ok(());
         }
         self.animated = match self.input.shape {
-            Shape::Bar { .. } => self.bar(root, &compositor, width, height),
-            Shape::Ring => {
-                let Some(frame) = self.input.timeline.frame(Instant::now(), Timestamp::now())
-                else {
-                    return Ok(());
-                };
-                self.geometry = Some(self.ring(root, &compositor, &frame, width.min(height))?);
-                frame.animation_duration().is_some()
-            }
+            Shape::Bar => self.bar(&root, &compositor, width, height)?,
+            Shape::Ring => self.ring(&root, &compositor, width.min(height))?,
         };
         #[cfg(feature = "graph-measurement")]
         if self.animated {
@@ -232,12 +234,12 @@ impl Progress {
     }
 
     fn bar(
-        &self,
+        &mut self,
         root: &ContainerVisual,
         compositor: &Compositor,
         width: f32,
         height: f32,
-    ) -> bool {
+    ) -> windows_core::Result<bool> {
         let track = compositor.create_sprite_visual();
         track.set_size(width, 1.0);
         track.set_offset(0.0, (height - 1.0) / 2.0, 0.0);
@@ -252,41 +254,31 @@ impl Progress {
         fill.set_size(width, height);
         fill.set_brush(&compositor.create_color_brush(color(self.input.accent)));
         root.children().insert_at_top(&fill);
-        if matches!(self.input.shape, Shape::Bar { complete: true }) {
-            fill.set_scale(Vector3::new(1.0, 1.0, 1.0));
-            return false;
-        }
-        let animation = compositor.create_vector3_key_frame_animation();
-        let easing = compositor.create_linear_easing_function();
-        let Some(frame) = self.input.timeline.bar_frame(Instant::now()) else {
+        let now = Instant::now();
+        let Some(frame) = self.input.timeline.bar_frame(now) else {
             fill.set_scale(Vector3::new(0.0, 1.0, 1.0));
-            return false;
+            return Ok(false);
         };
         fill.set_scale(Vector3::new(narrow(frame.from), 1.0, 1.0));
-        if let Some(duration) = frame.animation_duration() {
-            animation.insert_key_frame_with_easing(
-                0.0,
-                Vector3::new(narrow(frame.from), 1.0, 1.0),
-                &easing,
-            );
-            animation.insert_key_frame_with_easing(
-                1.0,
-                Vector3::new(narrow(frame.to), 1.0, 1.0),
-                &easing,
-            );
-            animation.set_duration(duration);
-            fill.start_animation("Scale", &animation);
+        let animate = frame.animation_duration().is_some();
+        if animate {
+            self.rendering = Some(crate::ui::composition::on_rendering(move |at| {
+                fill.set_scale(Vector3::new(
+                    narrow(frame.fraction(at.saturating_duration_since(now))),
+                    1.0,
+                    1.0,
+                ));
+            })?);
         }
-        frame.animation_duration().is_some()
+        Ok(animate)
     }
 
     fn ring(
-        &self,
+        &mut self,
         root: &ContainerVisual,
         compositor: &Compositor,
-        frame: &Frame,
         size: f32,
-    ) -> windows_core::Result<api::CompositionGeometry> {
+    ) -> windows_core::Result<bool> {
         let native = root
             .host_visual()
             .cast::<api::ICompositionObject>()?
@@ -326,8 +318,17 @@ impl Progress {
                 Ok(base)
             };
         create(self.input.palette.divider, 1.0)?;
-        let base = create(self.input.accent, narrow(frame.from))?;
-        if let Some(duration) = frame.animation_duration() {
+        let base = create(self.input.accent, 0.0)?;
+        let now = Instant::now();
+        let Some(frame) = self.input.timeline.frame(now, Timestamp::now()) else {
+            return Ok(false);
+        };
+        base.SetTrimEnd(narrow(frame.from))?;
+        self.geometry = Some(base.clone());
+        let Some(duration) = frame.animation_duration() else {
+            return Ok(false);
+        };
+        if self.input.timeline.playing.is_none() {
             let animation = native.CreateScalarKeyFrameAnimation()?;
             let easing = native.CreateLinearEasingFunction()?;
             animation.InsertKeyFrameWithEasingFunction(0.0, narrow(frame.from), &easing)?;
@@ -337,8 +338,21 @@ impl Progress {
                 .SetDuration(duration.try_into().map_err(std::io::Error::other)?)?;
             base.cast::<api::ICompositionObject>()?
                 .StartAnimation("TrimEnd", &animation)?;
+            return Ok(true);
         }
-        Ok(base)
+        let failed = std::cell::Cell::new(false);
+        self.rendering = Some(crate::ui::composition::on_rendering(move |at| {
+            if failed.get() {
+                return;
+            }
+            if let Err(error) =
+                base.SetTrimEnd(narrow(frame.fraction(at.saturating_duration_since(now))))
+            {
+                failed.set(true);
+                tracing::warn!(%error, "updating Preview phase progress");
+            }
+        })?);
+        Ok(true)
     }
 }
 
@@ -364,6 +378,7 @@ impl Component for Progress {
             geometry: None,
             metrics: (0.0, 0.0, 1.0),
             animated: false,
+            rendering: None,
         }
     }
 
@@ -419,6 +434,37 @@ mod tests {
     use crate::WindowsZone;
     use std::sync::Arc;
     use test_case::test_case;
+
+    #[test_case(0, 0.25)]
+    #[test_case(150, 0.5)]
+    #[test_case(300, 0.75)]
+    #[test_case(450, 1.0)]
+    #[test_case(550, 1.0)]
+    fn presentation_fraction_uses_elapsed_time_and_stays_at_the_endpoint(
+        milliseconds: u64,
+        expected: f64,
+    ) {
+        let frame = Frame {
+            from: 0.25,
+            to: 1.0,
+            remaining: Duration::from_millis(450),
+        };
+        assert_eq!(
+            frame.fraction(Duration::from_millis(milliseconds)),
+            expected
+        );
+    }
+
+    #[test]
+    fn presentation_fraction_handles_a_completed_or_truncated_phase() {
+        let frame = Frame {
+            from: 0.5,
+            to: 0.75,
+            remaining: Duration::ZERO,
+        };
+        assert_eq!(frame.fraction(Duration::ZERO), 0.75);
+        assert_eq!(frame.fraction(Duration::from_millis(100)), 0.75);
+    }
 
     #[test_case(1, 900)]
     #[test_case(2, 1900)]

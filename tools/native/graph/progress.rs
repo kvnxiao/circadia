@@ -23,6 +23,7 @@ use winsafe::HWND;
 pub(super) fn completion(
     measurement: &GraphMeasurement,
     activity: &ActivityMeasurement,
+    duration: Duration,
 ) -> io::Result<()> {
     let automation = Automation::new()?;
     let process = std::process::id();
@@ -44,6 +45,10 @@ pub(super) fn completion(
         .keep();
     report(&format!("Completion screenshots: {}", captures.display()));
     std::thread::sleep(Duration::from_millis(300));
+    automation.focus(&settings, process)?;
+    wait("completion Settings foreground", || {
+        Ok((HWND::GetForegroundWindow().as_ref() == Some(&settings)).then_some(()))
+    })?;
     measurement.hold_output(true)?;
     automation.invoke(&settings, process, automation_id::PREVIEW)?;
     wait("completion native output blocked", || {
@@ -52,7 +57,15 @@ pub(super) fn completion(
     let submitted = measurement
         .preview_submitted_at()?
         .ok_or_else(|| io::Error::other("completion Preview was not submitted"))?;
-    terminal_frames(&automation, &settings, submitted, &captures)?;
+    let result = terminal_frames(&automation, &settings, submitted, duration, &captures);
+    let trace = activity
+        .records()?
+        .iter()
+        .map(|record| format!("{record:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs_err::write(captures.join("activity.txt"), trace)?;
+    result?;
     require(
         measurement.output_blocked()?,
         "native output ended before the logical deadline",
@@ -65,7 +78,9 @@ pub(super) fn completion(
     report(
         "PASS: natural completion presents full-width pixels while editing remains locked, then removes the bar and unlocks editing at the real deadline while native output remains blocked",
     );
-    completion_lifecycle(measurement, &automation, &settings, activity)?;
+    if duration == Duration::from_secs(1) {
+        completion_lifecycle(measurement, &automation, &settings, activity)?;
+    }
     Ok(())
 }
 
@@ -112,12 +127,7 @@ fn completion_lifecycle(
 ) -> io::Result<()> {
     let process = std::process::id();
     let deadline = start(measurement, automation, settings)?;
-    let capture = crate::capture::Capture::region(
-        automation,
-        settings,
-        process,
-        automation_id::PREVIEW_PROGRESS,
-    )?;
+    let capture = bar_capture(automation, settings)?;
     require(
         fill_extent(&capture.read()?, capture.width, &accents()?) + 1 < capture.width,
         "rerun retained the previous full-width fill",
@@ -182,16 +192,9 @@ fn completion_lifecycle(
     Ok(())
 }
 
-fn terminal_frames(
-    automation: &Automation,
-    settings: &HWND,
-    started: Instant,
-    captures: &Path,
-) -> io::Result<()> {
-    let deadline = started + Duration::from_secs(1);
-    let accents = accents()?;
+fn bar_capture(automation: &Automation, settings: &HWND) -> io::Result<crate::capture::Capture> {
     let process = std::process::id();
-    let mut capture = wait("Preview bar capture", || {
+    wait("Preview bar capture", || {
         if automation
             .enabled(settings, process, automation_id::PREVIEW_PROGRESS)?
             .is_some()
@@ -206,25 +209,56 @@ fn terminal_frames(
         } else {
             Ok(None)
         }
-    })?;
-    let bounds = automation.bounds(settings, process, automation_id::PREVIEW_PROGRESS)?;
-    let window = settings.GetWindowRect().map_err(io::Error::other)?;
-    capture.include((bounds.left, window.top, bounds.right, window.bottom))?;
+    })
+}
+
+fn terminal_frames(
+    automation: &Automation,
+    settings: &HWND,
+    started: Instant,
+    duration: Duration,
+    captures: &Path,
+) -> io::Result<()> {
+    let deadline = started + duration;
+    let accents = accents()?;
+    let capture = bar_capture(automation, settings)?;
     let semantics = Semantics::new(automation, settings)?;
-    let mut full = None;
-    let mut unlocked = None;
-    let mut removed = None;
+    let bounds = settings.GetWindowRect().map_err(io::Error::other)?;
+    let (mut full, mut unlocked, mut removed) = (None, None, None);
     let mut widest = (0, Vec::new());
     let mut samples = Vec::new();
+    let mut previous = None;
+    let mut discontinuity = None;
+    let elapsed = |at: Instant| at.saturating_duration_since(started).as_secs_f64();
+    let width = f64::from(u32::try_from(capture.width).map_err(io::Error::other)?);
+    let pixels_per_second = width / (duration.as_secs_f64() - 0.1);
     while Instant::now() < deadline + Duration::from_millis(150) {
+        require_capture(settings, &bounds)?;
+        let capture_start = Instant::now();
         let pixels = capture.read()?;
+        let capture_end = Instant::now();
         let editable = semantics.editable()?;
         let now = Instant::now();
         let extent = fill_extent(&pixels, capture.width, &accents);
+        if let Some((at, before)) = previous
+            && now < deadline
+            && discontinuity.is_none()
+        {
+            discontinuity = continuous_step(
+                capture_end.duration_since(at),
+                before,
+                extent,
+                pixels_per_second,
+            )
+            .err();
+        }
+        previous = Some((capture_start, extent));
         samples.push(format!(
-            "{:.3}\t{}\t{extent}\t{editable}",
-            now.saturating_duration_since(started).as_secs_f64(),
-            capture.width
+            "{:.6}\t{}\t{extent}\t{editable}\t{:.6}\t{:.6}",
+            elapsed(now),
+            capture.width,
+            elapsed(capture_start),
+            elapsed(capture_end)
         ));
         if now < deadline && extent + 1 >= capture.width && full.is_none() {
             let value = semantics.value()?;
@@ -246,10 +280,15 @@ fn terminal_frames(
     }
     fs_err::write(captures.join("samples.tsv"), samples.join("\n"))?;
     capture.save(&widest.1, &captures.join("widest.png"))?;
+    if let Some(error) = discontinuity {
+        return Err(error);
+    }
     require(
-        full.is_some(),
+        full.is_some_and(|lead| {
+            (Duration::from_millis(50)..=Duration::from_millis(120)).contains(&lead)
+        }),
         &format!(
-            "no full-width terminal frame before deadline; widest={}",
+            "full-width terminal frame outside the 100 ms presentation allowance; lead={full:?}, widest={}",
             widest.0
         ),
     )?;
@@ -275,6 +314,36 @@ fn terminal_frames(
         unlocked.map(|at| at.saturating_duration_since(deadline))
     ));
     Ok(())
+}
+
+fn require_capture(settings: &HWND, bounds: &winsafe::RECT) -> io::Result<()> {
+    let foreground = HWND::GetForegroundWindow();
+    let current = settings.GetWindowRect().map_err(io::Error::other)?;
+    let coordinates = |rect: &winsafe::RECT| (rect.left, rect.top, rect.right, rect.bottom);
+    require(
+        foreground.as_ref() == Some(settings) && current == *bounds,
+        &format!(
+            "pixel capture interrupted: foreground={foreground:?}, Settings={settings:?}; original={:?}, current={:?}",
+            coordinates(bounds),
+            coordinates(&current)
+        ),
+    )
+}
+
+fn continuous_step(
+    elapsed: Duration,
+    before: usize,
+    after: usize,
+    pixels_per_second: f64,
+) -> io::Result<()> {
+    let allowed = pixels_per_second * (elapsed + Duration::from_millis(16)).as_secs_f64() + 2.0;
+    let advance = f64::from(u32::try_from(after.saturating_sub(before)).map_err(io::Error::other)?);
+    require(
+        advance <= allowed,
+        &format!(
+            "fill jumped from {before} to {after} pixels; maximum continuous step {allowed:.1}"
+        ),
+    )
 }
 
 struct Semantics {
@@ -555,7 +624,17 @@ fn sample(
 
 #[cfg(test)]
 mod tests {
+    use super::continuous_step;
     use super::fill_extent;
+    use std::time::Duration;
+
+    #[test]
+    fn continuity_rejects_the_measured_terminal_snap() {
+        assert!(continuous_step(Duration::from_millis(12), 599, 633, 703.0).is_err());
+        assert!(continuous_step(Duration::from_millis(12), 599, 608, 703.0).is_ok());
+        assert!(continuous_step(Duration::from_millis(13), 606, 633, 64.0).is_err());
+        assert!(continuous_step(Duration::from_millis(13), 632, 633, 64.0).is_ok());
+    }
 
     #[test]
     fn fill_extent_requires_a_contiguous_run_on_one_row() {

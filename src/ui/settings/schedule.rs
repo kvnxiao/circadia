@@ -455,9 +455,7 @@ fn preview_progress(settings: &Settings, progress: f64) -> View {
     if let Some(motion) = motion {
         layers.push(super::progress::view(
             motion,
-            super::progress::Shape::Bar {
-                complete: progress >= 1.0,
-            },
+            super::progress::Shape::Bar,
             &settings.palette(),
             settings.accents,
         ));
