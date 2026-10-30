@@ -15,9 +15,9 @@ This README uses these terms:
 
 ## Dependencies and environment
 
-The crate pins `windows-reactor`, `windows-canvas`, `windows-composition`, and the optional `windows-reactor-setup` helper to `windows-rs` revision `0496ec19116f1dac690daf31fcb96769118d9bac` (2026-10-24), Circadia's reference pin. `Cargo.lock` locks `i18n-embed` 0.16.0, `i18n-embed-fl` 0.10.1, `fluent-pseudo` 0.3.3, `rust-embed` 8.13.0, `png` 0.18.1, which encodes the extracted icon, and `windows-sys` 0.61.2, which provides Windows National Language Support (NLS) formatting, the high-contrast query, the preferred UI languages, and icon extraction. The manifest declares Rust 1.95 as its minimum. `cargo audit` reports one allowed warning: `basic-toml` 0.1.10 is unmaintained (RUSTSEC-2026-0374). `i18n-config` 0.4.8 reads `i18n.toml` with it when the `fl!` and `fluent_language_loader!` macros expand, so it runs only at build time.
+All directly declared Windows bindings, including `windows-reactor`, `windows-canvas`, `windows-composition`, `windows-sys`, and the optional setup helper, use `windows-rs` revision `3b6bea553787d9419b3fdd29e2c5436666d7325b` (2026-10-29), Circadia's reference pin. `Cargo.lock` also locks `i18n-embed` 0.16.0, `i18n-embed-fl` 0.10.1, `fluent-pseudo` 0.3.3, `rust-embed` 8.13.0, and `png` 0.18.1, which encodes the extracted icon. The `windows-sys` bindings provide Windows National Language Support (NLS) formatting, the high-contrast query, the preferred UI languages, and icon extraction. The manifest declares Rust 1.95 as its minimum. `cargo audit` reports one allowed warning: `basic-toml` 0.1.10 is unmaintained (RUSTSEC-2026-0374). `i18n-config` 0.4.8 reads `i18n.toml` with it when the `fl!` and `fluent_language_loader!` macros expand, so it runs only at build time.
 
-Use Windows with Rust's MSVC toolchain, the linker and Windows SDK, stable Rust, the Rust 1.95 toolchain for `check-msrv`, nightly rustfmt, `just`, `cargo-audit`, `cargo-machete`, and `jq`. Default builds need an installed Windows App SDK 2.5 runtime; the `self-contained` feature stages private runtime 2.5.1 under `target/`. The build copies the probe's `assets/circadia.ico`, the tray icon Circadia used before it generated its icon from `assets/icon/circadia.svg`, beside the executable. The probe compiles the phase art, badge, and app icon SVGs from `assets/` into the executable. Its Fluent catalogs in `i18n/` are embedded in release builds; debug builds, including every measured run, read them from `i18n/` at run time.
+Use Windows with Rust's MSVC toolchain, the linker and Windows SDK, stable Rust, the Rust 1.95 toolchain for `check-msrv`, nightly rustfmt, `just`, `cargo-audit`, `cargo-machete`, and `jq`. Default builds need an installed Windows App SDK runtime 2.6.4 or newer; the `self-contained` feature stages private runtime 2.6.4 under `target/`. The build copies the probe's `assets/circadia.ico`, the tray icon Circadia used before it generated its icon from `assets/icon/circadia.svg`, beside the executable. The probe compiles the phase art, badge, and app icon SVGs from `assets/` into the executable. Its Fluent catalogs in `i18n/` are embedded in release builds; debug builds, including every measured run, read them from `i18n/` at run time.
 
 ## Fixture and options
 
@@ -78,6 +78,62 @@ The parts are `screens` (every page in both themes, scrolled; status, banner, an
 ```bash
 powershell.exe -NoProfile -File verify-design.ps1 -Part icons -Results "$(cygpath -w "$PWD/results/icons")"
 ```
+
+## Dependency validation on 2026-10-29
+
+At `3b6bea5`, `just check` passed all 61 tests, formatting, Clippy, rustdoc, and dependency checks, with the existing allowed `basic-toml` warning. MSRV and bundled-build checks passed. The `motion` and `progress` desktop sections passed on the recorded Windows build at 100% scaling; both verified completion, removal, and automatic closure with zero remaining animation-completion event subscriptions. Results are in the ignored `results/reactor-next-motion/` and `results/reactor-next-progress/` directories. The six general design sections were not rerun at this revision.
+
+At `8786f59`, `just check` passed all 61 unit tests, formatting, Clippy, rustdoc, and dependency checks, with the existing allowed `basic-toml` warning. `just check-msrv`, `just build`, and `just build-self-contained` also passed.
+
+The full `verify-design.ps1` run completed without a section error on Windows 11 build 26300.9711 at 100% scaling, using the bundled 2.6.4 runtime. It captured light and dark pages, dialogs, pseudo-localized text, and all three graph renderers. The selected `replace-focus` picker strategy closed on Accept and Cancel and restored button focus in both list orders and both clock formats. Regional number entry, plural text, and tray labels retained their earlier behavior.
+
+The 32 px icons matched all 1,024 source pixels through both image sources, including after recreation, deletion, and file replacement. Scaling the 64 px extraction to 32 px produced the same differences recorded below. The composition renderer accumulated no additional CPU time in the ten-second idle sample; the swap-chain renderer accumulated 1.109375 seconds. This coarse CPU measurement does not count wakeups or establish battery use.
+
+The built-in toggle-text captures were empty, so this run does not establish whether WinUI's own text follows the language override in the bundled runtime. The title-bar measurement reported 32 px and returned title-content elements as caption buttons; it does not establish caption-button geometry. Generated screenshots and the JSON report are in the ignored `results/reactor-upgrade/` folder. Contrast themes, higher display scales, and Narrator remain untested.
+
+## Finite compositor motion experiment
+
+`--motion` opens an isolated window with Start, Replace, Remove, and Finite controls. Start moves a line and dot through a bend over 20 seconds; Replace creates a new marker at the opposite endpoint and moves it back along the path. Remove detaches and drops the animated visuals. Finite runs a four-second path and stops at its endpoint. The original experiment used `windows-composition` linear vector keyframes at revision `8786f59`, with no application frame callback or animation timer.
+
+After `just build-self-contained`, run the desktop check from this directory:
+
+```bash
+powershell.exe -NoProfile -File verify-design.ps1 -Part motion -Results "$(cygpath -w "$PWD/results/motion")"
+```
+
+The check focuses the probe window, invokes its controls, and captures screen pixels. It records dot positions, process CPU and resource samples, and animation completion notifications in `design-results.json` and `probe.log`. It closes the window afterward and does not change Night Light or Windows settings. Run it only while nobody uses the desktop. Inspect any `motion-error` in the JSON even when PowerShell exits successfully.
+
+On 2026-10-29, `results/motion-visible/` recorded forward and reverse motion, a bend, disappearance after removal, and a stable finite endpoint. Replacement and removal completed their tracked animations at 3.929 and 3.952 seconds from each animation's setup timestamp, before its configured 20-second endpoint. The four-second animation's completion notification arrived at 4.172 seconds from setup. Completed batch subscriptions were released, and the window closed automatically.
+
+The idle, removed, and completed two-second samples each recorded zero additional process CPU time. These observations support cleanup at this pinned revision; they do not establish battery use, presentation frame rate, or long-term resource growth. [Detailed results and API contracts](../../../docs/research/settings-design-support.md#finite-compositor-motion-and-removal) distinguish the measurements from documented guarantees. The check used a debug build with bundled runtime 2.6.4 on Windows 11 build 26300.9711 at 100% scaling; higher scales and other Windows builds remain untested.
+
+The subsequent `results/motion-verified/` run passed all pixel and cleanup assertions and closed automatically. CPU samples varied: the removed state recorded 0.03125 CPU seconds over two seconds. From the final idle sample through both sets of 20 forward and reverse pixel captures, the process recorded 0.859375 CPU seconds; the combined wall-clock interval was not recorded. The report's `verified` field records the assertion result; the CPU samples do not establish an improvement over another renderer.
+
+## Progress, ring, and color animation experiment
+
+`--progress` opens an isolated window with a compositor bar, stroked ellipse, and colored dot. A six-second animation changes the bar's horizontal scale, the ellipse's visible arc, and the dot's RGB color. The native ProgressBar and ProgressRing remain in the view at zero opacity so UI Automation can expose their ranges. A separate button changes their values from 25 to 75. Remove explicitly stops the arc and color animations and removes the visuals.
+
+After `just build-self-contained`, run from this directory while nobody uses the desktop:
+
+```bash
+powershell.exe -NoProfile -File verify-design.ps1 -Part progress -Results "$(cygpath -w "$PWD/results/progress")"
+```
+
+The script captures intermediate pixels, checks native range values, verifies finite completion and removal, and closes the probe. It does not change Night Light or Windows settings. Inspect the report's `progress.verified` field and any `progress-error` even when PowerShell exits successfully.
+
+**Measured on 2026-10-29 at `5cfe2c9`:** `results/progress-first/` passed on Windows 11 build 26300.9711 at 100% scaling, using a debug build with bundled runtime 2.6.4. Captures at approximately 0.50, 1.53, 3.04, and 6.55 seconds recorded:
+
+| Measurement | First | Second | Third | Completed |
+| :-- | --: | --: | --: | --: |
+| Filled bar fraction | 0.0817 | 0.2433 | 0.4850 | 1.0000 |
+| Yellow ring pixels | 151 | 407 | 787 | 1576 |
+| Dot RGB | 213, 42, 0 | 130, 125, 0 | 7, 248, 0 | 0, 0, 255 |
+
+Both native controls exposed a 0–100 range and the requested values of 25 and 75; UI Automation reported them as on-screen. The six-second animation's completion callback arrived 6.256 seconds after setup. Removing a separate 20-second animation ended its batch after 0.514 seconds, cleared the rendered pixels, and released all batch subscriptions. The window closed and its process ended.
+
+After all direct Windows bindings were aligned to the same pin, `results/progress-unified/` and the independent `results/progress-coordinator/` run passed the same assertions. The coordinator run completed its six-second batch after 6.256 seconds and removed its 20-second batch after 0.506 seconds. Both native ranges remained available, and completed subscriptions returned to zero.
+
+These checks establish intermediate rendered states and UI Automation range support. They do not establish Narrator delivery, frame pacing, other display scales, or behavior on other Windows builds. The [composition API research](../../../docs/research/settings-design-support.md#progress-and-color-animation) records the metadata inputs and commands to regenerate and check the bindings shared with the application.
 
 ## Results on 2026-10-24
 

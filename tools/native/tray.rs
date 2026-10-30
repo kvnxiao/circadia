@@ -2,9 +2,9 @@ use crate::automation::Automation;
 use crate::lifecycle::require;
 use circadia::InterfaceText;
 use std::io;
-use windows::Win32::UI::Accessibility::IUIAutomationElement;
-use windows::Win32::UI::Accessibility::UIA_ButtonControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_MenuItemControlTypeId;
+use windows::Win32::uiautomationclient::IUIAutomationElement;
+use windows::Win32::uiautomationclient::UIA_ButtonControlTypeId;
+use windows::Win32::uiautomationclient::UIA_MenuItemControlTypeId;
 use winsafe::AtomStr;
 use winsafe::HPROCESS;
 use winsafe::HWND;
@@ -47,6 +47,18 @@ pub(super) fn icon(
     Ok(icons.pop())
 }
 
+#[expect(
+    unsafe_code,
+    reason = "read the accessible tooltip of the verified Shell tray icon"
+)]
+pub(super) fn tooltip(element: &IUIAutomationElement) -> io::Result<String> {
+    // SAFETY: The live element returns an owned BSTR in the initialized
+    // apartment.
+    unsafe { element.CurrentName() }
+        .map(|name| name.display().to_string())
+        .map_err(io::Error::other)
+}
+
 #[expect(unsafe_code, reason = "inspect Shell-owned notification buttons")]
 fn is_icon(element: &IUIAutomationElement, tooltip_prefix: &str) -> io::Result<bool> {
     // SAFETY: The element is live in the initialized apartment.
@@ -56,7 +68,7 @@ fn is_icon(element: &IUIAutomationElement, tooltip_prefix: &str) -> io::Result<b
     }
     // SAFETY: The binding returns an owned BSTR from the live element.
     let name = unsafe { element.CurrentName() }.map_err(io::Error::other)?;
-    Ok(name.to_string().starts_with(tooltip_prefix))
+    Ok(name.display().to_string().starts_with(tooltip_prefix))
 }
 
 #[expect(unsafe_code, reason = "invoke only the Shell's hidden-icons control")]
@@ -78,7 +90,11 @@ pub(super) fn show_overflow(automation: &Automation) -> io::Result<()> {
     for element in automation.elements(&window, process)? {
         // SAFETY: The binding returns an owned BSTR from the live element.
         let name = unsafe { element.CurrentName() }.map_err(io::Error::other)?;
-        if name.to_string().eq_ignore_ascii_case("Show hidden icons") || name == "Hidden icon menu"
+        if name
+            .display()
+            .to_string()
+            .eq_ignore_ascii_case("Show hidden icons")
+            || name == "Hidden icon menu"
         {
             return click(&element);
         }
@@ -97,7 +113,7 @@ pub(super) fn show_overflow(automation: &Automation) -> io::Result<()> {
     reason = "click the physical point of a verified automation element"
 )]
 pub(super) fn click(element: &IUIAutomationElement) -> io::Result<()> {
-    let mut point = windows::Win32::Foundation::POINT::default();
+    let mut point = windows::Win32::windef::POINT::default();
     // SAFETY: The initialized writable point lives through the synchronous
     // call.
     if !unsafe { element.GetClickablePoint(&raw mut point) }
@@ -110,10 +126,7 @@ pub(super) fn click(element: &IUIAutomationElement) -> io::Result<()> {
     }
     // SAFETY: The API accepts scalar physical coordinates, matching UI
     // Automation.
-    if unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::SetPhysicalCursorPos(point.x, point.y)
-    } == 0
-    {
+    if unsafe { windows_sys::Win32::winuser::SetPhysicalCursorPos(point.x, point.y) } == 0 {
         return Err(io::Error::other(CursorPositionFailure {
             source: io::Error::last_os_error(),
         }));
@@ -149,7 +162,9 @@ struct CursorPositionFailure {
 )]
 pub(super) fn open_menu(element: &IUIAutomationElement) -> io::Result<()> {
     // SAFETY: The live element belongs to the checked Shell subtree.
-    unsafe { element.SetFocus() }.map_err(io::Error::other)?;
+    unsafe { element.SetFocus() }
+        .ok()
+        .map_err(io::Error::other)?;
     // SAFETY: The binding owns the scalar result storage.
     if !unsafe { element.CurrentHasKeyboardFocus() }
         .map_err(io::Error::other)?
@@ -181,12 +196,19 @@ pub(super) fn open_menu(element: &IUIAutomationElement) -> io::Result<()> {
 // Reactor's tray menu items expose only their text, so the checks find each
 // item by its position: settings, manual suppression, the caption, up to three
 // recent apps, and Quit.
-pub(super) struct Menu(Vec<(IUIAutomationElement, String)>);
+pub(super) struct Menu {
+    pub(super) window: HWND,
+    items: Vec<(IUIAutomationElement, String)>,
+}
 
 impl Menu {
-    fn item(&self, position: usize, label: &str) -> io::Result<&IUIAutomationElement> {
+    pub(super) fn labels(&self) -> impl Iterator<Item = &str> {
+        self.items.iter().map(|(_, name)| name.as_str())
+    }
+
+    pub(super) fn item(&self, position: usize, label: &str) -> io::Result<&IUIAutomationElement> {
         let (element, actual) = self
-            .0
+            .items
             .get(position)
             .ok_or_else(|| io::Error::other(format!("tray menu has no item {position}")))?;
         require(
@@ -203,16 +225,16 @@ impl Menu {
 
     pub(super) fn quit(&self, text: &InterfaceText) -> io::Result<&IUIAutomationElement> {
         self.check(text)?;
-        self.item(self.0.len().saturating_sub(1), &text.tray_quit)
+        self.item(self.items.len().saturating_sub(1), &text.tray_quit)
     }
 
     fn check(&self, text: &InterfaceText) -> io::Result<()> {
         require(
-            (4..=7).contains(&self.0.len()),
-            &format!("tray menu has {} items", self.0.len()),
+            (4..=7).contains(&self.items.len()),
+            &format!("tray menu has {} items", self.items.len()),
         )?;
         let manual = self
-            .0
+            .items
             .get(1)
             .map(|(_, label)| label.as_str())
             .unwrap_or_default();
@@ -263,10 +285,13 @@ fn menu_items(automation: &Automation, process: u32, quit: &str) -> io::Result<O
             }
             // SAFETY: The live interface returns an owned BSTR.
             let name = unsafe { element.CurrentName() }.map_err(io::Error::other)?;
-            items.push((element, name.to_string()));
+            items.push((element, name.display().to_string()));
         }
         if items.last().is_some_and(|(_, label)| label == quit) {
-            return Ok(Some(Menu(items)));
+            return Ok(Some(Menu {
+                window: menu,
+                items,
+            }));
         }
     }
     Ok(None)

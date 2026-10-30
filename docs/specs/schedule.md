@@ -57,20 +57,30 @@ This duration is separate from the ordinary fade for suppression changes, recomp
 
 ### REQ-configure-solar-location — Select coordinates explicitly
 
-Solar timing requires valid latitude and longitude. Settings offers manual coordinate entry and a saved Use my Windows location setting, initially off. While that setting is on, Circadia requests one position from Windows when the user turns the setting on and each time the settings window opens, and applies the result to the configuration's coordinates as a settings edit. A position that arrives during Preview applies when playback ends. Manual coordinate entry is unavailable while the setting is on. Each request runs while settings is in the foreground; Circadia does not request location at startup, in the background, or when settings changes page. With the setting off, manual coordinates apply and Circadia does not request location access. Valid coordinates take effect immediately and are saved.
+Solar timing requires valid latitude and longitude. Settings offers manual coordinate entry and a saved Use my Windows location setting, initially off. Turning that setting on opens a confirmation dialog explaining that Circadia requests location through Windows, that Windows can use network-backed positioning, and that requests also run when Circadia starts with only its tray icon. Confirming enables and saves the preference; cancelling keeps it off and makes no location request.
 
-Latitude must be finite and within -90 through +90 degrees; longitude must be finite and within -180 through +180 degrees. Settings shows and accepts coordinates with the decimal separator of the user's regional format; the configuration file stores them independently of locale. The accepted configuration's coordinates remain in use until a settings edit or a successful location request changes them. Circadia does not track travel in the background, infer the computer's time zone from coordinates, or offer city/address search in the MVP.
+While the setting is on, Circadia requests one position after confirmation, at each process startup, and each time the settings window opens, whether or not solar timing is on. A foreground startup makes one request, and overlapping requests are coalesced. Changing the settings page does not request location. Circadia does not continuously track location or periodically refresh it. A request can finish after settings closes. Its result applies to the configuration's coordinates as a settings edit and is saved; a result that arrives during Preview waits until logical playback ends. Manual coordinate entry is unavailable while the setting is on. Turning it off cancels pending requests and discards held or late results. Reset and exit also cancel pending requests. With the setting off, manual coordinates apply and Circadia does not request location access.
 
-If permission is denied, location services are disabled, or a position cannot be obtained, settings reports the failure at the location setting and keeps the existing coordinates. An unfinished request does not prevent the active schedule from running. Closing settings cancels an unfinished request or discards its eventual result without changing the configuration.
+The saved preference survives app restarts and does not require repeated Circadia confirmation. Windows permission is checked separately. Requests from tray-only operation do not display a Windows permission prompt. Windows consent is requested only while settings is in the foreground. Preview ends at its captured deadline or an earlier stop, even when a native call delays cleanup; this is the logical end of playback.
+
+Latitude must be finite and within -90 through +90 degrees; longitude must be finite and within -180 through +180 degrees. Settings shows and accepts coordinates with the decimal separator of the user's regional format; the configuration file stores them independently of locale. The accepted configuration's coordinates remain in use until a settings edit or a successful location request changes them. Circadia does not infer the computer's time zone from coordinates or offer city/address search in the MVP.
+
+If permission is denied, location services are disabled, or a position cannot be obtained, Circadia keeps the saved preference and existing coordinates. It records the failure and shows it at the location setting when settings is open. An unfinished request does not prevent the active schedule from running. A new request does not clear a failure until it succeeds or reports a different failure.
 
 **Scenarios:**
 
 - The user turns solar timing on and manually enters 40.7128, -74.0060: the coordinates apply and are saved without Windows location permission.
-- The user turns Use my Windows location on and grants access: the detected coordinates replace the manual ones, apply immediately, and are saved; the coordinate fields become unavailable.
+- The user turns Use my Windows location on, confirms Circadia's explanation, and grants Windows access: the saved preference is on, the detected coordinates replace the manual ones, and the coordinate fields become unavailable.
+- The user cancels the confirmation dialog: the preference stays off, manual coordinates remain available, and no Windows location operation runs.
 - Use my Windows location is on and the user opens settings a week later after traveling: Circadia requests one new position and applies it.
-- Use my Windows location is on and Circadia starts at sign-in with settings closed: Circadia does not request location.
-- Windows denies access: the existing coordinates and accepted schedule remain unchanged, and the location setting shows the failure.
-- A position arrives after settings closes: it does not change the configuration.
+- Use my Windows location was saved on and Circadia starts at sign-in with settings closed: it silently checks Windows permission and requests one position when access is allowed, without another Circadia confirmation.
+- Use my Windows location is on and Start minimized is off: startup and settings opening produce one position request, even with solar timing off.
+- Settings opens while the startup request is pending: the existing request continues without starting a second one.
+- Windows permission is denied or requires consent at tray-only startup: no permission prompt opens, the preference and coordinates remain saved, and the failure appears when settings next opens. Foreground settings can request Windows consent.
+- Windows revokes access between the permission check and acquisition: the failed request keeps the saved preference and coordinates and reports the failure.
+- A position arrives after settings closes: it applies and is saved. If Preview is still logically active, it waits until playback ends.
+- The setting is turned off, Reset to default settings runs, or the app exits with a pending request: the request is cancelled, and a late result does not change coordinates.
+- A position waits for Preview to end and the location setting turns off: the held position is discarded.
 - Latitude 91 or longitude -181 is entered while solar timing is enabled: the field shows 90 or -180 when it commits. Text that is not a number restores the previous coordinate.
 - The user's regional format uses a comma as decimal separator: settings shows 40,7128 and accepts 40,7128; the configuration file stores 40.7128.
 - The computer travels while saved coordinates remain unchanged: solar timing still uses those coordinates and the current Windows time zone.
@@ -185,12 +195,12 @@ Solar events remain their actual instants. Clock changes do not move them or rem
 - **Omitting Wake or Bedtime in a clock gap:** Omitting either occurrence can prolong the preceding temperature through an entire day. Elapsed-interval adjustment preserves the occurrence and its nominal separation from the preceding Wake or Bedtime.
 - **Shifting every remaining target on a clock-change day:** This unnecessarily shifts the evening routine after an overnight change. The next target returns to its configured clock unless doing so would collapse or reverse Wake/Bedtime order.
 - **Using every existing configured clock across daylight-saving changes:** This keeps each occurrence aligned with a wall-clock alarm but shortens or lengthens the interval that spans the change. The selected policy preserves that interval by adjusting the first Wake or Bedtime after the change, then returns later occurrences to their configured clocks. When Bedtime is the adjusted occurrence, the following night is shorter or longer instead.
-- **Requesting location at each launch or daily:** Requests without a foreground settings window are unverified for an unpackaged app and would track travel in the background.
+- **Continuous or periodic location tracking:** One-time requests at enablement, startup, and settings opening refresh the saved position without continuous sensor subscriptions or a recurring location timer.
 
 ## Supporting evidence
 
 | Design decision or requirement | Evidence |
 | :-- | :-- |
 | Local dates and clock times mapped to actual instants | [Clock conversion fixtures](../research/windows-clock-conversion.md), [host-setting checks](../research/schedule-integration.md#host-setting-exercise), and [elapsed-interval reasoning](../research/clock-change-intervals.md); the target-adjustment policy is not exercised by the existing probe. |
-| Optional solar timing and coordinate acquisition | [Local solar calculation](../research/solar-calculation.md), [location APIs](../research/location-and-solar-times.md); the probes do not verify the generated schedule's event-selection rules. |
+| Optional solar timing and coordinate acquisition | [Local solar calculation](../research/solar-calculation.md), [location APIs](../research/location-and-solar-times.md), and [tray-only location requests](../research/background-location.md); desktop permission outcomes remain implementation and release checks. |
 | Local calculation without persistent solar caches | [Measured per-date calculation cost](../research/solar-performance.md); four dates on one desktop do not establish a universal latency bound. |

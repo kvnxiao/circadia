@@ -1,10 +1,11 @@
 mod apps;
 pub(super) mod general;
 mod graph;
-mod location;
+pub(super) mod location;
 mod palette;
 mod phase;
 mod problems;
+mod progress;
 mod schedule;
 mod time_picker;
 mod transitions;
@@ -17,7 +18,6 @@ use super::icon_cache::AppIcons;
 use super::status;
 use crate::Config;
 use crate::ControllerSnapshot;
-use crate::Coordinates;
 use crate::DiagnosticFailure;
 use crate::DiagnosticOperation;
 use crate::Field;
@@ -44,6 +44,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 use windows_reactor::AutomationLiveSetting;
 use windows_reactor::Border;
 use windows_reactor::Button;
@@ -159,6 +160,7 @@ pub(super) struct Model {
     scheduling: SchedulingState,
     suppression: SuppressionState,
     preview_active: bool,
+    preview_deadline: Option<Instant>,
     playing: Option<schedule::Playing>,
     manual_end: Option<u16>,
     running_executable: String,
@@ -199,6 +201,8 @@ impl Model {
         status: String,
         names: &BTreeMap<String, String>,
     ) -> Self {
+        let preview_active =
+            snapshot.is_some_and(|snapshot| status::preview_active(snapshot, Instant::now()));
         let managing = configuration
             .accepted()
             .is_some_and(|config| config.input().manage_night_light);
@@ -213,7 +217,11 @@ impl Model {
             write_error: configuration.write_error().map(|error| error.diagnostic()),
             backup_error: configuration.backup_error().map(|error| error.diagnostic()),
             launch_language: configuration.launch_language().to_owned(),
-            status,
+            status: if preview_active {
+                String::new()
+            } else {
+                status
+            },
             management: snapshot.map_or(
                 if managing {
                     ManagementState::TurningOn
@@ -237,8 +245,11 @@ impl Model {
             suppression: snapshot
                 .map(|snapshot| snapshot.suppression)
                 .unwrap_or_default(),
-            preview_active: snapshot.is_some_and(|snapshot| snapshot.preview_active),
-            playing: snapshot.and_then(schedule::Playing::new),
+            preview_active,
+            preview_deadline: snapshot.and_then(status::preview_deadline),
+            playing: snapshot
+                .filter(|_| preview_active)
+                .and_then(schedule::Playing::new),
             manual_end: snapshot
                 .and_then(|snapshot| {
                     snapshot
@@ -269,6 +280,14 @@ impl Model {
             crash: crash.cloned(),
             ..self
         }
+    }
+
+    pub(super) fn with_stopped_preview(mut self, stopped: Option<Instant>) -> Self {
+        if status::preview_stopped(self.preview_deadline, stopped) {
+            self.preview_active = false;
+            self.playing = None;
+        }
+        self
     }
 
     fn control(&self, now: std::time::Instant) -> status::Control<'_> {
@@ -345,7 +364,9 @@ pub(super) struct Input {
     pub(super) model: Rc<Model>,
     pub(super) icons: Rc<AppIcons>,
     pub(super) sign_in: general::SignInStatus,
+    pub(super) location: location::Status,
     pub(super) contrast: Option<crate::platform::contrast::ContrastColors>,
+    pub(super) visual_revision: u64,
     pub(super) activation: u64,
     pub(super) exiting: bool,
     pub(super) opened: Callback<()>,
@@ -353,6 +374,7 @@ pub(super) struct Input {
     pub(super) edit: Callback<Vec<(Field, FieldValue)>>,
     pub(super) write: Callback<()>,
     pub(super) command: Callback<Command>,
+    pub(super) request_location: Callback<()>,
 }
 
 impl PartialEq for Input {
@@ -362,7 +384,9 @@ impl PartialEq for Input {
             && self.model == other.model
             && Rc::ptr_eq(&self.icons, &other.icons)
             && self.sign_in == other.sign_in
+            && self.location == other.location
             && self.contrast == other.contrast
+            && self.visual_revision == other.visual_revision
             && self.activation == other.activation
             && self.exiting == other.exiting
             && self.opened == other.opened
@@ -370,6 +394,7 @@ impl PartialEq for Input {
             && self.edit == other.edit
             && self.write == other.write
             && self.command == other.command
+            && self.request_location == other.request_location
     }
 }
 
@@ -392,12 +417,12 @@ pub(super) enum Command {
     RetrySignIn,
     Preview,
     StopPreview,
+    PreviewElapsed,
     Manual(ManualCommand),
     Add(Field, Vec<super::file_info::AppFile>),
     Browsed(super::file_info::AppFile),
     Icons(Vec<String>),
     Remove(Field, usize, String),
-    Located(Result<Coordinates, DiagnosticFailure>),
     Title {
         list: Field,
         index: usize,
@@ -438,6 +463,12 @@ impl PendingWrite {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Consent {
+    Management,
+    Location,
+}
+
 #[derive(Clone)]
 pub(super) enum Message {
     Navigate(Option<String>),
@@ -454,8 +485,10 @@ pub(super) enum Message {
     Action(Action),
     Command(Command),
     Tick,
+    PreviewDeadline(Instant),
     Minute,
     Indicator,
+    Phase,
     Visibility(Visibility),
     OpenDialog(Field),
     DialogClosed(ContentDialogResult),
@@ -470,7 +503,6 @@ pub(super) enum Message {
     TitleClosed(ContentDialogResult),
     SolarExpand(bool),
     WindowsLocation(bool),
-    Location(location::Event),
     CoordinateText(schedule::Axis, String),
     CoordinateCommit(schedule::Axis),
     Scheme(ColorScheme),
@@ -489,23 +521,25 @@ pub(super) struct Settings {
     write: PendingWrite,
     timer: Option<ComponentTimer>,
     tick: Option<ComponentTimer>,
+    preview_deadline: Option<(Instant, ComponentTimer)>,
     minute: Option<ComponentTimer>,
     indicator: Option<ComponentTimer>,
+    phase_timer: Option<(Instant, ComponentTimer)>,
     visibility: Visibility,
     dpi: u32,
     icon_requests: apps::IconRequests,
     _minimize_events: Option<crate::platform::win_event::WinEventHook>,
-    consent: bool,
+    consent: Option<Consent>,
     dialog: Option<apps::AddDialog>,
     title_dialog: Option<apps::TitleDialog>,
     expanded: Expanded,
-    location: location::Location,
     coordinate_drafts: schedule::CoordinateDrafts,
     scheme: ColorScheme,
+    accents: [windows_reactor::Color; 2],
     graph: Option<Calculation>,
     graphics: graph::Graphics,
     #[cfg(feature = "graph-measurement")]
-    _rendering: Option<windows_reactor::LiveRenderingSubscription>,
+    _rendering: Option<windows_reactor::test::LiveRenderingSubscription>,
 }
 
 pub(super) fn contrast_colors() -> Option<crate::platform::contrast::ContrastColors> {
@@ -547,6 +581,23 @@ impl Settings {
         self.input.write.call(());
     }
 
+    fn consent_closed(&mut self, result: ContentDialogResult) {
+        let Some(consent) = self.consent.take() else {
+            return;
+        };
+        if result != ContentDialogResult::Primary {
+            return;
+        }
+        let field = match consent {
+            Consent::Management => Field::ManageNightLight,
+            Consent::Location => Field::UseWindowsLocation,
+        };
+        self.edit_now(vec![(field, FieldValue::Switch(true))]);
+        if consent == Consent::Location {
+            self.input.request_location.call(());
+        }
+    }
+
     fn write_due(&mut self, token: u64) {
         if self.write.due(token) {
             self.timer = None;
@@ -554,14 +605,52 @@ impl Settings {
         }
     }
 
-    // Preview playback text and progress follow the playback clock between
-    // controller snapshots, which arrive only when output changes.
     fn animate(&mut self, context: &ComponentContext<Self>) {
-        if !schedule::playback_shown(self.page, &self.input.model, self.visibility) {
+        let now = Instant::now();
+        let phase = schedule::phase_deadline(
+            &self.input.model,
+            self.schedule(),
+            self.visibility,
+            now,
+            Timestamp::now(),
+        );
+        if self.phase_timer.as_ref().map(|(at, _)| *at) != phase {
+            self.phase_timer = phase.map(|at| {
+                (
+                    at,
+                    context.set_local_timeout(at.saturating_duration_since(now), || Message::Phase),
+                )
+            });
+        }
+        let deadline = self
+            .input
+            .model
+            .preview_deadline
+            .filter(|_| self.input.model.preview_active);
+        if self
+            .preview_deadline
+            .as_ref()
+            .map(|(deadline, _)| *deadline)
+            != deadline
+        {
+            self.preview_deadline = deadline.map(|deadline| {
+                let delay = deadline.saturating_duration_since(now);
+                let message = Message::PreviewDeadline(deadline);
+                (deadline, context.set_local_timeout(delay, move || message))
+            });
+        }
+        if !schedule::preview_values_shown(
+            self.page,
+            &self.input.model,
+            self.visibility,
+            self.phase().progress.is_some(),
+        ) {
             self.tick = None;
-        } else if self.tick.is_none() {
-            self.tick =
-                Some(context.set_local_timeout(Duration::from_millis(100), || Message::Tick));
+        } else if self.tick.is_none()
+            && let Some(playing) = &self.input.model.playing
+        {
+            let delay = playing.next_text_update(self.schedule(), now);
+            self.tick = Some(context.set_local_timeout(delay, || Message::Tick));
         }
         match schedule::indicator_delay(
             self.page,
@@ -587,7 +676,20 @@ impl Settings {
         crate::activity::record(crate::ActivityEvent::SettingsTick);
         match message {
             Message::Tick => self.tick = None,
+            Message::PreviewDeadline(deadline)
+                if self
+                    .preview_deadline
+                    .as_ref()
+                    .is_some_and(|(current, _)| current == deadline) =>
+            {
+                if Instant::now() < *deadline {
+                    self.preview_deadline = None;
+                } else {
+                    self.input.command.call(Command::PreviewElapsed);
+                }
+            }
             Message::Indicator => self.indicator = None,
+            Message::Phase => self.phase_timer = None,
             Message::Minute => self.minute = None,
             _ => {}
         }
@@ -676,38 +778,15 @@ impl Settings {
         });
     }
 
-    fn deliver(
-        context: &ComponentContext<Self>,
-    ) -> impl Fn(location::Event) + Clone + Send + 'static {
-        let completion = context.completion();
-        move |event| {
-            let _delivered = completion.clone().complete(Message::Location(event));
-        }
-    }
-
-    fn located(&self, result: Option<Result<Coordinates, DiagnosticFailure>>) {
-        if let Some(result) = result {
-            self.input.command.call(Command::Located(result));
-        }
-    }
-
     fn solar_update(&mut self, message: Message, context: &ComponentContext<Self>) {
         if location::starts_request(&message, &self.input.model) {
-            let started = self
-                .location
-                .start(&location::WindowsLocation, Self::deliver(context));
-            self.located(started);
+            self.input.request_location.call(());
         }
         match message {
             Message::SolarExpand(expanded) => self.expanded.solar = expanded,
-            Message::WindowsLocation(on) => {
-                if !on {
-                    self.location.cancel();
-                }
-                self.edit(
-                    vec![(Field::UseWindowsLocation, FieldValue::Switch(on))],
-                    context,
-                );
+            Message::WindowsLocation(true) => self.consent = Some(Consent::Location),
+            Message::WindowsLocation(false) => {
+                self.edit_now(vec![(Field::UseWindowsLocation, FieldValue::Switch(false))]);
             }
             Message::CoordinateText(axis, text) => self.coordinate_drafts.typed(axis, text),
             Message::CoordinateCommit(axis) => {
@@ -717,14 +796,6 @@ impl Settings {
                 {
                     self.edit(edits, context);
                 }
-            }
-            Message::Location(event) => {
-                let finished = self.location.receive(
-                    event,
-                    &location::WindowsLocation,
-                    Self::deliver(context),
-                );
-                self.located(finished);
             }
             _ => {}
         }
@@ -750,9 +821,64 @@ impl Settings {
         control.phase(Timestamp::now())
     }
 
+    fn phase_motion(&self, now: Instant, current: Timestamp) -> Option<progress::Timeline> {
+        if self.visibility != Visibility::Shown {
+            return None;
+        }
+        let mut control = self.input.model.control(now);
+        control.schedule = control.schedule.or_else(|| self.schedule());
+        control.phase(current).progress?;
+        let at = control.playback.unwrap_or(current);
+        let segment = control
+            .schedule?
+            .curve
+            .segments()
+            .iter()
+            .find(|segment| segment.start <= at && at < segment.end)?;
+        Some(progress::Timeline {
+            revision: self.input.visual_revision,
+            interval: crate::TimeInterval {
+                start: segment.start,
+                end: segment.end,
+            },
+            playing: self
+                .input
+                .model
+                .playing
+                .clone()
+                .filter(|_| control.preview_active),
+        })
+    }
+
     fn pane_header(&self, palette: &palette::Palette) -> View {
         let text = &self.input.text;
         let phase = self.phase();
+        let model = &self.input.model;
+        let mut control = model.control(Instant::now());
+        control.schedule = control.schedule.or_else(|| self.schedule());
+        let announcement = status::announcement(
+            text,
+            &control,
+            status::Stored {
+                error: model.error.is_some(),
+                paused: model.paused,
+                failed: model.write_error.is_some(),
+                restored: model.restore.is_some(),
+            },
+            Timestamp::now(),
+        );
+        let caption = status::status_line(
+            text,
+            &self.input.region,
+            Some(&control),
+            status::Stored {
+                error: model.error.is_some(),
+                paused: model.paused,
+                failed: model.write_error.is_some(),
+                restored: model.restore.is_some(),
+            },
+            Timestamp::now(),
+        );
         Grid::new()
             .columns([GridLength::Auto, GridLength::STAR])
             .column_spacing(14.0)
@@ -764,19 +890,21 @@ impl Settings {
                     palette,
                     60.0,
                     automation_id::PANE_ART,
+                    self.phase_motion(Instant::now(), Timestamp::now()),
+                    self.accents,
                 ),
                 StackPanel::new()
                     .grid_column(1)
                     .spacing(2.0)
                     .vertical_alignment(VerticalAlignment::Center)
                     .children((
-                        widgets::strong(text!(text, "app-name")),
-                        widgets::caption(&self.input.model.status)
+                        widgets::strong(text!(text, "app-name"))
+                            .automation_id(automation_id::STATUS_ANNOUNCEMENT)
+                            .automation_name(announcement)
+                            .automation_live_setting(AutomationLiveSetting::Polite),
+                        widgets::caption(caption)
                             .foreground(palette.secondary)
-                            .automation_id(automation_id::PANE_STATUS)
-                            .automation_live_setting(schedule::status_live(
-                                self.input.model.preview_active,
-                            )),
+                            .automation_id(automation_id::PANE_STATUS),
                     )),
             ))
             .into()
@@ -1020,19 +1148,21 @@ impl Component for Settings {
             write: PendingWrite::default(),
             timer: None,
             tick: None,
+            preview_deadline: None,
             minute: None,
             indicator: None,
+            phase_timer: None,
             visibility: Visibility::Shown,
             dpi: 96,
             icon_requests: apps::IconRequests::default(),
             _minimize_events: minimize_events,
-            consent: false,
+            consent: None,
             dialog: None,
             title_dialog: None,
             expanded: Expanded::default(),
-            location: location::Location::default(),
             coordinate_drafts: schedule::CoordinateDrafts::default(),
             scheme: ColorScheme::Dark,
+            accents: progress::accent_colors(),
             graph: graph::retained(None, input.model.calculation.as_ref()),
             graphics: graph::Graphics::default(),
             #[cfg(feature = "graph-measurement")]
@@ -1045,6 +1175,9 @@ impl Component for Settings {
 
     fn input_changed(&mut self, input: &Input, context: &ComponentContext<Self>) {
         let activated = input.activation != self.input.activation;
+        if input.visual_revision != self.input.visual_revision {
+            self.accents = progress::accent_colors();
+        }
         self.coordinate_drafts
             .follow(&self.input.model, &input.model, &input.region);
         self.input = input.clone();
@@ -1055,7 +1188,7 @@ impl Component for Settings {
             // access violation, so the render before the close removes it.
             self.dialog = None;
             self.title_dialog = None;
-            self.consent = false;
+            self.consent = None;
             let _closed = context.close_window();
             return;
         }
@@ -1072,8 +1205,7 @@ impl Component for Settings {
             | Message::SolarExpand(_)
             | Message::WindowsLocation(_)
             | Message::CoordinateText(..)
-            | Message::CoordinateCommit(_)
-            | Message::Location(_)) => self.solar_update(message, context),
+            | Message::CoordinateCommit(_)) => self.solar_update(message, context),
             Message::Navigate(tag) => {
                 if let Some(page) = Page::ALL
                     .into_iter()
@@ -1102,20 +1234,19 @@ impl Component for Settings {
                     self.edit(edits, context);
                 }
             }
-            Message::Manage(true) => self.consent = true,
+            Message::Manage(true) => self.consent = Some(Consent::Management),
             Message::Manage(false) => {
                 self.edit_now(vec![(Field::ManageNightLight, FieldValue::Switch(false))]);
             }
-            Message::Consent(result) => {
-                self.consent = false;
-                if result == ContentDialogResult::Primary {
-                    self.edit_now(vec![(Field::ManageNightLight, FieldValue::Switch(true))]);
-                }
-            }
+            Message::Consent(result) => self.consent_closed(result),
             Message::WriteDue(token) => self.write_due(token),
             Message::Action(action) => self.action(action),
             Message::Command(command) => self.input.command.call(command),
-            message @ (Message::Tick | Message::Indicator | Message::Minute) => {
+            message @ (Message::Tick
+            | Message::PreviewDeadline(_)
+            | Message::Indicator
+            | Message::Phase
+            | Message::Minute) => {
                 self.timer_elapsed(&message);
             }
             Message::Visibility(visibility) => self.visibility = visibility,

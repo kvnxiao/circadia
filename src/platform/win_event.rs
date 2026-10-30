@@ -2,11 +2,11 @@ use std::cell::RefCell;
 use std::io;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
-use windows_sys::Win32::Foundation::HWND as RawWindow;
-use windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK;
-use windows_sys::Win32::UI::Accessibility::SetWinEventHook;
-use windows_sys::Win32::UI::Accessibility::UnhookWinEvent;
-use windows_sys::Win32::UI::WindowsAndMessaging::WINEVENT_OUTOFCONTEXT;
+use windows_sys::Win32::windef::HWINEVENTHOOK;
+use windows_sys::Win32::windef::HWND as RawWindow;
+use windows_sys::Win32::winuser::SetWinEventHook;
+use windows_sys::Win32::winuser::UnhookWinEvent;
+use windows_sys::Win32::winuser::WINEVENT_OUTOFCONTEXT;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WinEvent {
@@ -34,7 +34,7 @@ impl WinEventHook {
         reason = "the static callback remains valid until this thread removes its hook"
     )]
     pub(crate) fn listen(
-        events: RangeInclusive<u32>,
+        events: RangeInclusive<i32>,
         process: u32,
         notify: impl Fn(WinEvent) + 'static,
     ) -> io::Result<Self> {
@@ -43,13 +43,13 @@ impl WinEventHook {
         // does not inject code.
         let handle = unsafe {
             SetWinEventHook(
-                *events.start(),
-                *events.end(),
+                events.start().cast_unsigned(),
+                events.end().cast_unsigned(),
                 std::ptr::null_mut(),
                 Some(dispatch),
                 process,
                 0,
-                WINEVENT_OUTOFCONTEXT,
+                WINEVENT_OUTOFCONTEXT.cast_unsigned(),
             )
         };
         if handle.is_null() {

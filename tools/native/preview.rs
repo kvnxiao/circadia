@@ -17,12 +17,12 @@ use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 use win_nightlight_lib::Nightlight;
-use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC;
-use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMSUSPEND;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_POWERBROADCAST;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_TIMECHANGE;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_WTSSESSION_CHANGE;
-use windows_sys::Win32::UI::WindowsAndMessaging::WTS_SESSION_LOCK;
+use windows_sys::Win32::winuser::PBT_APMRESUMEAUTOMATIC;
+use windows_sys::Win32::winuser::PBT_APMSUSPEND;
+use windows_sys::Win32::winuser::WM_POWERBROADCAST;
+use windows_sys::Win32::winuser::WM_TIMECHANGE;
+use windows_sys::Win32::winuser::WM_WTSSESSION_CHANGE;
+use windows_sys::Win32::winuser::WTS_SESSION_LOCK;
 use winsafe::HWND;
 
 pub(super) fn before_exit(

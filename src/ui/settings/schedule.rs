@@ -1,4 +1,5 @@
 use super::Command;
+use super::Consent;
 use super::Message;
 use super::Model;
 use super::NumberControls;
@@ -49,7 +50,6 @@ use windows_reactor::CheckBox;
 use windows_reactor::ContentDialog;
 use windows_reactor::ContentDialogButton;
 use windows_reactor::FocusEventInfo;
-use windows_reactor::FontIcon;
 use windows_reactor::Grid;
 use windows_reactor::GridLength;
 use windows_reactor::HorizontalAlignment;
@@ -165,9 +165,9 @@ pub(super) fn management_view(model: &Model, text: &Text) -> ManagementView {
 
 #[derive(Clone, Debug)]
 pub(super) struct Playing {
-    playback: Arc<Playback>,
+    pub(super) playback: Arc<Playback>,
     curve: Option<Arc<Curve>>,
-    started: Instant,
+    pub(super) started: Instant,
 }
 
 impl PartialEq for Playing {
@@ -179,6 +179,15 @@ impl PartialEq for Playing {
 }
 
 impl Playing {
+    #[cfg(test)]
+    pub(super) fn for_motion(playback: Arc<Playback>, started: Instant) -> Self {
+        Self {
+            playback,
+            curve: None,
+            started,
+        }
+    }
+
     pub(super) fn new(snapshot: &ControllerSnapshot) -> Option<Self> {
         let preview = snapshot.preview.as_ref()?;
         Some(Self {
@@ -201,6 +210,22 @@ impl Playing {
         self.playback
             .at(now.saturating_duration_since(self.started))
             .ok()
+    }
+
+    pub(super) fn next_text_update(
+        &self,
+        schedule: Option<&crate::CalculatedSchedule>,
+        now: Instant,
+    ) -> Duration {
+        let elapsed = now.saturating_duration_since(self.started);
+        let next_second = Duration::from_secs(elapsed.as_secs() + 1);
+        let boundary = schedule.and_then(|schedule| {
+            let view = graph::view_at(schedule, self.instant(now)?);
+            self.playback.elapsed_at(view.end).ok()
+        });
+        boundary
+            .map_or(next_second, |boundary| boundary.min(next_second))
+            .saturating_sub(elapsed)
     }
 
     fn detail(&self, text: &Text, region: &RegionalFormat, now: Instant) -> Option<String> {
@@ -280,8 +305,55 @@ pub(super) fn preview_view(
     }
 }
 
-pub(super) fn playback_shown(page: Page, model: &Model, visibility: Visibility) -> bool {
-    visibility == Visibility::Shown && page == Page::Schedule && model.playing.is_some()
+pub(super) fn preview_values_shown(
+    page: Page,
+    model: &Model,
+    visibility: Visibility,
+    phase_progress_shown: bool,
+) -> bool {
+    visibility == Visibility::Shown
+        && model.playing.is_some()
+        && (page == Page::Schedule || phase_progress_shown)
+}
+
+pub(super) fn phase_deadline(
+    model: &Model,
+    schedule: Option<&crate::CalculatedSchedule>,
+    visibility: Visibility,
+    now: Instant,
+    current: jiff::Timestamp,
+) -> Option<Instant> {
+    let control = model.control(now);
+    if visibility != Visibility::Shown
+        || !control.management.is_on()
+        || (control.suppression.active() && !control.preview_active)
+    {
+        return None;
+    }
+    let schedule = schedule?;
+    let at = control.playback.unwrap_or(current);
+    let boundary = schedule
+        .events
+        .iter()
+        .map(|event| event.instant)
+        .chain(
+            schedule
+                .curve
+                .segments()
+                .iter()
+                .filter(|segment| segment.from != segment.to)
+                .flat_map(|segment| [segment.start, segment.end]),
+        )
+        .filter(|boundary| *boundary > at)
+        .min()?;
+    if control.preview_active {
+        let playing = model.playing.as_ref()?;
+        playing
+            .started
+            .checked_add(playing.playback.elapsed_at(boundary).ok()?)
+    } else {
+        now.checked_add(Duration::try_from(boundary.duration_since(current)).ok()?)
+    }
 }
 
 // The time indicator moves at each whole minute, under one effective pixel at
@@ -345,7 +417,49 @@ fn graph_view(settings: &Settings, palette: &Palette) -> Option<View> {
         name: text!(text, "graph-name", clock = clock.as_str()),
         chip: &chip,
         hour: &hour,
+        animation: model
+            .playing
+            .as_ref()
+            .filter(|_| settings.visibility == Visibility::Shown)
+            .map(|playing| graph::animated_marker(calculation, layout.view, playing, *palette)),
     }))
+}
+
+fn preview_progress(settings: &Settings, progress: f64) -> View {
+    let motion = settings
+        .input
+        .model
+        .playing
+        .as_ref()
+        .filter(|_| settings.visibility == Visibility::Shown)
+        .map(|playing| super::progress::Timeline {
+            revision: settings.input.visual_revision,
+            interval: playing.playback.interval(),
+            playing: Some(playing.clone()),
+        });
+    let mut layers = vec![
+        ProgressBar::new()
+            .minimum(0.0)
+            .maximum(1.0)
+            .value(progress)
+            .height(3.0)
+            .opacity(if motion.is_some() { 0.0 } else { 1.0 })
+            .automation_id(automation_id::PREVIEW_PROGRESS)
+            .into(),
+    ];
+    if let Some(motion) = motion {
+        layers.push(super::progress::view(
+            motion,
+            super::progress::Shape::Bar,
+            &settings.palette(),
+            settings.accents,
+        ));
+    }
+    Grid::new()
+        .height(3.0)
+        .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
+        .children(layers)
+        .into()
 }
 
 fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
@@ -364,12 +478,9 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
     } else {
         ("\u{E768}", text!(text, "preview-start"), Command::Preview)
     };
-    // Only the start and stop of playback are announced; the detail changes on
-    // every frame and stays outside the live region.
     let mut line: Vec<View> = vec![
         widgets::caption(&preview.caption)
             .automation_id(automation_id::PREVIEW_STATE)
-            .automation_live_setting(AutomationLiveSetting::Polite)
             .into(),
     ];
     if let Some(detail) = &preview.detail {
@@ -387,16 +498,7 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
             .into(),
     ];
     if let Some(progress) = preview.progress {
-        state.push(
-            ProgressBar::new()
-                .minimum(0.0)
-                .maximum(1.0)
-                .value(progress)
-                .height(3.0)
-                .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
-                .automation_id(automation_id::PREVIEW_PROGRESS)
-                .into(),
-        );
+        state.push(preview_progress(settings, progress));
     }
     Border::new()
         .border_brush(ThemeBrush::CardStroke)
@@ -417,15 +519,7 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
                         .automation_id(automation_id::PREVIEW)
                         .automation_name(&label)
                         .on_click(context.message(Message::Command(command)))
-                        .content(
-                            StackPanel::new()
-                                .orientation(Orientation::Horizontal)
-                                .spacing(8.0)
-                                .children((
-                                    FontIcon::new().glyph(glyph).font_size(16.0),
-                                    widgets::body(label),
-                                )),
-                        ),
+                        .content(widgets::glyph_label(glyph, label)),
                 )),
         )
         .into()
@@ -689,16 +783,6 @@ fn summary_view(settings: &Settings, palette: &Palette) -> View {
         .into()
 }
 
-// The Preview status changes on every frame, so it stays outside the live
-// region like the Preview detail.
-pub(super) fn status_live(preview_active: bool) -> AutomationLiveSetting {
-    if preview_active {
-        AutomationLiveSetting::Off
-    } else {
-        AutomationLiveSetting::Polite
-    }
-}
-
 fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
     let (text, region, model) = (
         &settings.input.text,
@@ -718,7 +802,6 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
     } else {
         text!(text, "output-off")
     };
-    let live = status_live(control.preview_active);
     Grid::new()
         .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
         .column_spacing(20.0)
@@ -730,6 +813,8 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
                 &palette,
                 64.0,
                 automation_id::STATUS_ART,
+                settings.phase_motion(Instant::now(), current),
+                settings.accents,
             ),
             StackPanel::new()
                 .grid_column(1)
@@ -748,8 +833,7 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
                         )),
                     widgets::body(status_sentence(model, text, region, &control, current))
                         .foreground(palette.secondary)
-                        .automation_id(automation_id::STATUS_SENTENCE)
-                        .automation_live_setting(live),
+                        .automation_id(automation_id::STATUS_SENTENCE),
                 )),
             Border::new()
                 .grid_column(2)
@@ -793,7 +877,6 @@ fn management_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             .detail(view.change.map(|line| {
                 widgets::caption(line)
                     .automation_id(automation_id::MANAGE_CHANGE)
-                    .automation_live_setting(windows_reactor::AutomationLiveSetting::Polite)
                     .into()
             }))
             .controls(
@@ -814,9 +897,24 @@ fn management_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
 
 pub(super) fn consent_dialog(
     text: &Text,
-    open: bool,
+    open: Option<Consent>,
     context: &ViewContext<'_, Settings>,
 ) -> ContentDialog {
+    let dialog = ContentDialog::new()
+        .primary_button_text(text!(text, "consent-turn-on"))
+        .close_button_text(text!(text, "consent-cancel"))
+        .default_button(ContentDialogButton::Primary)
+        .is_open(open.is_some())
+        .on_closed(context.callback(Message::Consent));
+    if open == Some(Consent::Location) {
+        return dialog.title(text!(text, "location-consent-title")).content(
+            StackPanel::new().spacing(12.0).max_width(452.0).children((
+                widgets::body(text!(text, "location-consent-requests")),
+                widgets::body(text!(text, "location-consent-windows")),
+                widgets::body(text!(text, "location-consent-saving")),
+            )),
+        );
+    }
     let bullets: Vec<View> = [
         text!(text, "consent-schedule"),
         text!(text, "consent-native"),
@@ -825,23 +923,16 @@ pub(super) fn consent_dialog(
     .into_iter()
     .map(|line| widgets::body(format!("\u{2022} {line}")).into())
     .collect();
-    ContentDialog::new()
-        .title(text!(text, "consent-title"))
-        .content(
-            StackPanel::new().spacing(12.0).max_width(452.0).children((
-                widgets::body(text!(text, "consent-body")),
-                StackPanel::new()
-                    .spacing(4.0)
-                    .margin(Thickness::new(20.0, 0.0, 0.0, 0.0))
-                    .children(bullets),
-                widgets::body(text!(text, "consent-closing")),
-            )),
-        )
-        .primary_button_text(text!(text, "consent-turn-on"))
-        .close_button_text(text!(text, "consent-cancel"))
-        .default_button(ContentDialogButton::Primary)
-        .is_open(open)
-        .on_closed(context.callback(Message::Consent))
+    dialog.title(text!(text, "consent-title")).content(
+        StackPanel::new().spacing(12.0).max_width(452.0).children((
+            widgets::body(text!(text, "consent-body")),
+            StackPanel::new()
+                .spacing(4.0)
+                .margin(Thickness::new(20.0, 0.0, 0.0, 0.0))
+                .children(bullets),
+            widgets::body(text!(text, "consent-closing")),
+        )),
+    )
 }
 
 fn recommended_colors() -> Vec<(Field, FieldValue)> {
@@ -1369,7 +1460,7 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
         })
         .into(),
     ];
-    if settings.location.requesting() {
+    if settings.input.location.requesting {
         lines.push(
             widgets::caption(text!(text, "location-requesting"))
                 .automation_id(automation_id::LOCATION_REQUESTING)
@@ -1534,7 +1625,7 @@ fn solar_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View 
             model,
             text,
             &settings.input.region,
-            settings.location.failure(),
+            settings.input.location.failure,
             Instant::now(),
             jiff::Timestamp::now(),
         )

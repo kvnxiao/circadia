@@ -32,6 +32,14 @@ pub enum ActivityEvent {
     SettingsTick,
     /// Reconcile the settings view.
     SettingsView,
+    /// Start a finite compositor animation for the Preview marker.
+    GraphAnimationStarted,
+    /// Remove the animated Preview marker visuals.
+    GraphAnimationStopped,
+    /// Start a finite compositor animation for a visible progress indicator.
+    ProgressAnimationStarted,
+    /// Remove a progress indicator's animated visuals.
+    ProgressAnimationStopped,
     /// Begin due native work, including recovery.
     NativeDue {
         /// Whether a recovery deadline is due.

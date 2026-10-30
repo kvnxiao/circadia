@@ -5,10 +5,13 @@ use crate::lifecycle::require;
 use crate::lifecycle::settings_window;
 use crate::lifecycle::wait;
 use crate::lifecycle::window;
+use circadia::ActivityEvent;
+use circadia::ActivityMeasurement;
 use circadia::ConfigInput;
 use circadia::ConfigStore;
 use circadia::Coordinates;
 use circadia::GraphMeasurement;
+use circadia::SimulatedNativeCall;
 use circadia::SimulatedNativeFault;
 use circadia::automation_id;
 use std::ffi::OsString;
@@ -17,10 +20,16 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 use std::time::Instant;
-use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_POWERBROADCAST;
+use windows_sys::Win32::winuser::PBT_APMRESUMEAUTOMATIC;
+use windows_sys::Win32::winuser::WM_ENDSESSION;
+use windows_sys::Win32::winuser::WM_POWERBROADCAST;
 use winsafe::HWND;
+
+#[path = "graph/progress.rs"]
+mod progress;
+#[path = "graph/rendered.rs"]
+mod rendered;
+pub(super) use rendered::Capture;
 
 pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     require(
@@ -29,6 +38,7 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     )?;
     crate::lifecycle::require_english()?;
     environment()?;
+    let activity = ActivityMeasurement::start()?;
     let input = ConfigInput {
         start_minimized: false,
         manage_night_light: true,
@@ -40,13 +50,36 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
         ..ConfigInput::default()
     };
     desktop_check(input.clone(), &[], move |measurement, _| {
-        exercise(measurement, input)
+        exercise(measurement, input, &activity)
     })
 }
 
 pub(super) fn desktop_check(
     input: ConfigInput,
     faults: &[SimulatedNativeFault],
+    exercise: impl FnOnce(&GraphMeasurement, &Path) -> io::Result<()> + Send + 'static,
+) -> io::Result<()> {
+    let directory = tempfile::Builder::new()
+        .prefix("circadia-desktop-check-")
+        .tempdir()?;
+    ConfigStore::new(directory.path())
+        .save(&input.validate().map_err(io::Error::other)?)
+        .map_err(io::Error::other)?;
+    let measurement = GraphMeasurement::default();
+    measurement.fail_native(faults)?;
+    let result = desktop_check_at(&measurement, directory.path(), exercise);
+    if result.is_err() {
+        report(&format!(
+            "Failed desktop fixture retained: {}",
+            directory.keep().display()
+        ));
+    }
+    result
+}
+
+pub(super) fn desktop_check_at(
+    measurement: &GraphMeasurement,
+    directory: &Path,
     exercise: impl FnOnce(&GraphMeasurement, &Path) -> io::Result<()> + Send + 'static,
 ) -> io::Result<()> {
     match circadia::InstanceClaim::acquire()? {
@@ -58,16 +91,8 @@ pub(super) fn desktop_check(
             ));
         }
     }
-    let directory = tempfile::Builder::new()
-        .prefix("circadia-desktop-check-")
-        .tempdir()?;
-    ConfigStore::new(directory.path())
-        .save(&input.validate().map_err(io::Error::other)?)
-        .map_err(io::Error::other)?;
-    let measurement = GraphMeasurement::default();
-    measurement.fail_native(faults)?;
     let driver = measurement.clone();
-    let data = directory.path().to_owned();
+    let data = directory.to_owned();
     let thread = std::thread::Builder::new()
         .name("circadia-desktop-check".into())
         .spawn(move || {
@@ -83,21 +108,18 @@ pub(super) fn desktop_check(
                 });
             result.and(cleared).and(released).and(closed)
         })?;
-    let application = measurement.run(directory.path().to_owned());
+    let application = measurement.run(directory.to_owned());
     let checks = thread
         .join()
         .map_err(|_error| io::Error::other("desktop check thread panicked"))?;
-    let result = application.and(checks);
-    if result.is_err() {
-        report(&format!(
-            "Failed desktop fixture retained: {}",
-            directory.keep().display()
-        ));
-    }
-    result
+    application.and(checks)
 }
 
-fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Result<()> {
+fn exercise(
+    measurement: &GraphMeasurement,
+    mut input: ConfigInput,
+    activity: &ActivityMeasurement,
+) -> io::Result<()> {
     let automation = Automation::new()?;
     let process = std::process::id();
     let settings = wait("measurement settings window", || settings_window(process))?;
@@ -183,9 +205,223 @@ fn exercise(measurement: &GraphMeasurement, mut input: ConfigInput) -> io::Resul
             .filter(|enabled| *enabled))
     })?;
     measure_preview(measurement, &automation, &settings)?;
+    motion_lifecycle(measurement, &automation, &settings, activity)?;
+    progress::verify(measurement, &automation, &settings, activity, &mut input)?;
     let resumed = resume_preview(measurement, &automation, &settings, &mut input)?;
     samples.push(resumed);
+    automation.close(&settings, process)?;
+    wait("settings closed after graph checks", || {
+        Ok(settings_window(process)?.is_none().then_some(()))
+    })?;
+    inactive(activity, "closed settings")?;
+    progress::hidden(activity)?;
     summarize(&samples)
+}
+
+fn animation_active(activity: &ActivityMeasurement) -> io::Result<bool> {
+    Ok(activity
+        .records()?
+        .iter()
+        .rev()
+        .find_map(|record| match record.event {
+            ActivityEvent::GraphAnimationStarted => Some(true),
+            ActivityEvent::GraphAnimationStopped => Some(false),
+            _ => None,
+        })
+        .unwrap_or(false))
+}
+
+fn inactive(activity: &ActivityMeasurement, label: &str) -> io::Result<()> {
+    wait("Preview compositor stopped", || {
+        Ok((!animation_active(activity)?).then_some(()))
+    })?;
+    let mark = activity.records()?.len();
+    std::thread::sleep(Duration::from_millis(600));
+    let records = activity.records()?;
+    let events = records.iter().skip(mark).map(|record| record.event);
+    let starts = events
+        .clone()
+        .filter(|event| matches!(event, ActivityEvent::GraphAnimationStarted))
+        .count();
+    let ticks = events
+        .clone()
+        .filter(|event| matches!(event, ActivityEvent::SettingsTick))
+        .count();
+    let views = events
+        .filter(|event| matches!(event, ActivityEvent::SettingsView))
+        .count();
+    require(
+        starts == 0 && ticks <= 2,
+        "inactive graph performed recurring animation work",
+    )?;
+    report(&format!(
+        "PASS: {label} over 600 ms: animation starts={starts}; semantic/text timer wakes={ticks}; settings views={views}"
+    ));
+    Ok(())
+}
+
+fn motion_lifecycle(
+    measurement: &GraphMeasurement,
+    automation: &Automation,
+    settings: &HWND,
+    activity: &ActivityMeasurement,
+) -> io::Result<()> {
+    let process = std::process::id();
+    inactive(activity, "completed Preview")?;
+    automation.select(settings, process, automation_id::NAV_TRANSITIONS)?;
+    wait("Preview duration control", || {
+        automation.number(settings, process, automation_id::PREVIEW_LENGTH_NUMBER)
+    })?;
+    automation.set_number(
+        settings,
+        process,
+        automation_id::PREVIEW_LENGTH_NUMBER,
+        20.0,
+    )?;
+    automation.set_number(settings, process, automation_id::RATE_NUMBER, 1.0)?;
+    automation.select(settings, process, automation_id::NAV_SCHEDULE)?;
+    wait("visible graph for cadence measurement", || {
+        Ok(automation.show_graph(settings, process)?.then_some(()))
+    })?;
+    automation.invoke(settings, process, automation_id::PREVIEW)?;
+    wait("compositor animation started", || {
+        Ok(animation_active(activity)?.then_some(()))
+    })?;
+    native_cadence(measurement, automation, settings, activity)?;
+    automation.select(settings, process, automation_id::NAV_GENERAL)?;
+    inactive(activity, "off-page Preview")?;
+    automation.select(settings, process, automation_id::NAV_SCHEDULE)?;
+    wait("compositor resumes on Schedule", || {
+        Ok(animation_active(activity)?.then_some(()))
+    })?;
+    let mark = activity.records()?.len();
+    let size = settings.GetWindowRect().map_err(io::Error::other)?;
+    settings
+        .SetWindowPos(
+            winsafe::HwndPlace::None,
+            winsafe::POINT::new(),
+            winsafe::SIZE::with(size.right - size.left - 80, size.bottom - size.top),
+            winsafe::co::SWP::NOMOVE | winsafe::co::SWP::NOZORDER | winsafe::co::SWP::NOACTIVATE,
+        )
+        .map_err(io::Error::other)?;
+    wait("compositor path rebuilt after resize", || {
+        Ok(activity
+            .records()?
+            .iter()
+            .skip(mark)
+            .any(|record| matches!(record.event, ActivityEvent::GraphAnimationStarted))
+            .then_some(()))
+    })?;
+    automation.minimize(settings, process)?;
+    inactive(activity, "minimized Preview")?;
+    progress::hidden(activity)?;
+    let _shown = settings.ShowWindow(winsafe::co::SW::RESTORE);
+    wait("compositor resumes after restore", || {
+        Ok(animation_active(activity)?.then_some(()))
+    })?;
+    measurement.hold_output(true)?;
+    wait("native call blocked before Stop", || {
+        Ok(measurement.output_blocked()?.then_some(()))
+    })?;
+    automation.invoke(settings, process, automation_id::PREVIEW)?;
+    wait(
+        "Stop restores editing before the native call returns",
+        || {
+            Ok(automation
+                .enabled(settings, process, automation_id::WAKE)?
+                .filter(|enabled| *enabled))
+        },
+    )?;
+    require(
+        measurement.output_blocked()?,
+        "native call ended before Stop UI validation",
+    )?;
+    inactive(activity, "stopped Preview")?;
+    measurement.hold_output(false)?;
+    Ok(())
+}
+
+fn native_cadence(
+    measurement: &GraphMeasurement,
+    automation: &Automation,
+    settings: &HWND,
+    activity: &ActivityMeasurement,
+) -> io::Result<()> {
+    let submitted = measurement
+        .preview_submitted_at()?
+        .ok_or_else(|| io::Error::other("Preview was not submitted"))?;
+    let mut capture = Capture::new(automation, settings)?;
+    let mark = activity.records()?.len();
+    let began = Instant::now();
+    let mut positions = Vec::new();
+    while began.elapsed() < Duration::from_millis(900) {
+        if let Some(position) = capture.position()?
+            && positions
+                .last()
+                .is_none_or(|previous: &(u64, f64, f64)| previous.0 != position.0)
+        {
+            positions.push(position);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let observed = began.elapsed();
+    capture.save("target/preview-motion-one-hz.png")?;
+    require(
+        positions.len() > 10,
+        "rendered Preview did not advance more often than the former 100 ms UI tick",
+    )?;
+    let records = activity.records()?;
+    let ticks = records
+        .iter()
+        .skip(mark)
+        .filter(|record| matches!(record.event, ActivityEvent::SettingsTick))
+        .count();
+    let views = records
+        .iter()
+        .skip(mark)
+        .filter(|record| matches!(record.event, ActivityEvent::SettingsView))
+        .count();
+    let output = wait("two changing native calls during 1 Hz Preview", || {
+        let calls = changing_calls(&measurement.native_calls()?, submitted);
+        Ok((calls.len() >= 2).then_some(calls))
+    })?;
+    let spacing = output
+        .iter()
+        .zip(output.iter().skip(1))
+        .map(|(first, next)| next.started.duration_since(first.started))
+        .min()
+        .ok_or_else(|| io::Error::other("missing native call interval"))?;
+    require(
+        spacing >= Duration::from_secs(1),
+        &format!(
+            "1 Hz Preview exceeded its native rate limit: minimum spacing {spacing:?}; calls {output:?}"
+        ),
+    )?;
+    report(&format!(
+        "PASS: {} distinct captured positions in {:.3}s with 1 Hz native output; semantic/text timer wakes={ticks}; settings views={views}; {} changing temperature calls observed with minimum spacing {:.3}s",
+        positions.len(),
+        observed.as_secs_f64(),
+        output.len(),
+        spacing.as_secs_f64()
+    ));
+    Ok(())
+}
+
+fn changing_calls(calls: &[SimulatedNativeCall], submitted: Instant) -> Vec<SimulatedNativeCall> {
+    let mut previous = None;
+    let mut changing = Vec::new();
+    for call in calls.iter().filter(|call| call.started >= submitted) {
+        let Some((kelvin, _)) = call.temperature else {
+            continue;
+        };
+        if previous
+            .replace(kelvin)
+            .is_some_and(|previous| previous != kelvin)
+        {
+            changing.push(*call);
+        }
+    }
+    changing
 }
 
 fn measure_solar_failure(
@@ -339,23 +575,34 @@ fn measure_preview(
     wait("Preview operation blocked", || {
         Ok(measurement.output_blocked()?.then_some(()))
     })?;
-    let initial = wait("rendered Preview position", || measurement.position())?;
+    let mut capture = Capture::new(automation, settings)?;
+    let initial = wait("rendered Preview position", || capture.position());
+    if initial.is_err() {
+        capture.save("target/preview-motion-initial-timeout.png")?;
+    }
+    let initial = initial?;
     let advanced = wait("Preview graph moves while output is blocked", || {
-        Ok(measurement.position()?.filter(|(count, x, y)| {
+        Ok(capture.position()?.filter(|(count, x, y)| {
             *count >= initial.0 + 8
                 && ((x - initial.1).abs() > 0.02 || (y - initial.2).abs() > 0.02)
         }))
-    })?;
+    });
+    capture.save("target/preview-motion-blocked.png")?;
+    let advanced = advanced?;
     require(
         measurement.output_blocked()?,
         "output unblocked before animation progressed",
     )?;
-    measurement.hold_output(false)?;
     wait("Preview completion restores editing", || {
         Ok(automation
             .enabled(settings, process, automation_id::WAKE)?
             .filter(|enabled| *enabled))
     })?;
+    require(
+        measurement.output_blocked()?,
+        "native call ended before the logical deadline",
+    )?;
+    measurement.hold_output(false)?;
     report(&format!(
         "PASS: {} changed rendered positions while a native operation remained blocked; editing returned after completion",
         advanced.0 - initial.0
@@ -512,4 +759,59 @@ fn environment() -> io::Result<()> {
         "Method: native UI Automation number-field input to the first XAML CompositionTarget.Rendering callback after the graph drawing for the edited configuration; graph visible, output backend simulated. This excludes physical presentation latency.",
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use circadia::DiagnosticOperation;
+    use circadia::NativeSettings;
+    use circadia::NativeSnapshot;
+    use circadia::TemperatureMode;
+
+    #[test]
+    fn changing_steps_exclude_the_initial_value_and_same_temperature_setup() {
+        let began = Instant::now();
+        let calls: Vec<_> = [
+            (0, 6500, TemperatureMode::Apply),
+            (100, 3400, TemperatureMode::Apply),
+            (887, 3400, TemperatureMode::Hold),
+            (1887, 2800, TemperatureMode::Hold),
+            (1900, 2800, TemperatureMode::ApplyHeld),
+            (2887, 2400, TemperatureMode::Hold),
+            (2900, 2400, TemperatureMode::FinishHeld),
+        ]
+        .into_iter()
+        .map(|(milliseconds, kelvin, mode)| SimulatedNativeCall {
+            operation: DiagnosticOperation::TemperatureWrite,
+            started: began + Duration::from_millis(milliseconds),
+            completed: began + Duration::from_millis(milliseconds),
+            temperature: Some((kelvin, mode)),
+            failure: None,
+            snapshot: NativeSnapshot {
+                settings: NativeSettings {
+                    schedule_enabled: false,
+                    temperature: None,
+                    previewing: false,
+                },
+                active: true,
+            },
+        })
+        .collect();
+        let changing = changing_calls(&calls, began + Duration::from_millis(100));
+        assert_eq!(
+            changing
+                .iter()
+                .map(|call| (
+                    call.started.duration_since(began).as_millis(),
+                    call.temperature
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (1887, Some((2800, TemperatureMode::Hold))),
+                (2887, Some((2400, TemperatureMode::Hold))),
+            ]
+        );
+        assert!(changing_calls(&calls[1..3], began).is_empty());
+    }
 }

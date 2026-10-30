@@ -4,16 +4,16 @@ use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::BorrowedHandle;
 use std::time::Duration;
 use std::time::Instant;
-use windows_sys::Wdk::System::SystemInformation::NtQuerySystemInformation;
-use windows_sys::Wdk::System::SystemInformation::SystemProcessInformation;
-use windows_sys::Win32::Foundation::FILETIME;
-use windows_sys::Win32::Foundation::STATUS_INFO_LENGTH_MISMATCH;
-use windows_sys::Win32::System::ProcessStatus::GetProcessMemoryInfo;
-use windows_sys::Win32::System::ProcessStatus::PROCESS_MEMORY_COUNTERS;
-use windows_sys::Win32::System::ProcessStatus::PROCESS_MEMORY_COUNTERS_EX;
-use windows_sys::Win32::System::Threading::GetProcessTimes;
-use windows_sys::Win32::System::WindowsProgramming::SYSTEM_PROCESS_INFORMATION;
-use windows_sys::Win32::System::WindowsProgramming::SYSTEM_THREAD_INFORMATION;
+use windows_sys::Win32::minwindef::FILETIME;
+use windows_sys::Win32::ntstatus::STATUS_INFO_LENGTH_MISMATCH;
+use windows_sys::Win32::processthreadsapi::GetProcessTimes;
+use windows_sys::Win32::psapi::GetProcessMemoryInfo;
+use windows_sys::Win32::psapi::PROCESS_MEMORY_COUNTERS;
+use windows_sys::Win32::psapi::PROCESS_MEMORY_COUNTERS_EX;
+use windows_sys::Win32::winternl::NtQuerySystemInformation;
+use windows_sys::Win32::winternl::SYSTEM_PROCESS_INFORMATION;
+use windows_sys::Win32::winternl::SYSTEM_THREAD_INFORMATION;
+use windows_sys::Win32::winternl::SystemProcessInformation;
 
 pub(super) struct Snapshot {
     pub(super) at: Instant,
@@ -189,7 +189,8 @@ fn process_threads(mut records: &[u8], process: u32) -> io::Result<BTreeMap<(usi
         }
         // MS-TSTS defines Reserved1[2] as creation time and Reserved3 as
         // ContextSwitches.
-        let [_, _, created] = thread.Reserved1;
+        // SAFETY: LARGE_INTEGER stores the initialized signed 64-bit time.
+        let created = unsafe { thread.Reserved1[2].QuadPart };
         if threads
             .insert(
                 (thread.ClientId.UniqueThread as usize, created),

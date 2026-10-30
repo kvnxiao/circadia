@@ -15,12 +15,16 @@ use circadia::automation_id;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io;
+use std::io::Write;
 use std::path::Path;
-use windows::Win32::UI::Accessibility::UIA_MenuBarControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_PaneControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_TextControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_TitleBarControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_WindowControlTypeId;
+use std::path::PathBuf;
+use std::time::Duration;
+use windows::Win32::uiautomationclient::UIA_MenuBarControlTypeId;
+use windows::Win32::uiautomationclient::UIA_PaneControlTypeId;
+use windows::Win32::uiautomationclient::UIA_TextControlTypeId;
+use windows::Win32::uiautomationclient::UIA_TitleBarControlTypeId;
+use windows::Win32::uiautomationclient::UIA_ToolTipControlTypeId;
+use windows::Win32::uiautomationclient::UIA_WindowControlTypeId;
 use winsafe::HWND;
 
 const PSEUDO_LOCALE: &str = "qps-Ploc";
@@ -74,8 +78,14 @@ fn check(executable: &Path, directory: &Path) -> io::Result<()> {
         "Settings DPI: {}; language {PSEUDO_LOCALE}",
         settings.GetDpiForWindow()
     ));
-    let mut inspection = Inspection::default();
+    require(
+        settings.GetDpiForWindow() == 96,
+        "translation acceptance requires the current display to use 100% scaling",
+    )?;
+    let mut inspection = Inspection::new()?;
+    automation.focus(&settings, process)?;
     visit(&automation, &settings, process, &mut inspection)?;
+    extras(&automation, &settings, process, &mut inspection)?;
     crate::lifecycle::quit(&automation, &settings, process)?;
     application.wait_exit()?;
     for finding in &inspection.findings {
@@ -86,6 +96,7 @@ fn check(executable: &Path, directory: &Path) -> io::Result<()> {
         inspection.views,
         inspection.texts.len()
     ));
+    inspection.finish()?;
     require(
         inspection.findings.is_empty(),
         &format!(
@@ -94,7 +105,7 @@ fn check(executable: &Path, directory: &Path) -> io::Result<()> {
         ),
     )?;
     report(
-        "PASS: every page, dialog, and banner shows pseudo-localized text, except values, clocks, numbers, and executable or display names, and no text extends past its parent; Night Light was not managed",
+        "PASS: captured translation views pass automated text and bounds checks at 100%; screenshots require visual inspection; Night Light was not managed",
     );
     Ok(())
 }
@@ -133,7 +144,7 @@ fn visit(
         automation_id::NAV_GENERAL,
     ] {
         show_page(automation, settings, process, navigation)?;
-        inspection.inspect(automation, settings, process, navigation)?;
+        inspection.page(automation, settings, process, navigation)?;
     }
     show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     automation.toggle(settings, process, automation_id::SOLAR_TIMING)?;
@@ -142,7 +153,19 @@ fn visit(
             .enabled(settings, process, automation_id::LATITUDE)?
             .filter(|enabled| *enabled))
     })?;
-    inspection.inspect(automation, settings, process, "solar timing")?;
+    inspection.page(automation, settings, process, "solar timing")?;
+    automation.toggle(settings, process, automation_id::USE_WINDOWS_LOCATION)?;
+    dialog(
+        automation,
+        settings,
+        process,
+        inspection,
+        "location consent dialog",
+    )?;
+    require(
+        automation.toggled(settings, process, automation_id::USE_WINDOWS_LOCATION)? == Some(false),
+        "cancelling consent turned Windows location on",
+    )?;
     automation.toggle(settings, process, automation_id::SOLAR_TIMING)?;
     wait("solar timing off", || {
         Ok(automation
@@ -165,7 +188,7 @@ fn visit(
             &automation_id::remove(&automation_id::exclusion_entry(0)),
         )
     })?;
-    inspection.inspect(automation, settings, process, "expanded exclusions")?;
+    inspection.page(automation, settings, process, "expanded exclusions")?;
     automation.invoke(settings, process, automation_id::ADD_APP)?;
     dialog(automation, settings, process, inspection, "Add app dialog")?;
     automation.invoke(
@@ -194,7 +217,7 @@ fn dialog(
     })?;
     // The dialog opens with an animation, during which its text can still move.
     std::thread::sleep(std::time::Duration::from_millis(500));
-    inspection.inspect(automation, settings, process, place)?;
+    inspection.dialog(automation, settings, process, place)?;
     crate::lifecycle::wait(&format!("Cancel {place}"), || {
         Ok(automation
             .dialog_button(settings, process, DialogButton::Close)?
@@ -205,17 +228,317 @@ fn dialog(
             .dialog_button_enabled(settings, process, DialogButton::Close)?
             .is_none()
             .then_some(()))
-    })
+    })?;
+    // The popup disappears from UIA before its closing animation accepts
+    // another dialog.
+    std::thread::sleep(Duration::from_millis(300));
+    Ok(())
 }
 
-#[derive(Default)]
+fn extras(
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+    inspection: &mut Inspection,
+) -> io::Result<()> {
+    automation.invoke(settings, process, automation_id::ADD_EXCLUSION)?;
+    dialog(
+        automation,
+        settings,
+        process,
+        inspection,
+        "Add exclusion dialog",
+    )?;
+    picker(automation, settings, process, inspection)?;
+    show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
+    for id in [automation_id::WAKE, automation_id::BEDTIME] {
+        wait("visible clock entry", || {
+            Ok(automation
+                .show_control(settings, process, id)?
+                .then_some(()))
+        })?;
+        automation.invoke(settings, process, id)?;
+        wait("clock flyout", || {
+            automation.enabled(settings, process, &automation_id::cancel(id))
+        })?;
+        std::thread::sleep(Duration::from_millis(300));
+        inspection.inspect(automation, settings, process, id)?;
+        inspection.snapshot(settings, process, &format!("{id} flyout"), "clock segments")?;
+        automation.invoke(settings, process, &automation_id::cancel(id))?;
+        wait("closed clock flyout", || {
+            Ok(automation
+                .enabled(settings, process, &automation_id::cancel(id))?
+                .is_none()
+                .then_some(()))
+        })?;
+    }
+    show_page(automation, settings, process, automation_id::NAV_GENERAL)?;
+    wait("visible language entry", || {
+        Ok(automation
+            .show_control(settings, process, automation_id::LANGUAGE)?
+            .then_some(()))
+    })?;
+    automation.expand(settings, process, automation_id::LANGUAGE)?;
+    std::thread::sleep(Duration::from_millis(300));
+    inspection.inspect(automation, settings, process, "language menu")?;
+    let mut capture = crate::capture::Capture::window(settings, process)?;
+    let mut windows = Vec::new();
+    winsafe::EnumWindows(|window| {
+        if window.GetWindowThreadProcessId().1 == process && window.IsWindowVisible() {
+            windows.push(window);
+        }
+        true
+    })
+    .map_err(io::Error::other)?;
+    for window in windows {
+        let bounds = window.GetWindowRect().map_err(io::Error::other)?;
+        capture.include((bounds.left, bounds.top, bounds.right, bounds.bottom))?;
+    }
+    inspection.capture(&capture, "language menu", "full dropdown bounds")?;
+    wait("choose English language", || {
+        Ok(automation
+            .select_language(settings, process, "English")?
+            .then_some(()))
+    })?;
+    wait("language restart message", || {
+        automation.enabled(settings, process, automation_id::RESTART_QUIT)
+    })?;
+    inspection.page(automation, settings, process, "language restart")?;
+    tray(automation, process, inspection)
+}
+
+fn picker(
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+    inspection: &mut Inspection,
+) -> io::Result<()> {
+    automation.invoke(settings, process, automation_id::ADD_APP)?;
+    wait("Add app Browse", || {
+        automation.enabled(settings, process, automation_id::DIALOG_BROWSE)
+    })?;
+    automation.invoke(settings, process, automation_id::DIALOG_BROWSE)?;
+    let picker = wait("owned executable picker", || {
+        crate::lifecycle::window(process, &crate::lifecycle::text()?.picker_title, true)
+    })?;
+    require(
+        picker
+            .GetWindow(winsafe::co::GW::OWNER)
+            .map_err(io::Error::other)?
+            == *settings,
+        "picker owner differs from settings",
+    )?;
+    std::thread::sleep(Duration::from_millis(300));
+    inspection.snapshot(
+        &picker,
+        process,
+        "executable picker",
+        "native Windows text; localized title",
+    )?;
+    automation.close(&picker, process)?;
+    wait("picker returns to Add app", || {
+        let closed =
+            crate::lifecycle::window(process, &crate::lifecycle::text()?.picker_title, true)?
+                .is_none();
+        Ok((closed
+            && automation.enabled(settings, process, automation_id::DIALOG_BROWSE)? == Some(true))
+        .then_some(()))
+    })?;
+    dialog(
+        automation,
+        settings,
+        process,
+        inspection,
+        "Add app after picker Cancel",
+    )
+}
+
+fn tray(automation: &Automation, process: u32, inspection: &mut Inspection) -> io::Result<()> {
+    let text = crate::lifecycle::text()?;
+    let menu = crate::tray::open(automation, process)?;
+    let settings = menu.item(0, &text.tray_settings)?;
+    menu.item(1, &text.manual_start)?;
+    menu.item(menu.labels().count() - 1, &text.tray_quit)?;
+    std::thread::sleep(Duration::from_millis(200));
+    for label in menu.labels() {
+        let values = isolated(label).into_iter().collect();
+        require(
+            classify(label, &values) != Class::Untranslated,
+            &format!("untranslated tray item {label:?}"),
+        )?;
+        inspection.texts.insert(label.to_owned());
+    }
+    inspection.snapshot(&menu.window, process, "tray menu", "all items")?;
+    let icon = crate::tray::icon(automation, &text.tooltip_prefix)?
+        .ok_or_else(|| io::Error::other("tray icon is absent"))?;
+    let tooltip = crate::tray::tooltip(&icon)?;
+    require(
+        classify(&tooltip, &isolated(&tooltip).into_iter().collect()) != Class::Untranslated,
+        "tray tooltip is not translated",
+    )?;
+    require(
+        tooltip.encode_utf16().count() < 128,
+        "tray tooltip reaches the Windows size limit",
+    )?;
+    fs_err::write(inspection.directory.join("tray-tooltip.txt"), &tooltip)?;
+    inspection.texts.insert(tooltip);
+    crate::tray::click(settings)
+}
+
 struct Inspection {
+    directory: PathBuf,
     views: usize,
     texts: BTreeSet<String>,
     findings: BTreeSet<String>,
 }
 
 impl Inspection {
+    fn new() -> io::Result<Self> {
+        let directory = tempfile::Builder::new()
+            .prefix("translation-100-")
+            .tempdir_in("target")?
+            .keep();
+        report(&format!("Translation screenshots: {}", directory.display()));
+        fs_err::write(directory.join("manifest.tsv"), "image\tview\tscroll\n")?;
+        fs_err::write(
+            directory.join("result.txt"),
+            "INCOMPLETE: automated checks and visual inspection pending\n",
+        )?;
+        Ok(Self {
+            directory,
+            views: 0,
+            texts: BTreeSet::new(),
+            findings: BTreeSet::new(),
+        })
+    }
+
+    fn page(
+        &mut self,
+        automation: &Automation,
+        window: &HWND,
+        process: u32,
+        place: &str,
+    ) -> io::Result<()> {
+        let scroll = automation
+            .scrolls(window, process)?
+            .into_iter()
+            .find(|scroll| scroll.id == automation_id::SCROLL);
+        self.traverse(automation, window, process, place, scroll.as_ref())
+    }
+
+    fn dialog(
+        &mut self,
+        automation: &Automation,
+        window: &HWND,
+        process: u32,
+        place: &str,
+    ) -> io::Result<()> {
+        let scrolls: Vec<_> = automation
+            .scrolls(window, process)?
+            .into_iter()
+            .filter(|scroll| scroll.id != automation_id::SCROLL)
+            .collect();
+        if scrolls.is_empty() {
+            self.traverse(automation, window, process, place, None)
+        } else {
+            for (index, scroll) in scrolls.iter().enumerate() {
+                self.traverse(
+                    automation,
+                    window,
+                    process,
+                    &format!("{place} scroll {index}"),
+                    Some(scroll),
+                )?;
+            }
+            Ok(())
+        }
+    }
+
+    fn traverse(
+        &mut self,
+        automation: &Automation,
+        window: &HWND,
+        process: u32,
+        place: &str,
+        scroll: Option<&crate::automation::Scroll>,
+    ) -> io::Result<()> {
+        if let Some(scroll) = scroll {
+            scroll_to(scroll, 0.0)?;
+        }
+        for _ in 0..100 {
+            // WinUI scroll and popup animations must settle before pixel
+            // capture.
+            std::thread::sleep(Duration::from_millis(200));
+            let state = scroll
+                .map(crate::automation::Scroll::state)
+                .transpose()?
+                .flatten();
+            self.inspect(automation, window, process, place)?;
+            self.snapshot(window, process, place, &format!("{state:?}"))?;
+            let Some((position, view)) = state else {
+                return Ok(());
+            };
+            let Some(next) = next_scroll(position, view)? else {
+                return Ok(());
+            };
+            let Some(scroll) = scroll else {
+                return Ok(());
+            };
+            scroll_to(scroll, next)?;
+        }
+        Err(io::Error::other(format!(
+            "{place} exceeds 100 captured viewports"
+        )))
+    }
+
+    fn snapshot(
+        &mut self,
+        window: &HWND,
+        process: u32,
+        place: &str,
+        scroll: &str,
+    ) -> io::Result<()> {
+        self.capture(
+            &crate::capture::Capture::window(window, process)?,
+            place,
+            scroll,
+        )
+    }
+
+    fn capture(
+        &mut self,
+        capture: &crate::capture::Capture,
+        place: &str,
+        scroll: &str,
+    ) -> io::Result<()> {
+        let name = format!(
+            "{:03}-{}.png",
+            self.views + 1,
+            place.replace(|character: char| !character.is_ascii_alphanumeric(), "-")
+        );
+        capture.snapshot(&self.directory.join(&name))?;
+        self.views += 1;
+        let mut manifest = fs_err::OpenOptions::new()
+            .append(true)
+            .open(self.directory.join("manifest.tsv"))?;
+        writeln!(manifest, "{name}\t{place}\t{scroll}")?;
+        report(&format!("CAPTURE: {name}; {scroll}"));
+        Ok(())
+    }
+
+    fn finish(&self) -> io::Result<()> {
+        fs_err::write(
+            self.directory.join("result.txt"),
+            format!(
+                "Automated checks complete: {} findings; {} screenshots; {} distinct texts; 96 DPI.\nVisual acceptance pending.\n{}\n",
+                self.findings.len(),
+                self.views,
+                self.texts.len(),
+                self.findings.iter().cloned().collect::<Vec<_>>().join("\n")
+            ),
+        )
+    }
+
     fn inspect(
         &mut self,
         automation: &Automation,
@@ -223,12 +546,17 @@ impl Inspection {
         process: u32,
         place: &str,
     ) -> io::Result<()> {
-        self.views += 1;
         let controls = automation.controls_with_parents(settings, process)?;
-        let values: BTreeSet<String> = controls
+        let mut values: BTreeSet<String> = controls
             .iter()
             .flat_map(|(control, _)| isolated(&control.name))
             .collect();
+        if controls
+            .iter()
+            .any(|(control, _)| control.id == automation_id::LANGUAGE)
+        {
+            values.insert("English".into());
+        }
         for (control, parent) in &controls {
             if let Some(problem) = translation(control, parent.as_ref(), &values) {
                 self.findings.insert(format!("{place}: {problem}"));
@@ -240,13 +568,17 @@ impl Inspection {
                 self.texts.insert(control.name.clone());
             }
         }
+        fs_err::write(
+            self.directory.join("findings.txt"),
+            self.findings.iter().cloned().collect::<Vec<_>>().join("\n"),
+        )?;
         Ok(())
     }
 }
 
 // WinUI names these parts of its controls, by automation identifier, with its
 // own text. That text follows WinUI's resources, which have no pseudo-locale.
-const WINUI_TEXT: [(&str, &str); 8] = [
+const WINUI_TEXT: [(&str, &str); 9] = [
     ("Close", "Close"),
     ("Maximize", "Maximize"),
     ("Minimize", "Minimize"),
@@ -255,6 +587,7 @@ const WINUI_TEXT: [(&str, &str); 8] = [
     ("StandardIcon", "Informational icon"),
     ("StandardIcon", "Warning icon"),
     ("VerticalScrollBar", "Vertical"),
+    ("Light Dismiss", "Close"),
 ];
 
 // The window chrome, the system menu, and WinUI's popup hosts have names in
@@ -265,11 +598,23 @@ fn translation(
     values: &BTreeSet<String>,
 ) -> Option<String> {
     let chrome = parent.is_some_and(|parent| {
-        parent.kind == UIA_TitleBarControlTypeId.0 || parent.kind == UIA_MenuBarControlTypeId.0
+        parent.kind == UIA_TitleBarControlTypeId || parent.kind == UIA_MenuBarControlTypeId
     });
+    let native_close_tooltip = control.id.is_empty()
+        && control.name == "Close"
+        && parent.is_some_and(|parent| {
+            parent.id.is_empty()
+                && ((control.kind == UIA_ToolTipControlTypeId
+                    && parent.kind == UIA_WindowControlTypeId
+                    && parent.name == "Popup")
+                    || (control.kind == UIA_TextControlTypeId
+                        && parent.kind == UIA_ToolTipControlTypeId
+                        && parent.name == "Close"))
+        });
     let checked = !chrome
-        && control.kind != UIA_PaneControlTypeId.0
-        && control.kind != UIA_WindowControlTypeId.0
+        && !native_close_tooltip
+        && control.kind != UIA_PaneControlTypeId
+        && control.kind != UIA_WindowControlTypeId
         && !WINUI_TEXT.contains(&(control.id.as_str(), control.name.as_str()));
     // A NumberBox's text box appends WinUI's range text to the header.
     let name = match control.id.as_str() {
@@ -280,7 +625,7 @@ fn translation(
         _ => control.name.as_str(),
     };
     (checked && classify(name, values) == Class::Untranslated)
-        .then(|| format!("untranslated {:?} ({})", control.name, control.id))
+        .then(|| format!("untranslated {control:?}; parent {parent:?}"))
 }
 
 // A vertical scroll viewer moves text past its edges, so only horizontal
@@ -288,7 +633,7 @@ fn translation(
 fn clipping(control: &Control, parent: &Control) -> Option<String> {
     let (left, top, right, bottom) = control.bounds;
     let (outer_left, outer_top, outer_right, outer_bottom) = parent.bounds;
-    if control.kind != UIA_TextControlTypeId.0
+    if control.kind != UIA_TextControlTypeId
         || right <= left
         || bottom <= top
         || outer_right <= outer_left
@@ -298,7 +643,7 @@ fn clipping(control: &Control, parent: &Control) -> Option<String> {
     }
     let horizontal = left < outer_left - 1 || right > outer_right + 1;
     let vertical = top < outer_top - 1 || bottom > outer_bottom + 1;
-    (horizontal || (vertical && parent.kind != UIA_PaneControlTypeId.0)).then(|| {
+    (horizontal || (vertical && parent.kind != UIA_PaneControlTypeId)).then(|| {
         format!(
             "{:?} ({}) at {:?} extends past its parent {:?} at {:?}",
             control.name, control.id, control.bounds, parent.id, parent.bounds
@@ -377,10 +722,44 @@ fn isolated(name: &str) -> Vec<String> {
     values
 }
 
+fn scroll_to(scroll: &crate::automation::Scroll, position: f64) -> io::Result<()> {
+    scroll.set(position)?;
+    wait("viewport reaches the requested position", || {
+        Ok(scroll
+            .state()?
+            .filter(|(actual, _)| (actual - position).abs() <= 0.1))
+    })
+    .map(|_| ())
+}
+
+fn next_scroll(position: f64, view: f64) -> io::Result<Option<f64>> {
+    if !position.is_finite()
+        || !(0.0..=100.0).contains(&position)
+        || !view.is_finite()
+        || !(0.0..100.0).contains(&view)
+        || view == 0.0
+    {
+        return Err(io::Error::other("invalid scroll viewport metadata"));
+    }
+    Ok((position < 100.0).then(|| (position + 75.0 * view / (100.0 - view)).min(100.0)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use test_case::test_case;
+
+    #[test]
+    fn scroll_steps_overlap_and_finish_at_the_bottom() {
+        assert_eq!(next_scroll(0.0, 20.0).expect("valid viewport"), Some(18.75));
+        assert_eq!(
+            next_scroll(90.0, 20.0).expect("valid viewport"),
+            Some(100.0)
+        );
+        assert_eq!(next_scroll(100.0, 20.0).expect("bottom viewport"), None);
+        assert!(next_scroll(0.0, 0.0).is_err());
+        assert!(next_scroll(f64::NAN, 20.0).is_err());
+    }
 
     #[test_case("[Ŝéţţîñĝš ~~~~]", Class::Translated ; "pseudo-locale text")]
     #[test_case("Settings", Class::Untranslated ; "English text")]
@@ -424,7 +803,7 @@ mod tests {
         Control {
             id: id.into(),
             name: name.into(),
-            kind: UIA_TextControlTypeId.0,
+            kind: UIA_TextControlTypeId,
             enabled: true,
             bounds: (0, 0, 10, 10),
         }
@@ -438,6 +817,11 @@ mod tests {
             None
         );
         assert!(translation(&part("CloseButton", "Cancel"), None, &values).is_some());
+        assert_eq!(
+            translation(&part("Light Dismiss", "Close"), None, &values),
+            None
+        );
+        assert!(translation(&part("Light Dismiss", "Cancel"), None, &values).is_some());
         assert!(translation(&part("Title", "Circadia closed"), None, &values).is_some());
         assert_eq!(
             translation(
@@ -458,6 +842,37 @@ mod tests {
     }
 
     #[test]
+    fn native_close_tooltip_is_exempt_without_exempting_application_text() {
+        let values = BTreeSet::new();
+        let popup = Control {
+            kind: UIA_WindowControlTypeId,
+            ..part("", "Popup")
+        };
+        let tooltip = Control {
+            kind: UIA_ToolTipControlTypeId,
+            ..part("", "Close")
+        };
+        assert_eq!(translation(&tooltip, Some(&popup), &values), None);
+        assert_eq!(
+            translation(&part("", "Close"), Some(&tooltip), &values),
+            None
+        );
+        assert!(translation(&part("", "Close"), None, &values).is_some());
+        assert!(translation(&part("", "Cancel"), Some(&tooltip), &values).is_some());
+        assert!(
+            translation(
+                &Control {
+                    name: "Settings".into(),
+                    ..tooltip
+                },
+                Some(&popup),
+                &values
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
     fn text_past_its_parent_is_clipped_except_vertically_in_a_scroll_viewer() {
         let control = |kind: i32, bounds| Control {
             id: String::new(),
@@ -466,12 +881,12 @@ mod tests {
             enabled: true,
             bounds,
         };
-        let text = control(UIA_TextControlTypeId.0, (10, 10, 120, 30));
+        let text = control(UIA_TextControlTypeId, (10, 10, 120, 30));
         let button = control(50000, (0, 0, 100, 40));
-        let pane = control(UIA_PaneControlTypeId.0, (0, 20, 200, 40));
+        let pane = control(UIA_PaneControlTypeId, (0, 20, 200, 40));
         assert!(clipping(&text, &button).is_some());
         assert!(clipping(&text, &pane).is_none());
-        let inside = control(UIA_TextControlTypeId.0, (10, 10, 90, 30));
+        let inside = control(UIA_TextControlTypeId, (10, 10, 90, 30));
         assert!(clipping(&inside, &button).is_none());
     }
 }

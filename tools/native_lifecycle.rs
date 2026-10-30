@@ -8,6 +8,9 @@ mod activity;
 #[path = "native/automation.rs"]
 mod automation;
 #[cfg(windows)]
+#[path = "native/capture.rs"]
+mod capture;
+#[cfg(windows)]
 #[path = "native/deployment.rs"]
 mod deployment;
 #[cfg(windows)]
@@ -81,6 +84,8 @@ fn main() -> std::io::Result<()> {
         }
         #[cfg(feature = "graph-measurement")]
         Some("--native-recovery") => recovery::run(&arguments),
+        #[cfg(feature = "graph-measurement")]
+        Some("--native-location") => location::run(&arguments),
         #[cfg(feature = "graph-measurement")]
         Some("--measure-graph") => graph::run(&arguments),
         Some("--startup") => startup::run(&arguments),

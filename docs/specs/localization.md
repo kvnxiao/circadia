@@ -6,13 +6,15 @@ spec: SPEC.md
 
 Read the shared terms and invariants in [SPEC.md](SPEC.md) before this area. Interface text is every string that settings, its dialogs, the tray menu, and the tray tooltip show, plus every accessible name and description that a screen reader announces. The interface language is the language of that text.
 
+The validation scenarios use pseudo-localization: a developer-only artificial test language with expanded strings that expose layout and missing-translation defects. It is an acceptance-test technique, not a user-facing translation.
+
 ## Text
 
 ### REQ-localizable-text — Present all interface text from translations
 
 Every piece of interface text comes from a translation resource for the interface language: labels, descriptions, buttons, status lines, phase names (such as Daytime or Suppressed), graph labels, event names (Wake, Sunrise, Sunset, and Bedtime), validation and error messages, dialog text, tray menu items, the tray tooltip, and accessible names and descriptions. English is the source language and the fallback: a message missing from a translation uses its English text. Messages that include values use named placeholders, so a translation can reorder them, and counts use the plural rules of the interface language. Error explanations are translated; technical error codes appear unchanged. Log records are not interface text.
 
-The first release ships English and a generated pseudo-localized resource used for testing. Adding a language requires only its translation resource.
+The first release ships English. Adding a language requires only its translation resource; additional translated languages are post-MVP work under [Future work](SPEC.md#future-work).
 
 **Intent:** Let translators localize Circadia completely, and keep everything a user sees or hears in one language.
 
@@ -26,11 +28,14 @@ The first release ships English and a generated pseudo-localized resource used f
 
 ### REQ-translation-layout — Fit translated text
 
-Settings, its dialogs, and the tray menu show translated text without clipping or overlap at 100%, 150%, and 200% scaling, including the pseudo-locale's text, which is at least 40% longer than English. Text wraps or the layout grows instead. Every translation of every tray tooltip is shorter than 128 UTF-16 code units, the Windows notification-area limit.
+Settings, its dialogs, and the tray menu show translated text without clipping or overlap at 100% scaling. Text wraps or the layout grows instead. Verification at 150% and 200% is post-MVP work under [Future work](SPEC.md#future-work). Every translation of every tray tooltip is shorter than 128 UTF-16 code units, the Windows notification-area limit.
+
+**Validation:** Use test-language strings at least 40% longer than English.
 
 **Scenarios:**
 
-- Pseudo-localized text at 200% scaling: the navigation pane labels, settings group titles, and the Wake, Sunrise, Sunset, and Bedtime summary show their complete text.
+- Pseudo-localized text at 100% scaling: the navigation pane labels, settings group titles, and the Wake, Sunrise, Sunset, and Bedtime summary show their complete text.
+- Pseudo-localized settings runs on the smaller displays and in the narrow navigation mode of REQ-on-demand-settings: descriptions wrap, action groups remain reachable, and dialogs fit without clipping their translated commands.
 - Every tooltip text in every shipped language, with its longest values filled in, is shorter than 128 UTF-16 code units.
 
 ## Language

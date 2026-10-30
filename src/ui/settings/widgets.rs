@@ -25,6 +25,33 @@ use windows_reactor::VerticalAlignment;
 use windows_reactor::View;
 
 pub(super) const APP_GLYPH: &str = "\u{ECAA}";
+pub(super) const ICON_ACTION_SIZE: f64 = 40.0;
+
+pub(super) fn glyph_label(glyph: &'static str, label: impl AsRef<str>) -> StackPanel {
+    StackPanel::new()
+        .orientation(Orientation::Horizontal)
+        .spacing(8.0)
+        .children((FontIcon::new().glyph(glyph).font_size(16.0), body(label)))
+}
+
+pub(super) fn action_group(actions: Vec<View>) -> StackPanel {
+    StackPanel::new()
+        .orientation(Orientation::Horizontal)
+        .horizontal_alignment(HorizontalAlignment::Right)
+        .vertical_alignment(VerticalAlignment::Center)
+        .spacing(12.0)
+        .children(actions)
+}
+
+pub(super) fn icon_button(glyph: &'static str, size: f64) -> Button {
+    Button::new()
+        .style(ButtonStyle::Subtle)
+        .min_width(ICON_ACTION_SIZE)
+        .min_height(ICON_ACTION_SIZE)
+        .horizontal_content_alignment(HorizontalAlignment::Center)
+        .vertical_content_alignment(VerticalAlignment::Center)
+        .content(FontIcon::new().glyph(glyph).font_size(size))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum AppIcon {
@@ -184,24 +211,19 @@ pub(super) fn expand_button(
     id: &str,
     on_click: Callback<()>,
 ) -> View {
-    Button::new()
-        .style(ButtonStyle::Subtle)
-        .width(32.0)
-        .height(32.0)
-        .is_enabled(expansion != Expansion::Held)
-        .automation_id(id)
-        .automation_name(name)
-        .on_click(on_click)
-        .content(
-            FontIcon::new()
-                .glyph(if expansion.expanded() {
-                    "\u{E70E}"
-                } else {
-                    "\u{E70D}"
-                })
-                .font_size(12.0),
-        )
-        .into()
+    icon_button(
+        if expansion.expanded() {
+            "\u{E70E}"
+        } else {
+            "\u{E70D}"
+        },
+        12.0,
+    )
+    .is_enabled(expansion != Expansion::Held)
+    .automation_id(id)
+    .automation_name(name)
+    .on_click(on_click)
+    .into()
 }
 
 pub(super) fn nested_row(glyph: FontIcon, text: Vec<View>, action: Option<View>, id: &str) -> View {

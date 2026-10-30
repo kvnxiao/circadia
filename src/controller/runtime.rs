@@ -753,7 +753,7 @@ impl ControlRuntime {
         self.preview.is_some() || self.preview_entry.is_some()
     }
 
-    fn preview_deadline(&self) -> Result<Option<Duration>, ControlError> {
+    pub(super) fn preview_deadline(&self) -> Result<Option<Duration>, ControlError> {
         if let Some(preview) = &self.preview {
             return Ok(Some(preview.end));
         }

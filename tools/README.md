@@ -1,8 +1,8 @@
 # Native application checks
 
-These checks run the built Circadia executable on the Windows desktop and inspect it through UI Automation. Some change live Windows Night Light; others replace it with a simulated Night Light backend. Run them from the repository root on an interactive Windows 11 x64 desktop. Install the development tools listed in the [project README](../README.md). `just check` does not run any of these recipes. The lifecycle, settings, Explorer, and shutdown checks send mouse and keyboard input; avoid desktop input during those recipes. The standalone picker, startup, pseudo-locale, deployment, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
+These checks run the built Circadia executable on the Windows desktop and inspect it through UI Automation. Some change live Windows Night Light; others replace it with a simulated Night Light backend. Run them from the repository root on an interactive Windows 11 x64 desktop. Install the development tools listed in the [project README](../README.md). `just check` does not run any of these recipes. The lifecycle, settings, Explorer, shutdown, and pseudo-locale checks send mouse or keyboard input; avoid desktop input during those recipes. The standalone picker, startup, deployment, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
 
-The checks find the settings window by its title and every settings control by the automation identifiers that `circadia::automation_id` lists, so they do not depend on the interface language. A unit test of the harness fails when a check names an identifier that the list does not have. UI Automation exposes a panel or border only when it has an accessible name, so the checks use the controls and text inside a settings row, the panel that holds one setting's label and controls, rather than the row's own identifier. The tray menu's items expose only their text, so the checks find each item by its position (Open Circadia settings, manual suppression, the recent-apps caption, the recent apps, Quit Circadia) and compare its label with the catalog text of the language under test, which is the message in that language's Fluent `.ftl` file; they find the tray icon by the text that every tooltip starts with, `Circadia:` in English. The checks find the Windows file picker by its title, which is catalog text, and its filename box and Open button by their control identifiers, because Circadia shows the picker in the interface language. The Shell's hidden-icons button lookup requires an English Windows Shell.
+The checks find the settings window by its title and every settings control by the automation identifiers that `circadia::automation_id` lists, so they do not depend on the interface language. A unit test of the harness fails when a check names an identifier that the list does not have. UI Automation exposes a panel or border only when it has an accessible name, so the checks use the controls and text inside a settings row, the panel with one setting's label and controls, rather than the row's own identifier. The tray menu's items expose only their text, so the checks find each item by its position (Open Circadia settings, manual suppression, the recent-apps caption, the recent apps, Quit Circadia) and compare its label with the catalog text of the language under test, which is the message in that language's Fluent `.ftl` file; they find the tray icon by the text that every tooltip starts with, `Circadia:` in English. The checks find the Windows file picker by its title, which is catalog text, and its filename box and Open button by their control identifiers, because Circadia shows the picker in the interface language. The Shell's hidden-icons button lookup requires an English Windows Shell.
 
 The recipes that launch `circadia.exe` (`native-lifecycle`, `native-settings`, `native-explorer`, `native-startup`, `native-shutdown`, and `native-picker`) accept `--language TAG`, which they pass to every Circadia launch, for example `just native-settings --language qps-Ploc` for the pseudo-locale. The deployment, recovery, and measurement recipes run English only.
 
@@ -36,7 +36,7 @@ Successful cleanup clears Windows' native preview flag, used to request immediat
 
 On failure, the harness attempts graceful cleanup of its child. If the child cannot exit, the harness forcibly terminates it and reports that Night Light may retain its state at termination. The harness prints the retained temporary directory for inspection.
 
-UI Automation runs on the harness's COM multithreaded apartment. Searches are restricted to process-verified application windows, the Shell taskbar, and its visible hidden-icons area. The application and harness share the `windows` 0.62 bindings; UI Automation features are enabled only for the harness. The application uses the Windows Reactor UI library from the microsoft/windows-rs repository, pinned to a separate commit.
+UI Automation runs on the harness's COM multithreaded apartment. Searches are restricted to process-verified application windows, the Shell taskbar, and its visible hidden-icons area. The application and harness share the `windows` bindings from the same Git revision as Reactor; UI Automation features are enabled only for the harness.
 
 Power, session, and taskbar messages sent directly to the application are synthetic. `just native-lifecycle` does not restart Explorer, suspend Windows, sign out, or shut down the machine. These messages verify application handling, not delivery during an actual power or session transition. Successful library readback establishes native settings, not displayed color or smooth transitions.
 
@@ -61,7 +61,7 @@ This recipe runs the lifecycle checks and exercises the settings controls with b
 - Browse in the Add app and Add exclusion dialogs opens the Windows file picker owned by the settings window. Cancellation, including after folder navigation, returns to the dialog. Browsing to `ApplicationFrameHost.exe` shows the dialog's message instead of a choice. A selected file becomes a chosen entry with its lowercase file name, and the dialog's Add command writes it to the list. The fixed exclusions, `ApplicationFrameHost.exe` and the running Circadia executable, are listed. Remove writes each removal at once.
 - Turning solar timing on without coordinates shows the coordinates message and writes nothing. Typed latitude and longitude apply when the field loses focus, and the file then has solar timing and both coordinates. Turning solar timing off keeps the coordinates. The check does not turn on Use my Windows location, so it does not request a Windows position or show a Windows permission prompt.
 - Valid temperature edits change Night Light and are written to the configuration file and its backup without a Save command. Entering 1.5 Hz as the maximum update rate saves 2 Hz.
-- A Daytime value below Morning/Evening keeps its error at the field, blocks Preview, and leaves output and the file unchanged until it is corrected.
+- A Daytime value below Morning/Evening keeps its error at the field and blocks Preview. It does not change output or the file until it is corrected.
 - The schedule graph is shown. Preview disables schedule edits while manual suppression and the management setting stay available; Stop and natural completion restore editing, and Preview does not write the configuration. Manual suppression started during Preview does not stop it; after Stop, output fades to 6500 K.
 - A changing Preview stores many distinct temperatures, including the 2200 K and 6200 K levels.
 - A focused test window appears under Recently focused; its Add command writes a suppression entry. Focusing that window during Preview keeps Preview running until completion, then requests automatic 6500 K suppression. Returning focus to settings restores the schedule after the focus delay, and Remove writes the removal.
@@ -150,11 +150,24 @@ The tool records 15 graph-latency samples:
 
 The tool fails if any sample exceeds 100 ms. A simulated temperature operation for manual suppression remains blocked during the first 14 edits, so these samples show that the graph does not wait for Night Light output. Wake and Bedtime edits are not measured, because the time picker does not expose a UI Automation value pattern.
 
-A two-second Preview must advance through at least eight rendered graph positions while its own output operation remains blocked; editing returns after the harness releases the operation. The resume check sets the Preview length to 60 seconds on the Transitions page, starts Preview, and sends a synthetic resume notification without a preceding suspend notification. Editing must become available within the harness's 20-second timeout, before playback could finish naturally. A Sleep-temperature edit then must update the graph while a manual-suppression output operation remains blocked. Output is not blocked during the resume notification, because settings becomes editable only after the controller thread, which writes Night Light, reports the end of Preview, and it reports that only after a blocked operation returns. This check does not put Windows to sleep or verify hardware resume delivery.
+Preview motion is checked from captured screen pixels. The harness identifies changes in the rendered time line and dot, and keeps its test window on top during capture. A two-second Preview must advance through at least eight changed rendered positions while its native output call remains blocked. Editing must return at the logical deadline before the harness releases that call.
+
+A separate Preview uses a 1 Hz native rate limit. The capture must observe more than ten changed positions in about 900 ms, and temperature-call timestamps must respect the configured interval. The harness also checks these lifecycle transitions:
+
+- Navigating away and minimizing stop the animation; returning and restoring resume it.
+- Resizing rebuilds the path from the current playback clock.
+- Stop restores editing while a native call remains blocked.
+- Completed, stopped, hidden, and closed states record no animation starts during short activity observations.
+
+The captures are saved to `target/preview-motion-blocked.png` and `target/preview-motion-one-hz.png`. Their sampling rate depends on screen capture and harness overhead. They establish visible movement between native calls, not the monitor's presentation rate or frame-time distribution.
+
+The same recipe checks the Preview bar, phase ring, and dot color while a simulated native call is blocked. It captures intermediate fill lengths, arc lengths, and RGB colors for 900 ms and reads the native progress controls' accessible ranges. The navigation ring and its accessible percentage must keep advancing on the General page; minimizing settings must stop every progress animation. Stop must restore editing before the native call is released. The captures are saved to `target/preview-progress-bar.png`, `target/preview-progress-ring.png`, and `target/preview-progress-color.png`.
+
+The resume check sets the Preview length to 60 seconds on the Transitions page, starts Preview, and sends a synthetic resume notification without a preceding suspend notification. Editing must become available within the harness's 20-second timeout, before playback could finish naturally. A Sleep-temperature edit then must update the graph while a manual-suppression output operation remains blocked. This check does not put Windows to sleep or verify hardware resume delivery.
 
 The tool prints the processor, logical processor count, Windows build, primary display mode, settings DPI, build profile, source revision, and individual results. Uncommitted source changes are included in the build.
 
-The `graph-measurement` feature enables the simulated backend, controlled solar and native failures, and rendering instrumentation. Ordinary application builds exclude these hooks. `just check` compiles the feature but does not launch this interactive run.
+The `graph-measurement` feature enables the simulated backend, controlled solar and native failures, and rendering instrumentation. Its graph-latency subscription runs a test callback on each XAML frame while settings is open; the activity counters exclude that callback. Ordinary application builds exclude these hooks. `just check` compiles the feature but does not launch this interactive run.
 
 ## Native failure recovery
 
@@ -169,15 +182,18 @@ The recipe runs Circadia's release build with its bundled runtime, isolated conf
 Observation registration subscribes to changes in Windows Night Light settings and state. The checks verify:
 
 - Failed observation registration still permits live edits and output, and the status line reports it. Retry in the Night Light failure banner restores observation, and repeated failures produce one failure record before the recovery record in the `logs/circadia.log` of the run's temporary data directory.
+- UI Automation reports one status text configured to announce changes without interrupting current screen-reader speech. This accessible text belongs to the app name in the navigation pane. The visible numerical summaries and Preview caption have automatic announcements off. The accessible status text changes when observation fails and recovers.
 - Failed settings reads prevent temperature, schedule, and on/off writes while Preview advances on the graph. Recovery applies the current 6500 K position instead of earlier playback steps.
 - Stop and natural Preview completion restore editing while access still fails. Automatic recovery selects the current schedule without replaying obsolete temperatures.
+- A simulated temperature operation stays blocked past a three-second Preview deadline while General is selected. Editing becomes available there and on the other three pages before the operation is released. Release restores the current schedule without replaying obsolete Preview steps.
+- A new Preview is submitted after the old run's deadline while its native call remains blocked. Once that call finishes, the new run starts with a deadline calculated from its command submission time and configured duration. The check waits for command submission before releasing the old call.
 - A temperature operation reports failure after storing 2300 K, and its subsequent preview cleanup also fails. The stored temperature and enabled state are preserved, settings shows the failure banner, and the log records both failures.
 - Retry replaces a pending 800 ms delay and requests application of the current target even when the stored temperature already equals it. Successful recovery clears the banner.
 - Recorded simulated public operations execute without overlap.
 
 Wake and Bedtime are configured relative to the current local clock so Preview moves from a 2200 K Sleep period to 6500 K Daytime. A separate live edit to 2300 K exercises partial storage. The tool prints each completed operation's start, duration, request, failure, and resulting simulated state. Capture is bounded; overflow fails the check. On failure, the tool retains and prints the temporary configuration directory.
 
-These checks establish application behavior after controlled failures at the native adapter boundary. They do not establish Windows access permissions, delivery of actual Night Light subscription failures, or displayed color. The existing live native recipes exercise successful Windows operations separately.
+These checks establish application behavior after controlled failures at the native adapter boundary. They do not establish Windows access permissions, delivery of actual Night Light subscription failures, or displayed color. UI Automation verifies accessible names and live-region properties; actual Narrator delivery has not been exercised. The existing live native recipes exercise successful Windows operations separately.
 
 ## Native output timing
 
@@ -200,7 +216,18 @@ Each temperature-call record includes the attempt start, public-call start, and 
 
 The tool requires at least 95% of temperature calls in each scenario to start within 20 ms of eligibility. It also checks final temperatures and Preview restoration, rejects native errors or incomplete traces, and verifies cleanup through native readback. The raw trace and scenario summaries print after the application exits. Ordinary builds exclude the instrumentation; measured call timings include its overhead and do not establish displayed color or smoothness.
 
-This recipe changes live Night Light without moving the cursor or sending keyboard input. Settings can take focus. Graceful exit clears native preview and requests Night Light off without restoring the previous native schedule or temperature. Failure retains the temporary configuration directory. The tool prints the source revision, executable, build profile, hardware, Windows build, display modes, and settings window dimensions; preserve those details with the raw results. On 2026-10-27 the reworked order ran twice and failed its trace checks both times, although every measured output started at most 2.7 ms after it became eligible. In both runs, the first step of the scheduled transition, which the worker starts on a timer at the end of the 2400 K plateau, ran outside a measured attempt because the trace had no due time for it. In the second run, one call during Preview at 240 Hz also started before the eligibility time that the trace computed. Both are defects of the `output-measurement` trace, not of output timing.
+This recipe changes live Night Light without moving the cursor or sending keyboard input. Settings can take focus. Graceful exit clears native preview and requests Night Light off without restoring the previous native schedule or temperature. Failure retains the temporary configuration directory. The tool prints the source revision, executable, build profile, hardware, Windows build, display modes, and settings window dimensions; preserve those details with the raw results.
+
+On 2026-10-27 the recipe ran twice and failed its trace checks both times, although every measured output started at most 2.7 ms after it became eligible. In both runs, the first scheduled change after the 2400 K plateau lacked a recorded due time. In the second run, one call during Preview at 240 Hz also started before the eligibility time that the trace computed.
+
+On 2026-10-29, a live run reproduced the missing due time. Fixed-clock tests identified two trace defects:
+
+- When a fade's final rounded value was already stored, separate native-preview cleanup did not record the next scheduled change. The trace now calculates that deadline from the time when cleanup was first due, including when cleanup finishes late.
+- When an automatic correction and an output exempt from the rate interval were both pending, the trace applied the interval to both. It now calculates their eligibility separately and records the first eligible opportunity. A fixed-clock test reproduces this error; the live run did not reproduce the earlier Preview failure.
+
+These changes affect measurement bookkeeping. The controller's output-rate ceiling and native-call serialization are unchanged.
+
+The subsequent live run passed all scenarios and endpoint checks. Every measured temperature call started within 17.172 ms of eligibility; the longest public call took 50.694 ms. The release build ran on an AMD Ryzen 7 9800X3D with 16 logical processors, Windows 11 build 26300.9711, and a 2560 × 1440 display at 480 Hz. Settings used 96 DPI and a 1216 × 1008 window. The build used windows-rs `8786f59` and working-tree changes based on `c453c2f`. Cleanup cleared native preview and left Night Light off.
 
 ## Worker activity and idle behavior
 
@@ -217,7 +244,7 @@ The first phase observes constant 3400 K output for ten minutes with settings cl
 Later phases use controlled application clocks and explicit worker wakeups. They check:
 
 - A one-hour 6500 K to 2400 K transition emits exactly 410 distinct 10 K steps at independently calculated deadlines.
-- Automatic suppression removes underlying temperature deadlines while preserving one date-boundary recalculation.
+- Automatic suppression removes underlying temperature deadlines while preserving one recalculation when the local date changes.
 - With manual suppression active, the open settings window on the Schedule page updates only for the graph's current-time marker, once per whole minute. An observation across one minute boundary must record exactly one timer tick and at most two view updates. After settings closes, an observation across the next minute boundary must record none, and manual suppression still expires after exactly one hour.
 - Persistent native read failures use 100, 200, 400, and then 800 ms retry delays. Successful recovery stops retries.
 
@@ -257,7 +284,7 @@ This recipe changes live Night Light and uses UI Automation without moving the c
 
 ## Copied runtime deployment
 
-Build the bundled runtime with `just build-self-contained`. From `target/debug`, copy `circadia.exe`, `circadia.ico`, `Microsoft.Web.WebView2.Core.dll`, and the files listed in the [pinned runtime manifest](https://github.com/microsoft/windows-rs/blob/0496ec19116f1dac690daf31fcb96769118d9bac/crates/libs/reactor-setup/assets/runtime.txt) to a separate directory. Preserve their relative paths, including resource subdirectories. Close any running Circadia instance and pass the copied executable to:
+Build the bundled runtime with `just build-self-contained`. From `target/debug`, copy `circadia.exe`, `circadia.ico`, `Microsoft.Web.WebView2.Core.dll`, and the files listed in the [pinned runtime manifest](https://github.com/microsoft/windows-rs/blob/3b6bea553787d9419b3fdd29e2c5436666d7325b/crates/libs/reactor-setup/assets/runtime.txt) to a separate directory. Preserve their relative paths, including resource subdirectories. Close any running Circadia instance and pass the copied executable to:
 
 ```bash
 just native-deployment "path/to/copied/Circadia/circadia.exe"
@@ -281,6 +308,23 @@ This recipe runs the lifecycle checks and restarts the current Explorer Shell on
 
 After restart, the harness verifies one usable Circadia tray icon, the tray menu's labels, foreground settings activation, and reapplication of the current Night Light temperature in the original Circadia process. This recipe does not suspend Windows, sign out, or shut down the machine.
 
+## Windows location consent and startup
+
+```bash
+just native-location
+```
+
+This recipe uses simulated Night Light and location outcomes to check consent and request lifetime. Close any running Circadia instance first. It uses UI Automation, opens and closes Settings, and can take focus. It does not move the cursor or send keys.
+
+Four separate processes share one temporary configuration directory:
+
+- Cancel keeps location off without a request. Turn on saves enablement. A delayed position received after Settings closes is saved.
+- The next process starts only in the tray and requests one position. Opening Settings reuses the pending request; page changes do not add requests.
+- Denied permission at tray startup keeps the saved preference and coordinates without requesting Windows consent. Opening Settings starts a simulated Windows permission request; the failure stays visible until acquisition succeeds.
+- Foreground startup with the saved preference requests once, even with solar timing off, without repeating Circadia's location consent dialog.
+
+The recipe also checks Windows permission silently. When access is already allowed, a fifth process starts only in the tray and requests one real Windows position. It verifies that the position is saved without printing coordinates. Otherwise, it reports the host check as pending. It does not change Windows privacy settings or accept an OS permission prompt. A failed check retains the temporary directory for inspection.
+
 ## Pseudo-locale
 
 Close any running Circadia instance, then run:
@@ -289,18 +333,43 @@ Close any running Circadia instance, then run:
 just native-translation
 ```
 
-This recipe starts Circadia in the `qps-Ploc` pseudo-locale with management off, so it does not change Night Light. Its configuration has an invalid focus delay, an unknown key, a suppression entry with a window title, a second suppression entry, an exclusion, and a crash notice from a previous run, so the settings window shows a field message and banners for the invalid field, the unknown key, and the crash. The recipe uses UI Automation without moving the cursor or sending keys; settings can take focus. It inspects nine views: the four pages, the Schedule page with solar timing on, the App suppression page with its exclusion list expanded, the Night Light consent dialog, the Add app dialog, and the window-title dialog. It cancels each dialog, turns solar timing back off, and quits through the General page.
+This recipe starts Circadia in the `qps-Ploc` pseudo-locale, an artificial language with expanded test text, with management off. It does not change Night Light. Its configuration has an invalid focus delay, an unknown key, two suppression entries including a title condition, an exclusion, and a saved crash notice. Those fixtures exercise validation messages and banners.
+
+The recipe inspects and captures every page through overlapping scroll positions. It also visits expanded exclusions, consent dialogs, both Add dialogs, the title-condition editor, both time flyouts, the language popup and restart message, and the tray menu. It opens and cancels the Windows file picker and verifies the tray tooltip's accessible text. It sends mouse and keyboard input for those interactions; leave the desktop idle. Cancelling location consent does not request a Windows position. The fixture's selected language can change, but Windows' language and other host settings do not.
 
 In each view the recipe reads the text of every element and reports:
 
 - Text that has letters outside the pseudo-locale's brackets. Values that a message inserts between Unicode isolation marks, and each word of such a value, are exempt, as are executable names and text that has a digit and no run of more than two letters, such as `10:30 PM` and `6500 K`.
 - Text that extends horizontally past its parent element, or vertically past a parent that is not a pane. A scrolling pane moves text past its edges.
 
-Windows' caption buttons, the system menu, and WinUI's popup hosts show Windows' text and are not checked. WinUI's own names for parts of its controls are exempt only on the part that shows them: "Close" on an InfoBar's close button, the InfoBar icon names, "Vertical" on a scroll bar, and the range text that a number box appends to its field name. Text inside other WinUI parts, such as an InfoBar's title and message and a dialog's buttons, is checked.
+Windows' caption buttons, the system menu, and WinUI's popup hosts show Windows' text and are not checked. WinUI's own names for parts of its controls are exempt only on the corresponding native part: an InfoBar's close button and icons, popup dismissal controls and their Close tooltip, scroll bars, and the range text appended to number-field names. Other text inside WinUI parts, including InfoBar titles and messages and dialog buttons, is checked. Windows file-picker chrome can follow Windows' language.
 
-The layout check has two limits. UI Automation reports a text element's rectangle clipped to its layout slot, so text that is cut off inside a fixed-width or fixed-height container, such as a long label that does not wrap, is not reported. A text element scrolled out of view has an empty rectangle, so the check sees layout only for the part of each page that is visible without scrolling. The recipe does not open the Windows file picker; `just native-picker --language qps-Ploc` opens it in the pseudo-locale. It checks layout only at the current display scale; run it again at 150% and 200% scaling to check those scales. Failure retains the temporary configuration directory.
+UI Automation reports a text element's rectangle clipped to its layout slot, so it cannot establish that a glyph or text fits inside that slot. The recipe scrolls through content and records PNG captures in a fresh ignored `target/translation-100-*` directory with an ordered `manifest.tsv`. Unexpected automation failures fail the run. Automated success still requires visual inspection of the complete screenshot set; `result.txt` records that distinction. This acceptance recipe requires 100% scaling. Checks at 150% and 200% are [post-MVP work](../docs/specs/SPEC.md#future-work). Failure retains the temporary configuration directory.
 
 ## Recorded results
+
+At windows-rs `5cfe2c9` on 2026-10-29, Windows 11 build 26300.9711 at 100% scaling passed the binding-migration checks for location, both settings-startup variants, and all five shutdown cases. The completed animations passed captured-pixel and accessible-value checks with native output blocked; the [measurement record](../docs/research/resource-measurement.md#progress-bar-phase-ring-and-marker-color) gives the results and limits. Recovery passed 167 serialized simulated calls. The quick activity check recorded one indicator update during 60.039 seconds with settings open and zero UI ticks or views during 59.925 seconds after closing.
+
+On 2026-10-29, the working tree based on `c453c2f` used windows-rs `8786f59` and bundled Windows App SDK runtime 2.6.4 on Windows 11 build 26300.9711 at 100% scaling:
+
+| Recipe | Result |
+| :-- | :-- |
+| `just native-settings` | Passed both startup preferences, including the lifecycle, page order, keyboard, picker, autosave, Preview, suppression, and cleanup checks. |
+| `just native-startup` | Passed successful registration, Windows-disabled startup, and registration failure with Retry. |
+| `just native-shutdown` | Passed all five cases: session end with a dialog, while settings opens, with a picker, or with a flyout; and Quit with a dialog. |
+| `just native-picker --language qps-Ploc` | Passed. |
+| `just native-translation` | Passed ten views and 200 texts at 96 DPI, including the location consent dialog. The geometric check retains the limitations described above. Scrolling and screenshot inspection remain pending at 100%; checks at 150% and 200% are deferred to post-MVP work. |
+| `just native-location` | Passed all four simulated consent/startup cases and one real tray-only acquisition using existing Windows permission. No coordinates were printed and no Windows privacy settings changed. |
+| `just native-explorer` | Passed both startup preferences, Explorer restart, and cleanup. |
+| `just native-recovery` | Passed after fixing a harness race: automatic recovery could remove Retry between clearing an injected failure and finding its button. The test now prevents simulated recovery until Retry is submitted. The passing run recorded 89 serialized calls. |
+| `just measure-graph` | Passed 15 samples, with a maximum of 34.643 ms from input to the XAML rendering callback. Metadata reported 2560 × 1440 at 480 Hz; this is the display setting, not a measured Preview frame rate. |
+| `just measure-output` | Passed after correcting deadline and rate-limit bookkeeping in the trace. Every measured temperature call started within 17.172 ms of eligibility; all endpoint checks passed. |
+
+The 2026-10-29 validation of Preview completion during blocked native output passed `just native-recovery` with 139 serialized simulated calls. All four pages became editable while the native call remained blocked past the logical deadline. A separate check submitted a new Preview before releasing the old call and verified that it started with its own deadline. The run did not change live Night Light.
+
+The status-announcement checks on the same machine passed `just native-recovery` with 170 serialized simulated calls. UI Automation exposed one polite status region and non-live numerical regions; injected failure and recovery changed the accessible status name. Actual Narrator delivery remains untested. The subsequent pseudo-locale check passed ten views and 201 distinct text values at 96 DPI.
+
+Night Light was off with native preview cleared after each passing run that managed it. Scaling at 150% and 200%, system-theme changes, and minimum-build deployment remain untested at this revision.
 
 On 2026-10-27, on Windows 11 build 26300.9711 at 100% scaling (96 DPI) with the English Shell, the harness described above ran against the working tree based on `4647f8b`:
 
@@ -310,14 +379,14 @@ On 2026-10-27, on Windows 11 build 26300.9711 at 100% scaling (96 DPI) with the 
 | `just native-startup` | Passed on the second run. The first run could not find the startup message because its identifier was on an unnamed border; settings now puts the message identifier on its text. |
 | `just native-lifecycle` | Passed. |
 | `just native-settings` | Passed on the third run. The first run counted tray menu items from every window of the process; the second read the configuration file before the Preview length was written. Both were harness errors. A fourth run, with the page-order and keyboard checks added, passed. |
-| `just native-recovery` | Passed on the second run. The first run expected 6500 K at the top edge of the graph, which now keeps a margin. It passed again after the review changes. |
+| `just native-recovery` | Passed on the second run. The first run expected 6500 K at the top edge of the graph, which now keeps a margin. A subsequent run also passed. |
 | `just native-explorer` | Passed, including the Explorer restart. |
 | `just measure-graph` | Passed: 15 samples, with a maximum of 21.2 ms from input event to XAML rendering callback. |
 | `just measure-activity --quick` | Passed. The quick run shortens idle observation to two seconds, so it is a harness check, not a baseline. |
 | `just measure-resources --quick` | Passed with no recorded application errors. The quick run uses two-second observations, so its numbers are not baselines. |
 | `just native-deployment` | Passed with a copied runtime. |
 | `just measure-output` | Failed its trace checks in two runs; see [Native output timing](#native-output-timing). The first run also reported an empty scenario, because the harness added a second `startup` label; the label was removed. |
-| `just native-translation` | Passed at 100% scaling on the first recipe run: 9 views and 196 distinct texts, with no untranslated or clipped text. A later version that also checks text inside WinUI parts passed. With temporary English text in the crash banner's title and the consent dialog's Cancel button, it reported both; a temporary non-wrapping label of about 70 characters in a 120 epx container was not reported. Runs at 150% and 200% scaling were not performed. |
+| `just native-translation` | Passed at 100% scaling on the first recipe run: 9 views and 196 distinct texts, with no untranslated or clipped text. A later version that also checks text inside WinUI parts passed. With temporary English text in the crash banner's title and the consent dialog's Cancel button, it reported both; a temporary non-wrapping label of about 70 characters in a container 120 effective pixels wide (Windows' scale-independent layout units) was not reported. Runs at 150% and 200% scaling were not performed. |
 | `just native-shutdown` | Failed in the first three runs, then passed twice. In the failed runs, confirmed session end with the Add app dialog open, and with the file picker open, completed Night Light cleanup and logged a successful exit, then the process ended with exception 0xc0000005 in `Microsoft.ui.xaml.dll`, and the Quit case could not read the tray menu because the harness counted the settings window's system menu item. Settings now closes its dialogs before its window closes on exit, and the harness reads the tray menu from one host window; all four cases passed in both later runs. A later run added two cases. Session end with the Wake time flyout open passed. Quit from the tray menu with the file picker open failed, because the tray menu did not open while the picker was open, so the recipe does not include that case. |
 
 Each passing run left Night Light off with the native preview flag cleared.

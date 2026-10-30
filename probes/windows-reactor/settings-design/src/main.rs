@@ -6,8 +6,10 @@ mod icon;
 mod kelvin;
 mod l10n;
 mod log;
+mod motion;
 mod palette;
 mod phase;
+mod progress;
 mod region;
 mod settings;
 mod system;
@@ -263,6 +265,12 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> anyhow::Resul
 }
 
 fn main() -> anyhow::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--motion") {
+        return motion::run();
+    }
+    if std::env::args().nth(1).as_deref() == Some("--progress") {
+        return progress::run();
+    }
     let arguments = parse_arguments(std::env::args().skip(1))?;
     if let Some(tag) = &arguments.ui_language {
         system::prefer_ui_language(tag).with_context(|| format!("preferring UI language {tag}"))?;

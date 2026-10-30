@@ -16,7 +16,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use win_nightlight_lib::Nightlight;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
+use windows_sys::Win32::winuser::WM_ENDSESSION;
 
 #[derive(Clone, Copy, Debug)]
 enum ExitCase {

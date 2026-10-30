@@ -16,12 +16,12 @@ use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use win_nightlight_lib::Nightlight;
-use windows_sys::Win32::UI::Shell::SEE_MASK_FLAG_NO_UI;
-use windows_sys::Win32::UI::Shell::SEE_MASK_NOASYNC;
-use windows_sys::Win32::UI::Shell::SEE_MASK_NOCLOSEPROCESS;
-use windows_sys::Win32::UI::Shell::SHELLEXECUTEINFOW;
-use windows_sys::Win32::UI::Shell::ShellExecuteExW;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
+use windows_sys::Win32::shellapi::SEE_MASK_FLAG_NO_UI;
+use windows_sys::Win32::shellapi::SEE_MASK_NOASYNC;
+use windows_sys::Win32::shellapi::SEE_MASK_NOCLOSEPROCESS;
+use windows_sys::Win32::shellapi::SHELLEXECUTEINFOW;
+use windows_sys::Win32::shellapi::ShellExecuteExW;
+use windows_sys::Win32::winuser::WM_ENDSESSION;
 use winsafe::HPROCESS;
 use winsafe::HWND;
 use winsafe::co;
@@ -242,7 +242,7 @@ fn launch_owned_shortcut(
     let mut info = SHELLEXECUTEINFOW {
         cbSize: u32::try_from(std::mem::size_of::<SHELLEXECUTEINFOW>())
             .map_err(io::Error::other)?,
-        fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        fMask: (SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI).cast_unsigned(),
         lpFile: path.as_ptr(),
         nShow: 1,
         ..Default::default()

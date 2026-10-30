@@ -15,6 +15,10 @@ just check-msrv
 
 `Cargo.lock` pins the resolved dependency versions. Builds, tests, and Clippy use stable Rust; formatting uses nightly. Time-zone tests read the time-zone rules installed in Windows and do not change the computer's time-zone setting. `just check` does not run the [research probes](probes/README.md), which are standalone experiments under `probes/`, and does not change live Night Light. The [native lifecycle harness](tools/README.md) runs only through its own `just` recipes. It drives the built application on the Windows desktop, changes live Night Light, and sends mouse and keyboard input. Its separate Explorer recovery recipe also restarts the Windows Shell. It finds settings controls by automation identifiers and tray menu items by position, so the recipes that launch the executable also run under another interface language, such as `just native-settings --language qps-Ploc`.
 
+Circadia's directly declared Windows bindings use the same `windows-rs` Git revision as Reactor. Crates.io Windows dependencies whose Cargo version ranges accept the pinned version are patched to that revision to share their Rust types. Dependencies whose ranges require older versions retain them, including `windows-sys` 0.61 in the Night Light watcher and `tempfile`. These overrides apply only to Circadia; the Night Light crates remain published dependencies. The [tracking policy](docs/research/windows-reactor-ui.md#tracking-policy) describes dependency updates and validation.
+
+Circadia generates additional Rust bindings for public composition APIs that Reactor's wrapper does not expose. `just check` verifies the checked-in bindings against Windows API metadata from the pinned windows-rs checkout. See the [generation instructions](docs/research/settings-design-support.md#progress-and-color-animation) when changing those bindings or updating the pin.
+
 Build and launch the current application with its bundled runtime:
 
 ```bash
@@ -126,6 +130,8 @@ Circadia's Rust library accepts editable `ConfigInput` values and produces a `Co
 
 ### Status and schedule graph
 
+The displayed temperature is Circadia's current target from the schedule, suppression, or Preview. It does not confirm the temperature Windows has applied.
+
 The status card at the top of the Schedule page shows, from top to bottom:
 
 - A header with the picture of the current phase, the current output temperature, or Off while Circadia is not managing Night Light, the phase name, one sentence about the next scheduled change, and Suppress for 1 hour or Stop suppressing. The phase is Not managing, Preview, Suppressed, "Shifting to" followed by the next phase's name during a scheduled transition, or Morning, Daytime, Evening, or Bedtime. Morning runs from Wake to Sunrise; Daytime runs from Sunrise, or from Wake when no Sunrise follows it, to Sunset or Bedtime; Evening runs from Sunset to Bedtime; and Bedtime runs from Bedtime to Wake. A sentence reads, for example, "Next: 2400 K by 11:00 PM at bedtime, warming from 10:00 PM." It names the next event (Wake, Sunrise, Sunset, or Bedtime) that changes the temperature. When no later event in the graph changes it, the sentence states the schedule's current temperature. During suppression the sentence instead names the focused application or the time suppression ends, during Preview the previewed time, and after a time-zone failure the last scheduled temperature or that control is unavailable.
@@ -139,7 +145,17 @@ The status card at the top of the Schedule page shows, from top to bottom:
 - A summary of Wake, Sunrise, Sunset, and Bedtime with each one's time today in the regional clock format and the temperature it reaches. An unused Sunrise or Sunset shows Off and Not used. After a solar calculation failure, Sunrise and Sunset show Unavailable, and the summary says that the schedule uses Wake and Bedtime only.
 - A line that says whether Preview is playing, and a Preview or Stop button.
 
-The graph and the color strips under the temperature sliders draw through one Direct3D device per settings window. Closing settings releases the device. When a drawing finds the device lost, settings creates a new device and draws again. The phase pictures, the graph, and the strips follow a change between the light, dark, and contrast themes, or to a contrast theme's colors, while settings is open. While management is on, when Windows cannot provide the time zone and Circadia has no last scheduled temperature, every settings page shows a banner that control is unavailable, with Retry, which asks the controller to evaluate the schedule again.
+The graph and the color strips under the temperature sliders draw through one Direct3D device per settings window. Closing settings releases the device. When a drawing finds the device lost, settings creates a new device and draws again. The phase pictures, the graph, and the strips follow a change between the light, dark, and contrast themes, or to a contrast theme's colors, while settings is open.
+
+During Preview, Windows' compositor moves the time line and dot along the captured schedule, changes the dot's illustrative color, and fills the progress bar linearly from playback start to deadline. Native Night Light calls keep their separate configured rate limit. The Schedule page refreshes numerical text once per second and at phase or daily-view boundaries. Changing a number does not restart these animations.
+
+The graph and bar animate while their Schedule view is visible. Hiding the view removes their animations; returning resumes from the current Preview clock. Resize, DPI, theme, and daily-view changes rebuild the remaining path from that clock. Stop and the logical playback deadline end Preview motion and restore editing while any pending native cleanup remains serialized on the controller thread.
+
+The phase ring follows the elapsed fraction of the current scheduled transition, using the playback clock during Preview and actual time otherwise. The navigation pane's ring can animate on every page because it remains visible there. Minimizing or closing settings removes its animation. Native progress controls retain their accessible range values beneath the compositor visuals. During Preview, those values update once per second while visible, including the navigation ring on other pages.
+
+While management is on, a time-zone failure shows a non-closable banner with Retry on every page. It is a warning when Circadia continues using the last scheduled temperature, or an error when no such temperature exists and control stops. Retry asks the controller to evaluate the schedule again; recovery removes the banner.
+
+One accessible status text announces mode, phase, failure, and recovery changes without interrupting current screen-reader speech. Temperature, progress, and playback-clock changes do not change that announcement. Current numerical values remain readable on demand. UI Automation checks cover the text's properties and failure/recovery updates; actual Narrator delivery remains untested.
 
 ### Solar timing and location
 
@@ -147,7 +163,13 @@ The Follow sunrise and sunset card on the Schedule page has the solar timing swi
 
 Solar timing needs coordinates. Turning the switch on, or selecting Sunrise or Sunset while it is on, without saved coordinates leaves the configuration in use unchanged, shows the error under the coordinate fields, and keeps the card expanded. The pending change applies with the coordinates once both latitude and longitude are entered. A coordinate field commits its text when the user presses Enter or leaves the field. Text that is unchanged sends no edit, so leaving a field does not round a more precise position from Windows. A value beyond ±90 degrees of latitude or ±180 degrees of longitude becomes the nearest bound, and text that is not a number in the regional format, including empty text, restores the previous value.
 
-While Use my Windows location (`use_windows_location`) is on, the coordinate fields are unavailable, and settings asks Windows for one position when the user turns the setting on and each time the settings window opens, whether or not solar timing is on. Circadia does not ask at startup, while settings is closed, or when settings changes page. When settings opens behind another window, Circadia does not ask Windows and the card shows no failure; the next opening asks again. A position replaces the coordinates and is written at once. A position that arrives during Preview applies when playback ends or settings closes. Closing settings cancels an unfinished request and discards its result. When Windows denies access, its location services are off, or it cannot return a position, the card shows the reason and the coordinates stay unchanged. The log records a failure once until it changes or a request succeeds.
+Turning on Use my Windows location (`use_windows_location`) first shows an explanation of Windows location requests, possible network-based positioning, and requests while running only in the tray. Turn on saves the preference; Cancel keeps it off. Windows permission is separate from this saved choice.
+
+While enabled, Circadia requests one position after confirmation, at every startup, and whenever settings opens, whether or not solar timing is on. A foreground startup requests once, and opening settings during a pending request reuses it. Tray-only requests check Windows permission silently. Circadia requests Windows consent only with settings in the foreground. Changing pages does not request a position, and Circadia does not track location continuously or refresh it periodically.
+
+A successful position replaces the coordinates and is saved, including after settings closes. During Preview, it waits until logical playback ends. Turning location off, resetting settings, or exiting cancels pending requests and discards held or late results. Manual coordinate fields are unavailable while Windows location is enabled.
+
+If Windows denies access, location services are disabled, or acquisition fails, Circadia keeps the preference and existing coordinates. The card shows the failure when settings is open and retains it during a retry until the request succeeds or reports a different failure. The log records a failure once until it changes or a request succeeds.
 
 The card also shows a warning when solar calculation fails, with **Retry**, which asks the controller to calculate the schedule again and is available while Circadia manages Night Light. It shows another warning for each activity interval in the current day's view, which starts four hours before Wake, whose sunset comes before its sunrise, naming that interval's Wake and Bedtime times. In both cases the schedule uses only Wake and Bedtime for the affected days.
 
@@ -250,13 +272,13 @@ Manual Start and Stop commands are idempotent. Start creates one hour of suppres
 
 The controller selects Preview, suppression, or the active schedule in that order. When playback ends while either suppression source is active, output fades from the last Preview value toward 6500 K over the configured fade duration; otherwise the schedule's current temperature applies at once. It records the last scheduled temperature successfully stored in Windows. A new configuration keeps that record until its own schedule stores a temperature. A time-zone failure ends Preview and retains the recorded temperature. Without a recorded temperature, scheduled output, suppression output, and corrections to native Night Light settings stop until calculation succeeds, but Circadia can still turn off the native preview flag. Solar failure uses the Wake/Bedtime-only curve.
 
-Preview admission captures its start instant and the configuration in use, then starts graph calculation independently of native dispatch. The returned receipt identifies the calculation and its original animation start. Before native playback, the worker checks:
+Submitting a Preview command captures its start instant and the configuration in use, then starts graph calculation independently of native dispatch. The returned receipt identifies the calculation and its original animation start. Before native playback, the worker checks:
 
 - The captured configuration is still the one in use.
 - The configuration and time-zone conversion allow schedule evaluation.
-- Neither suppression source is active.
+- Management is on.
 
-Neither calculation nor native-call latency extends playback. A configuration change during Preview that changes the schedule applies when playback ends; other changes apply at once.
+The logical deadline is the captured Preview start plus its configured duration. Neither calculation nor native-call latency extends it. At that deadline, settings returns the graph to current time, ends Preview status, and enables editing on every page. A completed location request that was waiting for Preview applies then. These UI changes proceed even while a native call blocks; cleanup and replacement output wait for that call to finish. A configuration change during Preview that changes the schedule applies when playback ends; other changes apply at once.
 
 Native access uses the public API of `win-nightlight-lib` 0.5.0, which reads and writes Night Light, and `win-nightlight-watch` 0.5.0, which reports changes to it, with one Night Light handle for the worker's lifetime. Turning management off removes the change-notification registrations, and turning it on again registers them again. Night Light stores its schedule, temperature, and native preview flag in a settings record, and its on/off state in a separate state record. Each control attempt reads both records before selecting writes. It disables the native schedule before enabling Night Light and preserves unrelated values. Cleanup turns off the native preview flag. Circadia records separately whether Windows stored a temperature and whether the flag applied it, so a stored temperature followed by a failed cleanup is reported as both.
 

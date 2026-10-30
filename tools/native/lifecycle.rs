@@ -17,15 +17,15 @@ use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
 use win_nightlight_lib::Nightlight;
-use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC;
-use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMRESUMESUSPEND;
-use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMSUSPEND;
-use windows_sys::Win32::UI::WindowsAndMessaging::SMTO_ABORTIFHUNG;
-use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageTimeoutW;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_CLOSE;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_POWERBROADCAST;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_QUERYENDSESSION;
+use windows_sys::Win32::winuser::PBT_APMRESUMEAUTOMATIC;
+use windows_sys::Win32::winuser::PBT_APMRESUMESUSPEND;
+use windows_sys::Win32::winuser::PBT_APMSUSPEND;
+use windows_sys::Win32::winuser::SMTO_ABORTIFHUNG;
+use windows_sys::Win32::winuser::SendMessageTimeoutW;
+use windows_sys::Win32::winuser::WM_CLOSE;
+use windows_sys::Win32::winuser::WM_ENDSESSION;
+use windows_sys::Win32::winuser::WM_POWERBROADCAST;
+use windows_sys::Win32::winuser::WM_QUERYENDSESSION;
 use winsafe::HWND;
 
 pub(super) const WAIT_TIMEOUT: Duration = Duration::from_secs(20);
@@ -305,7 +305,7 @@ fn check_reconciliation(native: &Nightlight, receiver: &HWND) -> io::Result<()> 
     for (message, parameter, suspend_first) in [
         (WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC as usize, false),
         (WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC as usize, true),
-        (taskbar, 0, false),
+        (taskbar.cast_signed(), 0, false),
     ] {
         if suspend_first {
             native_message(receiver, WM_POWERBROADCAST, PBT_APMSUSPEND as usize)?;
@@ -603,17 +603,17 @@ pub(super) fn error_records(log: &str) -> Vec<&str> {
     unsafe_code,
     reason = "send pointer-free lifecycle messages only to the owned child"
 )]
-pub(super) fn native_message(window: &HWND, message: u32, parameter: usize) -> io::Result<usize> {
+pub(super) fn native_message(window: &HWND, message: i32, parameter: usize) -> io::Result<usize> {
     let mut result = 0;
     // SAFETY: These lifecycle messages have scalar parameters. The result
     // storage remains writable for the synchronous call, including timeout.
     let delivered = unsafe {
         SendMessageTimeoutW(
-            window.ptr(),
-            message,
+            window.ptr().cast(),
+            message.cast_unsigned(),
             parameter,
             0,
-            SMTO_ABORTIFHUNG,
+            SMTO_ABORTIFHUNG.cast_unsigned(),
             20_000,
             &raw mut result,
         )

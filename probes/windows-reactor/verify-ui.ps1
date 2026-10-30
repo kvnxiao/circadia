@@ -6,8 +6,11 @@ Add-Type -AssemblyName UIAutomationTypes
 $probePath = (Resolve-Path -LiteralPath $Executable).Path
 $probe = Start-Process -FilePath $probePath -ArgumentList '--graph' -PassThru -WindowStyle Hidden
 try {
-    $condition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $probe.Id)
+    $condition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $probe.Id),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty, 'Circadia pinned Reactor graph fixture'))
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
         $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
@@ -29,7 +32,15 @@ try {
         $control = Get-ProbeControl $Id
         $pattern = $control.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
         $pattern.Invoke()
-        Start-Sleep -Milliseconds 150
+    }
+    function Wait-ProbeCount([int]$Expected) {
+        $limit = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $actual = (Get-ProbeControl 'probe-state').Current.Name
+            if ($actual.StartsWith("Count=$Expected;")) { return }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $limit)
+        throw "Expected $Expected points; received '$actual'"
     }
     function Wait-ProbeStatus([string]$Expected) {
         $limit = [DateTime]::UtcNow.AddSeconds(5)
@@ -42,12 +53,17 @@ try {
     }
 
     Invoke-ProbeControl 'add-point'
+    Wait-ProbeCount 3
     Invoke-ProbeControl 'validate'
     Wait-ProbeStatus 'Point fields are valid. This probe does not save or evaluate a schedule.'
-    1..3 | ForEach-Object { Invoke-ProbeControl 'remove-point' }
+    2..0 | ForEach-Object {
+        Invoke-ProbeControl 'remove-point'
+        Wait-ProbeCount $_
+    }
     Invoke-ProbeControl 'validate'
     Wait-ProbeStatus 'Add at least one point.'
     Invoke-ProbeControl 'add-point'
+    Wait-ProbeCount 1
     Invoke-ProbeControl 'validate'
     Wait-ProbeStatus 'Point fields are valid. This probe does not save or evaluate a schedule.'
     $probe.Refresh()
@@ -60,6 +76,8 @@ try {
         privateBytes = $probe.PrivateMemorySize64
         cpuSeconds = $probe.TotalProcessorTime.TotalSeconds
     }
+    $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children, $condition)
     $window.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
     if ($probe.WaitForExit(500)) { throw 'Tray process exited after closing the graph' }
     $report['lastWindowClose'] = 'tray process survives graph closure'

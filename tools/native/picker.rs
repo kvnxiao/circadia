@@ -12,15 +12,15 @@ use circadia::automation_id;
 use std::ffi::OsString;
 use std::io;
 use std::path::Path;
-use windows::Win32::UI::Accessibility::IUIAutomationInvokePattern;
-use windows::Win32::UI::Accessibility::IUIAutomationSelectionItemPattern;
-use windows::Win32::UI::Accessibility::IUIAutomationValuePattern;
-use windows::Win32::UI::Accessibility::UIA_DataItemControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_EditControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_InvokePatternId;
-use windows::Win32::UI::Accessibility::UIA_ListItemControlTypeId;
-use windows::Win32::UI::Accessibility::UIA_SelectionItemPatternId;
-use windows::Win32::UI::Accessibility::UIA_ValuePatternId;
+use windows::Win32::uiautomationclient::IUIAutomationInvokePattern;
+use windows::Win32::uiautomationclient::IUIAutomationSelectionItemPattern;
+use windows::Win32::uiautomationclient::IUIAutomationValuePattern;
+use windows::Win32::uiautomationclient::UIA_DataItemControlTypeId;
+use windows::Win32::uiautomationclient::UIA_EditControlTypeId;
+use windows::Win32::uiautomationclient::UIA_InvokePatternId;
+use windows::Win32::uiautomationclient::UIA_ListItemControlTypeId;
+use windows::Win32::uiautomationclient::UIA_SelectionItemPatternId;
+use windows::Win32::uiautomationclient::UIA_ValuePatternId;
 use winsafe::HWND;
 
 pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
@@ -311,7 +311,9 @@ fn navigate(automation: &Automation, dialog: &HWND, process: u32, folder: &Path)
     })?;
     let destination = format!("{}\\", folder.trim_end_matches(['\\', '/']));
     // SAFETY: The owned BSTR remains live for this synchronous call.
-    unsafe { value.SetValue(&destination.clone().into()) }.map_err(io::Error::other)?;
+    unsafe { value.SetValue(&destination.clone().into()) }
+        .ok()
+        .map_err(io::Error::other)?;
     wait("picker filename contains the fixture directory", || {
         let Some(value) = filename_value(automation, dialog, process)? else {
             return Ok(None);
@@ -328,6 +330,7 @@ fn navigate(automation: &Automation, dialog: &HWND, process: u32, folder: &Path)
             // SAFETY: The binding owns the returned accessible name.
             if unsafe { element.CurrentName() }
                 .map_err(io::Error::other)?
+                .display()
                 .to_string()
                 .ends_with(folder)
             {
@@ -392,7 +395,7 @@ fn select_file(
             unsafe { element.GetCurrentPatternAs(UIA_SelectionItemPatternId) }
                 .map_err(io::Error::other)?;
         // SAFETY: Selection targets only the verified fixture item.
-        unsafe { pattern.Select() }.map_err(io::Error::other)?;
+        unsafe { pattern.Select() }.ok().map_err(io::Error::other)?;
         // SAFETY: The pattern belongs to the identified fixture item.
         let selected = unsafe { pattern.CurrentIsSelected() }.map_err(io::Error::other)?;
         return Ok(selected.as_bool().then_some(()));
@@ -414,5 +417,5 @@ fn confirm(automation: &Automation, dialog: &HWND, process: u32) -> io::Result<(
             .map_err(io::Error::other)
     })?;
     // SAFETY: The live pattern belongs to the verified dialog button.
-    unsafe { pattern.Invoke() }.map_err(io::Error::other)
+    unsafe { pattern.Invoke() }.ok().map_err(io::Error::other)
 }

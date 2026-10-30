@@ -239,6 +239,8 @@ pub struct ControllerSnapshot {
     pub calculation: Option<Arc<CalculationResult>>,
     /// Whether playback has entered, including pending curve calculation.
     pub preview_active: bool,
+    /// Logical deadline from `origin`, including pending Preview calculation.
+    pub preview_deadline: Option<Duration>,
     /// Current independent suppression sources and the manual deadline.
     pub suppression: SuppressionState,
     /// Most recent eligible executable identities and membership.
@@ -1043,6 +1045,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             origin: self.origin,
             calculation: runtime.calculation().cloned(),
             preview_active: runtime.preview_active(),
+            preview_deadline: runtime.preview_deadline().map_err(io::Error::other)?,
             suppression: runtime.suppression(),
             recent: runtime.recent(),
             command: self.command.clone(),
@@ -1087,6 +1090,40 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         (self.shared.notify)()
     }
 
+    fn preview(
+        &mut self,
+        config: &Config,
+        entered: ControlTime,
+        calculation: Option<u64>,
+        now: RuntimeTime,
+    ) -> io::Result<bool> {
+        self.driver
+            .runtime_mut()
+            .advance(now)
+            .map_err(io::Error::other)?;
+        self.apply_deferred()?;
+        let matches = self
+            .accepted
+            .as_ref()
+            .is_some_and(|layer| layer.config() == config);
+        let request = matches
+            .then(|| self.driver.runtime_mut().preview_request(entered, now))
+            .flatten();
+        if let Some(request) = request {
+            let revision = match calculation {
+                Some(revision) if self.shared.calculation.is_current(revision)? => revision,
+                Some(_) | None => self.shared.calculation.submit(request)?,
+            };
+            self.driver.runtime_mut().expect_calculation(revision);
+            Ok(true)
+        } else {
+            if calculation.is_some() {
+                self.recalculate(OutputUpdate::Adopt, None)?;
+            }
+            Ok(false)
+        }
+    }
+
     fn apply(&mut self, envelope: Envelope) -> io::Result<()> {
         let now = self.now();
         let mut outcome = CommandOutcome::Applied;
@@ -1108,29 +1145,9 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 }
             }
             ControllerCommand::Preview(config) => {
-                if self
-                    .accepted
-                    .as_ref()
-                    .is_none_or(|layer| layer.config() != config.as_ref())
-                {
+                expedite = self.preview(&config, envelope.entered, envelope.calculation, now)?;
+                if !expedite {
                     outcome = CommandOutcome::Unavailable;
-                } else if let Some(request) = self
-                    .driver
-                    .runtime_mut()
-                    .preview_request(envelope.entered, now)
-                {
-                    let revision = match envelope.calculation {
-                        Some(revision) if self.shared.calculation.is_current(revision)? => revision,
-                        Some(_) | None => self.shared.calculation.submit(request)?,
-                    };
-                    self.driver.runtime_mut().expect_calculation(revision);
-                    expedite = true;
-                } else {
-                    outcome = CommandOutcome::Unavailable;
-                }
-                if matches!(outcome, CommandOutcome::Unavailable) && envelope.calculation.is_some()
-                {
-                    self.recalculate(OutputUpdate::Adopt, None)?;
                 }
             }
             ControllerCommand::StopPreview | ControllerCommand::Lock => {

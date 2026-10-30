@@ -1,17 +1,17 @@
 use std::io;
-use windows_sys::Win32::Foundation::SYSTEMTIME;
-use windows_sys::Win32::Globalization::GetLocaleInfoEx;
-use windows_sys::Win32::Globalization::GetNumberFormatEx;
-use windows_sys::Win32::Globalization::GetTimeFormatEx;
-use windows_sys::Win32::Globalization::LOCALE_S1159;
-use windows_sys::Win32::Globalization::LOCALE_S2359;
-use windows_sys::Win32::Globalization::LOCALE_SDECIMAL;
-use windows_sys::Win32::Globalization::LOCALE_SNEGATIVESIGN;
-use windows_sys::Win32::Globalization::LOCALE_STHOUSAND;
-use windows_sys::Win32::Globalization::LOCALE_STIMEFORMAT;
-use windows_sys::Win32::Globalization::NUMBERFMTW;
-use windows_sys::Win32::Globalization::TIME_NOMINUTESORSECONDS;
-use windows_sys::Win32::Globalization::TIME_NOSECONDS;
+use windows_sys::Win32::datetimeapi::GetTimeFormatEx;
+use windows_sys::Win32::minwinbase::SYSTEMTIME;
+use windows_sys::Win32::winnls::GetLocaleInfoEx;
+use windows_sys::Win32::winnls::GetNumberFormatEx;
+use windows_sys::Win32::winnls::LOCALE_S1159;
+use windows_sys::Win32::winnls::LOCALE_S2359;
+use windows_sys::Win32::winnls::LOCALE_SDECIMAL;
+use windows_sys::Win32::winnls::LOCALE_SNEGATIVESIGN;
+use windows_sys::Win32::winnls::LOCALE_STHOUSAND;
+use windows_sys::Win32::winnls::LOCALE_STIMEFORMAT;
+use windows_sys::Win32::winnls::NUMBERFMTW;
+use windows_sys::Win32::winnls::TIME_NOMINUTESORSECONDS;
+use windows_sys::Win32::winnls::TIME_NOSECONDS;
 
 const BUFFER: usize = 128;
 
@@ -84,21 +84,27 @@ impl Region {
     }
 
     #[expect(unsafe_code, reason = "read one NLS locale string into a local buffer")]
-    fn info(&self, kind: u32) -> io::Result<String> {
+    fn info(&self, kind: i32) -> io::Result<String> {
         let mut buffer = [0_u16; BUFFER];
         // SAFETY: The locale is null or NUL-terminated, and the buffer length
         // matches the writable buffer.
-        let written =
-            unsafe { GetLocaleInfoEx(self.locale(), kind, buffer.as_mut_ptr(), length()) };
+        let written = unsafe {
+            GetLocaleInfoEx(
+                self.locale(),
+                kind.cast_unsigned(),
+                buffer.as_mut_ptr(),
+                length(),
+            )
+        };
         text(&buffer, written)
     }
 
     pub(crate) fn time(&self, hour: u8, minute: u8) -> io::Result<String> {
-        self.format_time(hour, minute, TIME_NOSECONDS)
+        self.format_time(hour, minute, TIME_NOSECONDS.cast_unsigned())
     }
 
     pub(crate) fn hour(&self, hour: u8) -> io::Result<String> {
-        self.format_time(hour, 0, TIME_NOMINUTESORSECONDS)
+        self.format_time(hour, 0, TIME_NOMINUTESORSECONDS.cast_unsigned())
     }
 
     #[expect(unsafe_code, reason = "format a local SYSTEMTIME with NLS")]

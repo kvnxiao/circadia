@@ -4,32 +4,32 @@ use std::fmt;
 use std::io;
 use std::sync::Arc;
 use std::sync::Mutex;
-use windows_sys::Win32::Foundation::HWND;
-use windows_sys::Win32::System::Power::HPOWERNOTIFY;
-use windows_sys::Win32::System::Power::RegisterSuspendResumeNotification;
-use windows_sys::Win32::System::Power::UnregisterSuspendResumeNotification;
-use windows_sys::Win32::System::RemoteDesktop::NOTIFY_FOR_THIS_SESSION;
-use windows_sys::Win32::System::RemoteDesktop::WTSRegisterSessionNotification;
-use windows_sys::Win32::System::RemoteDesktop::WTSUnRegisterSessionNotification;
-use windows_sys::Win32::UI::WindowsAndMessaging::DEVICE_NOTIFY_WINDOW_HANDLE;
-use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC;
-use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMRESUMESUSPEND;
-use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMSUSPEND;
-use windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_APP;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_CLOSE;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_ENDSESSION;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_POWERBROADCAST;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_QUERYENDSESSION;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_SETTINGCHANGE;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_SYSCOLORCHANGE;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_TIMECHANGE;
-use windows_sys::Win32::UI::WindowsAndMessaging::WM_WTSSESSION_CHANGE;
-use windows_sys::Win32::UI::WindowsAndMessaging::WTS_SESSION_LOCK;
-use windows_sys::Win32::UI::WindowsAndMessaging::WTS_SESSION_UNLOCK;
+use windows_sys::Win32::windef::HWND;
+use windows_sys::Win32::winuser::DEVICE_NOTIFY_WINDOW_HANDLE;
+use windows_sys::Win32::winuser::HPOWERNOTIFY;
+use windows_sys::Win32::winuser::PBT_APMRESUMEAUTOMATIC;
+use windows_sys::Win32::winuser::PBT_APMRESUMESUSPEND;
+use windows_sys::Win32::winuser::PBT_APMSUSPEND;
+use windows_sys::Win32::winuser::PostMessageW;
+use windows_sys::Win32::winuser::RegisterSuspendResumeNotification;
+use windows_sys::Win32::winuser::UnregisterSuspendResumeNotification;
+use windows_sys::Win32::winuser::WM_APP;
+use windows_sys::Win32::winuser::WM_CLOSE;
+use windows_sys::Win32::winuser::WM_ENDSESSION;
+use windows_sys::Win32::winuser::WM_POWERBROADCAST;
+use windows_sys::Win32::winuser::WM_QUERYENDSESSION;
+use windows_sys::Win32::winuser::WM_SETTINGCHANGE;
+use windows_sys::Win32::winuser::WM_SYSCOLORCHANGE;
+use windows_sys::Win32::winuser::WM_TIMECHANGE;
+use windows_sys::Win32::winuser::WM_WTSSESSION_CHANGE;
+use windows_sys::Win32::winuser::WTS_SESSION_LOCK;
+use windows_sys::Win32::winuser::WTS_SESSION_UNLOCK;
+use windows_sys::Win32::wtsapi32::NOTIFY_FOR_THIS_SESSION;
+use windows_sys::Win32::wtsapi32::WTSRegisterSessionNotification;
+use windows_sys::Win32::wtsapi32::WTSUnRegisterSessionNotification;
 use windows_window::Window;
 
-const WORKER_CHANGED: u32 = WM_APP + 2;
+const WORKER_CHANGED: u32 = WM_APP.cast_unsigned() + 2;
 
 /// Identify an application-lifetime Windows event on the UI thread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,16 +150,16 @@ impl LifecycleWindow {
             .visible(false)
             .quit_on_close(false)
             .on_message(move |_, message, wparam, _| {
-                if message == WM_QUERYENDSESSION {
+                if message == WM_QUERYENDSESSION.cast_unsigned() {
                     return Some(1);
                 }
-                if message == WM_CLOSE {
+                if message == WM_CLOSE.cast_unsigned() {
                     return Some(0);
                 }
-                if message == WM_ENDSESSION && (wparam == 0 || ended) {
+                if message == WM_ENDSESSION.cast_unsigned() && (wparam == 0 || ended) {
                     return Some(0);
                 }
-                if message == WM_ENDSESSION {
+                if message == WM_ENDSESSION.cast_unsigned() {
                     ended = true;
                     shutdown();
                     notify(DesktopEvent::SessionEnded);
@@ -176,17 +176,13 @@ impl LifecycleWindow {
                 }
                 if let Some(event) = event(message, wparam, taskbar) {
                     notify(event);
-                    Some(isize::from(message == WM_POWERBROADCAST))
+                    Some(isize::from(message == WM_POWERBROADCAST.cast_unsigned()))
                 } else {
                     None
                 }
             })
             .create()
-            .map_err(|error| {
-                io::Error::other(windows_result::Error::from_hresult(
-                    windows_result::HRESULT(error.code().0),
-                ))
-            })?;
+            .map_err(io::Error::other)?;
         let power = PowerRegistration::new(&window)?;
         let session = SessionRegistration::new(&window)?;
         wake.0
@@ -218,23 +214,23 @@ impl Drop for LifecycleWindow {
 }
 
 fn event(message: u32, wparam: usize, taskbar: u32) -> Option<DesktopEvent> {
-    match message {
-        ACTIVATE_SETTINGS => Some(DesktopEvent::Activate),
-        WORKER_CHANGED => Some(DesktopEvent::WorkerChanged),
+    match message.cast_signed() {
+        other if other == ACTIVATE_SETTINGS.cast_signed() => Some(DesktopEvent::Activate),
+        other if other == WORKER_CHANGED.cast_signed() => Some(DesktopEvent::WorkerChanged),
         WM_TIMECHANGE => Some(DesktopEvent::ClockChanged),
         WM_SETTINGCHANGE | WM_SYSCOLORCHANGE => Some(DesktopEvent::SettingsChanged),
-        WM_WTSSESSION_CHANGE => match u32::try_from(wparam).ok()? {
+        WM_WTSSESSION_CHANGE => match i32::try_from(wparam).ok()? {
             WTS_SESSION_LOCK => Some(DesktopEvent::SessionLocked),
             WTS_SESSION_UNLOCK => Some(DesktopEvent::SessionUnlocked),
             _ => None,
         },
-        WM_POWERBROADCAST => match u32::try_from(wparam).ok()? {
+        WM_POWERBROADCAST => match i32::try_from(wparam).ok()? {
             PBT_APMSUSPEND => Some(DesktopEvent::Suspend),
             PBT_APMRESUMEAUTOMATIC => Some(DesktopEvent::AutomaticResume),
             PBT_APMRESUMESUSPEND => Some(DesktopEvent::UserResume),
             _ => None,
         },
-        other if other == taskbar => Some(DesktopEvent::TaskbarCreated),
+        other if other == taskbar.cast_signed() => Some(DesktopEvent::TaskbarCreated),
         _ => None,
     }
 }
@@ -250,9 +246,12 @@ impl PowerRegistration {
         // SAFETY: The owner keeps this window alive until the registration
         // drops.
         let registration = unsafe {
-            RegisterSuspendResumeNotification(window.hwnd(), DEVICE_NOTIFY_WINDOW_HANDLE)
+            RegisterSuspendResumeNotification(
+                window.hwnd(),
+                DEVICE_NOTIFY_WINDOW_HANDLE.cast_unsigned(),
+            )
         };
-        if registration == 0 {
+        if registration.is_null() {
             return Err(io::Error::last_os_error());
         }
         Ok(Self(registration))
@@ -276,10 +275,16 @@ impl SessionRegistration {
     )]
     fn new(window: &Window) -> io::Result<Self> {
         // SAFETY: The owner unregisters before destroying the receiving window.
-        if unsafe { WTSRegisterSessionNotification(window.hwnd(), NOTIFY_FOR_THIS_SESSION) } == 0 {
+        if unsafe {
+            WTSRegisterSessionNotification(
+                window.hwnd().cast(),
+                NOTIFY_FOR_THIS_SESSION.cast_unsigned(),
+            )
+        } == 0
+        {
             return Err(io::Error::last_os_error());
         }
-        Ok(Self(window.hwnd()))
+        Ok(Self(window.hwnd().cast()))
     }
 }
 
@@ -297,16 +302,23 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
+    use windows_sys::Win32::winuser::SendMessageW;
 
     #[expect(
         unsafe_code,
         reason = "send pointer-free test messages to an owned hidden window"
     )]
-    fn send(window: &LifecycleWindow, message: u32, wparam: usize) -> isize {
+    fn send(window: &LifecycleWindow, message: i32, wparam: usize) -> isize {
         // SAFETY: The target lives on this thread, and both parameters are
         // values.
-        unsafe { SendMessageW(window.window.hwnd(), message, wparam, 0) }
+        unsafe {
+            SendMessageW(
+                window.window.hwnd().cast(),
+                message.cast_unsigned(),
+                wparam,
+                0,
+            )
+        }
     }
 
     #[test]
@@ -343,7 +355,7 @@ mod tests {
             || {},
         )
         .expect("hidden lifecycle window");
-        send(&window, ACTIVATE_SETTINGS, 0);
+        send(&window, ACTIVATE_SETTINGS.cast_signed(), 0);
         send(&window, WM_TIMECHANGE, 0);
         send(&window, WM_SYSCOLORCHANGE, 0);
         send(&window, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK as usize);
@@ -353,7 +365,9 @@ mod tests {
         send(&window, WM_POWERBROADCAST, PBT_APMRESUMESUSPEND as usize);
         send(
             &window,
-            winsafe::RegisterWindowMessage("TaskbarCreated").expect("taskbar message"),
+            winsafe::RegisterWindowMessage("TaskbarCreated")
+                .expect("taskbar message")
+                .cast_signed(),
             0,
         );
         assert_eq!(

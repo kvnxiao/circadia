@@ -9,11 +9,11 @@ publish = false
 num-traits = "0.2"
 anyhow = "1"
 winsafe = { version = "=0.0.29", features = ["shell"] }
-windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac" }
+windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
 
 [build-dependencies]
 anyhow = "1"
-windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", optional = true }
+windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", optional = true }
 
 [features]
 self-contained = ["dep:windows-reactor-setup"]

@@ -10,9 +10,15 @@ repository = "https://github.com/kvnxiao/circadia"
 
 [features]
 self-contained = ["dep:windows-reactor-setup"]
-native-tests = ["windows/Win32_Foundation", "windows/Win32_System_Com", "windows/Win32_UI_Accessibility", "windows-sys/Wdk_System_SystemInformation", "windows-sys/Win32_System_ProcessStatus", "windows-sys/Win32_System_Registry", "winsafe/ole"]
+native-tests = ["windows/combaseapi", "windows/windef", "windows/wtypesbase", "windows/uiautomationclient", "windows/uiautomationcore", "windows/uiautomationcoreapi", "windows-sys/winternl", "windows-sys/psapi", "winsafe/ole", "winsafe/gdi"]
 graph-measurement = ["native-tests", "windows-reactor/test"]
 output-measurement = ["native-tests"]
+binding-generation = ["dep:windows-bindgen"]
+
+[[bin]]
+name = "composition-bindings"
+path = "tools/composition_bindings.rs"
+required-features = ["binding-generation"]
 
 [[bin]]
 name = "native-lifecycle"
@@ -20,6 +26,7 @@ path = "tools/native_lifecycle.rs"
 required-features = ["native-tests"]
 
 [dependencies]
+windows-bindgen = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", optional = true }
 fluent-pseudo = "0.3"
 fs-err = "3.3"
 i18n-embed = { version = "0.16", features = ["fluent-system"] }
@@ -39,14 +46,18 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 [target.'cfg(windows)'.dependencies]
 win-nightlight-lib = "0.5.0"
 win-nightlight-watch = "0.5.0"
-windows-result = "0.100.0"
-windows = { version = "0.62", features = ["Devices_Geolocation", "Foundation"] }
-windows-future = "0.3"
-windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", features = ["composition", "reactor"] }
-windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", default-features = false, features = ["reactor"] }
-windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac" }
-windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac" }
-windows-sys = { version = "0.61", features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_Debug", "Win32_System_EventLog", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-result = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", features = ["Devices_Geolocation", "Foundation", "Security_Authorization_AppCapabilityAccess", "UI_ViewManagement"] }
+windows-future = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-core = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-collections = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-numerics = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-time = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", features = ["composition", "reactor"] }
+windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", default-features = false, features = ["reactor"] }
+windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-sys = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", features = ["datetimeapi", "errhandlingapi", "fileapi", "libloaderapi", "minwinbase", "minwindef", "ntstatus", "powerbase", "processthreadsapi", "realtimeapiset", "shellapi", "shlobj_core", "synchapi", "timezoneapi", "verrsrc", "wdm", "winbase", "windef", "winerror", "winevt", "wingdi", "winnls", "winnt", "winuser", "winver", "wtsapi32"] }
 winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
 
 [build-dependencies]
@@ -56,15 +67,18 @@ ico = "0.6"
 resvg = { version = "0.49", default-features = false }
 
 [target.'cfg(windows)'.build-dependencies]
-windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "0496ec19116f1dac690daf31fcb96769118d9bac", optional = true }
+windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", optional = true }
 
 [dev-dependencies]
 fluent-bundle = "0.16"
 fluent-syntax = "0.12"
 test-case = "3"
 
-[target.'cfg(windows)'.dev-dependencies]
-windows-core = "0.62"
+[patch.crates-io]
+windows-result = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-registry = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-strings = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-link = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
 
 [profile.release]
 debug = "line-tables-only"

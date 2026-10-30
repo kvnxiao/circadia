@@ -50,10 +50,13 @@ fn exercise(measurement: &GraphMeasurement, directory: &Path) -> io::Result<()> 
     let process = std::process::id();
     let settings = wait("recovery settings window", || settings_window(process))?;
     let checks = (|| {
+        announcements(&automation, &settings)?;
         observation_failure(measurement, &automation, &settings, directory)?;
         preview_recovery(measurement, &automation, &settings, directory)?;
         preview_stop_during_failure(measurement, &automation, &settings)?;
         preview_completion_during_failure(measurement, &automation, &settings)?;
+        preview_deadline_during_blocked_output(measurement, &automation, &settings)?;
+        preview_restart_after_blocked_deadline(measurement, &automation, &settings)?;
         partial_write_failure(measurement, &automation, &settings, directory)
     })();
     let calls = measurement.native_calls()?;
@@ -93,7 +96,17 @@ fn observation_failure(
     settings: &HWND,
     directory: &Path,
 ) -> io::Result<()> {
-    status(automation, settings, &text()?.observation_failed)?;
+    let failure = text()?.observation_failed.as_str();
+    status(automation, settings, failure)?;
+    wait_automation("observation failure announcement", || {
+        Ok(automation
+            .text(
+                settings,
+                std::process::id(),
+                automation_id::STATUS_ANNOUNCEMENT,
+            )?
+            .filter(|name| name.contains(failure)))
+    })?;
     written(measurement, 2200, None)?;
     let edited = Instant::now();
     sleep(automation, settings, 2300)?;
@@ -108,12 +121,42 @@ fn observation_failure(
             .then_some(()))
     })?;
     diagnostics(directory, "observation", &["failure"])?;
-    measurement.fail_native(&[])?;
-    retry(automation, settings)?;
+    measurement.retry_native(|| retry(automation, settings))?;
     recovered(automation, settings)?;
+    wait_automation("observation recovery announcement", || {
+        Ok(automation
+            .text(
+                settings,
+                std::process::id(),
+                automation_id::STATUS_ANNOUNCEMENT,
+            )?
+            .filter(|name| !name.contains(failure)))
+    })?;
     diagnostics(directory, "observation", &["failure", "recovered"])?;
     report(
         "PASS: observation failure permits live edits and output; Retry restores observation; repeated failures log once",
+    );
+    Ok(())
+}
+
+fn announcements(automation: &Automation, settings: &HWND) -> io::Result<()> {
+    let process = std::process::id();
+    wait_automation("semantic status announcement", || {
+        automation.text(settings, process, automation_id::STATUS_ANNOUNCEMENT)
+    })?;
+    for (id, expected) in [
+        (automation_id::STATUS_ANNOUNCEMENT, 1),
+        (automation_id::PANE_STATUS, 0),
+        (automation_id::STATUS_SENTENCE, 0),
+        (automation_id::PREVIEW_STATE, 0),
+    ] {
+        require(
+            automation.live_setting(settings, process, id)? == Some(expected),
+            &format!("unexpected live-region setting on {id}"),
+        )?;
+    }
+    report(
+        "PASS: one polite semantic status region; numerical status and Preview summaries are readable without live announcements",
     );
     Ok(())
 }
@@ -142,7 +185,7 @@ fn preview_recovery(
     })?;
     diagnostics(directory, "native_settings_read", &["failure"])?;
     start_preview(automation, settings)?;
-    daytime(measurement)?;
+    daytime(automation, settings)?;
     require(
         measurement
             .native_calls()?
@@ -152,8 +195,7 @@ fn preview_recovery(
         "required read failure permitted another normal operation",
     )?;
     let recovery = Instant::now();
-    measurement.fail_native(&[])?;
-    retry(automation, settings)?;
+    measurement.retry_native(|| retry(automation, settings))?;
     let current = written(measurement, 6500, Some(recovery))?;
     require(
         current.temperature == Some((6500, TemperatureMode::Apply))
@@ -188,7 +230,7 @@ fn preview_stop_during_failure(
     measurement.fail_native(&[SimulatedNativeFault::SettingsRead])?;
     start_preview(automation, settings)?;
     status(automation, settings, &text()?.output_unavailable)?;
-    daytime(measurement)?;
+    daytime(automation, settings)?;
     let stopped = Instant::now();
     automation.invoke(settings, std::process::id(), automation_id::PREVIEW)?;
     editable(automation, settings)?;
@@ -257,6 +299,121 @@ fn preview_completion_during_failure(
     Ok(())
 }
 
+fn preview_deadline_during_blocked_output(
+    measurement: &GraphMeasurement,
+    automation: &Automation,
+    settings: &HWND,
+) -> io::Result<()> {
+    let process = std::process::id();
+    show_page(
+        automation,
+        settings,
+        process,
+        automation_id::NAV_TRANSITIONS,
+    )?;
+    automation.set_number(settings, process, automation_id::PREVIEW_LENGTH_NUMBER, 3.0)?;
+    show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
+    measurement.hold_output(true)?;
+    let started = Instant::now();
+    start_preview(automation, settings)?;
+    wait("Preview output blocked across its deadline", || {
+        Ok(measurement.output_blocked()?.then_some(()))
+    })?;
+    show_page(automation, settings, process, automation_id::NAV_GENERAL)?;
+    wait_automation("General editing available at Preview deadline", || {
+        Ok(automation
+            .enabled(settings, process, automation_id::START_MINIMIZED)?
+            .filter(|enabled| *enabled))
+    })?;
+    require(
+        started.elapsed() < Duration::from_secs(5),
+        "blocked native output extended the three-second Preview UI",
+    )?;
+    require(
+        measurement.output_blocked()?,
+        "native output completed before the deadline check",
+    )?;
+    for (page, control) in [
+        (automation_id::NAV_APPS, automation_id::FOCUS_DELAY_NUMBER),
+        (
+            automation_id::NAV_TRANSITIONS,
+            automation_id::PREVIEW_LENGTH_NUMBER,
+        ),
+        (automation_id::NAV_SCHEDULE, automation_id::WAKE),
+    ] {
+        show_page(automation, settings, process, page)?;
+        require(
+            automation.enabled(settings, process, control)? == Some(true),
+            "a settings page stayed locked after Preview's deadline",
+        )?;
+    }
+    let released = Instant::now();
+    measurement.hold_output(false)?;
+    written(measurement, 2200, Some(released))?;
+    require(
+        measurement
+            .native_calls()?
+            .iter()
+            .filter(|call| call.started >= released)
+            .filter_map(|call| call.temperature)
+            .all(|(kelvin, _)| kelvin == 2200),
+        "native completion replayed an obsolete Preview step",
+    )?;
+    report(
+        "PASS: Preview ends and all settings pages unlock at the logical deadline while native output stays blocked; output restores after release",
+    );
+    Ok(())
+}
+
+fn preview_restart_after_blocked_deadline(
+    measurement: &GraphMeasurement,
+    automation: &Automation,
+    settings: &HWND,
+) -> io::Result<()> {
+    let process = std::process::id();
+    measurement.hold_output(true)?;
+    start_preview(automation, settings)?;
+    wait("old Preview output blocked", || {
+        Ok(measurement.output_blocked()?.then_some(()))
+    })?;
+    editable(automation, settings)?;
+    require(
+        measurement.output_blocked()?,
+        "old Preview call finished before restart",
+    )?;
+    let restarted = Instant::now();
+    automation.invoke(settings, process, automation_id::PREVIEW)?;
+    wait(
+        "new Preview submitted while the old call is blocked",
+        || {
+            Ok(measurement
+                .preview_submitted_at()?
+                .filter(|at| *at >= restarted))
+        },
+    )?;
+    measurement.hold_output(false)?;
+    wait_automation("new Preview admitted after the old call finishes", || {
+        Ok(automation
+            .enabled(settings, process, automation_id::WAKE)?
+            .filter(|enabled| !enabled))
+    })?;
+    written(measurement, 6500, Some(restarted))?;
+    editable(automation, settings)?;
+    require(
+        restarted.elapsed() < Duration::from_secs(5),
+        "replacement Preview extended its captured duration",
+    )?;
+    written(
+        measurement,
+        2200,
+        Some(restarted + Duration::from_millis(2900)),
+    )?;
+    report(
+        "PASS: a new Preview submitted after logical expiry starts when the old native call finishes and keeps its own deadline",
+    );
+    Ok(())
+}
+
 fn partial_write_failure(
     measurement: &GraphMeasurement,
     automation: &Automation,
@@ -305,8 +462,7 @@ fn partial_write_failure(
         .find(|call| call.failure == Some(DiagnosticOperation::TemperatureWrite))
         .ok_or_else(|| io::Error::other("last write failure absent"))?;
     let retry = Instant::now();
-    measurement.fail_native(&[])?;
-    self::retry(automation, settings)?;
+    measurement.retry_native(|| self::retry(automation, settings))?;
     let applied = written(measurement, 2300, Some(retry))?;
     require(
         applied.started.duration_since(last_failure.completed) < Duration::from_millis(800),
@@ -393,11 +549,12 @@ fn start_preview(automation: &Automation, settings: &HWND) -> io::Result<()> {
 
 // The plot keeps a margin above 6500 K, so the plateau is found as the first
 // level, well above the starting Sleep level, that stays unchanged.
-fn daytime(measurement: &GraphMeasurement) -> io::Result<()> {
-    let (_, _, sleep) = wait("rendered Preview position", || measurement.position())?;
+fn daytime(automation: &Automation, settings: &HWND) -> io::Result<()> {
+    let mut capture = crate::graph::Capture::new(automation, settings)?;
+    let (_, _, sleep) = wait("rendered Preview position", || capture.position())?;
     let mut level: Option<(f64, Instant)> = None;
     wait("rendered Preview advances to daytime plateau", || {
-        let Some((_, _, y)) = measurement.position()? else {
+        let Some((_, _, y)) = capture.position()? else {
             return Ok(None);
         };
         match level {
@@ -405,7 +562,7 @@ fn daytime(measurement: &GraphMeasurement) -> io::Result<()> {
                 level = None;
                 Ok(None)
             }
-            Some((plateau, since)) if (plateau - y).abs() < f64::EPSILON => {
+            Some((plateau, since)) if (plateau - y).abs() < 0.02 => {
                 Ok((since.elapsed() >= Duration::from_millis(300)).then_some(()))
             }
             _ => {

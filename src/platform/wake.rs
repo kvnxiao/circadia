@@ -5,12 +5,12 @@ use std::os::windows::io::BorrowedHandle;
 use std::os::windows::io::FromRawHandle;
 use std::os::windows::io::OwnedHandle;
 use std::time::Duration;
-use windows_sys::Win32::Foundation::WAIT_FAILED;
-use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
-use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
-use windows_sys::Win32::System::Threading::INFINITE;
-use windows_sys::Win32::System::Threading::SetEvent;
-use windows_sys::Win32::System::Threading::WaitForMultipleObjects;
+use windows_sys::Win32::synchapi::SetEvent;
+use windows_sys::Win32::synchapi::WaitForMultipleObjects;
+use windows_sys::Win32::winbase::INFINITE;
+use windows_sys::Win32::winbase::WAIT_FAILED;
+use windows_sys::Win32::winbase::WAIT_OBJECT_0;
+use windows_sys::Win32::winerror::WAIT_TIMEOUT;
 
 /// Wake a native worker for commands while preserving watcher notification
 /// state.
@@ -110,10 +110,13 @@ impl NativeWake {
         // call borrows them.
         let status = unsafe { WaitForMultipleObjects(count, handles.as_ptr(), 0, milliseconds) };
         match status {
-            WAIT_OBJECT_0 => Ok(WakeReason::Command),
-            WAIT_TIMEOUT => Ok(WakeReason::Deadline),
+            value if value == WAIT_OBJECT_0.cast_unsigned() => Ok(WakeReason::Command),
+            value if value == WAIT_TIMEOUT.cast_unsigned() => Ok(WakeReason::Deadline),
             WAIT_FAILED => Err(io::Error::last_os_error()),
-            other if other > WAIT_OBJECT_0 && other - WAIT_OBJECT_0 < count => {
+            other
+                if other > WAIT_OBJECT_0.cast_unsigned()
+                    && other - WAIT_OBJECT_0.cast_unsigned() < count =>
+            {
                 Ok(WakeReason::Observation)
             }
             _ => Err(io::Error::other("unexpected Windows event wait result")),

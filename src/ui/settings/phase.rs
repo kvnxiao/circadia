@@ -1,6 +1,7 @@
 use super::palette::Palette;
 use super::palette::Theme;
 use super::palette::hex;
+use super::progress;
 use crate::ui::status::Badge;
 use crate::ui::status::Phase;
 use crate::ui::status::Picture;
@@ -101,7 +102,15 @@ fn badge_svg(badge: Badge, palette: &Palette) -> EncodedImage {
     )
 }
 
-pub(super) fn view(phase: &Phase, name: String, palette: &Palette, size: f64, id: &str) -> View {
+pub(super) fn view(
+    phase: &Phase,
+    name: String,
+    palette: &Palette,
+    size: f64,
+    id: &str,
+    motion: Option<progress::Timeline>,
+    accents: [windows_reactor::Color; 2],
+) -> View {
     let unit = size / 76.0;
     let mut layers: Vec<View> = vec![
         Image::new()
@@ -121,10 +130,20 @@ pub(super) fn view(phase: &Phase, name: String, palette: &Palette, size: f64, id
                 .minimum(0.0)
                 .maximum(100.0)
                 .value(progress * 100.0)
+                .opacity(if motion.is_some() { 0.0 } else { 1.0 })
+                .automation_id(format!("{id}-progress"))
                 .width(size)
                 .height(size)
                 .into(),
         );
+        if let Some(motion) = motion {
+            layers.push(super::progress::view(
+                motion,
+                super::progress::Shape::Ring,
+                palette,
+                accents,
+            ));
+        }
     }
     if let Some(badge) = phase.badge {
         let ring = 3.0 * unit;

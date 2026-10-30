@@ -7,15 +7,14 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use windows_sys::Win32::Foundation::HMODULE;
-use windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_CONTINUE_SEARCH;
-use windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS;
-use windows_sys::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace;
-use windows_sys::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter;
-use windows_sys::Win32::System::LibraryLoader::GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS;
-use windows_sys::Win32::System::LibraryLoader::GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
-use windows_sys::Win32::System::LibraryLoader::GetModuleFileNameW;
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleExW;
+use windows_sys::Win32::errhandlingapi::SetUnhandledExceptionFilter;
+use windows_sys::Win32::libloaderapi::GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS;
+use windows_sys::Win32::libloaderapi::GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+use windows_sys::Win32::libloaderapi::GetModuleFileNameW;
+use windows_sys::Win32::libloaderapi::GetModuleHandleExW;
+use windows_sys::Win32::minwindef::HMODULE;
+use windows_sys::Win32::winnt::EXCEPTION_POINTERS;
+use windows_sys::Win32::winnt::RtlCaptureStackBackTrace;
 
 pub(crate) fn panic_record(info: &PanicHookInfo<'_>) -> String {
     let thread = std::thread::current();
@@ -54,7 +53,7 @@ pub(crate) fn install_exception_filter(data_directory: &Path) {
 )]
 extern "system" fn record_exception(pointers: *const EXCEPTION_POINTERS) -> i32 {
     if FILTER_ENTERED.swap(true, Ordering::Relaxed) {
-        return EXCEPTION_CONTINUE_SEARCH;
+        return 0;
     }
     // SAFETY: Windows passes exception pointers that stay valid for the
     // duration of the filter call, or null.
@@ -70,12 +69,12 @@ extern "system" fn record_exception(pointers: *const EXCEPTION_POINTERS) -> i32 
             jiff::Timestamp::now(),
             std::process::id(),
             std::thread::current().name().unwrap_or("unnamed"),
-            record.ExceptionCode.cast_unsigned(),
+            record.ExceptionCode,
             frames(),
         );
         super::append_to_current_file(directory, line.as_bytes());
     }
-    EXCEPTION_CONTINUE_SEARCH
+    0
 }
 
 #[expect(unsafe_code, reason = "capture the current thread's return addresses")]
@@ -108,7 +107,8 @@ fn module_offset(address: *const c_void) -> Option<(String, usize)> {
     // output is one writable handle.
     let found = unsafe {
         GetModuleHandleExW(
-            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT)
+                .cast_unsigned(),
             address.cast(),
             &raw mut module,
         )

@@ -1,7 +1,7 @@
 param(
     [string]$Executable = "$PSScriptRoot\target\debug\circadia-settings-design-probe.exe",
     [string]$Results = "$PSScriptRoot\results",
-    [ValidateSet('screens', 'pickers', 'renderers', 'localization', 'tray', 'icons')]
+    [ValidateSet('screens', 'pickers', 'renderers', 'localization', 'tray', 'icons', 'motion', 'progress')]
     [string[]]$Part = @('screens', 'pickers', 'renderers', 'localization', 'tray', 'icons')
 )
 
@@ -21,6 +21,7 @@ public static class DesignProbeWindows {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, UIntPtr wparam, IntPtr lparam);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
     public static IntPtr TrayWindow(uint process) {
@@ -748,6 +749,183 @@ function Test-Icons {
     }
 }
 
+function Read-Marker($HostElement) {
+    $rect = $HostElement.Current.BoundingRectangle
+    $bitmap = New-Object System.Drawing.Bitmap ([int]$rect.Width), ([int]$rect.Height)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen([int]$rect.X, [int]$rect.Y, 0, 0, $bitmap.Size)
+        return [MotionPixels]::Locate($bitmap)
+    } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+}
+
+function Test-Motion {
+    Add-Type -ReferencedAssemblies System.Drawing @'
+using System.Drawing;
+public static class MotionPixels {
+    public static double[] Locate(Bitmap image) {
+        long xsum = 0, ysum = 0, count = 0;
+        for (int y = 0; y < image.Height; y++) {
+            for (int x = 0; x < image.Width; x++) {
+                Color p = image.GetPixel(x, y);
+                if (p.G > 220 && p.R < 30 && p.B < 30) { xsum += x; ysum += y; count++; }
+            }
+        }
+        return count == 0 ? new double[] {-1, -1} : new double[] {(double)xsum/count, (double)ysum/count};
+    }
+}
+'@
+    $process = Start-Probe @('--motion')
+    $record = [ordered]@{ samples = @(); positions = @() }
+    $report.motion = $record
+    try {
+        $window = Wait-Window $process
+        Focus-Window $window
+        $handle = [IntPtr]$window.Current.NativeWindowHandle
+        [DesignProbeWindows]::SetWindowPos($handle, [IntPtr]-1, 0, 0, 0, 0, 0x0013) | Out-Null
+        $hostElement = $window
+        Start-Sleep -Seconds 2
+        $record.samples += Read-Sample $process 'idle start'
+        Start-Sleep -Seconds 2
+        $record.samples += Read-Sample $process 'idle end'
+        foreach ($action in @('start', 'replace')) {
+            Invoke-Element (Get-Id $window "motion-$action")
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            foreach ($sample in 1..20) {
+                Start-Sleep -Milliseconds 20
+                $position = Read-Marker $hostElement
+                if ($position[0] -lt 0) { throw "Visible marker missing during $action" }
+                $record.positions += [ordered]@{ action = $action; milliseconds = $clock.Elapsed.TotalMilliseconds; x = $position[0]; y = $position[1] }
+            }
+            $record.samples += Read-Sample $process "$action sampled"
+        }
+        Invoke-Element (Get-Id $window 'motion-remove')
+        Start-Sleep -Milliseconds 500
+        $removed = Read-Marker $hostElement
+        if ($removed[0] -ne -1) { throw 'Marker remains visible after removal' }
+        $record.samples += Read-Sample $process 'removed start'
+        Start-Sleep -Seconds 2
+        $record.samples += Read-Sample $process 'removed end'
+        $record.logAfterRemoval = [IO.File]::ReadAllLines($log)
+        Invoke-Element (Get-Id $window 'motion-finite')
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        foreach ($delay in @(500, 1500, 1500, 1000, 500)) {
+            Start-Sleep -Milliseconds $delay
+            $position = Read-Marker $hostElement
+            if ($position[0] -lt 0) { throw 'Visible marker missing during finite motion' }
+            $record.positions += [ordered]@{ action = 'finite'; milliseconds = $clock.Elapsed.TotalMilliseconds; x = $position[0]; y = $position[1] }
+        }
+        $record.samples += Read-Sample $process 'completed start'
+        Start-Sleep -Seconds 2
+        $record.samples += Read-Sample $process 'completed end'
+        $record.screenshot = Save-Screen $window 'motion-completed'
+        $record.finalLog = [IO.File]::ReadAllLines($log)
+        $forward = @($record.positions | Where-Object { $_.action -eq 'start' })
+        $reverse = @($record.positions | Where-Object { $_.action -eq 'replace' })
+        $finite = @($record.positions | Where-Object { $_.action -eq 'finite' })
+        if ($forward[-1].x - $forward[0].x -lt 20) { throw 'Forward path did not advance' }
+        if ($reverse[0].x - $reverse[-1].x -lt 20) { throw 'Replacement did not reverse direction' }
+        if ($finite[1].y -ge $finite[0].y -or $finite[2].y -le $finite[1].y) { throw 'Finite path did not pass its bend' }
+        if ([Math]::Abs($finite[-1].x - $finite[-2].x) -gt 1 -or [Math]::Abs($finite[-1].y - $finite[-2].y) -gt 1) { throw 'Finite endpoint did not remain still' }
+        foreach ($run in @(1, 2)) {
+            $completion = @($record.logAfterRemoval | Where-Object { $_ -match "^motion completed $run after ([0-9.]+) ms$" })
+            if ($completion.Count -ne 1 -or [double]($completion[0] -replace '^.* after ([0-9.]+) ms$', '$1') -ge 20000) { throw "Detached run $run did not complete before its deadline" }
+        }
+        if ($record.logAfterRemoval[-1] -ne 'motion subscriptions 0') { throw 'Detached subscriptions remain' }
+        $record.verified = $true
+        $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $Results 'motion-before-close.json') -Encoding UTF8
+        [DesignProbeWindows]::PostMessage($handle, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        if (-not $process.WaitForExit(5000)) { throw 'Motion probe did not exit on close' }
+    } finally {
+        if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit(5000) | Out-Null }
+        $process.Dispose()
+    }
+}
+
+function Test-Progress {
+    Add-Type -ReferencedAssemblies System.Drawing @'
+using System;
+using System.Drawing;
+public static class DesignProgressPixels {
+    public static double[] Read(int left, int top, int width, int height) {
+        using (var bitmap = new Bitmap(width, height)) {
+            using (var graphics = Graphics.FromImage(bitmap)) {
+                graphics.CopyFromScreen(left, top, 0, 0, bitmap.Size);
+            }
+            int green = 0, yellow = 0;
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    var color = bitmap.GetPixel(x, y);
+                    if (color.G > 200 && color.R < 40 && color.B < 40) green++;
+                    if (color.R > 200 && color.G > 200 && color.B < 40) yellow++;
+                }
+            }
+            var center = bitmap.GetPixel(width / 2, height / 2);
+            return new double[] {(double)green / (width * height), yellow, center.R, center.G, center.B};
+        }
+    }
+}
+'@
+    function Read-ProgressPixels($Element) {
+        $rect = $Element.Current.BoundingRectangle
+        return [DesignProgressPixels]::Read([int][Math]::Floor($rect.X), [int][Math]::Floor($rect.Y), [int][Math]::Ceiling($rect.Width), [int][Math]::Ceiling($rect.Height))
+    }
+    $process = Start-Probe @('--progress')
+    $record = [ordered]@{ positions = @(); ranges = @() }
+    $report.progress = $record
+    try {
+        $window = Wait-Window $process
+        Focus-Window $window
+        $handle = [IntPtr]$window.Current.NativeWindowHandle
+        [DesignProbeWindows]::SetWindowPos($handle, [IntPtr]-1, 0, 0, 0, 0, 0x0013) | Out-Null
+        $bar = Get-Id $window 'progress-bar'
+        $ring = Get-Id $window 'progress-ring'
+        $color = Get-Id $window 'progress-color'
+        foreach ($element in @($bar, $ring)) {
+            $range = $element.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current
+            if ($range.Minimum -ne 0 -or $range.Maximum -ne 100 -or $range.Value -ne 25) { throw 'Initial native range semantics changed' }
+            $record.ranges += [ordered]@{ id = $element.Current.AutomationId; value = $range.Value; minimum = $range.Minimum; maximum = $range.Maximum; offscreen = $element.Current.IsOffscreen }
+        }
+        Invoke-Element (Get-Id $window 'progress-start')
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        foreach ($delay in @(500, 1000, 1500, 3500)) {
+            Start-Sleep -Milliseconds $delay
+            $record.positions += [ordered]@{ milliseconds = $clock.Elapsed.TotalMilliseconds; bar = @(Read-ProgressPixels $bar); ring = @(Read-ProgressPixels $ring); color = @(Read-ProgressPixels $color) }
+        }
+        $record.screenshot = Save-Screen $window 'progress-completed'
+        $positions = $record.positions
+        if ($positions[0].bar[0] -le 0 -or $positions[1].bar[0] -le $positions[0].bar[0] -or $positions[2].bar[0] -le $positions[1].bar[0] -or $positions[3].bar[0] -lt 0.95) { throw 'Progress bar did not interpolate and finish' }
+        if ($positions[0].ring[1] -le 0 -or $positions[1].ring[1] -le $positions[0].ring[1] -or $positions[2].ring[1] -le $positions[1].ring[1] -or $positions[3].ring[1] -le $positions[2].ring[1]) { throw 'Progress arc did not interpolate and finish' }
+        if ($positions[0].color[2] -le 0 -or $positions[0].color[3] -le 0 -or $positions[3].color[4] -lt 250 -or $positions[3].color[2] -gt 5) { throw 'Dot color did not interpolate and finish' }
+        Invoke-Element (Get-Id $window 'progress-value')
+        Start-Sleep -Milliseconds 200
+        foreach ($element in @($bar, $ring)) {
+            $range = $element.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current
+            if ($range.Value -ne 75) { throw 'Updated native range value is missing' }
+            $record.ranges += [ordered]@{ id = $element.Current.AutomationId; value = $range.Value; minimum = $range.Minimum; maximum = $range.Maximum; offscreen = $element.Current.IsOffscreen }
+        }
+        Invoke-Element (Get-Id $window 'progress-long')
+        Start-Sleep -Milliseconds 500
+        Invoke-Element (Get-Id $window 'progress-remove')
+        Start-Sleep -Milliseconds 300
+        $record.removed = [ordered]@{ bar = @(Read-ProgressPixels $bar); ring = @(Read-ProgressPixels $ring); color = @(Read-ProgressPixels $color) }
+        if ($record.removed.bar[0] -ne 0 -or $record.removed.ring[1] -ne 0 -or ($record.removed.color[2] + $record.removed.color[3] + $record.removed.color[4]) -ne 0) { throw 'Animation visuals remain after removal' }
+        $record.log = [IO.File]::ReadAllLines($log)
+        if (@($record.log | Where-Object { $_ -match 'progress error|attachment error' }).Count -ne 0) { throw 'The progress probe reported a composition error' }
+        if (@($record.log | Where-Object { $_ -match '^progress completed 1 after' }).Count -ne 1 -or @($record.log | Where-Object { $_ -match '^progress completed 2 after' }).Count -ne 1 -or $record.log[-1] -ne 'progress subscriptions 0') { throw 'Animation completion or cleanup was not observed' }
+        $record.verified = $true
+        $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $Results 'progress-before-close.json') -Encoding UTF8
+        [DesignProbeWindows]::PostMessage($handle, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        if (-not $process.WaitForExit(5000)) { throw 'Progress probe did not exit on close' }
+    } finally {
+        if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit(5000) | Out-Null }
+        $process.Dispose()
+    }
+}
+
 foreach ($name in $Part) {
     try {
         switch ($name) {
@@ -757,6 +935,8 @@ foreach ($name in $Part) {
             'localization' { Test-Localization }
             'tray' { Test-Tray }
             'icons' { Test-Icons }
+            'motion' { Test-Motion }
+            'progress' { Test-Progress }
         }
     } catch {
         $report["$name-error"] = "$_ at $($_.InvocationInfo.ScriptLineNumber)"

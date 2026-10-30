@@ -7,10 +7,10 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
-use windows_sys::Win32::UI::WindowsAndMessaging::CHILDID_SELF;
-use windows_sys::Win32::UI::WindowsAndMessaging::EVENT_OBJECT_NAMECHANGE;
-use windows_sys::Win32::UI::WindowsAndMessaging::EVENT_SYSTEM_FOREGROUND;
-use windows_sys::Win32::UI::WindowsAndMessaging::OBJID_WINDOW;
+use windows_sys::Win32::winuser::CHILDID_SELF;
+use windows_sys::Win32::winuser::EVENT_OBJECT_NAMECHANGE;
+use windows_sys::Win32::winuser::EVENT_SYSTEM_FOREGROUND;
+use windows_sys::Win32::winuser::OBJID_WINDOW;
 use winsafe::HPROCESS;
 use winsafe::HWND;
 use winsafe::co;
@@ -164,7 +164,7 @@ fn hosted_identity<S: WindowSource>(
 }
 
 fn title_event<W: PartialEq + Copy>(window: W, object: i32, child: i32, foreground: W) -> bool {
-    window == foreground && object == OBJID_WINDOW && u32::try_from(child) == Ok(CHILDID_SELF)
+    window == foreground && object == OBJID_WINDOW && child == CHILDID_SELF
 }
 
 struct Previous {
@@ -285,7 +285,12 @@ impl ForegroundEvents {
                 let Some(foreground) = HWND::GetForegroundWindow() else {
                     return;
                 };
-                if !title_event(event.window, event.object, event.child, foreground.ptr()) {
+                if !title_event(
+                    event.window,
+                    event.object,
+                    event.child,
+                    foreground.ptr().cast(),
+                ) {
                     return;
                 }
                 if tracing::enabled!(tracing::Level::DEBUG) {
@@ -314,8 +319,8 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::collections::BTreeMap;
-    use windows_sys::Win32::UI::WindowsAndMessaging::OBJID_CLIENT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::OBJID_TITLEBAR;
+    use windows_sys::Win32::winuser::OBJID_CLIENT;
+    use windows_sys::Win32::winuser::OBJID_TITLEBAR;
 
     struct Fixture {
         names: BTreeMap<u32, Option<String>>,
@@ -458,7 +463,7 @@ mod tests {
 
     #[test]
     fn title_events_are_accepted_only_for_the_foreground_window_itself() {
-        let child = i32::try_from(CHILDID_SELF).expect("child identifier");
+        let child = CHILDID_SELF;
         assert!(title_event(7, OBJID_WINDOW, child, 7));
         assert!(!title_event(8, OBJID_WINDOW, child, 7));
         assert!(!title_event(7, OBJID_TITLEBAR, child, 7));
