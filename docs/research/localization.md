@@ -22,24 +22,11 @@ recheck-when: Circadia adds a shipped language or brings right-to-left languages
 
 # Localizing Circadia's interface
 
-Circadia should keep its own interface strings in Project Fluent files embedded in the executable and read through `i18n-embed` with the `fl!` macro from `i18n-embed-fl`, and it should format and parse clock times and decimal numbers with Windows national language support (NLS) functions called with `LOCALE_NAME_USER_DEFAULT`. The `fl!` macro rejects an unknown message identifier, an unknown argument, and a missing argument at compile time against the English source file; Fluent provides CLDR plural categories and named placeholders that translations can reorder; and the measured size cost is about 370 KiB in a minimal program. NLS is the only compared formatting API that applies every user regional override, it costs no binary size, and it separates the regional format from the display language the way Windows Settings does. ICU4X formats correctly from CLDR data but does not read Windows overrides and has no number parser. MRT Core is unsuitable for these reasons:
+Circadia uses embedded Project Fluent messages through `i18n-embed` and `i18n-embed-fl`, with Windows national language support (NLS) for regional formatting. The compared Fluent macros check message identifiers and arguments against the English catalog at compile time. The measured executable increase was about 369 KiB in a minimal release program.
 
-- The self-contained build already places the Windows App SDK runtime's own `resources.pri` next to `circadia.exe`.
-- `.resw` strings have no plural or named-placeholder syntax.
-- Circadia's windows-rs dependencies do not bind the MRT Core API.
-- `x:Uid` does not apply to controls that Reactor creates in Rust.
+NLS reads user regional overrides independently of the display language. The console measurements verified a custom short-date override; clock and decimal-separator overrides were inferred from the API contract. ICU4X did not read Windows overrides and had no number parser in the tested version. MRT Core required additional resource bindings and offered neither plural selection nor named placeholders.
 
-Native WinUI controls take built-in text from two separate sources that select languages differently: the runtime's `Microsoft.ui.xaml.dll.mui` satellite files (ToggleSwitch On/Off, TimePicker placeholders) follow the Win32 resource loader's preferred-UI-language list, and the runtime's `resources.pri` (InfoBar, NumberBox, NavigationView automation names) follows MRT Core's resource context. The runtime ships both in 86 languages but not in any pseudo-locale (`qps-ploc`, `qps-ploca`, or `qps-plocm`). Right-to-left layout is not possible through Reactor at windows-rs `722f202` or `ebc5a99`, because WinUI does not derive `FlowDirection` from the display language and Reactor exposes no setter; Circadia should request `FlowDirection` and `Language` upstream before it ships a right-to-left language. A display-language change takes effect only after the user signs out, so only a regional-format change can occur while Circadia runs; Circadia's hidden lifecycle window already receives the `WM_SETTINGCHANGE` message that announces it. The product decisions settled on 2026-10-23 are these; [Selected approach](#selected-approach) records how the evidence applies to each:
-
-- Adopt the recommended Fluent and NLS mechanisms.
-- Ship English only, with a generated pseudo-locale.
-- Add an in-app language drop-down whose change applies after Circadia restarts.
-- Apply regional-format and display-language changes at the next launch.
-- Leave right-to-left languages out of the first release.
-
-## Decision this research informs
-
-The design package for the 2026-10-23 settings-window redesign requires every user-visible and screen-reader string to be localizable, clock times to follow the user's Windows clock format, latitude and longitude fields to accept the locale's decimal separator while the configuration file stays locale-independent, counts to follow each language's plural rules, messages with values to use named placeholders, and layouts to tolerate longer translations. It left five product decisions open: which languages ship first, whether Circadia offers its own language setting, whether right-to-left languages are in scope, whether diagnostics stay in English, and when a Windows language or regional-format change takes effect. They were settled on 2026-10-23; [Selected approach](#selected-approach) records the choices. The mechanism must be selected before the redesigned settings pages are built so that they use localized strings from their first version.
+Native WinUI text uses both Multilingual User Interface (MUI) satellite files and MRT Core resource indexes. These sources select languages differently. The measurements below cover runtime 2.5.1 and the listed Reactor commits; they do not establish control text behavior in Circadia's current self-contained build. The [localization spec](../specs/localization.md) defines the English-only release, restart-time language and regional settings, and translation acceptance checks.
 
 ## Evidence boundaries
 
@@ -186,29 +173,21 @@ Under `FlowDirection.RightToLeft`, a `Canvas` places `(0, 0)` at the top-right c
 | Size and dependencies | None; system DLL | `windows` crate WinRT features | +195 KiB with compiled data |
 | Pseudo-locales | `qps-ploc`, `qps-ploca`, `qps-plocm` | `qps-ploc` accepted | Falls back to root data |
 
-## Recommendation
-
-Use Project Fluent through `i18n-embed` 0.16 and `i18n-embed-fl` 0.10 for every string Circadia supplies, including accessible names, tooltip text, dialog buttons, and `ToggleSwitch` `on_content`/`off_content`, embed the `.ftl` files with `rust-embed`, and negotiate the user's `GetUserPreferredUILanguages` list against the embedded languages with English as the fallback. Pass only negotiated languages to `load_languages`, name the pseudo-locale folder `qps-Ploc`, set isolation after loading, and add a unit test that parses every translation and compares its message identifiers and variables with the English file, because `fl!` checks only the fallback language. Generate `qps-Ploc` text with `fluent-pseudo` rather than maintaining a translated file. Apply it to each complete formatted message instead of setting it as Fluent's bundle transform, which brackets each literal fragment separately, and then pad the result to at least 40% longer than the English text, because `fluent-pseudo` alone lengthened the probe's messages by only 24% (see [Rendering probe results](#rendering-probe-results)). The padding step is untested. Add a development-only language override that Circadia applies before negotiation.
-
-Format clock times and decimal numbers with NLS and `LOCALE_NAME_USER_DEFAULT`: `GetTimeFormatEx` with `TIME_NOSECONDS` for times, `TIME_NOMINUTESORSECONDS` for hour axis labels, and `GetNumberFormatEx` with an explicit `NUMBERFMTW` for coordinates. Parse latitude and longitude with a small strict Rust parser that accepts an optional locale negative sign, ASCII digits, and exactly the locale decimal separator from `GetLocaleInfoEx`, then store the value in the configuration file as today. Pass formatted numbers to Fluent as strings and pass counts as numbers for plural selection. Do not use ICU4X or the WinRT formatters for Circadia's own text.
-
-Request `FlowDirection` and `Language` as Reactor properties upstream before any right-to-left language ships; do not use `WS_EX_LAYOUTRTL` as a substitute without a probe. Hide `NavigationView`'s built-in Settings item and supply `ToggleSwitch` text so that the remaining runtime-owned text is limited to automation names and `TimePicker`/`NumberBox` internals.
-
 ## Selected approach
 
-The product decisions settled on 2026-10-23 select the recommended mechanism: Project Fluent through `i18n-embed` and `i18n-embed-fl`, NLS functions (`GetTimeFormatEx`, `GetNumberFormatEx`, `GetLocaleInfoEx`) for formatting, and Circadia's own parser for coordinate input. The selected Wake and Bedtime control chooses values from lists, so it does not need a clock parser. The [localization spec](../specs/localization.md) states the resulting behavior. Each decision and the evidence that applies to it:
+The evidence supports Fluent for messages with plural forms and reorderable named values, and NLS for the user's regional formats. The current implementation uses these mechanisms in [localization](../../src/l10n.rs) and [regional formatting](../../src/platform/nls.rs). Coordinate input uses a strict parser with the locale's decimal separator; the configuration format remains locale-independent.
 
-- **Languages in the first release: English only, with localizable resources.** Tests and probes use a generated pseudo-locale, and a developer-only command-line option forces a language or the pseudo-locale. Fluent infrastructure, regional formatting, and the coordinate parser are needed even for an English-only release, because clock format and decimal separator follow the regional format, not the display language. The runtime already ships native control text in 86 languages, so a later language in that set gets matching control text without extra work; the pseudo-locale gets English control text. Each later language adds a translation and a layout check at 100%, 150%, and 200% scaling.
-- **Language setting: a drop-down on the General page.** "Use Windows language" is the default; it negotiates the Windows preferred UI languages against the shipped catalogs and falls back to English. Each shipped language is also listed under its own name. A change applies after restart: settings says that Circadia must restart and offers "Quit Circadia", which performs a normal Quit, and the user starts Circadia again. Circadia does not relaunch itself. The evidence supports restart-time application, because MRT-based control text fixes its language at the first lookup in the process. The stored choice must be in Circadia's configuration, because the unpackaged `PrimaryLanguageOverride` is not persisted. A choice that differs from the Windows language leaves WinUI-owned text, such as automation names, `NumberBox`, `InfoBar`, and `NavigationView` strings, and localized control types, in the Windows language unless the unverified overrides listed under [Gaps](#gaps) work.
-- **Right-to-left languages: out of scope for the first release.** Circadia asks upstream for Reactor `FlowDirection` and `Language` properties. The graph-mirroring choice is deferred with right-to-left support; the evidence above still applies when it returns.
-- **Error text and the log.** The decisions make every user-visible and screen-reader string localizable. Error text shows a translated plain explanation per error category plus the technical code, for example `0x80070005`, and does not show raw library messages, which removes the mix of English Rust messages and Windows-language system messages described under [Other locale-dependent constraints](#other-locale-dependent-constraints). The log is a developer record outside that scope; [Persistent crash logging](crash-logging.md) describes it.
-- **When a change takes effect: at the next launch.** Regional-format and display-language changes apply when Circadia next starts. Circadia does not need to inspect `WM_SETTINGCHANGE` for `"intl"`. Until restart, the settings window and the tray tooltip keep the formats read at startup.
-- **Time entry: a segmented button instead of `TimePicker`.** The Wake and Bedtime controls show hour, minute, and, only in regions with a 12-hour clock, an AM/PM segment; the button opens a flyout with scrolling lists and Accept and Cancel. Circadia asks upstream for a `TimePicker` selected-time property. The 12-hour or 24-hour choice, the position of the AM/PM segment, and the designators come from the regional format: the rendering probe reads the hour letter, the AM/PM position, and hour padding from the `LOCALE_STIMEFORMAT` pattern, skipping quoted literal text, and the designators from `LOCALE_S1159` and `LOCALE_S2359`. [Settings design support](settings-design-support.md) records the Reactor controls for this picker.
-- **Layout and tooltip limits.** Translations must not clip at 100%, 150%, and 200% scaling, and the tray tooltip stays under 128 UTF-16 code units in every language.
+Three limits matter when extending this implementation:
+
+- Fluent's compile-time checks cover the fallback catalog. Other translations need independent message and argument checks.
+- The measured `fluent-pseudo` transform expanded long messages by 24%. Circadia adds padding to satisfy the 40% expansion requirement; the old rendering measurements do not validate that application code.
+- Native control resources can retain a language selected at their first lookup. A language change therefore applies at restart. The preferred-language overrides were measured in a framework-dependent probe, with the limits below.
+
+The segmented Wake and Bedtime picker avoids the tested Reactor `TimePicker` limitation: it could not display a saved time. [Settings design support](settings-design-support.md) records the relevant control behavior. Right-to-left layout remains outside the first release.
 
 ## Rendering probe results
 
-**Measured with the [settings-design rendering probe](../../probes/windows-reactor/settings-design/README.md) on 2026-10-24:** windows-rs `0496ec1`, Windows 11 build 26300.9711 with an en-US display language and regional format, 100% scaling, and a default debug build using the installed Windows App SDK runtime 2.5.1. The probe embeds an English catalog, a partial German catalog, and a pseudo-locale generated with `fluent-pseudo` 0.3.3 as Fluent's bundle transform, and formats with NLS for the user default or an explicit locale name.
+**Measured with the [settings-design rendering probe](../../tools/windows-reactor/settings-design/README.md) on 2026-10-24:** windows-rs `0496ec1`, Windows 11 build 26300.9711 with an en-US display language and regional format, 100% scaling, and a default debug build using the installed Windows App SDK runtime 2.5.1. The probe embeds an English catalog, a partial German catalog, and a pseudo-locale generated with `fluent-pseudo` 0.3.3 as Fluent's bundle transform, and formats with NLS for the user default or an explicit locale name.
 
 - **Regional formats:** `en-US` produced "11:05 PM", the hour label "11 PM", "-74.0060", and "6,500"; `de-DE` produced "23:05", "23", "-74,0060", and "6.500". The 12-hour layout of the time picker has an AM/PM list; the 24-hour layout does not. Unit tests cover the probe's reading of 12-hour, 24-hour, AM/PM-first, and quoted-literal clock patterns.
 - **Coordinate entry:** with `de-DE` formats, the latitude field showed "40,7128", Circadia's parser rejected "40.5", and accepted "40,5".
@@ -226,14 +205,11 @@ The product decisions settled on 2026-10-23 select the recommended mechanism: Pr
 - Whether `WS_EX_LAYOUTRTL` on Reactor's host window mirrors WinUI content and input consistently. This matters only if right-to-left support returns to scope before Reactor adds `FlowDirection`.
 - Whether NLS returns new regional values in a running process after a regional-format change, and whether the `"intl"` broadcast reaches Circadia's lifecycle window. The next-launch decision does not depend on it; an immediate-update option would. A separately invoked test that changes the host's short-time pattern while a probe runs would settle it.
 
-### Implementation and release checks
+### Validation limits
 
-- Check pseudo-localized text that is at least 40% longer than English in the navigation pane and the four-column [event summary row](../design/settings-window.md#event-summary-row) (Wake, Sunrise, Sunset, and Bedtime) at 150% and 200% scaling. The rendering probe checked only 100% with 24% longer text.
-- Repeat the probe's localization cases in the self-contained build.
-- Track RUSTSEC-2026-0374: `cargo audit` reports `basic-toml` 0.1.10, which `i18n-config` 0.4.8 uses while the `fl!` and `fluent_language_loader!` macros expand, as unmaintained.
-- Check `NumberBox` display and parsing of a fractional coordinate under a comma-decimal regional format, if it is considered for latitude and longitude instead of text fields.
-- Bound the tray tooltip to 127 UTF-16 code units for every shipped language.
-- Recheck the native-control findings when `windows-reactor-setup` stages a different runtime.
+The rendering probe checked 100% scaling with text expanded by 24%. It does not establish the application's 40% pseudo-localization requirement, other display scales, or self-contained native-control translations. Checks above 100% remain post-MVP work under the [interface spec](../specs/interface.md).
+
+The build dependency `basic-toml` 0.1.10, used by `i18n-config` 0.4.8 during macro expansion, has the unmaintained advisory RUSTSEC-2026-0374. The repository's audit policy records its exception. Recheck these dependency and native-control findings when the relevant versions change.
 
 ## Sources
 

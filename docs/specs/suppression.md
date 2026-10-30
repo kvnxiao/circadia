@@ -203,19 +203,9 @@ The tray command indicates whether manual suppression is active, without a count
 - Management is off: the start command is disabled in the tray menu and settings. Turning management off during an active interval ends it.
 - Circadia exits with 30 minutes remaining and starts again: manual suppression starts off. Current focus can independently initialize automatic suppression.
 
-## Explored alternatives
+## Release acceptance conditions
 
-- **Requiring full-path matching for every rule:** Updates into versioned folders and moved applications would require frequent manual corrections. Filename matching remains the default, with an optional path restriction for users who need to distinguish installations. Title conditions distinguish applications that share one executable file, such as launchers using the same Java installation.
-- **Matching the process command line:** Minecraft launchers pass the account's access token on the command line, and the documented way to read another process's command line reads that process's memory, which REQ-game-process-isolation forbids.
-- **Matching window titles alone:** [f.lux's permissive title matching](../research/flux-behavior.md#app-identity-and-matching) drew reports that its app list matched too eagerly. A title condition only narrows a file-name match.
-- **Several entries in the same rule scope with different title conditions:** One entry with a regular expression matches several titles. Separate installation paths remain distinct scopes.
-- **Filling the title condition when adding an app:** Adding a browser while one tab is open would limit the entry to that tab's title.
-- **Letter tiles in place of app icons:** A tile with an app's initial needs no file read, but rows differ only by one letter. Settings shows each executable's own icon instead.
-- **Package logos for Store apps:** A Store app's logo is stored in its package, not in its executable, so apps such as Calculator show the generic icon. Showing package logos needs the package identity and its image assets, which the MVP does not add.
-
-## Implementation and release validation
-
-**Before release:** Include these Windows checks:
+Release evidence covers these Windows conditions:
 
 - Show extracted icons and the generic application icon in settings at 100% scaling. Verification at 200% is deferred to [post-MVP scaling checks](SPEC.md#future-work).
 - Add representative games protected by anti-cheat products while they run, and record whether their executable files can be read; a denied read shows the generic icon.

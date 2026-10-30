@@ -99,7 +99,7 @@ impl Capture {
         let mut pixels = vec![0; self.width * self.height * 4];
         // SAFETY: The buffer spans every 32-bit row, and the bitmap is no
         // longer selected into a device context.
-        unsafe {
+        let copied = unsafe {
             screen.GetDIBits(
                 &bitmap,
                 0,
@@ -110,6 +110,12 @@ impl Capture {
             )
         }
         .map_err(io::Error::other)?;
+        if usize::try_from(copied).ok() != Some(self.height) {
+            return Err(io::Error::other(format!(
+                "captured {copied} of {} requested scanlines",
+                self.height
+            )));
+        }
         Ok(pixels)
     }
 

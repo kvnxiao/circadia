@@ -9,7 +9,7 @@ recheck-when: The elapsed-time source, restart policy, supported Windows version
 
 # Timing manual suppression
 
-Windows provides an elapsed-time counter suitable for a one-hour suppression interval that includes sleep and hibernation. Comparing that counter with an activation deadline avoids local-clock conversion. This supports the selected timer behavior; Circadia's timer delivery and resume integration remain unverified.
+Manual suppression temporarily overrides the schedule with 6500 K for one hour. Windows provides an elapsed-time counter suitable for this interval, including time spent in sleep and hibernation. Comparing that counter with an activation deadline avoids local-clock conversion. This supports the selected timer behavior; The API evidence does not establish Circadia's timer delivery or resume integration.
 
 ## Documented behavior
 

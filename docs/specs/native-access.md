@@ -118,13 +118,9 @@ During failure, Circadia retains the latest stored temperature and normal on/off
 - Cleanup also fails: both failures remain visible, and automatic recovery uses the shared delay instead of an immediate retry loop.
 - A write reports successful temperature storage followed by failed cleanup: recovery applies the current target rather than treating matching stored kelvin as proof of complete success.
 
-## Explored alternatives
+## Release acceptance conditions
 
-- **Rewinding the settings timestamp at startup:** Resetting the timestamp to real time would remove the accumulated timestamp lead, but a probe in the Night Light library's repository found that Windows then ignored later temperature changes, consistent with an inferred highest applied timestamp. Circadia keeps one library handle that stamps above its own earlier writes instead. The [0.5.0 transition research](../research/nightlight-transition-control.md) records the probe's findings.
-
-## Implementation and release validation
-
-**Before release:** Include these Windows checks:
+Release evidence covers these Windows conditions:
 
 - On fresh profiles on build 22000 and a current supported build, test Night Light access before opening its native settings. Distinguish missing keys, missing values, and decode errors. Record any verified Windows action that creates missing Night Light data, and recovery through automatic or explicit retry. Do not prescribe opening Windows settings as a remedy without verifying that it initializes the missing data. Missing data follows the same unavailable-output status, detailed settings error, and retry behavior.
 - Exercise schedule Preview and ordinary fades at configured rates on representative displays. Record visible warming and cooling, cancellation, and missing or erratic response. Successful native operations do not prove visible smoothness. The upstream 0.5.0 probe reports gradual held-preview transitions at 30–480 writes per second on its recorded host; rates below 30 writes per second were not tested.

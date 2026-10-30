@@ -8,14 +8,14 @@ observed-in:
   - CPython 3.15.0a2 with standard-library ctypes on Windows 11 x64 build 26300
   - Installed Eastern Standard Time, Lord Howe Standard Time, Samoa Standard Time, and UTC rules
   - Microsoft Learn time-zone API contracts retrieved on 2026-10-17
-recheck-when: Windows time-zone data or clock policy changes; the Rust converter and host-setting integration are implemented.
+recheck-when: Windows time-zone data, the conversion adapter, or the clock policy changes.
 ---
 
 # Windows clock conversion
 
-A read-only Windows API probe tests omission of skipped local clocks and selection of the first repeated instant for the recorded dates and zones. All 18 retained tests pass on 2026-10-17, including four complete transition days, half-hour changes, year crossings, date boundaries, and elapsed-time interpolation. This establishes a conversion reference; the Rust implementation remains unverified. The [combined investigation](schedule-integration.md) records snapshots after actual host setting changes on 2026-10-16. The relocated host-setting exercise passed again on 2026-10-17 and verified restoration of Eastern Standard Time with daylight adjustment enabled.
+A read-only Windows API probe tests omission of skipped local clocks and selection of the first repeated instant for the recorded dates and zones. All 18 retained tests pass on 2026-10-17, including four complete transition days, half-hour changes, year crossings, date boundaries, and elapsed-time interpolation. This establishes a conversion reference, not verification of the Rust application. The [host-setting exercise](#host-setting-exercise) records snapshots after actual setting changes on 2026-10-16. The relocated host-setting exercise passed again on 2026-10-17 and verified restoration of Eastern Standard Time with daylight adjustment enabled.
 
-The [schedule requirements](../specs/schedule.md) define the policy. The conversion evidence identifies missing and repeated local times and supports elapsed-time interpolation. The probe's omission policy does not implement the spec's dated Wake/Bedtime adjustment or its graph-boundary clamping. [Clock-change intervals](clock-change-intervals.md) explains the selected elapsed-interval policy separately. Relative offsets remain probe fixtures for schedules with user-defined points; the MVP does not expose them. Run instructions and side effects are in the [probe README](../../probes/windows-clock/README.md). The [source archive](archives/README.md) preserves fixtures for a separate scheduler that adjusts solar reference clocks to preserve point order.
+The [schedule requirements](../specs/schedule.md) define the policy. The conversion evidence identifies missing and repeated local times and supports elapsed-time interpolation. The probe's omission policy does not implement the spec's dated Wake/Bedtime adjustment or its graph-boundary clamping. [Clock-change intervals](clock-change-intervals.md) explains the selected elapsed-interval policy separately. Relative offsets remain probe fixtures for schedules with user-defined points; the MVP does not expose them. Run instructions and side effects are in the [probe README](../../tools/windows-clock/README.md).
 
 ## Conversion procedure
 
@@ -75,6 +75,21 @@ Microsoft also documents that the non-Ex converter can miscalculate when the UTC
 
 An in-memory copy of a named dynamic zone with daylight adjustment disabled still followed installed daylight rules through Ex conversion. Explicit rules with transition dates cleared used the fixed bias as expected. These experiments did not change the host's setting. The production implementation must obtain and honor the computer's actual adjustment setting; copying the named-zone structure alone has not established that behavior.
 
+At Samoa's historical date-line change, an attempt to infer the local year from UTC alone was ambiguous: explicit 2011 and 2012 rules each produced a result in their own year. The integration experiment on 2026-10-16 used the known target local year for solar date filtering. The general conversion helper rejects ambiguous inference. The explicit target-year fixture does not establish universal historical conversion from an unqualified UTC instant.
+
+## Host-setting exercise
+
+**Observed through actual setting changes:** The adapter reads `GetDynamicTimeZoneInformation`, including the daylight-adjustment-disabled flag. With transitions disabled, it clears transition dates in its explicit rule copy and uses the standard bias.
+
+| Host setting | Local result for 2026-07-01 17:00 UTC |
+| :-- | :-- |
+| UTC | 17:00 |
+| Eastern Standard Time with daylight adjustment disabled | 12:00 |
+| Eastern Standard Time with daylight adjustment enabled | 13:00 |
+
+The retained [host-setting script](../../tools/windows-clock/host_settings.py) restored Eastern Standard Time with daylight adjustment enabled in a `finally` block. It does not change the system UTC clock. The relocated script passed again on 2026-10-17 with CPython 3.15.0a2 on Windows build 26300.9711, including all three settings and restoration. This verifies fresh snapshots after setting changes, not delivery of a Rust application's time-change notification.
+
+
 ## Documented API failures
 
 **Observed in Microsoft documentation retrieved on 2026-10-17:** The researched conversion path has explicit error returns:
@@ -89,13 +104,8 @@ No API failure was measured in the probes. Documentation does not establish its 
 
 For example, a synthetic fixture can disable solar timing and set Wake to 07:00, Bedtime to 23:00, Sleep to 2200 K, Daytime to 6500 K, and the transition duration to 60 minutes. At 10:30 UTC, a UTC−04:00 zone puts the schedule halfway through waking, at 4350 K. Changing the fixture zone to UTC makes the target 6500 K. Injecting a current-zone read failure at that point distinguishes continuing the old curve from evaluating the new rules. This is an unexecuted failure-injection example, not a host-setting test or product policy.
 
-## Remaining integration checks
+## Applicability limits
 
-- Implement the Rust conversion and compare it with the applicable fixed fixtures. Separately verify elapsed-interval adjustment of Wake/Bedtime occurrences and conversion of the graph's start and end times under the specification. Offset fixtures do not require product support for user-defined offsets.
-- Integrate notification-driven rule refresh in the application. The [combined probe](schedule-integration.md) verifies fresh snapshots after actual host time-zone and daylight-adjustment changes; it does not verify application notification delivery.
-- Connect the graph and controller to the same resolved manual occurrences and selected solar events, including activity intervals without usable solar events.
-- Evaluate relevant year-boundary offset changes without treating a successful finite sample as universal historical support.
+The probe does not establish the application's elapsed-interval adjustment of Wake/Bedtime, graph-boundary clamping, notification delivery, or shared graph/controller calculation. Its relative-offset fixtures do not require product support for arbitrary schedule points.
 
-The probe does not change the clock, time zone, registry, display, location settings, or Night Light. It does not verify solar calculations, native UI integration, or supported Windows build limits.
-
-The archived [combined investigation](schedule-integration.md) connects Windows conversions to real solar events and the scheduler that adjusts reference clocks to preserve point order. Its host-setting exercise is retained as a separate script; it is excluded from the default read-only test recipe.
+The read-only recipe does not change the clock, time zone, registry, display, location settings, or Night Light. The host-setting exercise is separately invoked and changes the time zone temporarily. Neither establishes supported-build coverage or universal historical conversion.

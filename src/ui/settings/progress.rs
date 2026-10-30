@@ -24,6 +24,20 @@ use windows_reactor::Grid;
 use windows_reactor::View;
 use windows_reactor::ViewContext;
 
+fn on_rendering(
+    callback: impl Fn(std::time::Instant) + 'static,
+) -> windows_core::Result<windows_core::EventRevoker> {
+    api::CompositionTarget::Rendering(move |_, _| {
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            callback(std::time::Instant::now());
+        }))
+        .is_err()
+        {
+            std::process::abort();
+        }
+    })
+}
+
 pub(super) const MIN_ANIMATION_DURATION: Duration = Duration::from_millis(1);
 
 pub(super) fn bar_duration(playback: Duration) -> Duration {
@@ -262,7 +276,7 @@ impl Progress {
         fill.set_scale(Vector3::new(narrow(frame.from), 1.0, 1.0));
         let animate = frame.animation_duration().is_some();
         if animate {
-            self.rendering = Some(crate::ui::composition::on_rendering(move |at| {
+            self.rendering = Some(on_rendering(move |at| {
                 fill.set_scale(Vector3::new(
                     narrow(frame.fraction(at.saturating_duration_since(now))),
                     1.0,
@@ -341,7 +355,7 @@ impl Progress {
             return Ok(true);
         }
         let failed = std::cell::Cell::new(false);
-        self.rendering = Some(crate::ui::composition::on_rendering(move |at| {
+        self.rendering = Some(on_rendering(move |at| {
             if failed.get() {
                 return;
             }

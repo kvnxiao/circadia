@@ -71,15 +71,8 @@ Interface text formats clock times and numbers with the user's Windows regional 
 - The regional format uses a comma as decimal separator: latitude shows 40,7128, entering 40,7128 is accepted, and the configuration file stores 40.7128.
 - The user switches the regional format to a 24-hour clock while Circadia runs: times keep the previous format until the next launch.
 
-## Explored alternatives
-
-- **Restarting automatically after a language change:** A self-restart hands control between two processes. Settings instead offers Quit, and the user starts Circadia again.
-- **Following only the Windows display language:** Users could not choose a language different from Windows. The setting defaults to following Windows instead.
-- **Applying regional-format changes while running:** This requires handling Windows' change notification throughout the interface for a rare change. The new format applies at the next launch.
-- **Right-to-left languages in the first release:** Mirrored layout needs a capability that the reference Reactor commit does not offer; see Future work in [SPEC.md](SPEC.md).
-
 ## Supporting evidence
 
 | Design decision or requirement | Evidence |
 | :-- | :-- |
-| Localizable text, language selection, and regional formats | [Localization](../research/localization.md); WinUI control text loaded from MUI resources, such as `ToggleSwitch` labels, followed the preferred UI language in the framework-dependent build; MRT-loaded control text and the self-contained build remain unverified. |
+| Localizable text, language selection, and regional formats | [Localization](../research/localization.md); WinUI control text loaded from Windows Multilingual User Interface (MUI) satellite resources, such as `ToggleSwitch` labels, followed the preferred UI language in the framework-dependent build; control text loaded through Windows App SDK MRT Core resource indexes and the self-contained build remain unverified. |

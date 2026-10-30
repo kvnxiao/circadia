@@ -2,7 +2,6 @@
 date: 2026-10-17
 questions:
   - Which local Rust library correctly finds solar events on the computer-local calendar date, including polar transitions and remote coordinates?
-  - How do repeated solar events and midnight rounding affect daily anchor preferences?
   - Which calculation errors can occur with the tested SPA adapter, and do they require an ordinary fallback mode?
 observed-in:
   - solar-positioning 0.7.1 published source and compiled numeric SPA event API
@@ -15,9 +14,9 @@ recheck-when: The solar dependency, event convention, date adapter, or delta-T e
 
 # Local solar calculation
 
-The complete `probes/solar-calculation/` experiment, including its saved references, is in the [source snapshot](archives/README.md). It is retired from the active probes. Extract the snapshot to run the original README commands; the measurements below support the draft MVP solar calculation.
+The tested `solar-positioning` 0.7.1 SPA interval API matches every sunrise and sunset count in 36 independent United States Naval Observatory (USNO) cases, including missing and repeated events. The `sunrise` 3.0.0 candidate misses events near polar transitions. These results support the application's local event calculation; they do not establish its selection of events between Wake and Bedtime.
 
-The [draft schedule](../specs/schedule.md) uses optional local solar timing. The tested `solar-positioning` 0.7.1 SPA interval API matches every sunrise and sunset count in 36 independent United States Naval Observatory (USNO) cases, including missing and repeated events. The `sunrise` 3.0.0 candidate misses events near polar transitions. The library comparison supports local event calculation. The automatic-anchor preference rules below belong to the archived resolver and do not define the draft schedule.
+The [solar comparison tool](../../tools/solar-calculation/README.md) retains the calculator, independent fixtures, and locked dependencies. Its recorded measurements keep their original dates and environment.
 
 ## Event convention and API fit
 
@@ -33,7 +32,7 @@ The API represents time as a Julian date, a continuous astronomical day count. I
 
 ## Independent reference comparison
 
-The [reproducible probe](archives/README.md) stores full USNO responses and request URLs. Tests do not call a live solar service. Expected results come from USNO, not from either Rust candidate. The API returns a list of phenomena for the requested civil date and clock offset, including zero or multiple events of one type. [USNO API documentation](https://aa.usno.navy.mil/data/api).
+The [reproducible probe](../../tools/solar-calculation/README.md) stores full USNO responses and request URLs. Tests do not call a live solar service. Expected results come from USNO, not from either Rust candidate. The API returns a list of phenomena for the requested civil date and clock offset, including zero or multiple events of one type. [USNO API documentation](https://aa.usno.navy.mil/data/api).
 
 **Measured on 2026-10-16:** Six Rust tests pass. The reference test covers 36 cases and 48 individual rise/set times. Additional tests distinguish invalid coordinates and invalid search inputs from legitimate missing events. All reference event counts match.
 
@@ -62,28 +61,12 @@ The error review informs whether startup needs an ordinary solar fallback mode. 
 | Nonfinite computed position | The event wrapper reports a computation error. No recorded reference case triggers this guard with the built-in SPA provider. |
 | Windows clock or time-zone conversion failure | A separate date-acquisition or conversion failure, not a failed solar crossing calculation. The [Windows conversion research](windows-clock-conversion.md) records that adapter's evidence and limits. |
 
-These findings come from `delta_t.rs`, `events.rs`, `spa/mod.rs`, and `tests/events_numeric.rs` in the published 0.7.1 crate. The [active timing probe](../../probes/solar-timing/README.md) also calls `estimate_from_date`; the date restriction applies before its interval search. [Versioned crate source](https://docs.rs/crate/solar-positioning/0.7.1/source/).
+These findings come from `delta_t.rs`, `events.rs`, `spa/mod.rs`, and `tests/events_numeric.rs` in the published 0.7.1 crate. The [active timing probe](../../tools/solar-timing/README.md) also calls `estimate_from_date`; the date restriction applies before its interval search. [Versioned crate source](https://docs.rs/crate/solar-positioning/0.7.1/source/).
 
 The evidence supports validating the dates and intervals required by an operation and reporting an unexpected failure as a defect. It does not justify several user-configurable solar fallback modes or a persistent cache for expected calculation outages. Retrying identical inputs does not inherently repair a deterministic rejection. The recorded fixtures do not prove that every finite coordinate and supported date succeeds. Host behavior with an unsupported system date has not been tested.
 
-## Daily preference rules
-
-**Observed in the saved USNO response for Tromso, 69.6492 N, 18.9553 E, UTC+2, 2026-07-27:** Sunset occurs at 00:13 and 23:59, with sunrise at 01:29. This is two distinct solar crossings, not a daylight-saving clock repetition. The selected library finds both. Each automatic anchor needs one preference even when the calculation returns multiple crossings.
-
-A second ambiguity follows from the required minute rounding: an event at 23:59:40 rounds to the next date's 00:00, but the resolver accepts a preferred clock time from 00:00 through 23:59 for each anchor date. That date identifies the anchor occurrence; adding an offset can put its point on an adjacent date. The USNO fixtures have minute precision and do not establish this seconds-level boundary; the probe therefore uses independent synthetic seconds-level cases for midnight assignment.
-
-The probe tests these automatic-anchor rules:
-
-- Round a complete event timestamp before assigning its Windows-local source date. Collect enough neighboring events to include crossings that round into the date.
-- For multiple events of the required type on that rounded date, choose the clock time nearest the anchor's configured backup. Compare absolute clock-minute distance without wrapping; choose the earlier event on a tie.
-- Use the backup if that rounded date has no qualifying event.
-
-Synthetic tests cover the nearest-backup choice, earlier ties, input-order independence, and backup fallback. They cover 23:59:29, 23:59:30, and 23:59:40, plus the combination of a preceding date's rounded event and another event on the target date. These checks use a fixed clock offset; they do not exercise the native Windows adapter. The schedule resolver can still adjust the selected preference to preserve the saved order and spacing of temperature points.
-
-Choosing the earliest event or using the backup for every ambiguous date were alternatives. Keeping the original date during midnight rounding would require a rounding exception or a larger resolver preference domain. The selected rules preserve ordinary nearest-minute rounding and the existing 00:00 through 23:59 preference range.
-
 ## Adoption and remaining evidence
 
-For local solar calculation, the evidence supports `solar-positioning` 0.7.1 with the tested SPA model, standard horizon, and minimal feature set. The draft specification selects event omission and activity-interval filtering separately from the tested backup-clock preferences.
+For local solar calculation, the evidence supports `solar-positioning` 0.7.1 with the tested SPA model, standard horizon, and minimal feature set. The [schedule specification](../specs/schedule.md) defines event omission and activity-interval filtering separately.
 
-The local calculation needs no network after installation. The saved references cover selected boundaries, not every coordinate and date. The [combined integration probe](schedule-integration.md) verifies these preference rules with native Windows date boundaries and the archived schedule resolver in eight tests. The [timing probe](solar-performance.md) measures local per-date calculation cost. Full application latency, native editor integration, and host behavior with unsupported system dates remain unverified. A missing event is a successful calculation with an empty event list; a library input or calculation error remains distinguishable from that result.
+The local calculation needs no network after installation. The saved references cover selected boundaries, not every coordinate and date. The [timing probe](solar-performance.md) measures local per-date calculation cost. These calculator fixtures do not establish full application latency, UI integration, or host behavior with unsupported system dates. A missing event is a successful calculation with an empty event list; a library input or calculation error remains distinguishable from that result.

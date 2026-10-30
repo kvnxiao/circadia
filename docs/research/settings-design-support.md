@@ -20,26 +20,11 @@ recheck-when: Each bump of the reference windows-rs commit; when the rendering p
 
 # Settings design support in Windows Reactor
 
-Circadia is a Windows tray application that sets Windows Night Light's color temperature on a daily schedule. At windows-rs `ebc5a99`, Windows Reactor (Reactor, the preview Rust library in windows-rs that declares WinUI 3 interfaces, which Circadia uses for its settings window and tray) supports most of the redesigned settings window directly: `NavigationView`, `Expander`, `ToggleSwitch`, `CheckBox`, `HyperlinkButton`, `ContentDialog`, `Slider`, `NumberBox` with a configurable step, `InfoBar`, `ProgressRing`, `ProgressBar`, SVG `Image` sources, a `TitleBar` with an icon and a tall height, and live-region announcements. It has no gradient or dashed brush, no `TimePicker` selected-time property, no secondary text, tertiary text, or divider theme brush, no `InfoBadge` glyph, no action content in `InfoBar`, no contrast-theme state, no blend effect, no `FlowDirection` or `Language` property, and no checked, bold, or two-line tray menu items.
+The tested Windows Reactor APIs support the settings window's native controls, with additional drawing for gradients and a custom segmented time picker. Rendering measurements favored a `windows-canvas` drawing attached to a composition surface: it drew on demand and used less memory and had lower measured latency than the tested swap-chain view.
 
-The selected approaches:
+The control-support table describes windows-rs `ebc5a99`; rendering results describe `0496ec1`; animation results identify their later commits individually. These observations explain the implementation's API constraints and provide reproducible comparisons. They do not establish behavior at every later dependency revision. The [probe README](../../tools/windows-reactor/settings-design/README.md) identifies its current pin and validation limits.
 
-- Draw the schedule graph's fill and curve, and the gradient strips under the temperature sliders, with the `windows-canvas` Direct2D library. XAML draws the graph's labels, gridlines, dashed lines at the Wake, sunrise, sunset, and Bedtime events, and chips (small round badges with each event's glyph).
-- Replace `TimePicker` with a segmented button that opens a flyout of lists.
-- Use fixed secondary colors per light and dark theme, and Windows high-contrast system colors in contrast themes.
-- Mark checked tray items with a text check mark.
-- Do not tint the window during Preview, the user-started playback of the schedule through Night Light.
-
-The [settings-design rendering probe](../../probes/windows-reactor/settings-design/README.md) rendered every page, dialog, and the tray menu at `0496ec1` in the dark and light themes at 100% scaling. Its results support the selected approaches with two refinements:
-
-- Close the time-picker flyout from Accept and Cancel by changing the picker button's key, and then request focus on the new button. The key identifies an element across Reactor's declarations; when it changes, Reactor replaces the button and its flyout. None of the other approaches that Reactor's declarations allow closed the flyout.
-- Host the `windows-canvas` drawing in a composition surface instead of `windows-canvas`'s swap-chain view. The swap-chain view wakes the process on every frame while settings is open and costs more memory and latency; the composition surface draws on demand.
-
-Contrast themes, 150% and 200% scaling, and Narrator use remain unverified.
-
-## Decision this informs
-
-Circadia's settings redesign follows WinUI 3 and the Windows Settings app, but Circadia declares its interface through Reactor's Rust API. Each design element needs a Reactor control that exposes the needed properties, a composition of exposed controls, or a simplified design. Product decisions made on 2026-10-23, recorded in the [interface spec](../specs/interface.md) and the [design documents](../design/README.md), selected an approach for each gap. This document records the support at windows-rs `ebc5a99` and the selected approach, so that the new pages use the selected controls from their first version. The [Windows Reactor UI research](windows-reactor-ui.md) records the [tracking policy](windows-reactor-ui.md#tracking-policy) (Circadia builds against one windows-rs commit, the reference pin, and moves it to the latest `master` at set times), the Reactor changes since the previous pin, and the [failure policy](windows-reactor-ui.md#failure-policy), under which invalid declarations, internal bugs, and failed native calls after startup end the process; the [interface spec](../specs/interface.md) states the required behavior.
+The [interface spec](../specs/interface.md) defines behavior, and [design documents](../design/README.md) define appearance. [Windows Reactor UI research](windows-reactor-ui.md) describes lifecycle and failure behavior. Contrast themes, scaling above 100%, and Narrator output were not verified by these rendering measurements.
 
 ## Evidence boundaries
 
@@ -73,7 +58,7 @@ Circadia's settings redesign follows WinUI 3 and the Windows Settings app, but C
 | Controls or properties that Reactor does not declare | `ElementRef` offers only typed requests: focus, UI Automation notification, swap chain, native image source, composition child visual on `Grid`, and WebView2. `WindowHandle::as_raw` returns the window handle only. | No general access to the underlying WinUI element. | Each missing feature needs an upstream change or one of the workarounds in this table. |
 | Tray menu | `MenuItem` has three variants: `Item` (key, label, enabled), `Separator`, and `Submenu`. `Menu::new(items, callback)` has no opening callback, and replacing menu content closes an open menu. | No checked state, icon, bold default item, or secondary text. Issue 4923 (menu item kinds, including toggle items) is open; issue 4976 closed on 2026-10-23 as a duplicate of open issue 5137 (accelerators and access keys, and, according to the maintainer, icons). | Plain items in this order: "Open Circadia settings" (not bold), a separator, "Suppress for 1 hour" or "Stop suppressing", a separator, a disabled "Suppress while focused" caption, three recent apps, a separator, and "Quit Circadia". A listed recent app reads "✓ Name (exe)", an unlisted one "Name (exe)", and an excluded one is disabled with "(excluded)". Ask upstream for toggle items. **Measured:** Reactor shows the menu as a WinUI `MenuFlyout` in its own host window, in the Windows 11 menu style; the separators, the disabled caption, the check-mark prefix, and the disabled excluded app render, and the labels change after the state changes. |
 | Tray icon | `NotifyIcon::new(path)` loads an `.ico` file with `LoadImageW`. | No icon handle or SVG source. Issue 4973 (caller-provided `HICON` for window and notification icons) is open. | Generate the `.ico` from the SVG app icon at build time and ship it next to the executable. |
-| Automated native checks with translated text | UI Automation finds controls by name or by automation ID. | English button names stop matching when the interface language changes. | Circadia's [native application checks](../../tools/README.md) find controls by automation ID instead of English text. |
+| Automated native checks with translated text | UI Automation finds controls by name or by automation ID. | English button names stop matching when the interface language changes. | Circadia's [native application checks](../../tools/native/README.md) find controls by automation ID instead of English text. |
 
 ## Time-picker flyout
 
@@ -102,21 +87,21 @@ A `ListView` does not scroll its selected item into view when the flyout opens, 
 | Preview tint | A translucent overlay; a canvas-drawn composition surface; no tint | No tint | Circadia changes screen color only through Night Light, so it draws no overlay or simulated tint. |
 | Checked tray items | A text check mark in the label; a submenu per app; an upstream toggle item | Text check mark, with an upstream request | A text label needs no Reactor change. A submenu adds a level to a frequent action. Toggle items do not exist at `ebc5a99`. |
 
-## Recommendation
+## Applicability to the implementation
 
-The rendering probe at `0496ec1` supported these implementation choices. Its [dependency validation](../../probes/windows-reactor/settings-design/README.md#dependency-validation-on-2026-10-29) records the later checks at `8786f59`; the probe README identifies its current pin.
+The rendering experiment establishes several constraints at `0496ec1`:
 
-- Draw the graph and slider strips with `windows-canvas` into composition surfaces that share one Direct3D device, attached through `ElementRef<Grid>::request_set_child_visual`, and redraw them only when the curve, size, scale, or theme changes. Release the device when settings closes and recreate it after a device loss; the probe kept its device for the life of the process and did not test either rule.
-- Close the time-picker flyout from Accept and Cancel by changing the picker button's key and then requesting focus on the new button, and rotate each list so that the current value is visible when the flyout opens.
-- Declare the `TitleBar` with `height(48.0)` as well as `preferred_height(Tall)`.
-- Replace `currentColor` in badge SVGs before loading them.
-- Align `Expander` cards with plain cards through negative margins, and override only the expander's brush resources.
+- A composition surface can share one Direct3D device and redraw when its content, size, scale, or theme changes. The experiment retained its device for the process lifetime, so it did not establish device-loss recovery or release when settings closes.
+- Replacing a picker button by changing its key closes the flyout. A subsequent focus request returns keyboard focus to the replacement button.
+- A tall `TitleBar` needs an explicit element height as well as `preferred_height(Tall)`.
+- Badge SVGs need `currentColor` replaced before loading.
+- Expander brush overrides work, but overriding `ExpanderHeaderBorderThickness` terminates the tested process.
 
-Recheck each row at the next pin bump, because a Reactor change can replace a workaround.
+Recheck these constraints when upgrading Reactor. Later dependency checks are recorded in the [probe's dependency validation](../../tools/windows-reactor/settings-design/README.md#dependency-validation-on-2026-10-29).
 
 ## Rendering probe results
 
-The [settings-design rendering probe](../../probes/windows-reactor/settings-design/README.md) renders each page, dialog, and the tray menu with fixture data. Its README records every result; this section summarizes those that bear on the selected approaches. The design export's mockups and the probe's screenshots stay out of version control.
+The [settings-design rendering probe](../../tools/windows-reactor/settings-design/README.md) renders each page, dialog, and the tray menu with fixture data. Its README records every result; this section summarizes those that bear on the selected approaches. The design export's mockups and the probe's screenshots stay out of version control.
 
 ### Graph renderers
 
@@ -134,7 +119,7 @@ Latency runs from the message that changes Bedtime to the end of the drawing cal
 
 ### Finite compositor motion and removal
 
-**Measured on 2026-10-29:** the isolated [motion experiment](../../probes/windows-reactor/settings-design/README.md#finite-compositor-motion-experiment) moved a line and dot with linear compositor keyframes at `8786f59`. It did not register an application frame callback or animation timer. Captured screen pixels showed forward motion, reverse motion after replacement, a bend in the path, and a stable final position. Removing the marker removed its pixels. The corrected harness closed its window after capture. Earlier captures obscured by another window are excluded.
+**Measured on 2026-10-29:** the isolated [motion experiment](../../tools/windows-reactor/settings-design/README.md#finite-compositor-motion-experiment) moved a line and dot with linear compositor keyframes at `8786f59`. It did not register an application frame callback or animation timer. Captured screen pixels showed forward motion, reverse motion after replacement, a bend in the path, and a stable final position. Removing the marker removed its pixels. The corrected harness closed its window after capture. Earlier captures obscured by another window are excluded.
 
 The `results/motion-visible/` run measured these completion notifications:
 
@@ -150,7 +135,7 @@ Two-second idle, removed, and completed samples each recorded zero additional pr
 
 The subsequent `results/motion-verified/` run passed independent assertions for forward movement, replacement direction, the bend, removal, and the stable endpoint. Its cancelled batches completed at 3.896 and 3.863 seconds from setup, and finite completion was reported at 4.170 seconds. The removed two-second sample recorded 0.03125 CPU seconds; idle and completed samples recorded zero. The interval from the final idle sample through both capture sets recorded 0.859375 CPU seconds. This variation prevents attributing a CPU reduction to the animation approach from these samples.
 
-The dependency wrapper exposes keyframes, `start_animation`, and visual removal. It does not expose `StopAnimation` or `Close`. Microsoft separately documents [CompositionObject.Close](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.composition.compositionobject.close) as releasing resources through `Windows.Foundation.IClosable`; the tested cleanup did not need that operation. Recheck removal and completion after a dependency or runtime upgrade.
+At `8786f59`, the dependency wrapper exposes keyframes, `start_animation`, and visual removal. It does not expose `StopAnimation` or `Close`; the later generated bindings described below add the required stop operation. Microsoft separately documents [CompositionObject.Close](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.composition.compositionobject.close) as releasing resources through `Windows.Foundation.IClosable`; the tested cleanup did not need that operation. Recheck removal and completion after a dependency or runtime upgrade.
 
 ### Progress and color animation
 
@@ -172,9 +157,9 @@ just composition-bindings /path/to/windows-rs
 
 The generator rejects a checkout at a different commit. [`tools/composition-bindings.txt`](../../tools/composition-bindings.txt) selects the required APIs. `just check-composition-bindings` locates Cargo's pinned checkout, regenerates into a temporary directory, and compares bytes without changing the checked-in file. `just check` includes this check.
 
-**Measured on 2026-10-29:** the [progress experiment](../../probes/windows-reactor/settings-design/README.md#progress-ring-and-color-animation-experiment) captured intermediate bar widths, ring arcs, and dot colors over six seconds. Native ProgressBar and ProgressRing controls at zero opacity retained their UI Automation range patterns, including updated values, and were reported as on-screen. The finite batch completed after 6.256 seconds. Explicit stop and removal ended a separate 20-second batch after 0.514 seconds; all rendered pixels disappeared and batch subscriptions returned to zero.
+**Measured on 2026-10-29:** the [progress experiment](../../tools/windows-reactor/settings-design/README.md#progress-ring-and-color-animation-experiment) captured intermediate bar widths, ring arcs, and dot colors over six seconds. Native ProgressBar and ProgressRing controls at zero opacity retained their UI Automation range patterns, including updated values, and were reported as on-screen. The finite batch completed after 6.256 seconds. Explicit stop and removal ended a separate 20-second batch after 0.514 seconds; all rendered pixels disappeared and batch subscriptions returned to zero.
 
-The run passed at 100% scaling on Windows 11 build 26300.9711 with bundled runtime 2.6.4. It establishes the public API route and accessible range exposure for the tested arrangement. It does not establish Narrator delivery, monitor presentation cadence, or behavior at other scales. Separate application checks must verify that the visuals follow the schedule and Preview clocks and stop when hidden or cancelled. They must also verify that Preview ends at its deadline while a synchronous Night Light call is still running on the controller thread.
+The run passed at 100% scaling on Windows 11 build 26300.9711 with bundled runtime 2.6.4. It establishes the public API route and accessible range exposure for the tested arrangement. It does not establish Narrator delivery, monitor presentation cadence, or behavior at other scales. It does not establish application clock synchronization, cancellation while hidden, or Preview completion during a blocked Night Light call. Those are separate application acceptance conditions.
 
 ### Other results
 
@@ -191,15 +176,11 @@ These uncertainties could change a selected approach:
 - Whether Narrator reads the time-picker list items, whose UI Automation names are empty.
 - Whether the composition renderer leaves the process idle between edits. Counting context switches or process cycle time over an idle window would settle it.
 
-These are implementation and release checks:
-
-- Keyboard and Narrator use of every page, including focus order and the graph's accessible description.
-- Explorer restart with the tray menu open, under the failure policy recorded in [Windows Reactor UI support](windows-reactor-ui.md#failure-policy).
-- Clean-machine deployment of the generated `.ico` with the self-contained runtime.
+The isolated probe does not establish keyboard and Narrator behavior throughout Circadia, Explorer recovery with an open menu, or clean-machine deployment. Those remain application acceptance conditions; the [native harness](../../tools/native/README.md) describes the corresponding checks.
 
 ## Sources
 
-- The [settings-design rendering probe](../../probes/windows-reactor/settings-design/README.md), its `verify-design.ps1` results of 2026-10-24, and windows-rs at `0496ec1`: [swap-chain panel frame subscription](https://github.com/microsoft/windows-rs/blob/0496ec19116f1dac690daf31fcb96769118d9bac/crates/libs/reactor/src/native/winui/adapter.rs#L464) and [`ComponentContext::set_timeout`](https://github.com/microsoft/windows-rs/blob/0496ec19116f1dac690daf31fcb96769118d9bac/crates/libs/reactor/src/component.rs#L517).
+- The [settings-design rendering probe](../../tools/windows-reactor/settings-design/README.md), its `verify-design.ps1` results of 2026-10-24, and windows-rs at `0496ec1`: [swap-chain panel frame subscription](https://github.com/microsoft/windows-rs/blob/0496ec19116f1dac690daf31fcb96769118d9bac/crates/libs/reactor/src/native/winui/adapter.rs#L464) and [`ComponentContext::set_timeout`](https://github.com/microsoft/windows-rs/blob/0496ec19116f1dac690daf31fcb96769118d9bac/crates/libs/reactor/src/component.rs#L517).
 - windows-rs at `ebc5a99`: [`ThemeBrush` and `Brush`](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/declaration.rs#L217), [`Flyout`](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/declaration.rs#L730), [`MenuItem`](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/declaration.rs#L754), [`FlyoutExt`](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/declaration.rs#L2160), [native flyout hosting](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/native/winui/hosting.rs#L437), [`TitleBar`](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/generated_declarations.rs#L2849), [`TimePicker`](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/generated_declarations.rs#L6328), [`window_frame`](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/component.rs#L1020), [`ElementRef` hosting and notifications](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/reference.rs#L159), [live regions](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/reactor/src/native/winui/automation.rs#L43), [`windows-canvas` Reactor view](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/canvas/src/reactor.rs#L161), and [`windows-canvas` gradients](https://github.com/microsoft/windows-rs/blob/ebc5a99d08be3f23cef4d428661357fad3d1c0db/crates/libs/canvas/src/session.rs#L187).
 - windows-rs at `722f202` and published 0.100.0 source revision `a57cc321bfdbac6bb98c488ba49f399da8fcb98a`: `ThemeBrush` and `NumberBox` declarations, compared by source inspection on 2026-10-23.
 - windows-rs pull requests [5127](https://github.com/microsoft/windows-rs/pull/5127), [5158](https://github.com/microsoft/windows-rs/pull/5158), [5160](https://github.com/microsoft/windows-rs/pull/5160), and [5170](https://github.com/microsoft/windows-rs/pull/5170); issues [4923](https://github.com/microsoft/windows-rs/issues/4923), [4973](https://github.com/microsoft/windows-rs/issues/4973), [4976](https://github.com/microsoft/windows-rs/issues/4976), and [5137](https://github.com/microsoft/windows-rs/issues/5137). States retrieved 2026-10-23.

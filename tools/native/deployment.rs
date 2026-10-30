@@ -8,7 +8,6 @@ use crate::lifecycle::wait;
 use crate::lifecycle::wait_temperature;
 use crate::lifecycle::window;
 use circadia::ConfigInput;
-use circadia::ConfigStore;
 use circadia::InstanceClaim;
 use circadia::automation_id;
 use std::ffi::OsString;
@@ -54,12 +53,7 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
         manage_night_light: true,
         ..ConfigInput::default()
     };
-    let saved = ConfigStore::new(directory.path())
-        .save(&input.validate().map_err(io::Error::other)?)
-        .map_err(io::Error::other)?;
-    if let Some(error) = saved.backup_error {
-        return Err(io::Error::other(error));
-    }
+    crate::lifecycle::seed(directory.path(), &input)?;
     let automation = Automation::new()?;
     let native = Nightlight::new();
     let shortcut = directory.path().join("Circadia deployment.lnk");

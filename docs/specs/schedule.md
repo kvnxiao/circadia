@@ -184,23 +184,10 @@ Solar events remain their actual instants. Clock changes do not move them or rem
 - The computer changes from New York time to London time: configured clocks follow London local time, and solar results are regenerated using the saved coordinates. A five-hour difference between the zones does not itself add five hours to Wake.
 - The app restarts or evaluates the same dates in reverse order: unchanged inputs produce the same curve.
 
-## Explored alternatives
-
-- **Arbitrary points and offsets:** A general curve editor exposes ordering and collision decisions that the intended daily schedule does not need. Three ordered temperatures and generated transitions provide the selected user experience.
-- **Transitions starting at their target time:** This reaches the desired temperature too late. The schedule instead reaches each retained temperature by its target time.
-- **Moving Sunset to an earlier Bedtime:** This preserves an unnecessary middle target. Omitting Sunset lets the app generate the complete transition to Sleep before Bedtime.
-- **Repeated solar-driven cycles:** Following every crossing can add another warming/cooling cycle within one waking day. Solar targets are limited to one morning and one evening between Wake and the following Bedtime.
-- **Synthetic solar times during polar conditions:** Backup clocks or reused events would imply a solar event that does not occur. Missing events are omitted while Wake and Bedtime remain user-controlled.
-- **Persistent solar caches:** Multi-location caches introduce retention, location matching, invalidation, and persistence behavior. The selected design calculates required dates locally from the accepted configuration's coordinates.
-- **Omitting Wake or Bedtime in a clock gap:** Omitting either occurrence can prolong the preceding temperature through an entire day. Elapsed-interval adjustment preserves the occurrence and its nominal separation from the preceding Wake or Bedtime.
-- **Shifting every remaining target on a clock-change day:** This unnecessarily shifts the evening routine after an overnight change. The next target returns to its configured clock unless doing so would collapse or reverse Wake/Bedtime order.
-- **Using every existing configured clock across daylight-saving changes:** This keeps each occurrence aligned with a wall-clock alarm but shortens or lengthens the interval that spans the change. The selected policy preserves that interval by adjusting the first Wake or Bedtime after the change, then returns later occurrences to their configured clocks. When Bedtime is the adjusted occurrence, the following night is shorter or longer instead.
-- **Continuous or periodic location tracking:** One-time requests at enablement, startup, and settings opening refresh the saved position without continuous sensor subscriptions or a recurring location timer.
-
 ## Supporting evidence
 
 | Design decision or requirement | Evidence |
 | :-- | :-- |
-| Local dates and clock times mapped to actual instants | [Clock conversion fixtures](../research/windows-clock-conversion.md), [host-setting checks](../research/schedule-integration.md#host-setting-exercise), and [elapsed-interval reasoning](../research/clock-change-intervals.md); the target-adjustment policy is not exercised by the existing probe. |
-| Optional solar timing and coordinate acquisition | [Local solar calculation](../research/solar-calculation.md), [location APIs](../research/location-and-solar-times.md), and [tray-only location requests](../research/background-location.md); desktop permission outcomes remain implementation and release checks. |
+| Local dates and clock times mapped to actual instants | [Clock conversion fixtures](../research/windows-clock-conversion.md), [host-setting checks](../research/windows-clock-conversion.md#host-setting-exercise), and [elapsed-interval reasoning](../research/clock-change-intervals.md); the target-adjustment policy is not exercised by the existing probe. |
+| Optional solar timing and coordinate acquisition | [Local solar calculation](../research/solar-calculation.md) and [tray-only location requests](../research/background-location.md); desktop permission outcomes remain implementation and release checks. |
 | Local calculation without persistent solar caches | [Measured per-date calculation cost](../research/solar-performance.md); four dates on one desktop do not establish a universal latency bound. |

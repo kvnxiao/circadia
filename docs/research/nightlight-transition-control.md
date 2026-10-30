@@ -20,7 +20,7 @@ Windows stores Night Light in two registry records, each an encoded value in its
 
 The library's repository, win-nightlight-cli, has a transition guide and probes, which are standalone experiments that measure Windows behavior. This document calls their results upstream findings. They identify Explorer (`explorer.exe`) as the process whose restarts and timestamp history affect whether stored changes appear on the display.
 
-After its startup checks pass, Circadia owns Night Light: it keeps Night Light on and the native schedule off, and it restores its intended temperature and expected preview flag after another program changes them. The expected preview flag is on during a held preview or an apply call and off otherwise. Circadia's controller is the only Circadia component that writes Night Light. Native preview differs from Circadia's schedule Preview, which plays the schedule from the current instant to the same local clock time tomorrow in 1–60 seconds. While the settings window is open, valid unsaved edits control output immediately, and Preview plays that unsaved schedule.
+After its startup checks pass, Circadia owns Night Light: it keeps Night Light on and the native schedule off, and it restores its intended temperature and expected preview flag after another program changes them. The expected preview flag is on during a held preview or an apply call and off otherwise. Circadia's controller is the only Circadia component that writes Night Light. Native preview differs from Circadia's schedule Preview, which plays the schedule from the current instant to the same local clock time tomorrow in 1–60 seconds. Valid settings edits apply and save automatically; Preview plays the accepted schedule.
 
 The question is how one controller can follow a daily schedule, animate brief changes, and cancel Preview without leaving queued writes for targets it no longer wants or leaving native preview on.
 
@@ -51,7 +51,7 @@ Each method can perform several synchronous reads and writes. Each handle's inte
 
 Circadia classifies transitions by kind rather than duration, under the [native-access specification](../specs/native-access.md):
 
-- **Short transitions:** the startup fade, an ordinary fade to a new target (for example, when suppression starts), and each changing segment of Preview. Circadia turns native preview on, writes each changing temperature, and then turns preview off. Adjacent changing Preview segments continue the same held preview.
+- **Short transitions:** ordinary fades, including startup and suppression changes, and each changing segment of Preview. Circadia turns native preview on, writes each changing temperature, and then turns preview off. Adjacent changing Preview segments continue the same held preview.
 - **Gradual transitions:** scheduled transitions. Circadia uses plain writes. The first changed output, and any change due at least 60 seconds after the previous apply call or completed held preview, uses `apply_color_temperature` instead. Circadia does not add a timer for constant output.
 
 **Reported by the upstream probe:** One-second held-preview transitions at 30, 60, 144, 240, and 480 writes per second looked gradual in ten of ten observations across two randomized, blinded rounds. Rates below 30 writes per second were not tested. A separate held preview lasted 123 seconds and applied five requested changes. These are single-host visual observations, not optical measurements or universal rate guarantees.
@@ -104,7 +104,7 @@ These contracts support the observation design in the [native-access specificati
 
 **Observed in Microsoft documentation retrieved 2026-10-19:** The Shell broadcasts `TaskbarCreated` to top-level windows when it creates the taskbar. The documentation also lists a primary-display DPI change as a trigger on Windows 10. Message-only windows do not receive broadcasts. The event is therefore a useful recovery signal, not proof that Explorer crashed or that Night Light output failed. [Taskbar creation](https://learn.microsoft.com/en-us/windows/win32/shell/taskbar#taskbar-creation-notification), [message-only windows](https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#message-only-windows).
 
-A top-level window that exists for the application's whole run can receive this event while Circadia's settings window is closed. Circadia can merge `TaskbarCreated` messages that arrive before its refresh runs into one `apply_color_temperature` call for the current temperature, while it restores its tray icon. The implementation still needs to verify delivery through Windows Reactor, the Rust WinUI 3 library developed in the windows-rs repository, at revision `722f202100c3bd428627941d3834d87ad6679d1c`. The event does not reveal every case where Windows stops showing the stored temperature. It therefore adds to the apply calls that replace a gradual-transition step due at least 60 seconds after the previous one, and to the application requests at startup and after resume. Restarting Explorer automatically is unnecessary and would interrupt other user work.
+A top-level window that exists for the application's whole run can receive this event while Circadia's settings window is closed. Circadia can merge `TaskbarCreated` messages that arrive before its refresh runs into one `apply_color_temperature` call for the current temperature, while it restores its tray icon. This source investigation did not verify delivery through Reactor; the [application check guide](../../tools/native/README.md#explorer-recovery) describes separate integration checks. The event does not reveal every case where Windows stops showing the stored temperature. It therefore adds to the apply calls that replace a gradual-transition step due at least 60 seconds after the previous one, and to the application requests at startup and after resume. Restarting Explorer automatically is unnecessary and would interrupt other user work.
 
 ## Alternatives and recommendation
 
@@ -125,16 +125,9 @@ The public API supports the selected design without a dependency extension. The 
 - The margin exceeds the timestamps of every other writer.
 - Circadia can detect that Windows stopped showing the stored temperature while Circadia writes nothing.
 
-Implementation checks cover:
+This source inspection does not establish application cancellation during a blocking call, partial-write recovery, correction of an outside preview-flag change, output pacing, or delivery of taskbar notifications. Those are controller integration questions. Preview cancellation and restoration are defined by the [application contract](../specs/application.md); the old draft/Save model is not part of that contract.
 
-- Cancellation during a blocking library call.
-- A successful temperature write followed by a failure to turn preview off.
-- Another program changing only the preview flag.
-- Pacing at the configured output rate.
-- `TaskbarCreated` delivery while the settings window is closed.
-- Output after Preview: the settings window's Stop command ends playback and returns output to the unsaved schedule being edited, and its Discard command removes the unsaved edits and returns output to the accepted configuration's schedule, meaning the last saved or otherwise validated configuration.
-
-Release checks cover supported Windows builds, representative display configurations, actual power-state transitions, and visible output. These are pending conformance checks, not results of this source inspection. Whether 6500 K output looks identical to Night Light off, and whether display calibration is preserved, remain outside the evidence.
+Supported Windows builds, representative displays, actual power-state transitions, and visible output require evidence beyond this source inspection. Whether 6500 K output looks identical to Night Light off, and whether display calibration is preserved, remain outside the evidence.
 
 ## Sources
 
@@ -142,5 +135,5 @@ Release checks cover supported Windows builds, representative display configurat
 - [Public operations and per-handle timestamp history](https://github.com/kvnxiao/win-nightlight-cli/blob/0461529455f3594b9b9d6cc3d6c2e7a9736de9b5/win-nightlight-lib/src/nightlight.rs).
 - [Settings timestamp stamping](https://github.com/kvnxiao/win-nightlight-cli/blob/0461529455f3594b9b9d6cc3d6c2e7a9736de9b5/win-nightlight-lib/src/cloudstore.rs).
 - [Change-notification contracts](https://github.com/kvnxiao/win-nightlight-cli/blob/0461529455f3594b9b9d6cc3d6c2e7a9736de9b5/docs/change-notifications.md).
-- [Upstream timestamp-rewind findings and their limitations](https://github.com/kvnxiao/win-nightlight-cli/blob/0461529455f3594b9b9d6cc3d6c2e7a9736de9b5/probes/timestamp-rewind/README.md).
+- [Upstream timestamp-rewind findings and their limitations](https://github.com/kvnxiao/win-nightlight-cli/blob/0461529455f3594b9b9d6cc3d6c2e7a9736de9b5/tools/timestamp-rewind/README.md).
 - [Watcher implementation](https://github.com/kvnxiao/win-nightlight-cli/blob/0461529455f3594b9b9d6cc3d6c2e7a9736de9b5/win-nightlight-watch/src/lib.rs) and [watcher errors](https://github.com/kvnxiao/win-nightlight-cli/blob/0461529455f3594b9b9d6cc3d6c2e7a9736de9b5/win-nightlight-watch/src/error.rs).

@@ -13,7 +13,6 @@ use crate::lifecycle::settings_window;
 use crate::lifecycle::wait_temperature;
 use crate::lifecycle::window;
 use circadia::ConfigInput;
-use circadia::ConfigStore;
 use circadia::InstanceClaim;
 use circadia::WindowsZone;
 use circadia::automation_id;
@@ -138,13 +137,7 @@ fn exercise(executable: &Path, directory: &Path, quick: bool) -> io::Result<()> 
 }
 
 fn save(directory: &Path, input: &ConfigInput) -> io::Result<()> {
-    let config = input.clone().validate().map_err(io::Error::other)?;
-    let saved = ConfigStore::new(directory)
-        .save(&config)
-        .map_err(io::Error::other)?;
-    if let Some(error) = saved.backup_error {
-        return Err(io::Error::other(error));
-    }
+    crate::lifecycle::seed(directory, input)?;
     report(&format!(
         "Configuration: {}",
         toml::to_string(input)

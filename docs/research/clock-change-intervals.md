@@ -16,7 +16,7 @@ Elapsed-time addition can preserve the ordinary interval to a manual target acro
 
 **Observed in Microsoft documentation retrieved 2026-10-18:** Windows converts local time with `UTC = local time + bias`; standard and daylight biases contribute to the effective bias. The adjustment must use the actual bias difference rather than assuming one hour. [Time-zone structure](https://learn.microsoft.com/en-us/windows/win32/api/timezoneapi/ns-timezoneapi-time_zone_information).
 
-The [clock-conversion research](windows-clock-conversion.md) records one-hour Eastern and half-hour Lord Howe changes, repeated instants, and missing local minutes. The [host-setting investigation](schedule-integration.md#host-setting-exercise) verifies conversion using newly read Windows time-zone rules and the actual automatic daylight-saving setting. Its tests do not implement elapsed-interval target adjustment.
+The [clock-conversion research](windows-clock-conversion.md) records one-hour Eastern and half-hour Lord Howe changes, repeated instants, and missing local minutes. The [host-setting investigation](windows-clock-conversion.md#host-setting-exercise) verifies conversion using newly read Windows time-zone rules and the actual automatic daylight-saving setting. Its tests do not implement elapsed-interval target adjustment.
 
 The following are arithmetic deductions from those offsets, not executed Circadia tests:
 
