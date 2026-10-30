@@ -1,6 +1,8 @@
 use super::problems::FeatureMessage;
 use super::problems::Severity;
 use crate::automation_id;
+use crate::l10n::Text;
+use crate::l10n::text;
 use std::sync::Arc;
 use windows_reactor::AutomationLiveSetting;
 use windows_reactor::Border;
@@ -21,11 +23,30 @@ use windows_reactor::TextBlock;
 use windows_reactor::TextWrapping;
 use windows_reactor::ThemeBrush;
 use windows_reactor::Thickness;
+use windows_reactor::ToggleSwitch;
 use windows_reactor::VerticalAlignment;
 use windows_reactor::View;
 
 pub(super) const APP_GLYPH: &str = "\u{ECAA}";
 pub(super) const ICON_ACTION_SIZE: f64 = 40.0;
+pub(super) const CONTENT_INSET: f64 = 16.0;
+pub(super) const COMPACT_ACTION_INSET: f64 = CONTENT_INSET - (ICON_ACTION_SIZE - 16.0) / 2.0;
+
+pub(super) fn toggle(text: &Text, on: bool, control: ToggleSwitch) -> StackPanel {
+    let label = text!(text, "toggle-state", on = if on { "yes" } else { "no" });
+    action_group(vec![
+        body(label)
+            .vertical_alignment(VerticalAlignment::Center)
+            .into(),
+        control
+            // Empty native switch content still reserves a 12 epx trailing column.
+            .min_width(0.0)
+            .on_content("")
+            .off_content("")
+            .is_on(on)
+            .into(),
+    ])
+}
 
 pub(super) fn glyph_label(glyph: &'static str, label: impl AsRef<str>) -> StackPanel {
     StackPanel::new()
@@ -310,6 +331,8 @@ pub(super) struct Row {
     description: String,
     detail: Option<View>,
     controls: Vec<View>,
+    compact: bool,
+    action_inset: f64,
 }
 
 impl Row {
@@ -325,6 +348,8 @@ impl Row {
             description: description.into(),
             detail: None,
             controls: Vec::new(),
+            compact: false,
+            action_inset: CONTENT_INSET,
         }
     }
 
@@ -343,8 +368,20 @@ impl Row {
         self
     }
 
+    pub(super) fn compact_actions(mut self) -> Self {
+        self.compact = true;
+        self.action_inset = COMPACT_ACTION_INSET;
+        self
+    }
+
+    pub(super) fn trailing_icon(mut self) -> Self {
+        self.action_inset = COMPACT_ACTION_INSET;
+        self
+    }
+
     pub(super) fn view(self, stacked: bool) -> View {
         let top = self.controls.len() > 1;
+        let stacked = stacked && (!self.compact || top);
         let alignment = if top {
             VerticalAlignment::Top
         } else {
@@ -353,7 +390,7 @@ impl Row {
         let offset = if top { 6.0 } else { 0.0 };
         Border::new()
             .min_height(68.0)
-            .padding(Thickness::new(16.0, 12.0, 16.0, 12.0))
+            .padding(Thickness::new(CONTENT_INSET, 12.0, self.action_inset, 12.0))
             .content(
                 Grid::new()
                     .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])

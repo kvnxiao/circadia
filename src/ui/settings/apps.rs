@@ -951,7 +951,7 @@ fn app_row(
     controls: Vec<View>,
     id: String,
     stacked: bool,
-) -> View {
+) -> Border {
     Border::new()
         .min_height(60.0)
         .padding(Thickness::new(16.0, 10.0, 16.0, 10.0))
@@ -980,7 +980,6 @@ fn app_row(
                         .grid_column_span(if stacked { 2 } else { 1 }),
                 )),
         )
-        .into()
 }
 
 fn title_button(
@@ -1098,7 +1097,7 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 automation_id::recent(&executable),
                 settings.stacked(),
             );
-            keyed(executable, divided(row_view, position > 0))
+            keyed(executable, divided(row_view.into(), position > 0))
         })
         .collect();
     widgets::card(StackPanel::new().keyed_children(views))
@@ -1166,14 +1165,22 @@ fn entry_card(row: &EntryRow, settings: &Settings, controls: Vec<View>, id: Stri
         .border_brush(border)
         .border_thickness(1.0)
         .corner_radius(4.0)
-        .content(app_row(
-            icon(settings, &row.executable, row.path.as_ref(), 32.0),
-            &row.name,
-            detail,
-            controls,
-            id,
-            settings.stacked(),
-        ))
+        .content(
+            app_row(
+                icon(settings, &row.executable, row.path.as_ref(), 32.0),
+                &row.name,
+                detail,
+                controls,
+                id,
+                false,
+            )
+            .padding(Thickness::new(
+                widgets::CONTENT_INSET,
+                10.0,
+                widgets::COMPACT_ACTION_INSET,
+                10.0,
+            )),
+        )
         .into()
 }
 
@@ -1249,7 +1256,6 @@ fn exclusion_row(
             StackPanel::new().spacing(2.0).children(detail).into(),
             actions,
             &id,
-            settings.stacked(),
         ),
     )
 }
@@ -1289,6 +1295,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         ])
         .into(),
     ])
+    .trailing_icon()
     .view(settings.stacked());
     let mut children: Vec<View> = vec![header];
     children.extend(settings.feedback(Field::Exclusions));
@@ -1313,7 +1320,6 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         .into(),
                 ],
                 &automation_id::fixed_exclusion(&row.executable.to_ascii_lowercase()),
-                settings.stacked(),
             )
         }));
         children.push(
@@ -1332,33 +1338,26 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
     widgets::card(StackPanel::new().children(children))
 }
 
-fn nested_app_row(
-    icon: View,
-    name: &str,
-    detail: View,
-    actions: Vec<View>,
-    id: &str,
-    stacked: bool,
-) -> View {
+fn nested_app_row(icon: View, name: &str, detail: View, actions: Vec<View>, id: &str) -> View {
     widgets::nested(id)
+        .padding(Thickness::new(
+            52.0,
+            10.0,
+            widgets::COMPACT_ACTION_INSET,
+            10.0,
+        ))
         .content(
             Grid::new()
                 .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
-                .rows([GridLength::Auto, GridLength::Auto])
-                .row_spacing(if stacked { 12.0 } else { 0.0 })
                 .column_spacing(12.0)
                 .children((
                     icon,
                     StackPanel::new()
                         .grid_column(1)
-                        .grid_column_span(if stacked { 2 } else { 1 })
                         .spacing(2.0)
                         .vertical_alignment(VerticalAlignment::Center)
                         .children((widgets::body(name), detail)),
-                    widgets::action_group(actions)
-                        .grid_column(if stacked { 1 } else { 2 })
-                        .grid_row(i32::from(stacked))
-                        .grid_column_span(if stacked { 2 } else { 1 }),
+                    widgets::action_group(actions).grid_column(2),
                 )),
         )
         .into()

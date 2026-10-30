@@ -293,6 +293,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         context,
                     ),
                 ))
+                .compact_actions()
                 .view(settings.stacked()),
             ),
         ]),
@@ -403,15 +404,18 @@ fn switch(
     (id, name): (&str, &str),
     context: &ViewContext<'_, Settings>,
 ) -> View {
-    ToggleSwitch::new()
-        .is_on(on)
-        .is_enabled(settings.input.model.editable())
-        .automation_id(id)
-        .automation_name(name)
-        .on_toggled(
-            context.callback(move |on| Message::Edit(vec![(field, FieldValue::Switch(on))])),
-        )
-        .into()
+    widgets::toggle(
+        &settings.input.text,
+        on,
+        ToggleSwitch::new()
+            .is_enabled(settings.input.model.editable())
+            .automation_id(id)
+            .automation_name(name)
+            .on_toggled(
+                context.callback(move |on| Message::Edit(vec![(field, FieldValue::Switch(on))])),
+            ),
+    )
+    .into()
 }
 
 fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
@@ -442,6 +446,7 @@ fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
                 context,
             ),
         ))
+        .compact_actions()
         .view(settings.stacked()),
     ];
     if let Some(message) = view.message {
