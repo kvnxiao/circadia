@@ -52,7 +52,7 @@ just check
 just check-msrv
 ```
 
-`just check` runs formatting checks, Clippy, tests, release-text tests, rustdoc, dependency checks, and generated-binding verification. Builds, tests, and Clippy use stable Rust with the lockfile. Time-zone tests read installed Windows rules without changing the computer's time zone. Routine checks do not drive the desktop or change live Night Light.
+`just check` runs formatting checks, Clippy, tests, release-text tests (localization with debug assertions disabled), rustdoc, dependency checks, and generated-binding verification. Builds, tests, and Clippy use stable Rust with the lockfile. Time-zone tests read installed Windows rules without changing the computer's time zone. Routine checks do not drive the desktop or change live Night Light.
 
 The [tools index](tools/README.md) lists separate application checks and experiments. Their own READMEs describe prerequisites, commands, side effects, and evidence limits. Moving them into one folder does not include them in `just check`. Python experiment checks use Python 3.15:
 
@@ -113,7 +113,7 @@ just composition-bindings /path/to/windows-rs
 just check-composition-bindings
 ```
 
-The generator reads [tools/composition-bindings.txt](tools/composition-bindings.txt) and writes the private composition bindings. The freshness check is part of `just check`; [animation research](docs/research/settings-design-support.md#progress-and-color-animation) explains the API need.
+The [generator package](tools/composition-bindings/README.md) builds independently of the application. It reads [tools/composition-bindings.txt](tools/composition-bindings.txt) and writes the private composition bindings. Update its `windows-bindgen` revision with the application's Reactor pin. The freshness check is part of `just check`; [animation research](docs/research/settings-design-support.md#progress-and-color-animation) explains the API need.
 
 ## Implementation boundaries
 
