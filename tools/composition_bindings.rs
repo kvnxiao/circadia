@@ -29,6 +29,7 @@ fn main() -> io::Result<()> {
     let metadata = checkout.join("crates/tools/reactor-metadata/winmd");
     let inputs = [
         metadata.join("Microsoft.UI.winmd"),
+        metadata.join("Microsoft.UI.Xaml.winmd"),
         metadata.join("Microsoft.Graphics.winmd"),
         checkout.join("crates/libs/default/Windows.winmd"),
     ];

@@ -28,3 +28,5 @@ Microsoft.UI.Composition.CompositionAnimation
 Microsoft.UI.Composition.CompositionEasingFunction
 Microsoft.UI.Composition.LinearEasingFunction
 Windows.UI.Color
+Microsoft.UI.Xaml.Media.CompositionTarget
+Microsoft.UI.Xaml.Media.ICompositionTargetStatics::{add_Rendering, remove_Rendering}

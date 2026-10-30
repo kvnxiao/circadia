@@ -8,6 +8,7 @@
     missing_docs,
     unreachable_pub,
     unnameable_types,
+    elided_lifetimes_in_paths,
     non_snake_case,
     non_upper_case_globals,
     non_camel_case_types,
@@ -18,3 +19,17 @@
     reason = "metadata-generated WinRT projection"
 )]
 pub(crate) mod bindings;
+
+pub(crate) fn on_rendering(
+    callback: impl Fn(std::time::Instant) + 'static,
+) -> windows_core::Result<windows_core::EventRevoker> {
+    bindings::CompositionTarget::Rendering(move |_, _| {
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            callback(std::time::Instant::now());
+        }))
+        .is_err()
+        {
+            std::process::abort();
+        }
+    })
+}
