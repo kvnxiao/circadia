@@ -12,16 +12,16 @@ build-self-contained:
     cargo +stable build --bin circadia --features self-contained --locked
 
 composition-bindings checkout:
-    cargo +stable run --bin composition-bindings --features binding-generation --locked -- "{{checkout}}"
+    cargo +stable run --package composition-bindings --locked -- "{{checkout}}"
 
 check-composition-bindings:
     #!/usr/bin/env bash
     set -euo pipefail
-    metadata=$(cargo +stable metadata --format-version 1 --locked)
-    manifest=$(jq -er '.packages[] | select(.name == "windows-composition") | .manifest_path' <<< "$metadata")
+    metadata=$(cargo +stable metadata --manifest-path tools/composition-bindings/Cargo.toml --format-version 1 --locked)
+    manifest=$(jq -er '.packages[] | select(.name == "windows-bindgen") | .manifest_path' <<< "$metadata")
     manifest=${manifest//\\//}
-    checkout=${manifest%/crates/libs/composition/Cargo.toml}
-    cargo +stable run --bin composition-bindings --features binding-generation --locked -- "$checkout" --check
+    checkout=${manifest%/crates/libs/bindgen/Cargo.toml}
+    cargo +stable run --package composition-bindings --locked -- "$checkout" --check
 
 native-lifecycle *args: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} target/debug/circadia.exe

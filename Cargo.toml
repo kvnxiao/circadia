@@ -1,24 +1,33 @@
+[workspace]
+members = ["tools/composition-bindings"]
+exclude = ["tools/solar-calculation", "tools/windows-reactor", "tools/windows-reactor/settings-design"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/kvnxiao/circadia"
+
+[workspace.dependencies]
+fs-err = "3.3"
+tempfile = "3"
+toml = "1.1"
+
 [package]
 name = "circadia"
 version = "0.1.0"
-edition = "2024"
-rust-version = "1.95"
+edition.workspace = true
+rust-version.workspace = true
 publish = false
-license = "MIT"
+license.workspace = true
 description = "Schedule native Windows Night Light temperatures"
-repository = "https://github.com/kvnxiao/circadia"
+repository.workspace = true
 
 [features]
 self-contained = ["dep:windows-reactor-setup"]
 native-tests = ["windows/combaseapi", "windows/windef", "windows/wtypesbase", "windows/uiautomationclient", "windows/uiautomationcore", "windows/uiautomationcoreapi", "windows-sys/winternl", "windows-sys/psapi", "winsafe/ole", "winsafe/gdi"]
 graph-measurement = ["native-tests", "windows-reactor/test"]
 output-measurement = ["native-tests"]
-binding-generation = ["dep:windows-bindgen"]
-
-[[bin]]
-name = "composition-bindings"
-path = "tools/composition_bindings.rs"
-required-features = ["binding-generation"]
 
 [[bin]]
 name = "native-lifecycle"
@@ -26,10 +35,9 @@ path = "tools/native_lifecycle.rs"
 required-features = ["native-tests"]
 
 [dependencies]
-windows-bindgen = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", optional = true }
 fluent-bundle = "0.16"
 fluent-pseudo = "0.3"
-fs-err = "3.3"
+fs-err.workspace = true
 i18n-embed = { version = "0.16", features = ["fluent-system"] }
 i18n-embed-fl = "0.10"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
@@ -38,9 +46,9 @@ regex = "1.13"
 rust-embed = { version = "8", features = ["debug-embed"] }
 serde = { version = "1.0", features = ["derive"] }
 solar-positioning = { version = "0.7.1", default-features = false, features = ["std"] }
-tempfile = "3"
+tempfile.workspace = true
 thiserror = "2.0"
-toml = "1.1"
+toml.workspace = true
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "registry"] }
 
@@ -63,7 +71,7 @@ winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
 
 [build-dependencies]
 embed-resource = "3.0.12"
-fs-err = "3.3"
+fs-err.workspace = true
 ico = "0.6"
 resvg = { version = "0.49", default-features = false }
 
@@ -87,7 +95,10 @@ debug = "line-tables-only"
 inherits = "test"
 debug-assertions = false
 
-[lints.rust]
+[lints]
+workspace = true
+
+[workspace.lints.rust]
 unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 missing_docs = "warn"
@@ -95,7 +106,7 @@ unreachable_pub = "warn"
 unnameable_types = "warn"
 elided_lifetimes_in_paths = "warn"
 
-[lints.clippy]
+[workspace.lints.clippy]
 all = { level = "warn", priority = -2 }
 pedantic = { level = "warn", priority = -2 }
 cargo = { level = "warn", priority = -2 }
@@ -153,7 +164,7 @@ needless_pass_by_value = "warn"
 missing_errors_doc = "warn"
 missing_panics_doc = "warn"
 
-[lints.rustdoc]
+[workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"
 private_intra_doc_links = "deny"
 missing_crate_level_docs = "warn"
