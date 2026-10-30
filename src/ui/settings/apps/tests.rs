@@ -27,6 +27,50 @@ fn model(management: ManagementState) -> Model {
 }
 
 #[test]
+fn a_global_saved_name_cannot_label_a_different_installation_while_its_read_is_pending_or_failed() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let mut configuration = Configuration::load(directory.path(), "circadia.exe");
+    let a = crate::ExecutablePath::new(r"C:\A\browser.exe").expect("A");
+    let b = crate::ExecutablePath::new(r"C:\B\browser.exe").expect("B");
+    configuration
+        .add(
+            Field::Suppression,
+            vec![
+                AppEntry::new("browser.exe", "Installation A"),
+                AppEntry::new("browser.exe", "Restricted A").with_path(Some(a.as_str().into())),
+            ],
+        )
+        .expect("rules saved");
+    let sources = BTreeMap::from([(
+        crate::ExecutableName::new("browser.exe").expect("filename"),
+        b.clone(),
+    )]);
+    for known in [
+        BTreeMap::from([(a.clone(), "Installation A".into())]),
+        BTreeMap::new(),
+    ] {
+        let model =
+            Model::new(&configuration, None, false, String::new(), &known).with_sources(&sources);
+        assert!(!model.names.contains_key(&b));
+        assert!(model.names.contains_key(&a));
+        assert_eq!(
+            entry_rows(&model, &english(), Field::Suppression)[0].name,
+            "browser.exe"
+        );
+    }
+    let restarted = Configuration::load(directory.path(), "circadia.exe");
+    let model =
+        Model::new(&restarted, None, false, String::new(), &BTreeMap::new()).with_sources(&sources);
+    assert!(!model.names.contains_key(&b));
+    let known = BTreeMap::from([(b.clone(), "Installation B".into())]);
+    let model = Model::new(&restarted, None, false, String::new(), &known).with_sources(&sources);
+    assert_eq!(
+        model.names.get(&b).map(String::as_str),
+        Some("Installation B")
+    );
+}
+
+#[test]
 fn suppress_for_1_hour_is_disabled_with_its_reason_while_management_is_off() {
     let region = RegionalFormat::capture("en-US").expect("Windows resolves en-US");
     let view = manual_view(&model(ManagementState::Off), &english(), &region);
@@ -115,6 +159,165 @@ fn file(executable: &str) -> AppFile {
     }
 }
 
+fn installation(folder: &str) -> AppFile {
+    AppFile {
+        executable: "browser.exe".into(),
+        path: format!("C:/{folder}/browser.exe").into(),
+    }
+}
+
+#[test]
+fn same_name_candidates_allow_distinct_restrictions_but_only_one_global_addition() {
+    let fixture = Fixture::new(None);
+    let model = fixture.model(Vec::new());
+    let a = installation("A");
+    let b = installation("B");
+    let pa = a.identity().expect("A");
+    let pb = b.identity().expect("B");
+    for list in [Field::Suppression, Field::Exclusions] {
+        let mut dialog = AddDialog::new(list);
+        assert!(dialog.browsed(&model, a.clone()));
+        assert!(dialog.browsed(&model, b.clone()));
+        assert_eq!(dialog.files(&model), [AppSelection::from(a.clone())]);
+        assert!(!dialog.available(&pb, &model));
+        dialog.restrict(&pa, true, &model);
+        dialog.restrict(&pb, true, &model);
+        dialog.choose(&pb, true, &model);
+        assert_eq!(
+            dialog.files(&model),
+            [
+                AppSelection {
+                    file: a.clone(),
+                    restricted: true
+                },
+                AppSelection {
+                    file: b.clone(),
+                    restricted: true
+                }
+            ]
+        );
+        dialog.restrict(&pa, false, &model);
+        dialog.restrict(&pb, false, &model);
+        assert_eq!(dialog.files(&model), [AppSelection::from(a.clone())]);
+    }
+}
+
+#[test]
+fn rule_editor_prefills_restrictions_checks_duplicates_and_keeps_cancel_local() {
+    let mut fixture = Fixture::new(Some(&entries_file(&["browser.exe"], &[])));
+    let a = installation("A");
+    let recent = crate::RecentApp {
+        executable: "browser.exe".into(),
+        path: a.path.clone(),
+        title: Some("A title".into()),
+        ..recent_app("browser.exe", None)
+    };
+    let model = fixture.model(vec![recent]);
+    let mut dialog = TitleDialog::open(&model, Field::Suppression, 0).expect("global rule");
+    dialog.restrict(true);
+    assert_eq!(
+        dialog.replacement().restriction().expect("path"),
+        a.identity()
+    );
+    assert!(dialog.command(&model).is_some());
+    assert_eq!(model.config().entries(Field::Suppression)[0].path, None);
+    assert!(!dialog.browsed(&file("other.exe")));
+    assert!(!title_dialog_view(&model, &english(), &dialog).save_enabled);
+    assert!(dialog.browsed(&installation("B")));
+    fixture
+        .desktop
+        .command(dialog.command(&model).expect("replacement"));
+    let changed = fixture.model(Vec::new());
+    assert_eq!(
+        changed.config().entries(Field::Suppression)[0]
+            .path
+            .as_deref(),
+        Some(r"C:\B\browser.exe")
+    );
+    fixture
+        .desktop
+        .command(Command::Add(Field::Suppression, vec![a.into()]));
+    let model = fixture.model(Vec::new());
+    let mut dialog = TitleDialog::open(&model, Field::Suppression, 0).expect("restricted rule");
+    dialog.restrict(false);
+    assert_eq!(dialog.path_error(&model), Some(EntryProblem::Duplicate));
+    assert!(dialog.command(&model).is_none());
+}
+
+#[test]
+fn duplicate_rule_keys_remain_distinct_and_display_name_refresh_keeps_the_action_target() {
+    let fixture = Fixture::new(Some(&entries_file(&["browser.exe", "browser.exe"], &[])));
+    let model = fixture.model(Vec::new());
+    let rows = entry_rows(&model, &english(), Field::Suppression);
+    assert_ne!(rows[0].id, rows[1].id);
+    let mut refreshed = rows[0].expected.clone();
+    refreshed.name = "Refreshed description".into();
+    assert!(rows[0].expected.same_rule(&refreshed));
+    assert_eq!(
+        automation_id::rule(Field::Suppression, &refreshed, 0),
+        rows[0].id
+    );
+}
+
+#[test]
+fn unknown_restriction_requires_browse_and_title_suggestions_follow_its_path() {
+    let fixture = Fixture::new(Some(&entries_file(&["browser.exe"], &[])));
+    let model = fixture.model(Vec::new());
+    let mut dialog = TitleDialog::open(&model, Field::Suppression, 0).expect("rule");
+    dialog.restrict(true);
+    assert!(dialog.command(&model).is_none());
+    assert_eq!(dialog.path_error(&model), Some(EntryProblem::Path));
+    assert!(dialog.browsed(&installation("A")));
+    let make_recent = |folder: &str, title: &str| crate::RecentApp {
+        path: installation(folder).path,
+        title: Some(title.into()),
+        ..recent_app("browser.exe", None)
+    };
+    let model = fixture.model(vec![
+        make_recent("B", "B title"),
+        make_recent("A", "A title"),
+    ]);
+    dialog.use_title(&model);
+    assert_eq!(dialog.text, "A title");
+    dialog.restrict(false);
+    dialog.use_title(&model);
+    assert_eq!(dialog.text, "B title");
+}
+
+#[test]
+fn recent_remove_is_offered_only_for_one_covering_rule() {
+    let fixture = Fixture::new(None);
+    let a = installation("A");
+    let global = AppEntry::new("browser.exe", "Browser");
+    let restricted = global
+        .clone()
+        .with_path(Some(a.path.to_string_lossy().into_owned()));
+    fixture
+        .configuration
+        .borrow_mut()
+        .add(Field::Suppression, vec![global.clone(), restricted])
+        .expect("overlap");
+    let recent = crate::RecentApp {
+        path: a.path,
+        ..recent_app("browser.exe", None)
+    };
+    let model = fixture.model(vec![recent.clone()]);
+    let rows = recent_rows(&model, &english(), &region(), Duration::ZERO);
+    assert_eq!(rows[0].covering, 2);
+    assert_eq!(rows[0].listed, None);
+    fixture.configuration.borrow_mut().edit(vec![(
+        Field::Suppression,
+        crate::FieldValue::Apps(vec![global]),
+    )]);
+    let rows = recent_rows(
+        &fixture.model(vec![recent]),
+        &english(),
+        &region(),
+        Duration::ZERO,
+    );
+    assert_eq!(rows[0].listed.as_ref().map(|(index, _)| *index), Some(0));
+}
+
 fn recent_app(executable: &str, focus_ended: Option<Duration>) -> crate::RecentApp {
     crate::RecentApp {
         executable: executable.into(),
@@ -122,6 +325,8 @@ fn recent_app(executable: &str, focus_ended: Option<Duration>) -> crate::RecentA
         focus_ended,
         title: None,
         included: false,
+        covering: 0,
+        removable: false,
         condition: String::new(),
         excluded: false,
     }
@@ -177,7 +382,10 @@ impl Fixture {
             None,
             false,
             String::new(),
-            &BTreeMap::from([("game.exe".to_owned(), "Game".to_owned())]),
+            &BTreeMap::from([(
+                crate::ExecutablePath::new(r"C:\Apps\game.exe").expect("fixture path"),
+                "Game".to_owned(),
+            )]),
         );
         model.recent = recent;
         model
@@ -225,7 +433,14 @@ fn recently_focused_offers_add_for_an_unlisted_app_and_remove_for_a_listed_one()
     let rows: Vec<(String, String, Option<usize>, bool)> =
         recent_rows(&model, &english(), &region(), now)
             .into_iter()
-            .map(|row| (row.name, plain(&row.detail), row.listed, row.excluded))
+            .map(|row| {
+                (
+                    row.name,
+                    plain(&row.detail),
+                    row.listed.map(|(index, _)| index),
+                    row.excluded,
+                )
+            })
             .collect();
     assert_eq!(
         rows,
@@ -265,13 +480,21 @@ fn choosing_two_apps_reads_add_2_apps_and_sends_one_configure_with_both() {
         (plain(&view.primary), view.primary_enabled),
         ("Add".to_owned(), false)
     );
-    dialog.choose("game.exe", true);
+    dialog.choose(
+        &file("game.exe").identity().expect("fixture path"),
+        true,
+        &model,
+    );
     let view = dialog_view(&model, &english(), &region(), &dialog);
     assert_eq!(
         (plain(&view.primary), view.primary_enabled),
         ("Add".to_owned(), true)
     );
-    dialog.choose("vlc.exe", true);
+    dialog.choose(
+        &file("vlc.exe").identity().expect("fixture path"),
+        true,
+        &model,
+    );
     let view = dialog_view(&model, &english(), &region(), &dialog);
     assert_eq!(
         (plain(&view.primary), view.primary_enabled),
@@ -292,18 +515,19 @@ fn choosing_two_apps_reads_add_2_apps_and_sends_one_configure_with_both() {
 }
 
 #[test]
-fn browsing_to_a_listed_executable_adds_nothing_and_suggests_a_regular_expression() {
+fn browsing_to_a_listed_executable_keeps_the_restriction_choice_available() {
     let fixture = Fixture::new(Some(&entries_file(&["javaw.exe"], &[])));
     let model = fixture.model(Vec::new());
     let mut dialog = AddDialog::new(Field::Suppression);
-    assert!(!dialog.browsed(&model, file("javaw.exe")));
+    assert!(dialog.browsed(&model, file("javaw.exe")));
     let view = dialog_view(&model, &english(), &region(), &dialog);
-    assert_eq!(view.rows, []);
+    assert_eq!(view.rows.len(), 1);
+    assert!(!view.rows[0].available);
     assert!(!view.primary_enabled);
     assert_eq!(
         view.message.as_deref().map(plain),
         Some(
-            "javaw.exe is already on your list. To match several window titles, use a regular expression such as minecraft|terraria in its window title condition."
+            "This rule for javaw.exe is already on your list. Change “Only this installation” to add a different installation, or edit the existing rule. To match several window titles, use a regular expression such as minecraft|terraria."
                 .to_owned()
         )
     );
@@ -311,12 +535,18 @@ fn browsing_to_a_listed_executable_adds_nothing_and_suggests_a_regular_expressio
     let view = dialog_view(&model, &english(), &region(), &dialog);
     assert_eq!(view.message, None);
     assert_eq!(
-        view.rows,
+        view.rows
+            .into_iter()
+            .filter(|row| row.executable == "game.exe")
+            .collect::<Vec<_>>(),
         [DialogRow {
+            path: file("game.exe").identity(),
             executable: "game.exe".into(),
             name: "Game".into(),
             checked: true,
-            browsed: true,
+            restricted: false,
+            available: true,
+            section: CandidateSection::Browsed,
         }]
     );
 }
@@ -333,17 +563,20 @@ fn browsed_candidate_keeps_its_section_when_it_enters_recent_history() {
         assert_eq!(
             view.rows,
             [DialogRow {
+                path: file("game.exe").identity(),
                 executable: "game.exe".into(),
                 name: "Game".into(),
                 checked: true,
-                browsed: true,
+                restricted: false,
+                available: true,
+                section: CandidateSection::Browsed,
             }]
         );
     }
 }
 
 #[test]
-fn add_exclusion_omits_apps_that_have_an_exclusion_and_lists_suppressed_ones() {
+fn add_dialogs_keep_listed_apps_available_for_another_installation_scope() {
     let fixture = Fixture::new(Some(&entries_file(&["game.exe"], &["browser.exe"])));
     let model = fixture.model(vec![
         recent_app("game.exe", None),
@@ -357,7 +590,9 @@ fn add_exclusion_omits_apps_that_have_an_exclusion_and_lists_suppressed_ones() {
         .iter()
         .map(|row| row.executable.as_str())
         .collect();
-    assert_eq!(rows, ["game.exe"]);
+    assert_eq!(rows, ["game.exe", "browser.exe"]);
+    assert!(view.rows[0].available);
+    assert!(!view.rows[1].available);
     assert!(!view.primary_enabled);
     let suppression = AddDialog::new(Field::Suppression);
     let rows: Vec<String> = suppression
@@ -365,7 +600,7 @@ fn add_exclusion_omits_apps_that_have_an_exclusion_and_lists_suppressed_ones() {
         .into_iter()
         .map(|file| file.executable)
         .collect();
-    assert_eq!(rows, ["browser.exe"]);
+    assert_eq!(rows, ["game.exe", "browser.exe"]);
 }
 
 #[test_case(Field::Suppression, "ApplicationFrameHost.exe"; "shared host in add app")]
@@ -452,7 +687,7 @@ fn duplicate_entries_are_marked_on_both_cards_and_removing_one_writes_the_file()
     fixture.desktop.command(Command::Remove(
         Field::Suppression,
         0,
-        "game.exe".to_owned(),
+        AppEntry::new("game.exe", ""),
     ));
     assert!(!fixture.configuration.borrow().paused());
     let saved = fixture.saved().expect("ending the pause writes the file");
@@ -476,7 +711,7 @@ fn adding_to_a_marked_list_clears_its_mark_and_ends_the_pause() {
     );
     fixture.desktop.command(Command::Add(
         Field::Suppression,
-        vec![self::file("vlc.exe")],
+        vec![self::file("vlc.exe").into()],
     ));
     assert!(!fixture.configuration.borrow().paused());
     let saved = fixture.saved().expect("ending the pause writes the file");
@@ -548,7 +783,7 @@ fn saving_a_title_relabels_the_entry_by_its_title_text(regex: bool, detail: &str
     dialog.set_regex(regex);
     dialog.set_text("Minecraft");
     assert!(title_dialog_view(&model, &english(), &dialog).save_enabled);
-    let command = dialog.command().expect("valid condition");
+    let command = dialog.command(&model).expect("valid condition");
     fixture.desktop.command(command);
     assert_eq!(
         fixture.configured(),
@@ -571,10 +806,10 @@ fn the_title_dialog_suggests_the_history_title_and_use_this_title_copies_it() {
     let model = fixture.model(vec![seen("javaw.exe", "Minecraft 1.21.4")]);
     let mut dialog = TitleDialog::open(&model, Field::Suppression, 0).expect("user entry");
     let view = title_dialog_view(&model, &english(), &dialog);
-    assert_eq!(plain(&view.title), "Match window titles");
+    assert_eq!(plain(&view.title), "Match conditions");
     assert_eq!(
         plain(&view.description),
-        "Limit this entry to windows whose title contains this text. Leave it empty to match every window of javaw.exe."
+        "Limit this entry to windows whose title contains this text. Leave it empty to remove the window-title condition."
     );
     assert_eq!(plain(&view.label), "Window title contains");
     assert_eq!(
@@ -622,7 +857,7 @@ fn an_invalid_expression_shows_a_field_error_disables_save_and_keeps_the_conditi
         Some("This isn't a valid regular expression.".to_owned())
     );
     assert!(!view.save_enabled);
-    assert_eq!(dialog.command(), None);
+    assert_eq!(dialog.command(&model), None);
     assert_eq!(
         fixture
             .model(Vec::new())
@@ -633,14 +868,19 @@ fn an_invalid_expression_shows_a_field_error_disables_save_and_keeps_the_conditi
 }
 
 #[test]
-fn an_app_with_a_title_limited_entry_is_not_offered_again() {
+fn an_app_with_a_title_limited_global_entry_keeps_its_restriction_choice() {
     let fixture = Fixture::new(Some(&titled_file(
         &[("javaw.exe", "Minecraft", false)],
         &[("javaw.exe", "IntelliJ", false)],
     )));
     let model = fixture.model(vec![seen("javaw.exe", "Minecraft 1.21.4")]);
     for list in [Field::Suppression, Field::Exclusions] {
-        assert_eq!(AddDialog::new(list).candidates(&model), [], "{list:?}");
+        let mut dialog = AddDialog::new(list);
+        assert_eq!(dialog.candidates(&model), [file("javaw.exe")], "{list:?}");
+        let path = file("javaw.exe").identity().expect("fixture path");
+        assert!(!dialog.available(&path, &model));
+        dialog.restrict(&path, true, &model);
+        assert!(dialog.available(&path, &model));
     }
 }
 
@@ -705,7 +945,7 @@ fn clearing_a_loaded_invalid_expression_removes_its_mark_and_writes_the_file() {
     let mut dialog = TitleDialog::open(&model, Field::Suppression, 0).expect("user entry");
     assert!(!title_dialog_view(&model, &english(), &dialog).save_enabled);
     dialog.set_text("");
-    let command = dialog.command().expect("an empty condition is valid");
+    let command = dialog.command(&model).expect("an empty condition is valid");
     fixture.desktop.command(command);
     assert!(!fixture.configuration.borrow().paused());
     let saved = fixture.saved().expect("ending the pause writes the file");
@@ -747,21 +987,37 @@ fn images(tag: u8) -> IconImages {
     ])
 }
 
-fn names(executables: &[&str]) -> Vec<String> {
-    executables.iter().map(|name| (*name).to_owned()).collect()
+fn names(executables: &[&str]) -> Vec<crate::ExecutablePath> {
+    executables
+        .iter()
+        .map(|name| crate::ExecutablePath::new(&format!("C:/Apps/{name}")).expect("fixture path"))
+        .collect()
 }
 
 #[test]
 fn each_app_row_requests_its_icon_once_per_page_view() {
     let fixture = Fixture::new(Some(&entries_file(&["cs2.exe"], &["browser.exe"])));
-    let model = fixture.model(vec![
+    let mut model = fixture.model(vec![
         recent_app("game.exe", None),
         recent_app("circadia.exe", None),
     ]);
     let page = names(&["browser.exe", "cs2.exe", "game.exe"]);
+    model.sources = BTreeMap::from([
+        (
+            crate::ExecutableName::new("browser.exe").expect("filename"),
+            file("browser.exe").identity().expect("fixture path"),
+        ),
+        (
+            crate::ExecutableName::new("cs2.exe").expect("filename"),
+            file("cs2.exe").identity().expect("fixture path"),
+        ),
+    ]);
     let mut requests = IconRequests::default();
     assert_eq!(requests.due(Page::Apps, None, &model), page);
-    assert_eq!(requests.due(Page::Apps, None, &model), Vec::<String>::new());
+    assert_eq!(
+        requests.due(Page::Apps, None, &model),
+        Vec::<crate::ExecutablePath>::new()
+    );
     let mut dialog = AddDialog::new(Field::Exclusions);
     assert_eq!(requests.due(Page::Apps, Some(&dialog), &model), page);
     assert!(dialog.browsed(&model, file("tool.exe")));
@@ -771,7 +1027,7 @@ fn each_app_row_requests_its_icon_once_per_page_view() {
     );
     assert_eq!(
         requests.due(Page::Schedule, None, &model),
-        Vec::<String>::new()
+        Vec::<crate::ExecutablePath>::new()
     );
     assert_eq!(requests.due(Page::Apps, None, &model), page);
 }
@@ -780,17 +1036,22 @@ fn each_app_row_requests_its_icon_once_per_page_view() {
 fn a_row_shows_the_generic_icon_until_its_own_icon_is_read() {
     let mut icons = AppIcons::default();
     assert_eq!(
-        icon_for(&icons, "circadia.exe", "game.exe", 32),
+        icon_for(&icons, "circadia.exe", "game.exe", None, 32),
         AppIcon::Placeholder
     );
     icons.generic = Some(images(0));
     assert_eq!(
-        icon_for(&icons, "circadia.exe", "game.exe", 32),
+        icon_for(&icons, "circadia.exe", "game.exe", None, 32),
         AppIcon::Image(Arc::from(vec![0, 32]))
     );
-    icons.apps.insert("game.exe".to_owned(), images(1));
+    let path = file("game.exe").identity().expect("fixture path");
+    icons.apps.insert(path.clone(), images(1));
+    icons.sources.insert(
+        crate::ExecutableName::new("game.exe").expect("filename"),
+        path,
+    );
     assert_eq!(
-        icon_for(&icons, "circadia.exe", "game.exe", 64),
+        icon_for(&icons, "circadia.exe", "game.exe", None, 64),
         AppIcon::Image(Arc::from(vec![1, 64]))
     );
 }
@@ -800,12 +1061,16 @@ fn circadias_own_fixed_exclusion_shows_circadias_icon() {
     let fixture = Fixture::new(None);
     let model = fixture.model(Vec::new());
     let icons = AppIcons {
-        apps: BTreeMap::from([("circadia.exe".to_owned(), images(1))]),
+        apps: BTreeMap::from([(
+            file("circadia.exe").identity().expect("fixture path"),
+            images(1),
+        )]),
+        sources: BTreeMap::new(),
         generic: Some(images(0)),
     };
     let own = fixed_rows(&model, &english())
         .into_iter()
-        .map(|row| icon_for(&icons, &model.running_executable, &row.executable, 32))
+        .map(|row| icon_for(&icons, &model.running_executable, &row.executable, None, 32))
         .next();
     assert_eq!(own, Some(AppIcon::Circadia));
 }

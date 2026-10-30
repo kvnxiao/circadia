@@ -1215,6 +1215,7 @@ fn the_history_keeps_the_last_title_after_focus_moves_to_another_executable() {
             &Foreground::window("game.exe", "Game"),
             Some(&PreviousWindow {
                 executable: "javaw.exe".into(),
+                path: "C:/Apps/javaw.exe".into(),
                 title: "DeceasedCraft".into(),
             }),
             time(400),

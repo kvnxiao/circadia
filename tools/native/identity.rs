@@ -77,8 +77,8 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
         return Ok(());
     }
     crate::lifecycle::show_page(&automation, &settings, process, automation_id::NAV_APPS)?;
-    let first_add = automation_id::recent_add(&first.name);
-    let second_add = automation_id::recent_add(&second.name);
+    let first_add = automation_id::recent_add(first.identity.as_str());
+    let second_add = automation_id::recent_add(second.identity.as_str());
     order(&automation, &settings, process, &first_add, &second_add)?;
     let action = automation
         .find(&settings, process, &first_add)?
@@ -122,7 +122,7 @@ fn observed(
     process: u32,
     fixture: &Fixture,
 ) -> io::Result<()> {
-    let id = automation_id::recent_add(&fixture.name);
+    let id = automation_id::recent_add(fixture.identity.as_str());
     wait("foreground fixture enters recent history", || {
         require_foreground(&fixture.window)?;
         automation.enabled(settings, process, &id)
@@ -150,7 +150,7 @@ fn candidates(
     captures: &Path,
 ) -> io::Result<()> {
     automation.invoke(settings, process, automation_id::ADD_APP)?;
-    let id = automation_id::dialog_choice(&first.name);
+    let id = automation_id::dialog_choice(first.identity.as_str());
     wait("app A candidate checkbox", || {
         automation.enabled(settings, process, &id)
     })?;
@@ -194,7 +194,7 @@ fn candidates(
     Ok(())
 }
 
-fn order(
+pub(super) fn order(
     automation: &Automation,
     settings: &HWND,
     process: u32,
@@ -225,7 +225,7 @@ fn order(
     })
 }
 
-fn focused(automation: &Automation, process: u32, id: &str) -> io::Result<()> {
+pub(super) fn focused(automation: &Automation, process: u32, id: &str) -> io::Result<()> {
     let current = automation.focused(process)?;
     require(
         current
@@ -235,7 +235,7 @@ fn focused(automation: &Automation, process: u32, id: &str) -> io::Result<()> {
     )
 }
 
-fn arrange(settings: &HWND, first: &HWND, second: &HWND) -> io::Result<()> {
+pub(super) fn arrange(settings: &HWND, first: &HWND, second: &HWND) -> io::Result<()> {
     let area = settings
         .MonitorFromWindow(winsafe::co::MONITOR::DEFAULTTONEAREST)
         .GetMonitorInfo()
@@ -267,7 +267,7 @@ fn arrange(settings: &HWND, first: &HWND, second: &HWND) -> io::Result<()> {
     Ok(())
 }
 
-fn activate(window: &HWND, process: u32) -> io::Result<()> {
+pub(super) fn activate(window: &HWND, process: u32) -> io::Result<()> {
     require(
         window.GetWindowThreadProcessId().1 == process,
         "activation target changed owner",
@@ -279,6 +279,19 @@ fn activate(window: &HWND, process: u32) -> io::Result<()> {
         wait("activation target restores", || {
             Ok((window.IsWindowVisible() && !window.IsIconic()).then_some(()))
         })?;
+    }
+    window
+        .SetWindowPos(
+            winsafe::HwndPlace::Place(winsafe::co::HWND_PLACE::TOP),
+            winsafe::POINT::new(),
+            winsafe::SIZE::new(),
+            winsafe::co::SWP::NOACTIVATE | winsafe::co::SWP::NOMOVE | winsafe::co::SWP::NOSIZE,
+        )
+        .map_err(io::Error::other)?;
+    if !window.SetForegroundWindow() {
+        report(
+            "Windows denied the owned window's foreground request; waiting for its title-bar input target",
+        );
     }
     let bounds = window.GetWindowRect().map_err(io::Error::other)?;
     let point = winsafe::POINT::with(bounds.right - 200, bounds.top + 16);
@@ -316,7 +329,7 @@ fn activate(window: &HWND, process: u32) -> io::Result<()> {
     Ok(())
 }
 
-fn require_foreground(window: &HWND) -> io::Result<()> {
+pub(super) fn require_foreground(window: &HWND) -> io::Result<()> {
     require(
         window.IsWindowVisible()
             && !window.IsIconic()
@@ -328,7 +341,7 @@ fn require_foreground(window: &HWND) -> io::Result<()> {
     )
 }
 
-fn return_to(window: &HWND) -> io::Result<()> {
+pub(super) fn return_to(window: &HWND) -> io::Result<()> {
     let inputs = [
         (winsafe::co::VK::MENU, winsafe::co::KEYEVENTF::NoValue),
         (winsafe::co::VK::TAB, winsafe::co::KEYEVENTF::NoValue),
@@ -357,6 +370,7 @@ struct Fixture {
     _path: tempfile::TempPath,
     window: HWND,
     name: String,
+    identity: circadia::ExecutablePath,
 }
 
 impl Fixture {
@@ -377,6 +391,11 @@ impl Fixture {
             .ok_or_else(|| io::Error::other("fixture name is not Unicode"))?
             .to_lowercase();
         let process = Process::foreground_fixture_at(&path)?;
+        let identity = circadia::ExecutablePath::new(
+            path.to_str()
+                .ok_or_else(|| io::Error::other("fixture path is not Unicode"))?,
+        )
+        .map_err(io::Error::other)?;
         let window = wait("owned identity fixture window", || {
             crate::lifecycle::window(process.id(), "Circadia foreground fixture", true)
         })?;
@@ -385,6 +404,7 @@ impl Fixture {
             _path: path,
             window,
             name,
+            identity,
         })
     }
 }

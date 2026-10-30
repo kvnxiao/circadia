@@ -1,10 +1,10 @@
 # Native application checks
 
-These checks run the built Circadia executable on the Windows desktop and inspect it through UI Automation. Some change live Windows Night Light; others replace it with a simulated Night Light backend. Run them from the repository root on an interactive Windows 11 x64 desktop. Install the development tools listed in the [project README](../README.md). `just check` does not run any of these recipes. The lifecycle, settings, Explorer, shutdown, and pseudo-locale checks send mouse or keyboard input; avoid desktop input during those recipes. The standalone picker, startup, deployment, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
+These checks run the built Circadia executable on the Windows desktop and inspect it through UI Automation. Some change live Windows Night Light; others replace it with a simulated backend or keep management off. Run them from the repository root on an interactive Windows 11 x64 desktop. Install the development tools listed in the [project README](../README.md). `just check` does not run any of these recipes. The lifecycle, settings, Explorer, shutdown, recent-app identity, installation restriction, and pseudo-locale checks send mouse or keyboard input; avoid desktop input during those recipes. The standalone picker, startup, deployment, recovery, and measurement recipes use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
 
 The checks find the settings window by its title and every settings control by the automation identifiers that `circadia::automation_id` lists, so they do not depend on the interface language. A unit test of the harness fails when a check names an identifier that the list does not have. UI Automation exposes a panel or border only when it has an accessible name, so the checks use the controls and text inside a settings row, the panel with one setting's label and controls, rather than the row's own identifier. The tray menu's items expose only their text, so the checks find each item by its position (Open Circadia settings, manual suppression, the recent-apps caption, the recent apps, Quit Circadia) and compare its label with the catalog text of the language under test, which is the message in that language's Fluent `.ftl` file; they find the tray icon by the text that every tooltip starts with, `Circadia:` in English. The checks find the Windows file picker by its title, which is catalog text, and its filename box and Open button by their control identifiers, because Circadia shows the picker in the interface language. The Shell's hidden-icons button lookup requires an English Windows Shell.
 
-The recipes that launch `circadia.exe` (`native-lifecycle`, `native-settings`, `native-explorer`, `native-startup`, `native-shutdown`, and `native-picker`) accept `--language TAG`, which they pass to every Circadia launch, for example `just native-settings --language qps-Ploc` for the pseudo-locale. The deployment, recovery, and measurement recipes run English only.
+The `native-lifecycle`, `native-settings`, `native-explorer`, `native-startup`, `native-shutdown`, `native-picker`, and `native-identity` recipes accept `--language TAG`, which they pass to every Circadia launch. For example, `just native-settings --language qps-Ploc` uses the pseudo-locale. The `native-paths` and `native-translation` recipes select that expanded debug text automatically. The deployment, recovery, and measurement recipes run English only.
 
 Each recipe that changes Night Light starts Circadia with `manage_night_light = true` in its configuration file, which Circadia reads at startup, so Circadia controls Night Light without first asking the user to allow it. The startup and picker recipes start with management off and do not change Night Light. Circadia reads its configuration file only at startup, so the checks change settings through the settings controls and read the file to confirm each write.
 
@@ -101,6 +101,18 @@ The check opens two temporary test windows and switches between them and Setting
 
 This check sends desktop input and requires 100% scaling; leave the desktop idle. It uses isolated configuration with Night Light management off and saves screenshots under `target/identity-100-*`.
 
+## Installation restrictions
+
+Close any running Circadia instance, then run:
+
+```bash
+just native-paths
+```
+
+This recipe checks filename-only rules and the optional **Only this installation** restriction with copies of one fixture executable in separate folders. It activates both windows and checks additions, overlapping inclusions and exclusions, rule edits, and actions after recent history reorders. Moving a fixture checks that a saved path restriction requires an explicit update.
+
+The recipe uses expanded debug text and captures app rows and dialogs at narrow and expanded navigation widths, including the 640×480 minimum client size. It sends mouse and keyboard input at the current 100% display scale; leave the desktop idle. Night Light management stays off. The fixture windows and processes close when the run ends, including on failure.
+
 ## Sign-in startup
 
 Close any running Circadia instance, then run:
@@ -174,7 +186,7 @@ A separate Preview uses a 1 Hz native rate limit. The capture must observe more 
 
 The captures are saved to `target/preview-motion-blocked.png` and `target/preview-motion-one-hz.png`. Their sampling rate depends on screen capture and harness overhead. They establish visible movement between native calls, not the monitor's presentation rate or frame-time distribution.
 
-The same recipe checks the Preview bar, phase ring, and dot color while a simulated native call is blocked. It captures intermediate fill lengths, arc lengths, and RGB colors for 900 ms and reads the native progress controls' accessible ranges. The navigation ring and its accessible percentage must keep advancing on the General page; minimizing settings must stop every progress animation. Stop must restore editing before the native call is released. The captures are saved to `target/preview-progress-bar.png`, `target/preview-progress-ring.png`, and `target/preview-progress-color.png`.
+The same recipe checks the Preview bar, phase ring, and dot color while a simulated native call is blocked. The phase ring shows the elapsed fraction of the current scheduled transition, using the playback clock during Preview. It captures intermediate fill lengths, arc lengths, and RGB colors for 900 ms and reads the native progress controls' accessible ranges. The navigation ring and its accessible percentage must keep advancing on the General page; minimizing settings must stop every progress animation. Stop must restore editing before the native call is released. The captures are saved to `target/preview-progress-bar.png`, `target/preview-progress-ring.png`, and `target/preview-progress-color.png`.
 
 Run `just measure-graph --completion-only` for the bar's completion check. This separate check samples its final rendered pixels while native output remains blocked. It requires a full-width frame and an accessible value of 100% before the actual deadline, with editing still locked. It then checks editing unlock and bar removal at completion, followed by starting another Preview, Stop, page exit, minimize, and close. Samples and captures are saved under `target/preview-completion-*`.
 
@@ -348,7 +360,7 @@ Close any running Circadia instance, then run:
 just native-translation
 ```
 
-This recipe builds the debug application and starts it in the `qps-Ploc` pseudo-locale, an artificial language with expanded test text, with management off. It does not change Night Light. Release builds exclude the test-text generator and reject the developer language option. The fixture configuration has an invalid focus delay, an unknown key, two suppression entries including a title condition, an exclusion, and a saved crash notice. Those fixtures exercise validation messages and banners.
+This recipe builds the debug application and starts it in the `qps-Ploc` pseudo-locale, an artificial language with expanded test text, with management off. It does not change Night Light. Release builds exclude the test-text generator and reject the developer language option. The fixture configuration has an invalid focus delay, an unknown key, two suppression entries, an exclusion, and a saved crash notice. One suppression entry uses the literal title substring “Minecraft”. Those fixtures exercise validation messages and banners.
 
 The recipe inspects and captures every page through overlapping scroll positions at the default size, 640×480, 700×600, and 800×600 client sizes. It also sizes the window to work areas equivalent to 1280×720 and 1366×768 desktops with taskbar space excluded, without changing the monitor resolution. It exercises the hamburger overlay and dismissal, tests navigation at 799 and 800 effective pixels, and checks that an existing number-field value survives resizing.
 
@@ -356,7 +368,7 @@ The run also visits expanded exclusions, consent dialogs, both Add dialogs, the 
 
 In each view the recipe reads the text of every element and reports:
 
-- Text that has letters outside the pseudo-locale's brackets. Values that a message inserts between Unicode isolation marks, and each word of such a value, are exempt, as are executable names and text that has a digit and no run of more than two letters, such as `10:30 PM` and `6500 K`.
+- Text that has letters outside the pseudo-locale's brackets. Values that a message inserts between Unicode isolation marks, and each word of such a value, are exempt, as are executable names, absolute executable paths and folders, and text that has a digit and no run of more than two letters, such as `10:30 PM` and `6500 K`. Absolute-path lines are omitted before checking multi-line app details.
 - Text that extends horizontally past its parent element, or vertically past a parent that is not a pane. A scrolling pane moves text past its edges.
 
 Windows' caption buttons, the system menu, and WinUI's popup hosts show Windows' text and are not checked. WinUI's own names for parts of its controls are exempt only on the corresponding native part: an InfoBar's close button and icons, popup dismissal controls and their Close tooltip, scroll bars, and the range text appended to number-field names. Other text inside WinUI parts, including InfoBar titles and messages and dialog buttons, is checked. Windows file-picker chrome can follow Windows' language.
@@ -369,7 +381,7 @@ On 2026-10-29, the responsive settings checks passed with windows-rs `3b6bea5` a
 
 The navigation check verified a hamburger overlay at 799 epx client width and an expanded pane at 800 epx, plus overlay dismissal, selection, focus restoration, and preservation of an existing number-field value during reflow. The identity check activated both owned fixture windows and verified the same focused native actions after history reordered. Settings integration passed with real Night Light calls and cleanup. The graph check used simulated native calls; its maximum input-to-render callback delay was 27.639 ms over 15 samples. With the navigation pane hidden on General, a 600 ms observation recorded no animation starts, text-timer wakes, or settings renders. A separate 600 ms observation after closing Settings recorded the same counts. These results do not verify higher display scales, Narrator delivery, or optical Night Light output.
 
-At windows-rs `5cfe2c9` on 2026-10-29, Windows 11 build 26300.9711 at 100% scaling passed the binding-migration checks for location, both settings-startup variants, and all five shutdown cases. The completed animations passed captured-pixel and accessible-value checks with native output blocked; the [measurement record](../docs/research/resource-measurement.md#progress-bar-phase-ring-and-marker-color) gives the results and limits. Recovery passed 167 serialized simulated calls. The quick activity check recorded one indicator update during 60.039 seconds with settings open and zero UI ticks or views during 59.925 seconds after closing.
+At windows-rs `5cfe2c9` on 2026-10-29, Windows 11 build 26300.9711 at 100% scaling passed checks for location, both settings-startup variants, and all five shutdown cases after Circadia's direct Windows bindings were aligned with Reactor's Git revision. The completed animations passed captured-pixel and accessible-value checks with native output blocked; the [measurement record](../docs/research/resource-measurement.md#progress-bar-phase-ring-and-marker-color) gives the results and limits. Recovery passed 167 serialized simulated calls. The quick activity check recorded one indicator update during 60.039 seconds with settings open and zero UI timer updates or settings view constructions during 59.925 seconds after closing.
 
 On 2026-10-29, the working tree based on `c453c2f` used windows-rs `8786f59` and bundled Windows App SDK runtime 2.6.4 on Windows 11 build 26300.9711 at 100% scaling:
 

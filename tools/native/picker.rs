@@ -71,7 +71,7 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
 }
 
 #[derive(Clone, Copy)]
-enum Selection<'a> {
+pub(super) enum Selection<'a> {
     Cancel,
     CancelIn(&'a Path),
     File(&'a Path),
@@ -109,18 +109,14 @@ pub(super) fn exercise(
     })?;
     require(
         automation
-            .enabled(
-                settings,
-                process,
-                &automation_id::dialog_choice("applicationframehost.exe"),
-            )?
+            .enabled(settings, process, &choice(&fixed)?)?
             .is_none(),
         "a fixed exclusion became a dialog choice",
     )?;
     let selected = fixtures.join("Picker-Fixture.EXE");
     fs_err::copy(&executable, &selected)?;
     select(automation, settings, process, Selection::File(&selected))?;
-    let choice = automation_id::dialog_choice("picker-fixture.exe");
+    let choice = choice(&selected)?;
     wait("browsed file becomes a chosen dialog entry", || {
         automation.toggled(settings, process, &choice)
     })?;
@@ -133,7 +129,7 @@ pub(super) fn exercise(
         "the open dialog changed the saved configuration",
     )?;
     confirm_dialog(automation, settings, process)?;
-    let entry = automation_id::suppression_entry(0);
+    let entry = fixture_rule(circadia::Field::Suppression);
     wait("Add writes the browsed suppression entry", || {
         Ok((saved(directory)?
             .suppression
@@ -155,7 +151,7 @@ fn exclude_and_remove(
     directory: &Path,
     selected: &Path,
 ) -> io::Result<()> {
-    let choice = automation_id::dialog_choice("picker-fixture.exe");
+    let choice = choice(selected)?;
     open_dialog(automation, settings, process, automation_id::ADD_EXCLUSION)?;
     select(automation, settings, process, Selection::File(selected))?;
     wait("browsed exclusion is chosen", || {
@@ -181,8 +177,8 @@ fn exclude_and_remove(
             .then_some(()))
     })?;
     for entry in [
-        automation_id::exclusion_entry(0),
-        automation_id::suppression_entry(0),
+        fixture_rule(circadia::Field::Exclusions),
+        fixture_rule(circadia::Field::Suppression),
     ] {
         let remove = automation_id::remove(&entry);
         wait("entry offers Remove", || {
@@ -207,7 +203,7 @@ fn exclude_and_remove(
     Ok(())
 }
 
-fn open_dialog(
+pub(super) fn open_dialog(
     automation: &Automation,
     settings: &HWND,
     process: u32,
@@ -225,7 +221,11 @@ fn open_dialog(
     Ok(())
 }
 
-fn confirm_dialog(automation: &Automation, settings: &HWND, process: u32) -> io::Result<()> {
+pub(super) fn confirm_dialog(
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+) -> io::Result<()> {
     crate::lifecycle::wait("enabled Add command", || {
         Ok(automation
             .dialog_button(settings, process, DialogButton::Primary)?
@@ -245,7 +245,23 @@ fn select(
     process: u32,
     selection: Selection<'_>,
 ) -> io::Result<()> {
-    automation.invoke(settings, process, automation_id::DIALOG_BROWSE)?;
+    select_from(
+        automation,
+        settings,
+        process,
+        automation_id::DIALOG_BROWSE,
+        selection,
+    )
+}
+
+pub(super) fn select_from(
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+    browse: &str,
+    selection: Selection<'_>,
+) -> io::Result<()> {
+    automation.invoke(settings, process, browse)?;
     let dialog = wait("owned executable picker", || {
         window(process, &text()?.picker_title, true)
     })?;
@@ -284,7 +300,7 @@ fn select(
     let result = result.and_then(|()| {
         wait("picker returns to the Add dialog", || {
             let open = window(process, &text()?.picker_title, true)?.is_some();
-            let browse = automation.enabled(settings, process, automation_id::DIALOG_BROWSE)?;
+            let browse = automation.enabled(settings, process, browse)?;
             observed = Some((open, browse));
             Ok((!open && browse == Some(true)).then_some(()))
         })
@@ -296,6 +312,19 @@ fn select(
         drop(automation.close(&dialog, process));
     }
     result
+}
+
+fn choice(path: &Path) -> io::Result<String> {
+    let path = circadia::ExecutablePath::new(
+        path.to_str()
+            .ok_or_else(|| io::Error::other("picker path is not Unicode"))?,
+    )
+    .map_err(io::Error::other)?;
+    Ok(automation_id::dialog_choice(path.as_str()))
+}
+
+fn fixture_rule(list: circadia::Field) -> String {
+    automation_id::rule(list, &circadia::AppEntry::new("picker-fixture.exe", ""), 0)
 }
 
 #[expect(

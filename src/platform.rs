@@ -2,6 +2,7 @@ pub(crate) mod clock;
 pub(crate) mod contrast;
 pub(crate) mod event_log;
 pub(crate) mod events;
+pub(crate) mod executable_path;
 pub(crate) mod file_info;
 pub(crate) mod foreground;
 pub(crate) mod instance;

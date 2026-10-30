@@ -1259,6 +1259,8 @@ fn suppression_and_management_off_explain_the_output() {
         focus_ended: None,
         title: None,
         included: true,
+        covering: 1,
+        removable: true,
         condition: String::new(),
         excluded: false,
     }];

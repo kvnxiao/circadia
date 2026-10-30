@@ -643,7 +643,15 @@ fn suppressed_sentence(
             .recent
             .iter()
             .find(|recent| recent.focus_ended.is_none())
-            .map(|recent| apps::display_name(model, &recent.executable));
+            .map(|recent| {
+                apps::display_name(
+                    model,
+                    &crate::ui::file_info::AppFile {
+                        executable: recent.executable.clone(),
+                        path: recent.path.clone(),
+                    },
+                )
+            });
         app.map_or_else(
             || text!(text, "sentence-automatic-unknown", kelvin = kelvin.as_str()),
             |app| {

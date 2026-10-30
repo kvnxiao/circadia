@@ -598,7 +598,7 @@ pub(super) fn menu_items(
     snapshot: Option<&ControllerSnapshot>,
     manual: ManualCommand,
     toggles: Toggles,
-    names: &BTreeMap<String, String>,
+    names: &BTreeMap<crate::ExecutablePath, String>,
 ) -> Vec<MenuItem> {
     let manual_key = match manual {
         ManualCommand::Start => "manual-start",
@@ -623,39 +623,73 @@ pub(super) fn menu_items(
         MenuItem::separator("separator-recent"),
         MenuItem::disabled("caption", text!(text, "tray-caption", reason = reason)),
     ];
-    let recent = snapshot.map_or(&[][..], |snapshot| snapshot.recent.as_slice());
-    items.extend(recent.iter().take(3).map(|recent| {
+    let history = snapshot.map_or(&[][..], |snapshot| snapshot.recent.as_slice());
+    items.extend(history.iter().take(3).map(|recent| {
         let executable = recent.executable.as_str();
         let name = if recent.condition.is_empty() {
-            names.get(executable).map_or(executable, String::as_str)
+            recent
+                .path
+                .to_str()
+                .and_then(|path| crate::ExecutablePath::new(path).ok())
+                .as_ref()
+                .and_then(|path| names.get(path))
+                .map_or(executable, String::as_str)
         } else {
             recent.condition.as_str()
         };
         let listed = if recent.included { "yes" } else { "no" };
         let action = if recent.included { "remove" } else { "add" };
-        let key = format!("{action}:{executable}");
+        let path = recent.path.to_string_lossy();
+        let regex = snapshot
+            .and_then(|snapshot| snapshot.accepted.as_ref())
+            .into_iter()
+            .flat_map(|layer| layer.config().entries(crate::Field::Suppression))
+            .find(|entry| {
+                entry.path.is_none() && crate::same_executable(&entry.executable, executable)
+            })
+            .is_some_and(|entry| entry.regex);
+        let key = format!("{action}:{}:{path}", u8::from(regex));
+        let folder = history
+            .iter()
+            .filter(|other| crate::same_executable(&other.executable, executable))
+            .nth(1)
+            .and_then(|_| crate::ExecutablePath::new(&path).ok())
+            .map(|path| path.folder().to_owned());
+        let label = |label: String| {
+            folder.as_ref().map_or_else(
+                || label.clone(),
+                |folder| {
+                    text!(
+                        text,
+                        "tray-installation",
+                        app = label.as_str(),
+                        folder = folder.as_str()
+                    )
+                },
+            )
+        };
         if recent.excluded {
             MenuItem::disabled(
                 key,
-                text!(
+                label(text!(
                     text,
                     "tray-app-excluded",
                     listed = listed,
                     name = name,
                     executable = executable
-                ),
+                )),
             )
         } else {
             item(
                 key,
-                text!(
+                label(text!(
                     text,
                     "tray-app",
                     listed = listed,
                     name = name,
                     executable = executable
-                ),
-                toggles == Toggles::Available && recent.condition.is_empty(),
+                )),
+                toggles == Toggles::Available && (!recent.included || recent.removable),
             )
         }
     }));
@@ -1482,9 +1516,59 @@ mod tests {
             focus_ended: None,
             title: None,
             included: false,
+            covering: 0,
+            removable: false,
             condition: String::new(),
             excluded: false,
         }
+    }
+
+    #[test]
+    fn same_name_tray_items_identify_folders_and_disable_overlapping_rules() {
+        let input = ConfigInput {
+            suppression: vec![
+                crate::AppEntry::new("browser.exe", "Browser"),
+                crate::AppEntry::new("browser.exe", "Browser A")
+                    .with_path(Some("C:/A/browser.exe".into())),
+            ],
+            ..ConfigInput::default()
+        };
+        let config = input.clone().validate().expect("valid scopes");
+        let mut state = snapshot(input);
+        let mut apps = ForegroundApps::new("circadia.exe").expect("own name");
+        for path in ["C:/A/browser.exe", "C:/B/browser.exe"] {
+            apps.observe(
+                &Foreground::Application {
+                    executable: "browser.exe".into(),
+                    path: path.into(),
+                    title: None,
+                },
+                None,
+                Duration::ZERO,
+            );
+        }
+        state.recent = apps.recent(&config);
+        let items = labels(&menu_items(
+            &english(),
+            Some(&state),
+            ManualCommand::Start,
+            Toggles::Available,
+            &BTreeMap::new(),
+        ));
+        assert!(
+            items
+                .iter()
+                .any(|(key, label, enabled)| key.ends_with(r"C:\A\browser.exe")
+                    && label.contains(r"C:\A")
+                    && !enabled)
+        );
+        assert!(
+            items
+                .iter()
+                .any(|(key, label, enabled)| key.ends_with(r"C:\B\browser.exe")
+                    && label.contains(r"C:\B")
+                    && *enabled)
+        );
     }
 
     fn plain(label: &str) -> String {
@@ -1543,6 +1627,8 @@ mod tests {
         state.recent = vec![
             RecentApp {
                 included: true,
+                removable: true,
+                covering: 1,
                 ..recent("cs2.exe")
             },
             recent("vlc.exe"),
@@ -1552,7 +1638,10 @@ mod tests {
             },
             recent("old.exe"),
         ];
-        let names = BTreeMap::from([("cs2.exe".to_owned(), "Counter-Strike 2".to_owned())]);
+        let names = BTreeMap::from([(
+            crate::ExecutablePath::new(r"C:\Apps\cs2.exe").expect("fixture path"),
+            "Counter-Strike 2".to_owned(),
+        )]);
         let items = menu_items(
             &english(),
             Some(&state),
@@ -1569,13 +1658,13 @@ mod tests {
                 entry("separator-recent", "-", false),
                 entry("caption", "Suppress while focused", false),
                 entry(
-                    "remove:cs2.exe",
+                    "remove:0:C:/Apps/cs2.exe",
                     "\u{2713} Counter-Strike 2 (cs2.exe)",
                     true
                 ),
-                entry("add:vlc.exe", "vlc.exe (vlc.exe)", true),
+                entry("add:0:C:/Apps/vlc.exe", "vlc.exe (vlc.exe)", true),
                 entry(
-                    "add:browser.exe",
+                    "add:0:C:/Apps/browser.exe",
                     "browser.exe (browser.exe) (excluded)",
                     false
                 ),
@@ -1593,7 +1682,10 @@ mod tests {
             condition: "Minecraft".to_owned(),
             ..recent("javaw.exe")
         }];
-        let names = BTreeMap::from([("javaw.exe".to_owned(), "Java".to_owned())]);
+        let names = BTreeMap::from([(
+            crate::ExecutablePath::new(r"C:\Apps\javaw.exe").expect("fixture path"),
+            "Java".to_owned(),
+        )]);
         let items = menu_items(
             &english(),
             Some(&state),
@@ -1603,7 +1695,7 @@ mod tests {
         );
         assert!(
             labels(&items).contains(&entry(
-                "remove:javaw.exe",
+                "remove:0:C:/Apps/javaw.exe",
                 "\u{2713} Minecraft (javaw.exe)",
                 false
             )),
@@ -1628,7 +1720,7 @@ mod tests {
             &BTreeMap::new(),
         );
         assert!(labels(&items).contains(&entry(
-            "remove:both.exe",
+            "remove:0:C:/Apps/both.exe",
             "\u{2713} both.exe (both.exe) (excluded)",
             false
         )));
@@ -1659,7 +1751,11 @@ mod tests {
             "{items:?}"
         );
         assert!(
-            items.contains(&entry("add:game.exe", "game.exe (game.exe)", false)),
+            items.contains(&entry(
+                "add:0:C:/Apps/game.exe",
+                "game.exe (game.exe)",
+                false
+            )),
             "{items:?}"
         );
         assert_eq!(
@@ -1681,7 +1777,11 @@ mod tests {
             Toggles::Available,
             &BTreeMap::new(),
         ));
-        assert!(items.contains(&entry("add:game.exe", "game.exe (game.exe)", true)));
+        assert!(items.contains(&entry(
+            "add:0:C:/Apps/game.exe",
+            "game.exe (game.exe)",
+            true
+        )));
     }
 
     #[test]

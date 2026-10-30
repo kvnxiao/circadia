@@ -21,6 +21,7 @@ use crate::l10n::Text;
 use crate::l10n::text;
 use crate::platform::nls::RegionalFormat;
 use crate::ui::file_info::AppFile;
+use crate::ui::file_info::AppSelection;
 use crate::ui::icon_cache::AppIcons;
 use crate::ui::status;
 use std::collections::BTreeSet;
@@ -44,6 +45,7 @@ use windows_reactor::HorizontalAlignment;
 use windows_reactor::HyperlinkButton;
 use windows_reactor::KeyedView;
 use windows_reactor::Orientation;
+use windows_reactor::ScrollViewer;
 use windows_reactor::StackPanel;
 use windows_reactor::TextBox;
 use windows_reactor::ThemeBrush;
@@ -200,60 +202,78 @@ pub(super) fn icon_for(
     icons: &AppIcons,
     running_executable: &str,
     executable: &str,
+    path: Option<&crate::ExecutablePath>,
     pixels: u16,
 ) -> AppIcon {
-    if executable.eq_ignore_ascii_case(running_executable) {
+    if crate::same_executable(executable, running_executable) {
         return AppIcon::Circadia;
     }
-    icons
-        .apps
-        .get(&executable.to_lowercase())
-        .or(icons.generic.as_ref())
-        .map_or(AppIcon::Placeholder, |images| {
-            AppIcon::Image(Arc::clone(images.at(pixels)))
-        })
+    path.or_else(|| {
+        icons
+            .sources
+            .get(&crate::ExecutableName::new(executable).ok()?)
+    })
+    .and_then(|path| icons.apps.get(path))
+    .or(icons.generic.as_ref())
+    .map_or(AppIcon::Placeholder, |images| {
+        AppIcon::Image(Arc::clone(images.at(pixels)))
+    })
 }
 
-fn icon(settings: &Settings, executable: &str, size: f64) -> View {
+fn icon(
+    settings: &Settings,
+    executable: &str,
+    path: Option<&crate::ExecutablePath>,
+    size: f64,
+) -> View {
     icon_for(
         &settings.input.icons,
         &settings.input.model.running_executable,
         executable,
+        path,
         icon_pixels(settings.dpi),
     )
     .view(size)
 }
 
-fn shown_apps(page: Page, dialog: Option<&AddDialog>, model: &Model) -> BTreeSet<String> {
+fn shown_apps(
+    page: Page,
+    dialog: Option<&AddDialog>,
+    model: &Model,
+) -> BTreeSet<crate::ExecutablePath> {
     if page != Page::Apps {
         return BTreeSet::new();
     }
     let config = model.config();
-    let listed: Vec<String> = [Field::Suppression, Field::Exclusions]
+    let listed: Vec<crate::ExecutablePath> = [Field::Suppression, Field::Exclusions]
         .into_iter()
         .flat_map(|list| config.entries(list))
-        .filter_map(AppEntry::file_name)
+        .filter_map(|entry| crate::ui::icon_cache::source(entry, &model.sources))
         .collect();
-    let running = model.running_executable.to_lowercase();
     model
         .recent
         .iter()
-        .map(|recent| recent.executable.clone())
+        .filter_map(|recent| {
+            recent
+                .path
+                .to_str()
+                .and_then(|path| crate::ExecutablePath::new(path).ok())
+        })
         .chain(listed)
         .chain(
             dialog
                 .into_iter()
                 .flat_map(|dialog| dialog.candidates(model))
-                .map(|file| file.executable),
+                .filter_map(|file| file.identity()),
         )
-        .filter(|executable| *executable != running)
+        .filter(|path| !crate::same_executable(path.file_name(), &model.running_executable))
         .collect()
 }
 
 #[derive(Debug, Default)]
 pub(super) struct IconRequests {
     view: Option<(Page, Option<Field>)>,
-    requested: BTreeSet<String>,
+    requested: BTreeSet<crate::ExecutablePath>,
 }
 
 impl IconRequests {
@@ -262,13 +282,13 @@ impl IconRequests {
         page: Page,
         dialog: Option<&AddDialog>,
         model: &Model,
-    ) -> Vec<String> {
+    ) -> Vec<crate::ExecutablePath> {
         let view = (page, dialog.map(|dialog| dialog.list));
         if self.view != Some(view) {
             self.view = Some(view);
             self.requested.clear();
         }
-        let due: Vec<String> = shown_apps(page, dialog, model)
+        let due: Vec<crate::ExecutablePath> = shown_apps(page, dialog, model)
             .into_iter()
             .filter(|executable| !self.requested.contains(executable))
             .collect();
@@ -277,12 +297,12 @@ impl IconRequests {
     }
 }
 
-pub(super) fn display_name(model: &Model, executable: &str) -> String {
-    model
-        .names
-        .get(executable)
+pub(super) fn display_name(model: &Model, file: &AppFile) -> String {
+    file.identity()
+        .as_ref()
+        .and_then(|path| model.names.get(path))
         .cloned()
-        .unwrap_or_else(|| executable.to_owned())
+        .unwrap_or_else(|| file.executable.clone())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -290,7 +310,8 @@ pub(super) struct RecentRow {
     pub(super) file: AppFile,
     pub(super) name: String,
     pub(super) detail: String,
-    pub(super) listed: Option<usize>,
+    pub(super) listed: Option<(usize, AppEntry)>,
+    pub(super) covering: usize,
     pub(super) excluded: bool,
 }
 
@@ -309,19 +330,78 @@ pub(super) fn recent_rows(
                 executable: recent.executable.clone(),
                 path: recent.path.clone(),
             },
-            name: display_name(model, &recent.executable),
-            detail: text!(
-                text,
-                "recent-detail",
-                executable = recent.executable.as_str(),
-                since = since(text, region, recent.since_focus(now))
+            name: display_name(
+                model,
+                &AppFile {
+                    executable: recent.executable.clone(),
+                    path: recent.path.clone(),
+                },
             ),
-            listed: config
-                .entries(Field::Suppression)
-                .iter()
-                .position(|entry| entry.file_name().as_deref() == Some(recent.executable.as_str())),
+            detail: {
+                let detail = text!(
+                    text,
+                    "recent-detail",
+                    executable = recent.executable.as_str(),
+                    since = since(text, region, recent.since_focus(now))
+                );
+                let same_name = model
+                    .recent
+                    .iter()
+                    .filter(|other| crate::same_executable(&other.executable, &recent.executable))
+                    .count()
+                    > 1;
+                recent
+                    .path
+                    .to_str()
+                    .and_then(|path| crate::ExecutablePath::new(path).ok())
+                    .filter(|_| same_name)
+                    .map_or_else(
+                        || detail.clone(),
+                        |path| format!("{detail}\n{}", path.folder()),
+                    )
+            },
+            listed: {
+                let path = recent
+                    .path
+                    .to_str()
+                    .and_then(|path| crate::ExecutablePath::new(path).ok());
+                let entries: Vec<_> = config
+                    .entries(Field::Suppression)
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| entry.covers(&recent.executable, path.as_ref()))
+                    .collect();
+                (entries.len() == 1)
+                    .then(|| {
+                        entries
+                            .first()
+                            .map(|(index, entry)| (*index, (*entry).clone()))
+                    })
+                    .flatten()
+            },
+            covering: config
+                .classify_path(
+                    &recent.executable,
+                    recent
+                        .path
+                        .to_str()
+                        .and_then(|path| crate::ExecutablePath::new(path).ok())
+                        .as_ref(),
+                    None,
+                    &model.running_executable,
+                )
+                .covering,
             excluded: config
-                .classify(&recent.executable, None, &model.running_executable)
+                .classify_path(
+                    &recent.executable,
+                    recent
+                        .path
+                        .to_str()
+                        .and_then(|path| crate::ExecutablePath::new(path).ok())
+                        .as_ref(),
+                    None,
+                    &model.running_executable,
+                )
                 .excluded,
         })
         .collect()
@@ -332,6 +412,9 @@ pub(super) struct EntryRow {
     pub(super) index: usize,
     pub(super) name: String,
     pub(super) executable: String,
+    pub(super) path: Option<crate::ExecutablePath>,
+    pub(super) expected: AppEntry,
+    pub(super) id: String,
     pub(super) detail: String,
     pub(super) inactive: bool,
     pub(super) error: Option<String>,
@@ -347,30 +430,59 @@ pub(super) fn entry_rows(model: &Model, text: &Text, list: Field) -> Vec<EntryRo
         .map(|(index, (entry, problem))| EntryRow {
             index,
             name: if entry.title.is_empty() {
-                entry.display_name().to_owned()
+                crate::ui::icon_cache::source(entry, &model.sources).map_or_else(
+                    || entry.display_name().to_owned(),
+                    |path| {
+                        model
+                            .names
+                            .get(&path)
+                            .cloned()
+                            .unwrap_or_else(|| entry.executable.clone())
+                    },
+                )
             } else {
                 entry.title.clone()
             },
             executable: entry.executable.clone(),
-            detail: if entry.title.is_empty() {
-                entry.executable.clone()
-            } else {
-                text!(
-                    text,
-                    "entry-title-detail",
-                    regex = if entry.regex { "yes" } else { "no" },
-                    executable = entry.executable.as_str()
+            path: crate::ui::icon_cache::source(entry, &model.sources),
+            expected: entry.clone(),
+            id: automation_id::rule(
+                list,
+                entry,
+                config
+                    .entries(list)
+                    .iter()
+                    .take(index)
+                    .filter(|other| other.scope() == entry.scope())
+                    .count(),
+            ),
+            detail: {
+                let detail = if entry.title.is_empty() {
+                    entry.executable.clone()
+                } else {
+                    text!(
+                        text,
+                        "entry-title-detail",
+                        regex = if entry.regex { "yes" } else { "no" },
+                        executable = entry.executable.as_str()
+                    )
+                };
+                entry.path.as_ref().map_or_else(
+                    || detail.clone(),
+                    |path| {
+                        let folder = crate::ExecutablePath::new(path)
+                            .map_or_else(|_error| path.clone(), |path| path.folder().to_owned());
+                        format!("{detail}\n{folder}")
+                    },
                 )
             },
             inactive: list == Field::Suppression
-                && entry.file_name().is_some_and(|name| {
-                    config
-                        .classify(&name, None, &model.running_executable)
-                        .excluded
-                }),
+                && config.inactive(entry, &model.running_executable),
             error: problem.map(|problem| match problem {
                 EntryProblem::Invalid => text!(text, "entry-invalid"),
                 EntryProblem::Expression => text!(text, "entry-expression"),
+                EntryProblem::Path => text!(text, "entry-path-invalid"),
+                EntryProblem::PathFilename => text!(text, "entry-path-filename"),
                 EntryProblem::Duplicate => text!(
                     text,
                     "entry-duplicate",
@@ -403,7 +515,8 @@ pub(super) fn fixed_rows(model: &Model, text: &Text) -> Vec<FixedRow> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct AddDialog {
     pub(super) list: Field,
-    chosen: BTreeSet<String>,
+    chosen: BTreeSet<crate::ExecutablePath>,
+    restricted: BTreeSet<crate::ExecutablePath>,
     browsed: Vec<AppFile>,
     problem: Option<(String, FieldErrorKind)>,
 }
@@ -413,34 +526,84 @@ impl AddDialog {
         Self {
             list,
             chosen: BTreeSet::new(),
+            restricted: BTreeSet::new(),
             browsed: Vec::new(),
             problem: None,
         }
     }
 
-    pub(super) fn choose(&mut self, executable: &str, checked: bool) {
-        if checked {
-            self.chosen.insert(executable.to_owned());
+    pub(super) fn choose(&mut self, path: &crate::ExecutablePath, checked: bool, model: &Model) {
+        if checked && self.available(path, model) {
+            self.chosen.insert(path.clone());
         } else {
-            self.chosen.remove(executable);
+            self.chosen.remove(path);
         }
     }
 
-    pub(super) fn browsed(&mut self, model: &Model, file: AppFile) -> bool {
-        let entry = AppEntry::new(file.executable.clone(), file.executable.clone());
-        let added = model
+    pub(super) fn restrict(
+        &mut self,
+        path: &crate::ExecutablePath,
+        restricted: bool,
+        model: &Model,
+    ) {
+        if restricted {
+            self.restricted.insert(path.clone());
+        } else {
+            self.restricted.remove(path);
+        }
+        if !self.available(path, model) {
+            self.chosen.remove(path);
+        }
+    }
+
+    fn selected(&self, file: AppFile) -> AppSelection {
+        let restricted = file
+            .identity()
+            .is_some_and(|path| self.restricted.contains(&path));
+        AppSelection { file, restricted }
+    }
+
+    fn available(&self, path: &crate::ExecutablePath, model: &Model) -> bool {
+        let selection = self.selected(AppFile {
+            executable: path.file_name().to_ascii_lowercase(),
+            path: path.as_path().to_path_buf(),
+        });
+        let entry = selection.entry(selection.file.executable.clone());
+        model
             .config()
-            .add_entries(self.list, [entry], &model.running_executable);
-        if let Err(kind) = added {
-            self.problem = Some((file.executable, kind));
+            .add_entries(self.list, [entry.clone()], &model.running_executable)
+            .is_ok()
+            && !self
+                .chosen
+                .iter()
+                .filter(|chosen| *chosen != path)
+                .any(|chosen| {
+                    let selected = self.selected(AppFile {
+                        executable: chosen.file_name().to_ascii_lowercase(),
+                        path: chosen.as_path().to_path_buf(),
+                    });
+                    selected.entry(selected.file.executable.clone()).scope() == entry.scope()
+                })
+    }
+
+    pub(super) fn browsed(&mut self, model: &Model, file: AppFile) -> bool {
+        let Some(path) = file.identity() else {
+            return false;
+        };
+        if crate::is_fixed_exclusion(&file.executable, &model.running_executable) {
+            self.problem = Some((file.executable, FieldErrorKind::FixedExclusion));
             return false;
         }
-        self.problem = None;
-        self.chosen.insert(file.executable.clone());
+        let available = self.available(&path, model);
+        self.problem =
+            (!available).then(|| (file.executable.clone(), FieldErrorKind::AlreadyListed));
+        if available {
+            self.chosen.insert(path.clone());
+        }
         if !self
             .browsed
             .iter()
-            .any(|browsed| browsed.executable == file.executable)
+            .any(|browsed| browsed.identity().as_ref() == Some(&path))
         {
             self.browsed.push(file);
         }
@@ -448,41 +611,58 @@ impl AddDialog {
     }
 
     pub(super) fn candidates(&self, model: &Model) -> Vec<AppFile> {
-        let config = model.config();
-        let entries = config.entries(self.list);
         let mut candidates: Vec<AppFile> = Vec::new();
         let recent = model.recent.iter().map(|recent| AppFile {
             executable: recent.executable.clone(),
             path: recent.path.clone(),
         });
         for file in recent.chain(self.browsed.iter().cloned()) {
-            let listed = entries
+            let Some(path) = file.identity() else {
+                continue;
+            };
+            let file = self
+                .browsed
                 .iter()
-                .any(|entry| entry.executable.to_lowercase() == file.executable);
+                .find(|browsed| browsed.identity().as_ref() == Some(&path))
+                .cloned()
+                .unwrap_or(file);
             let shown = candidates
                 .iter()
-                .any(|candidate| candidate.executable == file.executable);
-            if !listed && !shown {
+                .any(|candidate| candidate.identity().as_ref() == Some(&path));
+            if !crate::is_fixed_exclusion(&file.executable, &model.running_executable) && !shown {
                 candidates.push(file);
             }
         }
         candidates
     }
 
-    pub(super) fn files(&self, model: &Model) -> Vec<AppFile> {
+    pub(super) fn files(&self, model: &Model) -> Vec<AppSelection> {
         self.candidates(model)
             .into_iter()
-            .filter(|file| self.chosen.contains(&file.executable))
+            .filter(|file| {
+                file.identity()
+                    .is_some_and(|path| self.chosen.contains(&path) && self.available(&path, model))
+            })
+            .map(|file| self.selected(file))
             .collect()
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub(super) enum CandidateSection {
+    Recent,
+    Browsed,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub(super) struct DialogRow {
     pub(super) executable: String,
+    pub(super) path: Option<crate::ExecutablePath>,
     pub(super) name: String,
     pub(super) checked: bool,
-    pub(super) browsed: bool,
+    pub(super) restricted: bool,
+    pub(super) available: bool,
+    pub(super) section: CandidateSection,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -519,12 +699,26 @@ pub(super) fn dialog_view(
             .candidates(model)
             .into_iter()
             .map(|file| DialogRow {
-                name: display_name(model, &file.executable),
-                checked: dialog.chosen.contains(&file.executable),
-                browsed: dialog
+                path: file.identity(),
+                name: display_name(model, &file),
+                checked: file.identity().is_some_and(|path| {
+                    dialog.chosen.contains(&path) && dialog.available(&path, model)
+                }),
+                restricted: file
+                    .identity()
+                    .is_some_and(|path| dialog.restricted.contains(&path)),
+                available: file
+                    .identity()
+                    .is_some_and(|path| dialog.available(&path, model)),
+                section: if dialog
                     .browsed
                     .iter()
-                    .any(|browsed| browsed.executable == file.executable),
+                    .any(|browsed| browsed.identity() == file.identity())
+                {
+                    CandidateSection::Browsed
+                } else {
+                    CandidateSection::Recent
+                },
                 executable: file.executable,
             })
             .collect(),
@@ -557,7 +751,10 @@ pub(super) fn dialog_view(
 pub(super) struct TitleDialog {
     list: Field,
     index: usize,
-    executable: String,
+    expected: AppEntry,
+    restricted: bool,
+    path: Option<String>,
+    path_problem: Option<EntryProblem>,
     text: String,
     regex: bool,
 }
@@ -569,10 +766,82 @@ impl TitleDialog {
         Some(Self {
             list,
             index,
-            executable: entry.executable.clone(),
+            expected: entry.clone(),
+            restricted: entry.path.is_some(),
+            path: entry
+                .path
+                .clone()
+                .or_else(|| {
+                    crate::ui::icon_cache::source(entry, &model.sources)
+                        .map(|path| path.as_str().to_owned())
+                })
+                .or_else(|| {
+                    model
+                        .recent
+                        .iter()
+                        .find(|recent| {
+                            crate::same_executable(&recent.executable, &entry.executable)
+                        })
+                        .map(|recent| recent.path.to_string_lossy().into_owned())
+                }),
+            path_problem: None,
             text: entry.title.clone(),
             regex: entry.regex,
         })
+    }
+
+    pub(super) fn matches(&self, expected: &AppEntry) -> bool {
+        self.expected.same_rule(expected)
+    }
+
+    pub(super) fn restrict(&mut self, restricted: bool) {
+        self.restricted = restricted;
+        self.path_problem = None;
+    }
+
+    pub(super) fn browsed(&mut self, file: &AppFile) -> bool {
+        if !crate::same_executable(&self.expected.executable, &file.executable) {
+            self.path_problem = Some(EntryProblem::PathFilename);
+            return false;
+        }
+        let Some(path) = file.identity() else {
+            self.path_problem = Some(EntryProblem::Path);
+            return false;
+        };
+        self.path = Some(path.as_str().to_owned());
+        self.path_problem = None;
+        true
+    }
+
+    fn replacement(&self) -> AppEntry {
+        self.expected
+            .clone()
+            .with_title(self.text.clone(), self.regex)
+            .with_path(
+                self.restricted
+                    .then(|| self.path.clone().unwrap_or_default()),
+            )
+    }
+
+    fn path_error(&self, model: &Model) -> Option<EntryProblem> {
+        if self.restricted && self.path_problem.is_some() {
+            return self.path_problem;
+        }
+        let replacement = self.replacement();
+        if let Err(error) = replacement.restriction() {
+            return Some(error);
+        }
+        model
+            .config()
+            .entries(self.list)
+            .iter()
+            .enumerate()
+            .any(|(index, entry)| {
+                index != self.index
+                    && entry.scope().is_some()
+                    && entry.scope() == replacement.scope()
+            })
+            .then_some(EntryProblem::Duplicate)
     }
 
     pub(super) fn set_text(&mut self, text: &str) {
@@ -584,7 +853,7 @@ impl TitleDialog {
     }
 
     pub(super) fn use_title(&mut self, model: &Model) {
-        if let Some(title) = last_seen(model, &self.executable) {
+        if let Some(title) = last_seen(model, &self.replacement()) {
             self.text = if self.regex {
                 regex::escape(title)
             } else {
@@ -593,22 +862,42 @@ impl TitleDialog {
         }
     }
 
-    pub(super) fn command(&self) -> Option<Command> {
-        crate::valid_title(&self.text, self.regex).then(|| Command::Title {
+    pub(super) fn command(&self, model: &Model) -> Option<Command> {
+        (crate::valid_title(&self.text, self.regex)
+            && self.path_error(model).is_none()
+            && model
+                .config()
+                .entries(self.list)
+                .get(self.index)
+                .is_some_and(|entry| entry.same_rule(&self.expected)))
+        .then(|| Command::Title {
             list: self.list,
             index: self.index,
-            executable: self.executable.clone(),
+            expected: self.expected.clone(),
             title: self.text.clone(),
             regex: self.regex,
+            path: self.replacement().path,
         })
     }
 }
 
-fn last_seen<'a>(model: &'a Model, executable: &str) -> Option<&'a str> {
+fn last_seen<'a>(model: &'a Model, entry: &AppEntry) -> Option<&'a str> {
+    let name = entry.file_name()?;
+    let restriction = entry.restriction().ok()?;
     model
         .recent
         .iter()
-        .find(|recent| recent.executable == executable)
+        .find(|recent| {
+            crate::same_executable(&recent.executable, &name)
+                && restriction.as_ref().is_none_or(|path| {
+                    recent
+                        .path
+                        .to_str()
+                        .and_then(|path| crate::ExecutablePath::new(path).ok())
+                        .as_ref()
+                        == Some(path)
+                })
+        })
         .and_then(|recent| recent.title.as_deref())
         .filter(|title| !title.is_empty())
 }
@@ -620,6 +909,9 @@ pub(super) struct TitleDialogView {
     pub(super) label: String,
     pub(super) text: String,
     pub(super) regex: bool,
+    pub(super) restricted: bool,
+    pub(super) path: Option<String>,
+    pub(super) path_error: Option<String>,
     pub(super) suggestion: Option<String>,
     pub(super) error: Option<String>,
     pub(super) save_enabled: bool,
@@ -634,19 +926,21 @@ pub(super) fn title_dialog_view(
     let valid = crate::valid_title(&dialog.text, dialog.regex);
     TitleDialogView {
         title: text!(text, "title-dialog-title"),
-        description: text!(
-            text,
-            "title-dialog-description",
-            regex = regex,
-            executable = dialog.executable.as_str()
-        ),
+        description: text!(text, "title-dialog-description", regex = regex),
         label: text!(text, "title-dialog-field", regex = regex),
         text: dialog.text.clone(),
         regex: dialog.regex,
-        suggestion: last_seen(model, &dialog.executable)
+        restricted: dialog.restricted,
+        path: dialog.path.clone(),
+        path_error: dialog.path_error(model).map(|problem| match problem {
+            EntryProblem::Duplicate => text!(text, "dialog-scope-duplicate"),
+            EntryProblem::PathFilename => text!(text, "entry-path-filename"),
+            _ => text!(text, "entry-path-invalid"),
+        }),
+        suggestion: last_seen(model, &dialog.replacement())
             .map(|title| text!(text, "title-dialog-last-seen", title = title)),
         error: (!valid).then(|| text!(text, "title-dialog-invalid")),
-        save_enabled: valid,
+        save_enabled: dialog.command(model).is_some(),
     }
 }
 
@@ -704,7 +998,7 @@ fn title_button(
             "entry-title-name",
             name = row.name.as_str()
         ))
-        .on_click(context.message(Message::OpenTitle(list, row.index)))
+        .on_click(context.message(Message::OpenTitle(list, row.index, row.expected.clone())))
         .into()
 }
 
@@ -737,16 +1031,16 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
         .into_iter()
         .enumerate()
         .map(|(position, row)| {
-            let executable = row.file.executable.clone();
+            let executable = row.file.identity().map_or_else(
+                || row.file.path.to_string_lossy().into_owned(),
+                |path| path.as_str().to_owned(),
+            );
             let mut controls: Vec<View> = Vec::new();
+            let mut detail = vec![widgets::caption(&row.detail).into()];
             if row.excluded {
-                controls.push(
-                    widgets::caption(text!(text, "recent-excluded"))
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .into(),
-                );
+                detail.push(widgets::caption(text!(text, "recent-excluded")).into());
             }
-            if let Some(index) = row.listed {
+            if let Some((index, expected)) = &row.listed {
                 controls.push(
                     StackPanel::new()
                         .orientation(Orientation::Horizontal)
@@ -769,13 +1063,13 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                         ))
                         .on_click(context.message(Message::Command(Command::Remove(
                             Field::Suppression,
-                            index,
-                            row.file.executable.clone(),
+                            *index,
+                            expected.clone(),
                         ))))
                         .content(text!(text, "recent-remove"))
                         .into(),
                 );
-            } else {
+            } else if row.covering == 0 {
                 controls.push(
                     Button::new()
                         .is_enabled(editable)
@@ -783,16 +1077,23 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                         .automation_name(text!(text, "recent-add-name", name = row.name.as_str()))
                         .on_click(context.message(Message::Command(Command::Add(
                             Field::Suppression,
-                            vec![row.file.clone()],
+                            vec![row.file.clone().into()],
                         ))))
                         .content(widgets::glyph_label(ADD_GLYPH, text!(text, "recent-add")))
                         .into(),
                 );
+            } else {
+                detail.push(widgets::caption(text!(text, "recent-multiple-rules")).into());
             }
             let row_view = app_row(
-                icon(settings, &row.file.executable, 32.0),
+                icon(
+                    settings,
+                    &row.file.executable,
+                    row.file.identity().as_ref(),
+                    32.0,
+                ),
                 &row.name,
-                vec![widgets::caption(&row.detail).into()],
+                detail,
                 controls,
                 automation_id::recent(&executable),
                 settings.stacked(),
@@ -866,7 +1167,7 @@ fn entry_card(row: &EntryRow, settings: &Settings, controls: Vec<View>, id: Stri
         .border_thickness(1.0)
         .corner_radius(4.0)
         .content(app_row(
-            icon(settings, &row.executable, 32.0),
+            icon(settings, &row.executable, row.path.as_ref(), 32.0),
             &row.name,
             detail,
             controls,
@@ -890,10 +1191,10 @@ fn suppression_cards(settings: &Settings, context: &ViewContext<'_, Settings>) -
             .view(settings.stacked()),
         )];
     }
-    let cards = rows
+    let cards: Vec<KeyedView> = rows
         .iter()
         .map(|row| {
-            let id = automation_id::suppression_entry(row.index);
+            let id = row.id.clone();
             let remove = remove_button(
                 &text!(text, "entry-remove-name", name = row.name.as_str()),
                 automation_id::remove(&id),
@@ -901,14 +1202,56 @@ fn suppression_cards(settings: &Settings, context: &ViewContext<'_, Settings>) -
                 context.message(Message::Command(Command::Remove(
                     Field::Suppression,
                     row.index,
-                    row.executable.clone(),
+                    row.expected.clone(),
                 ))),
             );
             let title = title_button(row, Field::Suppression, &id, settings, context);
-            entry_card(row, settings, vec![title, remove.into()], id)
+            keyed(
+                id.clone(),
+                entry_card(row, settings, vec![title, remove.into()], id),
+            )
         })
         .collect();
-    vec![widgets::group(cards)]
+    vec![StackPanel::new().spacing(4.0).keyed_children(cards).into()]
+}
+
+fn exclusion_row(
+    row: &EntryRow,
+    settings: &Settings,
+    context: &ViewContext<'_, Settings>,
+) -> KeyedView {
+    let model = &settings.input.model;
+    let text = &settings.input.text;
+    let id = row.id.clone();
+    let mut detail: Vec<View> = vec![widgets::caption(&row.detail).into()];
+    if let Some(error) = &row.error {
+        detail.push(widgets::field_error(error, &automation_id::message(&id)));
+    }
+    let actions = vec![
+        title_button(row, Field::Exclusions, &id, settings, context),
+        remove_button(
+            &text!(text, "entry-remove-name", name = row.name.as_str()),
+            automation_id::remove(&id),
+            model.editable(),
+            context.message(Message::Command(Command::Remove(
+                Field::Exclusions,
+                row.index,
+                row.expected.clone(),
+            ))),
+        )
+        .into(),
+    ];
+    keyed(
+        id.clone(),
+        nested_app_row(
+            icon(settings, &row.executable, row.path.as_ref(), 32.0),
+            &row.name,
+            StackPanel::new().spacing(2.0).children(detail).into(),
+            actions,
+            &id,
+            settings.stacked(),
+        ),
+    )
 }
 
 fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
@@ -952,7 +1295,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
     if expanded {
         children.extend(fixed_rows(model, text).into_iter().map(|row| {
             nested_app_row(
-                icon(settings, &row.executable, 32.0),
+                icon(settings, &row.executable, None, 32.0),
                 &row.executable,
                 widgets::caption(&row.description).into(),
                 vec![
@@ -969,39 +1312,15 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         )
                         .into(),
                 ],
-                &automation_id::fixed_exclusion(&row.executable.to_lowercase()),
+                &automation_id::fixed_exclusion(&row.executable.to_ascii_lowercase()),
                 settings.stacked(),
             )
         }));
-        children.extend(rows.iter().map(|row| {
-            let id = automation_id::exclusion_entry(row.index);
-            let mut detail: Vec<View> = vec![widgets::caption(&row.detail).into()];
-            if let Some(error) = &row.error {
-                detail.push(widgets::field_error(error, &automation_id::message(&id)));
-            }
-            let actions = vec![
-                title_button(row, Field::Exclusions, &id, settings, context),
-                remove_button(
-                    &text!(text, "entry-remove-name", name = row.name.as_str()),
-                    automation_id::remove(&id),
-                    model.editable(),
-                    context.message(Message::Command(Command::Remove(
-                        Field::Exclusions,
-                        row.index,
-                        row.executable.clone(),
-                    ))),
-                )
+        children.push(
+            StackPanel::new()
+                .keyed_children(rows.iter().map(|row| exclusion_row(row, settings, context)))
                 .into(),
-            ];
-            nested_app_row(
-                icon(settings, &row.executable, 32.0),
-                &row.name,
-                StackPanel::new().spacing(2.0).children(detail).into(),
-                actions,
-                &id,
-                settings.stacked(),
-            )
-        }));
+        );
         if rows.is_empty() {
             children.push(
                 widgets::nested("exclusions-empty")
@@ -1049,44 +1368,132 @@ fn nested_app_row(
 struct CandidateInput {
     position: usize,
     checkbox: CheckBox,
+    restriction: CheckBox,
+    description: View,
 }
 
 struct Candidate {
     input: CandidateInput,
     checkbox: ElementRef<CheckBox>,
-    focused: bool,
+    restriction: ElementRef<CheckBox>,
+    focused: Option<bool>,
 }
 
 impl Component for Candidate {
     type Input = CandidateInput;
-    type Message = bool;
+    type Message = Option<bool>;
 
     fn create(input: &Self::Input, _: &ComponentContext<Self>) -> Self {
         Self {
             input: input.clone(),
             checkbox: ElementRef::new(),
-            focused: false,
+            restriction: ElementRef::new(),
+            focused: None,
         }
     }
 
     fn input_changed(&mut self, input: &Self::Input, _: &ComponentContext<Self>) {
-        if input.position != self.input.position && self.focused && !self.checkbox.request_focus() {
+        let target = self.focused.map(|restriction| {
+            if restriction {
+                &self.restriction
+            } else {
+                &self.checkbox
+            }
+        });
+        if input.position != self.input.position
+            && target.is_some_and(|target| !target.request_focus())
+        {
             tracing::debug!("candidate focus request rejected");
         }
         self.input = input.clone();
     }
 
-    fn update(&mut self, focused: bool, _: &ComponentContext<Self>) {
+    fn update(&mut self, focused: Option<bool>, _: &ComponentContext<Self>) {
         self.focused = focused;
     }
 
     fn view(&self, input: &Self::Input, context: &mut ViewContext<'_, Self>) -> View {
-        Border::new()
-            .on_got_focus(context.callback(|_: FocusEventInfo| true))
-            .on_lost_focus(context.callback(|_: FocusEventInfo| false))
-            .content(input.checkbox.clone().element_ref(&self.checkbox))
+        StackPanel::new()
+            .spacing(6.0)
+            .margin(Thickness::new(0.0, 4.0, 0.0, 8.0))
+            .children((
+                Border::new()
+                    .on_got_focus(context.callback(|_: FocusEventInfo| Some(false)))
+                    .on_lost_focus(context.callback(|_: FocusEventInfo| None))
+                    .content(input.checkbox.clone().element_ref(&self.checkbox)),
+                input.description.clone(),
+                Border::new()
+                    .on_got_focus(context.callback(|_: FocusEventInfo| Some(true)))
+                    .on_lost_focus(context.callback(|_: FocusEventInfo| None))
+                    .content(input.restriction.clone().element_ref(&self.restriction)),
+            ))
             .into()
     }
+}
+
+fn candidate_view(
+    settings: &Settings,
+    context: &ViewContext<'_, Settings>,
+    position: usize,
+    row: &DialogRow,
+) -> KeyedView {
+    let text = &settings.input.text;
+    let path = row.path.clone();
+    let identity = path.as_ref().map_or("", crate::ExecutablePath::as_str);
+    let restriction_path = path.clone();
+    keyed(
+        automation_id::identity(identity),
+        View::component::<Candidate>(CandidateInput {
+            position,
+            restriction: CheckBox::new()
+                .is_checked(row.restricted)
+                .automation_id(automation_id::dialog_restriction(identity))
+                .automation_name(text!(text, "installation-only"))
+                .content(widgets::body(text!(text, "installation-only")))
+                .on_is_checked_changed(context.callback(move |checked: Option<bool>| {
+                    restriction_path.clone().map_or(Message::Tick, |path| {
+                        Message::RestrictCandidate(path, checked == Some(true))
+                    })
+                })),
+            description: StackPanel::new()
+                .spacing(4.0)
+                .children(
+                    std::iter::once(widgets::caption(identity).into())
+                        .chain((!row.available).then(|| {
+                            widgets::caption(text!(text, "dialog-scope-duplicate")).into()
+                        }))
+                        .collect::<Vec<View>>(),
+                )
+                .into(),
+            checkbox: CheckBox::new()
+                .is_checked(row.checked)
+                .is_enabled(row.available)
+                .automation_id(automation_id::dialog_choice(identity))
+                .automation_name(text!(
+                    text,
+                    "app-entry-name",
+                    name = row.name.as_str(),
+                    executable = row.executable.as_str()
+                ))
+                .on_is_checked_changed(context.callback(move |checked: Option<bool>| {
+                    path.clone().map_or(Message::Tick, |path| {
+                        Message::Choose(path, checked == Some(true))
+                    })
+                }))
+                .content(
+                    Grid::new()
+                        .columns([GridLength::Auto, GridLength::STAR])
+                        .column_spacing(14.0)
+                        .children((
+                            icon(settings, &row.executable, row.path.as_ref(), 28.0),
+                            StackPanel::new().grid_column(1).children((
+                                widgets::body(&row.name),
+                                widgets::caption(&row.executable),
+                            )),
+                        )),
+                ),
+        }),
+    )
 }
 
 fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> ContentDialog {
@@ -1101,41 +1508,11 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
         return dialog;
     };
     let view = dialog_view(model, text, region, state);
-    let choice = |(position, row): (usize, DialogRow)| -> KeyedView {
-        let executable = row.executable.clone();
-        keyed(
-            executable.clone(),
-            View::component::<Candidate>(CandidateInput {
-                position,
-                checkbox: CheckBox::new()
-                    .is_checked(row.checked)
-                    .automation_id(automation_id::dialog_choice(&row.executable))
-                    .automation_name(text!(
-                        text,
-                        "app-entry-name",
-                        name = row.name.as_str(),
-                        executable = row.executable.as_str()
-                    ))
-                    .on_is_checked_changed(context.callback(move |checked: Option<bool>| {
-                        Message::Choose(executable.clone(), checked == Some(true))
-                    }))
-                    .content(
-                        Grid::new()
-                            .columns([GridLength::Auto, GridLength::STAR])
-                            .column_spacing(14.0)
-                            .children((
-                                icon(settings, &row.executable, 28.0),
-                                StackPanel::new().grid_column(1).children((
-                                    widgets::body(&row.name),
-                                    widgets::caption(&row.executable),
-                                )),
-                            )),
-                    ),
-            }),
-        )
-    };
-    let (browsed, recent): (Vec<DialogRow>, Vec<DialogRow>) =
-        view.rows.into_iter().partition(|row| row.browsed);
+    let choice = |(position, row)| candidate_view(settings, context, position, &row);
+    let (browsed, recent): (Vec<DialogRow>, Vec<DialogRow>) = view
+        .rows
+        .into_iter()
+        .partition(|row| row.section == CandidateSection::Browsed);
     let rows: Vec<KeyedView> = if recent.is_empty() {
         vec![keyed(
             "empty",
@@ -1177,20 +1554,68 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
         .primary_button_text(view.primary)
         .is_primary_button_enabled(view.primary_enabled)
         .content(
-            StackPanel::new().spacing(16.0).max_width(472.0).children((
-                widgets::caption(view.description),
-                StackPanel::new().spacing(6.0).children((
-                    widgets::strong(text!(text, "dialog-recent")),
-                    StackPanel::new().spacing(2.0).keyed_children(rows),
-                )),
-                Border::new()
-                    .height(1.0)
-                    .background(ThemeBrush::CardStroke)
-                    .horizontal_alignment(HorizontalAlignment::Stretch),
-                StackPanel::new().spacing(2.0).children(browse),
-            )),
+            ScrollViewer::new()
+                .max_height(settings.dialog_height())
+                .content(
+                    StackPanel::new().spacing(16.0).max_width(472.0).children((
+                        widgets::caption(view.description),
+                        StackPanel::new().spacing(6.0).children((
+                            widgets::strong(text!(text, "dialog-recent")),
+                            StackPanel::new().spacing(2.0).keyed_children(rows),
+                        )),
+                        Border::new()
+                            .height(1.0)
+                            .background(ThemeBrush::CardStroke)
+                            .horizontal_alignment(HorizontalAlignment::Stretch),
+                        StackPanel::new().spacing(2.0).children(browse),
+                    )),
+                ),
         )
 }
+fn restriction_fields(
+    text: &Text,
+    view: &TitleDialogView,
+    context: &ViewContext<'_, Settings>,
+) -> Vec<View> {
+    let mut field: Vec<View> = vec![
+        CheckBox::new()
+            .is_checked(view.restricted)
+            .automation_id(automation_id::RULE_RESTRICTION)
+            .automation_name(text!(text, "installation-only"))
+            .content(widgets::body(text!(text, "installation-only")))
+            .on_is_checked_changed(
+                context
+                    .callback(|checked: Option<bool>| Message::RestrictRule(checked == Some(true))),
+            )
+            .into(),
+    ];
+    if view.restricted {
+        field.push(
+            widgets::caption(
+                view.path
+                    .as_deref()
+                    .unwrap_or(&text!(text, "installation-unknown")),
+            )
+            .automation_id(automation_id::RULE_PATH)
+            .into(),
+        );
+        field.push(
+            Button::new()
+                .horizontal_alignment(HorizontalAlignment::Right)
+                .automation_id(automation_id::RULE_BROWSE)
+                .content(text!(text, "installation-browse"))
+                .on_click(context.message(Message::Browse))
+                .into(),
+        );
+        if let Some(error) = &view.path_error {
+            field.push(widgets::field_error(error, automation_id::RULE_PATH_ERROR));
+        }
+    } else if let Some(error) = &view.path_error {
+        field.push(widgets::field_error(error, automation_id::RULE_PATH_ERROR));
+    }
+    field
+}
+
 fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> ContentDialog {
     let text = &settings.input.text;
     let dialog = ContentDialog::new()
@@ -1202,7 +1627,8 @@ fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Con
         return dialog;
     };
     let view = title_dialog_view(&settings.input.model, text, state);
-    let mut field: Vec<View> = vec![
+    let mut field = restriction_fields(text, &view, context);
+    field.push(
         TextBox::new()
             .header(widgets::body(&view.label))
             .text(&view.text)
@@ -1212,7 +1638,7 @@ fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Con
                 context.callback(|text: std::rc::Rc<str>| Message::TitleText(text.to_string())),
             )
             .into(),
-    ];
+    );
     if let Some(error) = &view.error {
         field.push(widgets::field_error(
             error,
@@ -1234,13 +1660,12 @@ fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Con
     if let Some(suggestion) = &view.suggestion {
         field.push(
             StackPanel::new()
-                .orientation(Orientation::Horizontal)
                 .spacing(8.0)
                 .children((
                     widgets::caption(suggestion)
-                        .automation_id(automation_id::TITLE_DIALOG_LAST_SEEN)
-                        .vertical_alignment(VerticalAlignment::Center),
+                        .automation_id(automation_id::TITLE_DIALOG_LAST_SEEN),
                     HyperlinkButton::new()
+                        .horizontal_alignment(HorizontalAlignment::Right)
                         .automation_id(automation_id::TITLE_DIALOG_USE)
                         .on_click(context.message(Message::UseTitle))
                         .content(text!(text, "title-dialog-use")),
@@ -1252,10 +1677,14 @@ fn title_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Con
         .title(view.title)
         .primary_button_text(text!(text, "title-dialog-save"))
         .is_primary_button_enabled(view.save_enabled)
-        .content(StackPanel::new().spacing(16.0).max_width(472.0).children((
-            widgets::caption(view.description),
-            StackPanel::new().spacing(8.0).children(field),
-        )))
+        .content(
+            ScrollViewer::new()
+                .max_height(settings.dialog_height())
+                .content(StackPanel::new().spacing(16.0).max_width(472.0).children((
+                    widgets::caption(view.description),
+                    StackPanel::new().spacing(8.0).children(field),
+                ))),
+        )
 }
 
 #[cfg(test)]

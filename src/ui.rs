@@ -384,7 +384,7 @@ struct Desktop {
     session: Option<Session>,
     file_info: Option<FileInfoClient>,
     icons: IconCache,
-    browsed: BTreeMap<String, (PathBuf, Duration)>,
+    browsed: BTreeMap<crate::ExecutablePath, (PathBuf, Duration)>,
     configuration: Rc<RefCell<Configuration>>,
     crash: Option<crate::log::run::CrashSummary>,
     startup: Option<Startup>,
@@ -492,35 +492,27 @@ impl Application for Desktop {
             jiff::Timestamp::now(),
         );
         let manual = self.manual_command();
-        let mut names: std::collections::BTreeMap<String, String> = configuration
-            .accepted()
-            .into_iter()
-            .flat_map(|config| {
-                [Field::Suppression, Field::Exclusions]
-                    .into_iter()
-                    .flat_map(|list| config.entries(list))
-                    .filter_map(|entry| Some((entry.file_name()?, entry.display_name().to_owned())))
-            })
-            .collect();
-        if let Some(file_info) = &self.file_info {
-            names.extend(file_info.names().clone());
-        }
-        let items = status::menu_items(
-            &input.text,
-            self.snapshot.as_deref(),
-            manual,
-            configuration.toggles(),
-            &names,
-        );
+        let sources = &self.icons.view().sources;
+        let empty_names = std::collections::BTreeMap::new();
         let model = settings::Model::new(
             &configuration,
             self.snapshot.as_deref(),
             self.retrying(),
             line.clone(),
-            &names,
+            self.file_info
+                .as_ref()
+                .map_or(&empty_names, FileInfoClient::names),
         )
+        .with_sources(sources)
         .with_stopped_preview(self.stopped_preview)
         .with_crash(self.crash.as_ref());
+        let items = status::menu_items(
+            &input.text,
+            self.snapshot.as_deref(),
+            manual,
+            configuration.toggles(),
+            &model.names,
+        );
         ApplicationView::new()
             .window::<settings::Settings>(
                 "settings",
@@ -810,53 +802,52 @@ impl Desktop {
             settings::Command::PreviewElapsed => self.release_location(),
             settings::Command::Manual(command) => self.queue(ControllerCommand::Manual(command)),
             settings::Command::Add(list, files) => self.add(list, &files),
-            settings::Command::Remove(list, index, executable) => {
+            settings::Command::Remove(list, index, expected) => {
                 let changed = self
                     .configuration
                     .borrow_mut()
-                    .remove(list, index, &executable);
+                    .remove(list, index, &expected);
                 self.configure(changed);
             }
             settings::Command::Title {
                 list,
                 index,
-                executable,
+                expected,
                 title,
                 regex,
+                path,
             } => {
-                let changed = self.configuration.borrow_mut().set_title(
-                    list,
-                    index,
-                    &executable,
-                    title,
-                    regex,
-                );
+                let changed = self
+                    .configuration
+                    .borrow_mut()
+                    .set_title(list, index, &expected, title, regex, path);
                 self.configure(changed);
             }
             settings::Command::Icons(executables) => self.request_icons(&executables),
             settings::Command::Browsed(file) => {
+                self.icons.observe(&file);
                 if let Some(file_info) = &mut self.file_info {
                     file_info.request(&file.executable, &file.path);
                 }
-                self.browsed
-                    .insert(file.executable, (file.path, crate::elapsed_since_boot()));
+                if let Some(identity) = file.identity() {
+                    self.browsed
+                        .insert(identity, (file.path, crate::elapsed_since_boot()));
+                }
             }
         }
     }
 
-    fn entry(&self, file: &AppFile) -> crate::AppEntry {
+    fn entry(&self, selected: &file_info::AppSelection) -> crate::AppEntry {
+        let file = &selected.file;
         let name = self
             .file_info
             .as_ref()
-            .and_then(|file_info| file_info.name(&file.executable))
+            .and_then(|file_info| file.identity().and_then(|path| file_info.name(&path)))
             .map(str::to_owned);
-        crate::AppEntry::new(
-            file.executable.clone(),
-            name.unwrap_or_else(|| file.executable.clone()),
-        )
+        selected.entry(name.unwrap_or_else(|| file.executable.clone()))
     }
 
-    fn add(&mut self, list: Field, files: &[AppFile]) {
+    fn add(&mut self, list: Field, files: &[file_info::AppSelection]) {
         let entries = files.iter().map(|file| self.entry(file)).collect();
         let added = self.configuration.borrow_mut().add(list, entries);
         match added {
@@ -881,28 +872,23 @@ impl Desktop {
         if icons_received {
             self.prune_icons();
         }
-        for (executable, name) in received.names {
+        if let Some(client) = &self.file_info {
             let changed = self
                 .configuration
                 .borrow_mut()
-                .record_name(&executable, &name);
+                .record_names(client.names(), &self.icons.view().sources);
             self.configure(changed);
         }
     }
 
-    fn request_icons(&mut self, executables: &[String]) {
+    fn request_icons(&mut self, paths: &[crate::ExecutablePath]) {
         let Some(file_info) = &mut self.file_info else {
             return;
         };
-        for executable in executables {
-            let recent = self.snapshot.as_ref().and_then(|snapshot| {
-                snapshot
-                    .recent
-                    .iter()
-                    .find(|recent| recent.executable == *executable)
-            });
-            let known = icon_cache::latest_path(recent, self.browsed.get(executable));
-            if let Some(request) = self.icons.request(executable, known) {
+        for path in paths {
+            let executable = path.file_name().to_ascii_lowercase();
+            file_info.request(&executable, path.as_path());
+            if let Some(request) = self.icons.request(&executable, Some(path.as_path())) {
                 file_info.request_icon(request);
             }
         }
@@ -914,6 +900,30 @@ impl Desktop {
         };
         for recent in &snapshot.recent {
             file_info.request(&recent.executable, &recent.path);
+        }
+        let names: BTreeSet<crate::ExecutableName> = snapshot
+            .recent
+            .iter()
+            .filter_map(|recent| crate::ExecutableName::new(&recent.executable).ok())
+            .collect();
+        for executable in names {
+            let executable = executable.as_str();
+            let recent = snapshot
+                .recent
+                .iter()
+                .find(|recent| crate::same_executable(&recent.executable, executable));
+            let browsed = self
+                .browsed
+                .iter()
+                .filter(|(path, _)| crate::same_executable(path.file_name(), executable))
+                .map(|(_, observation)| observation)
+                .max_by_key(|(_, at)| *at);
+            if let Some(path) = icon_cache::latest_path(recent, browsed) {
+                self.icons.observe(&AppFile {
+                    executable: executable.to_owned(),
+                    path: path.to_owned(),
+                });
+            }
         }
     }
 
@@ -968,14 +978,38 @@ impl Desktop {
         let Some(config) = self.configuration.borrow().accepted().cloned() else {
             return;
         };
-        let keep: BTreeSet<String> = [Field::Suppression, Field::Exclusions]
+        let globals: BTreeSet<String> = [Field::Suppression, Field::Exclusions]
             .into_iter()
             .flat_map(|list| config.entries(list))
+            .filter(|entry| entry.path.is_none())
             .filter_map(crate::AppEntry::file_name)
-            .chain(recent_executables(self.snapshot.as_deref()).cloned())
-            .chain(self.browsed.keys().filter(|_| self.settings_open).cloned())
             .collect();
-        self.icons.prune(&keep);
+        let keep = [Field::Suppression, Field::Exclusions]
+            .into_iter()
+            .flat_map(|list| config.entries(list))
+            .filter_map(|entry| entry.restriction().ok().flatten())
+            .chain(
+                self.snapshot
+                    .iter()
+                    .flat_map(|snapshot| &snapshot.recent)
+                    .filter_map(|recent| {
+                        recent
+                            .path
+                            .to_str()
+                            .and_then(|path| crate::ExecutablePath::new(path).ok())
+                    }),
+            )
+            .chain(
+                self.browsed
+                    .values()
+                    .filter(|_| self.settings_open)
+                    .filter_map(|(path, _)| {
+                        path.to_str()
+                            .and_then(|path| crate::ExecutablePath::new(path).ok())
+                    }),
+            )
+            .collect();
+        self.icons.prune(&keep, &globals);
     }
 
     fn queue(&mut self, command: ControllerCommand) {
@@ -1079,19 +1113,34 @@ impl Desktop {
     }
 
     fn tray_toggle(&mut self, key: &str) {
-        let Some((action, executable)) = key.split_once(':') else {
+        let Some((action, rest)) = key.split_once(':') else {
+            return;
+        };
+        let Some((regex, path)) = rest.split_once(':') else {
+            return;
+        };
+        let Ok(path) = crate::ExecutablePath::new(path) else {
+            return;
+        };
+        let Ok(executable) = crate::ExecutableName::new(path.file_name()) else {
             return;
         };
         let name = self
             .file_info
             .as_ref()
-            .and_then(|file_info| file_info.name(executable))
-            .unwrap_or(executable);
-        let entry = crate::AppEntry::new(executable, name);
+            .and_then(|file_info| {
+                self.icons
+                    .view()
+                    .sources
+                    .get(&executable)
+                    .and_then(|path| file_info.name(path))
+            })
+            .unwrap_or(executable.as_str());
+        let entry = crate::AppEntry::new(executable.as_str(), name).with_title("", regex == "1");
         let changed = self
             .configuration
             .borrow_mut()
-            .toggle(entry, action == "add");
+            .toggle(entry, &path, action == "add");
         self.configure(changed);
     }
 
@@ -1177,10 +1226,10 @@ impl Desktop {
         }
         if self.pending.len() < COMMAND_QUEUE_CAPACITY && session.focus_pending.replace(false) {
             let config = self.configuration.borrow().accepted().cloned();
-            let (foreground, previous) = session.foreground.read(|executable| {
+            let (foreground, previous) = session.foreground.read(|executable, path| {
                 config
                     .as_ref()
-                    .is_some_and(|config| config.has_title_condition(executable))
+                    .is_some_and(|config| config.has_path_title_condition(executable, path))
             });
             self.queue(ControllerCommand::Foreground {
                 foreground,
@@ -1235,11 +1284,11 @@ impl Desktop {
     }
 }
 
-fn recent_executables(snapshot: Option<&ControllerSnapshot>) -> impl Iterator<Item = &String> {
+fn recent_executables(snapshot: Option<&ControllerSnapshot>) -> impl Iterator<Item = &PathBuf> {
     snapshot
         .into_iter()
         .flat_map(|snapshot| &snapshot.recent)
-        .map(|recent| &recent.executable)
+        .map(|recent| &recent.path)
 }
 
 #[derive(Default)]
@@ -1906,7 +1955,12 @@ mod tests {
         while desktop
             .file_info
             .as_ref()
-            .and_then(|file_info| file_info.name(executable))
+            .and_then(|file_info| {
+                file_info
+                    .names()
+                    .iter()
+                    .find(|(path, _)| crate::same_executable(path.file_name(), executable))
+            })
             .is_none()
         {
             assert!(
@@ -1940,7 +1994,10 @@ mod tests {
         let (gate, client) = gated_reader("Game");
         desktop.file_info = Some(client);
         desktop.command(settings::Command::Browsed(game()));
-        desktop.command(settings::Command::Add(Field::Suppression, vec![game()]));
+        desktop.command(settings::Command::Add(
+            Field::Suppression,
+            vec![game().into()],
+        ));
         assert_eq!(
             suppression_list(&desktop),
             [crate::AppEntry::new("game.exe", "game.exe")]
@@ -1971,11 +2028,15 @@ mod tests {
         let (gate, client) = gated_reader("Game");
         desktop.file_info = Some(client);
         desktop.command(settings::Command::Browsed(game()));
-        desktop.command(settings::Command::Add(Field::Suppression, vec![game()]));
-        let removed = desktop
-            .configuration
-            .borrow_mut()
-            .remove(Field::Suppression, 0, "game.exe");
+        desktop.command(settings::Command::Add(
+            Field::Suppression,
+            vec![game().into()],
+        ));
+        let removed = desktop.configuration.borrow_mut().remove(
+            Field::Suppression,
+            0,
+            &crate::AppEntry::new("game.exe", ""),
+        );
         assert!(removed.is_some());
         let before = saved(&directory);
         let revision = desktop.configuration.borrow().revision();
@@ -2003,7 +2064,10 @@ mod tests {
             path: PathBuf::from("C:\\Windows\\System32\\notepad.exe"),
         };
         desktop.command(settings::Command::Browsed(notepad.clone()));
-        desktop.command(settings::Command::Add(Field::Suppression, vec![notepad]));
+        desktop.command(settings::Command::Add(
+            Field::Suppression,
+            vec![notepad.into()],
+        ));
         receive_name(&mut desktop, "notepad.exe");
         assert_eq!(
             suppression_list(&desktop),
@@ -2057,7 +2121,10 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert_eq!(file_info.receive().names, Vec::<(String, String)>::new());
+        assert_eq!(
+            file_info.receive().names,
+            Vec::<(crate::ExecutablePath, String)>::new()
+        );
         drop(controller);
     }
 
@@ -2073,7 +2140,7 @@ mod tests {
     fn a_tray_toggle_with_settings_closed_sends_one_configure_and_writes_at_once() {
         let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
         assert!(!desktop.settings_open);
-        desktop.tray_toggle("add:game.exe");
+        desktop.tray_toggle("add:0:C:/Apps/game.exe");
         assert_eq!(configures(&desktop), 1);
         assert_eq!(
             suppression_list(&desktop),
@@ -2086,10 +2153,10 @@ mod tests {
     #[test]
     fn a_tray_click_acts_on_the_offered_file_name_after_the_history_changed() {
         let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
-        desktop.tray_toggle("add:game.exe");
-        desktop.tray_toggle("add:other.exe");
+        desktop.tray_toggle("add:0:C:/Apps/game.exe");
+        desktop.tray_toggle("add:0:C:/Apps/other.exe");
         desktop.pending.clear();
-        desktop.tray_toggle("remove:game.exe");
+        desktop.tray_toggle("remove:0:C:/Apps/game.exe");
         assert_eq!(configures(&desktop), 1);
         assert_eq!(
             suppression_list(&desktop),
@@ -2098,7 +2165,7 @@ mod tests {
         let written = saved(&directory).expect("written file");
         assert!(!written.contains("game.exe"), "{written}");
         desktop.pending.clear();
-        desktop.tray_toggle("add:other.exe");
+        desktop.tray_toggle("add:0:C:/Apps/other.exe");
         assert_eq!(configures(&desktop), 0);
     }
 
@@ -2106,7 +2173,7 @@ mod tests {
     fn a_tray_toggle_while_saving_is_paused_changes_nothing() {
         let file = configuration_file("25:00");
         let (directory, mut desktop) = desktop_with(Some(&file));
-        desktop.tray_toggle("add:game.exe");
+        desktop.tray_toggle("add:0:C:/Apps/game.exe");
         assert_eq!(configures(&desktop), 0);
         assert_eq!(suppression_list(&desktop), Vec::<crate::AppEntry>::new());
         assert_eq!(saved(&directory), Some(file));

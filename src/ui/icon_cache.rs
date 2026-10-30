@@ -3,6 +3,9 @@ use super::file_info::ICON_PIXELS;
 use super::file_info::IconImages;
 use super::file_info::IconRead;
 use super::file_info::IconRequest;
+use crate::AppEntry;
+use crate::ExecutableName;
+use crate::ExecutablePath;
 use crate::RecentApp;
 use crate::platform::file_info::FileStamp;
 use serde::Deserialize;
@@ -18,7 +21,8 @@ use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Entry {
-    path: PathBuf,
+    path: String,
+    image: u32,
     size: u64,
     modified: u64,
 }
@@ -32,21 +36,37 @@ impl Entry {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Index {
-    #[serde(default)]
-    apps: BTreeMap<String, Entry>,
+    version: u32,
+    apps: Vec<Entry>,
+    sources: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct AppIcons {
-    pub(super) apps: BTreeMap<String, IconImages>,
+    pub(super) apps: BTreeMap<ExecutablePath, IconImages>,
+    pub(super) sources: BTreeMap<ExecutableName, ExecutablePath>,
     pub(super) generic: Option<IconImages>,
+}
+
+pub(super) fn source(
+    entry: &AppEntry,
+    sources: &BTreeMap<ExecutableName, ExecutablePath>,
+) -> Option<ExecutablePath> {
+    entry.restriction().ok()?.or_else(|| {
+        sources
+            .get(&ExecutableName::new(&entry.file_name()?).ok()?)
+            .cloned()
+    })
 }
 
 pub(super) struct IconCache {
     folder: PathBuf,
-    icons: BTreeMap<String, (Entry, IconImages)>,
+    icons: BTreeMap<ExecutablePath, (Entry, IconImages)>,
+    sources: BTreeMap<ExecutableName, ExecutablePath>,
+    last_image: u32,
     generic: Option<IconImages>,
     view: Rc<AppIcons>,
 }
@@ -67,26 +87,24 @@ pub(super) fn latest_path<'a>(
 impl IconCache {
     pub(super) fn load(directory: &Path) -> Self {
         let folder = directory.join("icons");
-        let index = fs_err::read_to_string(folder.join("index.toml"))
+        let loaded = fs_err::read_to_string(folder.join("index.toml"))
             .map_err(|error| error.to_string())
             .and_then(|text| toml::from_str::<Index>(&text).map_err(|error| error.to_string()))
             .inspect_err(|error| tracing::debug!(%error, "no icon cache index"))
-            .unwrap_or_default();
-        let icons = index
-            .apps
-            .into_iter()
-            .filter_map(|(executable, entry)| {
-                let images = read_images(&folder, &executable)
-                    .inspect_err(|error| {
-                        tracing::debug!(%error, %executable, "cached icon unavailable");
-                    })
-                    .ok()?;
-                Some((executable, (entry, images)))
-            })
-            .collect();
+            .ok()
+            .and_then(valid_index);
+        let (entries, sources) = loaded.unwrap_or_default();
+        let last_image = entries.values().map(|entry| entry.image).max().unwrap_or(0);
+        let icons = entries.into_iter().filter_map(|(path, entry)| {
+            let images = read_images(&folder, entry.image)
+                .inspect_err(|error| tracing::debug!(%error, path = path.as_str(), "cached icon unavailable")).ok()?;
+            Some((path, (entry, images)))
+        }).collect();
         let mut cache = Self {
             folder,
             icons,
+            sources,
+            last_image,
             generic: None,
             view: Rc::default(),
         };
@@ -103,10 +121,26 @@ impl IconCache {
             apps: self
                 .icons
                 .iter()
-                .map(|(executable, (_, images))| (executable.clone(), images.clone()))
+                .map(|(path, (_, images))| (path.clone(), images.clone()))
                 .collect(),
+            sources: self.sources.clone(),
             generic: self.generic.clone(),
         });
+    }
+
+    pub(super) fn observe(&mut self, file: &AppFile) {
+        let Some(path) = file.identity() else {
+            return;
+        };
+        let Ok(name) = ExecutableName::new(&file.executable) else {
+            return;
+        };
+        if self.sources.get(&name) == Some(&path) {
+            return;
+        }
+        self.sources.insert(name, path);
+        self.write_index();
+        self.update_view();
     }
 
     pub(super) fn set_generic(&mut self, images: IconImages) {
@@ -115,44 +149,68 @@ impl IconCache {
     }
 
     pub(super) fn request(&self, executable: &str, known: Option<&Path>) -> Option<IconRequest> {
-        let entry = self.icons.get(executable).map(|(entry, _)| entry);
-        let path = known.or_else(|| entry.map(|entry| entry.path.as_path()))?;
+        let path = match known {
+            Some(path) => ExecutablePath::new(path.to_str()?).ok()?,
+            None => self
+                .sources
+                .get(&ExecutableName::new(executable).ok()?)?
+                .clone(),
+        };
+        let entry = self.icons.get(&path).map(|(entry, _)| entry);
         Some(IconRequest {
             file: AppFile {
                 executable: executable.to_owned(),
-                path: path.to_owned(),
+                path: path.as_path().to_path_buf(),
             },
-            recorded: entry.filter(|entry| entry.path == path).map(Entry::stamp),
+            recorded: entry.map(Entry::stamp),
         })
     }
 
-    pub(super) fn apply(&mut self, executable: &str, read: IconRead) {
+    pub(super) fn apply(&mut self, path: &ExecutablePath, read: IconRead) {
         match read {
             IconRead::Unchanged | IconRead::Failed => {}
             IconRead::Icon {
-                path,
+                path: read_path,
                 stamp,
                 images,
             } => {
+                if read_path
+                    .to_str()
+                    .and_then(|path| ExecutablePath::new(path).ok())
+                    .as_ref()
+                    != Some(path)
+                {
+                    return;
+                }
+                let Some(image) = self
+                    .icons
+                    .get(path)
+                    .map(|(entry, _)| entry.image)
+                    .or_else(|| self.last_image.checked_add(1))
+                    .filter(|image| *image < u32::MAX)
+                else {
+                    tracing::warn!("icon identifier space exhausted");
+                    return;
+                };
+                self.last_image = self.last_image.max(image);
                 let entry = Entry {
-                    path,
+                    path: path.as_str().to_owned(),
+                    image,
                     size: stamp.size,
                     modified: stamp.modified,
                 };
-                // A partly written set would load next run with the new
-                // stamp and stale images, so the files are removed and the
-                // icon is read again then.
-                if let Err(error) = write_images(&self.folder, executable, &images) {
-                    tracing::warn!(%error, %executable, "writing a cached icon");
-                    self.delete_images(executable);
+                // A partial write cannot be reused with the new file stamp.
+                if let Err(error) = write_images(&self.folder, image, &images) {
+                    tracing::warn!(%error, path = path.as_str(), "writing a cached icon");
+                    self.delete_images(image);
                 }
-                self.icons.insert(executable.to_owned(), (entry, images));
+                self.icons.insert(path.clone(), (entry, images));
                 self.write_index();
                 self.update_view();
             }
             IconRead::NoIcon => {
-                if self.icons.remove(executable).is_some() {
-                    self.delete_images(executable);
+                if let Some((entry, _)) = self.icons.remove(path) {
+                    self.delete_images(entry.image);
                     self.write_index();
                     self.update_view();
                 }
@@ -160,28 +218,36 @@ impl IconCache {
         }
     }
 
-    pub(super) fn prune(&mut self, keep: &BTreeSet<String>) {
-        let removed: Vec<String> = self
+    pub(super) fn prune(&mut self, keep: &BTreeSet<ExecutablePath>, globals: &BTreeSet<String>) {
+        let before = self.sources.len();
+        self.sources.retain(|name, path| {
+            globals
+                .iter()
+                .any(|global| crate::same_executable(name.as_str(), global))
+                || keep.contains(path)
+        });
+        let referenced: BTreeSet<&ExecutablePath> =
+            keep.iter().chain(self.sources.values()).collect();
+        let removed: Vec<ExecutablePath> = self
             .icons
             .keys()
-            .filter(|executable| !keep.contains(*executable))
+            .filter(|path| !referenced.contains(path))
             .cloned()
             .collect();
-        for executable in &removed {
-            self.icons.remove(executable);
-            self.delete_images(executable);
+        for path in &removed {
+            if let Some((entry, _)) = self.icons.remove(path) {
+                self.delete_images(entry.image);
+            }
         }
-        if !removed.is_empty() {
-            tracing::debug!(?removed, "cached icons pruned");
+        if !removed.is_empty() || before != self.sources.len() {
             self.write_index();
             self.update_view();
         }
     }
 
-    fn delete_images(&self, executable: &str) {
+    fn delete_images(&self, image: u32) {
         for pixels in ICON_PIXELS {
-            let path = image_path(&self.folder, executable, pixels);
-            if let Err(error) = fs_err::remove_file(&path)
+            if let Err(error) = fs_err::remove_file(image_path(&self.folder, image, pixels))
                 && error.kind() != io::ErrorKind::NotFound
             {
                 tracing::warn!(%error, "deleting a cached icon");
@@ -191,14 +257,19 @@ impl IconCache {
 
     fn write_index(&self) {
         let index = Index {
+            version: 1,
             apps: self
                 .icons
+                .values()
+                .map(|(entry, _)| entry.clone())
+                .collect(),
+            sources: self
+                .sources
                 .iter()
-                .map(|(executable, (entry, _))| (executable.clone(), entry.clone()))
+                .map(|(name, path)| (name.as_str().to_owned(), path.as_str().to_owned()))
                 .collect(),
         };
-        // Renaming a complete file over the index keeps an interrupted
-        // write from truncating it.
+        // Renaming a complete index avoids exposing a partial write.
         let written = toml::to_string(&index)
             .map_err(io::Error::other)
             .and_then(|text| {
@@ -213,20 +284,51 @@ impl IconCache {
     }
 }
 
-fn image_path(folder: &Path, executable: &str, pixels: u16) -> PathBuf {
-    folder.join(format!("{executable}-{pixels}.png"))
+fn valid_index(
+    index: Index,
+) -> Option<(
+    BTreeMap<ExecutablePath, Entry>,
+    BTreeMap<ExecutableName, ExecutablePath>,
+)> {
+    if index.version != 1 {
+        return None;
+    }
+    let mut ids = BTreeSet::new();
+    let mut entries = BTreeMap::new();
+    for entry in index.apps {
+        if entry.image == 0 || entry.image == u32::MAX || !ids.insert(entry.image) {
+            return None;
+        }
+        let path = ExecutablePath::new(&entry.path).ok()?;
+        if entries.insert(path, entry).is_some() {
+            return None;
+        }
+    }
+    let mut sources = BTreeMap::new();
+    for (name, path) in index.sources {
+        let path = ExecutablePath::new(&path).ok()?;
+        let name = ExecutableName::new(&name).ok()?;
+        if ExecutableName::new(path.file_name()).ok()? != name
+            || sources.insert(name, path).is_some()
+        {
+            return None;
+        }
+    }
+    Some((entries, sources))
 }
 
-fn read_images(folder: &Path, executable: &str) -> io::Result<IconImages> {
+fn image_path(folder: &Path, image: u32, pixels: u16) -> PathBuf {
+    folder.join(format!("{image}-{pixels}.png"))
+}
+fn read_images(folder: &Path, image: u32) -> io::Result<IconImages> {
     let [small, medium, large] = ICON_PIXELS
-        .map(|pixels| fs_err::read(image_path(folder, executable, pixels)).map(Arc::<[u8]>::from));
+        .map(|pixels| fs_err::read(image_path(folder, image, pixels)).map(Arc::<[u8]>::from));
     Ok(IconImages([small?, medium?, large?]))
 }
-
-fn write_images(folder: &Path, executable: &str, images: &IconImages) -> io::Result<()> {
+fn write_images(folder: &Path, image: u32, images: &IconImages) -> io::Result<()> {
     fs_err::create_dir_all(folder)?;
     for (pixels, png) in ICON_PIXELS.into_iter().zip(&images.0) {
-        fs_err::write(image_path(folder, executable, pixels), png)?;
+        fs_err::write(image_path(folder, image, pixels), png)?;
     }
     Ok(())
 }

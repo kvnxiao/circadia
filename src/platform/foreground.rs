@@ -1,3 +1,4 @@
+use crate::ExecutablePath;
 use crate::Foreground;
 use crate::PreviousWindow;
 use crate::normalize_executable;
@@ -153,11 +154,12 @@ fn hosted_identity<S: WindowSource>(
             return None;
         }
         if name != "applicationframehost.exe" {
-            identities.insert(name, path);
+            let identity = ExecutablePath::new(path.to_str()?).ok()?;
+            identities.insert(identity, (name, path));
         }
     }
     if identities.len() == 1 {
-        identities.into_iter().next()
+        identities.into_values().next()
     } else {
         None
     }
@@ -171,11 +173,13 @@ struct Previous {
     window: HWND,
     process: u32,
     executable: String,
+    path: PathBuf,
 }
 
 struct Titles {
     process: u32,
     executable: String,
+    path: Option<ExecutablePath>,
     _hook: WinEventHook,
 }
 
@@ -229,23 +233,36 @@ impl ForegroundEvents {
     ///   that names another app.
     pub(crate) fn read(
         &mut self,
-        follow_titles: impl FnOnce(&str) -> bool,
+        follow_titles: impl FnOnce(&str, Option<&ExecutablePath>) -> bool,
     ) -> (Foreground, Option<PreviousWindow>) {
         let (foreground, window) = current();
         let executable = match &foreground {
             Foreground::Application { executable, .. } => Some(executable.as_str()),
             Foreground::Unknown | Foreground::Shell => None,
         };
+        let path = match &foreground {
+            Foreground::Application { path, .. } => Some(path),
+            Foreground::Unknown | Foreground::Shell => None,
+        };
+        let identity = path
+            .and_then(|path| path.to_str())
+            .and_then(|path| ExecutablePath::new(path).ok());
         let previous = self
             .previous
             .take()
             .filter(|previous| {
-                Some(previous.executable.as_str()) != executable
+                (Some(previous.executable.as_str()) != executable
+                    || previous
+                        .path
+                        .to_str()
+                        .and_then(|path| ExecutablePath::new(path).ok())
+                        != identity)
                     && Windows.owner(&previous.window) == Some(previous.process)
             })
             .and_then(|previous| {
                 Windows.title(&previous.window).map(|title| PreviousWindow {
                     executable: previous.executable,
+                    path: previous.path,
                     title,
                 })
             });
@@ -255,27 +272,40 @@ impl ForegroundEvents {
             .filter(|process| *process != std::process::id());
         let follow = executable
             .zip(process)
-            .filter(|(executable, _)| follow_titles(executable));
-        let following = self
-            .titles
-            .as_ref()
-            .map(|titles| (titles.executable.as_str(), titles.process));
+            .filter(|(executable, _)| follow_titles(executable, identity.as_ref()))
+            .map(|(executable, process)| (executable, process, identity.as_ref()));
+        let following = self.titles.as_ref().map(|titles| {
+            (
+                titles.executable.as_str(),
+                titles.process,
+                titles.path.as_ref(),
+            )
+        });
         if following != follow {
             self.titles = None;
-            self.titles = follow
-                .and_then(|(executable, process)| self.follow(executable.to_owned(), process));
+            self.titles = follow.and_then(|(executable, process, path)| {
+                self.follow(executable.to_owned(), process, path.cloned())
+            });
         }
-        if let (Some(window), Some(executable), Some(process)) = (window, executable, process) {
+        if let (Some(window), Some(executable), Some(process), Some(path)) =
+            (window, executable, process, path)
+        {
             self.previous = Some(Previous {
                 window,
                 process,
                 executable: executable.to_owned(),
+                path: path.clone(),
             });
         }
         (foreground, previous)
     }
 
-    fn follow(&self, executable: String, process: u32) -> Option<Titles> {
+    fn follow(
+        &self,
+        executable: String,
+        process: u32,
+        path: Option<ExecutablePath>,
+    ) -> Option<Titles> {
         let notify = Rc::clone(&self.notify);
         let logged = executable.clone();
         WinEventHook::listen(
@@ -309,6 +339,7 @@ impl ForegroundEvents {
         .map(|hook| Titles {
             process,
             executable,
+            path,
             _hook: hook,
         })
     }
@@ -380,6 +411,24 @@ mod tests {
                 path: PathBuf::from("C:/Apps/VLC.EXE"),
                 title: Some("Window 1".into()),
             }
+        );
+    }
+
+    #[test]
+    fn hosted_candidates_with_the_same_filename_at_different_paths_are_ambiguous() {
+        let source = fixture(&[
+            (1, Some("ApplicationFrameHost.exe")),
+            (2, Some("A/app.exe")),
+            (3, Some("B/app.exe")),
+        ]);
+        assert_eq!(resolve_window(&source, Some(&1)), Foreground::Unknown);
+        let same = fixture(&[
+            (1, Some("ApplicationFrameHost.exe")),
+            (2, Some("A/app.exe")),
+            (3, Some("a/APP.EXE")),
+        ]);
+        assert!(
+            matches!(resolve_window(&same, Some(&1)), Foreground::Application { executable, .. } if executable == "app.exe")
         );
     }
 

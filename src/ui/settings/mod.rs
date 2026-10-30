@@ -169,7 +169,8 @@ pub(super) struct Model {
     manual_end: Option<u16>,
     running_executable: String,
     recent: Vec<RecentApp>,
-    names: BTreeMap<String, String>,
+    pub(super) names: BTreeMap<crate::ExecutablePath, String>,
+    sources: BTreeMap<crate::ExecutableName, crate::ExecutablePath>,
     today: Option<crate::SolarToday>,
     solar: schedule::SolarStatus,
     calculation: Option<Calculation>,
@@ -198,12 +199,30 @@ impl Calculation {
 }
 
 impl Model {
+    pub(super) fn with_sources(
+        mut self,
+        sources: &BTreeMap<crate::ExecutableName, crate::ExecutablePath>,
+    ) -> Self {
+        self.sources = sources.clone();
+        for entry in self.accepted.iter().flat_map(|config| {
+            [Field::Suppression, Field::Exclusions]
+                .into_iter()
+                .flat_map(|list| config.entries(list))
+        }) {
+            if let Ok(Some(path)) = entry.restriction() {
+                self.names
+                    .entry(path)
+                    .or_insert_with(|| entry.display_name().to_owned());
+            }
+        }
+        self
+    }
     pub(super) fn new(
         configuration: &Configuration,
         snapshot: Option<&ControllerSnapshot>,
         retrying: bool,
         status: String,
-        names: &BTreeMap<String, String>,
+        names: &BTreeMap<crate::ExecutablePath, String>,
     ) -> Self {
         let preview_active =
             snapshot.is_some_and(|snapshot| status::preview_active(snapshot, Instant::now()));
@@ -264,6 +283,7 @@ impl Model {
             running_executable: configuration.running_executable().to_owned(),
             recent: snapshot.map_or_else(Vec::new, |snapshot| snapshot.recent.clone()),
             names: names.clone(),
+            sources: BTreeMap::new(),
             today: snapshot
                 .and_then(|snapshot| snapshot.calculation.as_ref())
                 .and_then(|calculation| calculation.result.as_ref().ok())
@@ -423,16 +443,17 @@ pub(super) enum Command {
     StopPreview,
     PreviewElapsed,
     Manual(ManualCommand),
-    Add(Field, Vec<super::file_info::AppFile>),
+    Add(Field, Vec<super::file_info::AppSelection>),
     Browsed(super::file_info::AppFile),
-    Icons(Vec<String>),
-    Remove(Field, usize, String),
+    Icons(Vec<crate::ExecutablePath>),
+    Remove(Field, usize, crate::AppEntry),
     Title {
         list: Field,
         index: usize,
-        executable: String,
+        expected: crate::AppEntry,
         title: String,
         regex: bool,
+        path: Option<String>,
     },
 }
 
@@ -499,11 +520,13 @@ pub(super) enum Message {
     Visibility(Visibility),
     OpenDialog(Field),
     DialogClosed(ContentDialogResult),
-    Choose(String, bool),
+    Choose(crate::ExecutablePath, bool),
+    RestrictCandidate(crate::ExecutablePath, bool),
+    RestrictRule(bool),
     Browse,
     Picked(Option<super::file_info::AppFile>),
     Expand(bool),
-    OpenTitle(Field, usize),
+    OpenTitle(Field, usize, crate::AppEntry),
     TitleText(String),
     TitleRegex(bool),
     UseTitle,
@@ -527,6 +550,7 @@ pub(super) struct Settings {
     placed: bool,
     placement: Option<WindowPlacement>,
     width: f64,
+    height: f64,
     pane_open: bool,
     write: PendingWrite,
     timer: Option<ComponentTimer>,
@@ -572,11 +596,16 @@ impl Settings {
         layout::stacked(self.width)
     }
 
+    fn dialog_height(&self) -> f64 {
+        (self.height - 220.0).max(100.0)
+    }
+
     fn resized(&mut self, size: WindowSize) {
         if self.expanded_navigation() != layout::expanded(size.width) {
             self.pane_open = false;
         }
         self.width = size.width;
+        self.height = size.height;
     }
 
     fn palette(&self) -> palette::Palette {
@@ -753,11 +782,71 @@ impl Settings {
     }
 
     fn picked(&mut self, file: super::file_info::AppFile) {
+        if let Some(dialog) = &mut self.title_dialog {
+            if dialog.browsed(&file) {
+                self.input.command.call(Command::Browsed(file));
+            }
+            return;
+        }
         let Some(dialog) = &mut self.dialog else {
             return;
         };
         if dialog.browsed(&self.input.model, file.clone()) {
             self.input.command.call(Command::Browsed(file));
+        }
+    }
+
+    fn app_message(&mut self, message: Message, context: &ComponentContext<Self>) {
+        match message {
+            Message::OpenDialog(list) => self.dialog = Some(apps::AddDialog::new(list)),
+            Message::DialogClosed(result) => self.dialog_closed(result),
+            Message::Choose(path, checked) => {
+                if let Some(dialog) = &mut self.dialog {
+                    dialog.choose(&path, checked, &self.input.model);
+                }
+            }
+            Message::RestrictCandidate(path, restricted) => {
+                if let Some(dialog) = &mut self.dialog {
+                    dialog.restrict(&path, restricted, &self.input.model);
+                }
+            }
+            Message::RestrictRule(restricted) => {
+                if let Some(dialog) = &mut self.title_dialog {
+                    dialog.restrict(restricted);
+                }
+            }
+            Message::Browse => self.browse(context),
+            Message::Picked(Some(file)) => self.picked(file),
+            Message::Expand(expanded) => self.expanded.exclusions = expanded,
+            Message::OpenTitle(list, index, expected) => {
+                self.title_dialog = apps::TitleDialog::open(&self.input.model, list, index)
+                    .filter(|dialog| dialog.matches(&expected));
+            }
+            Message::TitleText(text) => {
+                if let Some(dialog) = &mut self.title_dialog {
+                    dialog.set_text(&text);
+                }
+            }
+            Message::TitleRegex(regex) => {
+                if let Some(dialog) = &mut self.title_dialog {
+                    dialog.set_regex(regex);
+                }
+            }
+            Message::UseTitle => {
+                if let Some(dialog) = &mut self.title_dialog {
+                    dialog.use_title(&self.input.model);
+                }
+            }
+            Message::TitleClosed(result) => {
+                let command = self
+                    .title_dialog
+                    .take()
+                    .and_then(|dialog| dialog.command(&self.input.model));
+                if let (ContentDialogResult::Primary, Some(command)) = (result, command) {
+                    self.input.command.call(command);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1230,6 +1319,7 @@ impl Component for Settings {
                 )
                 .ok(),
             width: 1200.0,
+            height: 1000.0,
             pane_open: false,
             write: PendingWrite::default(),
             timer: None,
@@ -1341,44 +1431,19 @@ impl Component for Settings {
             }
             Message::Visibility(visibility) => self.visibility = visibility,
             Message::Scheme(scheme) => self.scheme = scheme,
-            Message::OpenDialog(list) => self.dialog = Some(apps::AddDialog::new(list)),
-            Message::DialogClosed(result) => self.dialog_closed(result),
-            Message::Choose(executable, checked) => {
-                if let Some(dialog) = &mut self.dialog {
-                    dialog.choose(&executable, checked);
-                }
-            }
-            Message::Browse => self.browse(context),
-            Message::Picked(file) => {
-                if let Some(file) = file {
-                    self.picked(file);
-                }
-            }
-            Message::Expand(expanded) => self.expanded.exclusions = expanded,
-            Message::OpenTitle(list, index) => {
-                self.title_dialog = apps::TitleDialog::open(&self.input.model, list, index);
-            }
-            Message::TitleText(text) => {
-                if let Some(dialog) = &mut self.title_dialog {
-                    dialog.set_text(&text);
-                }
-            }
-            Message::TitleRegex(regex) => {
-                if let Some(dialog) = &mut self.title_dialog {
-                    dialog.set_regex(regex);
-                }
-            }
-            Message::UseTitle => {
-                if let Some(dialog) = &mut self.title_dialog {
-                    dialog.use_title(&self.input.model);
-                }
-            }
-            Message::TitleClosed(result) => {
-                let command = self.title_dialog.take().and_then(|dialog| dialog.command());
-                if let (ContentDialogResult::Primary, Some(command)) = (result, command) {
-                    self.input.command.call(command);
-                }
-            }
+            message @ (Message::OpenDialog(_)
+            | Message::DialogClosed(_)
+            | Message::Choose(..)
+            | Message::RestrictCandidate(..)
+            | Message::RestrictRule(_)
+            | Message::Browse
+            | Message::Picked(_)
+            | Message::Expand(_)
+            | Message::OpenTitle(..)
+            | Message::TitleText(_)
+            | Message::TitleRegex(_)
+            | Message::UseTitle
+            | Message::TitleClosed(_)) => self.app_message(message, context),
         }
         self.animate(context);
         self.request_icons();
