@@ -22,7 +22,25 @@ Release builds use the same bundled-runtime feature:
 cargo +stable build --release --bin circadia --features self-contained --locked
 ```
 
-The root justfile has no release-only build recipe. Its measurement recipes also build release binaries, but run separate experiments with desktop or Night Light effects.
+`just installer` builds and packages a release binary. The measurement recipes also build release binaries, but run separate experiments with desktop or Night Light effects.
+
+### Build an unsigned installer
+
+Use Inno Setup 6.7.1, `cargo-bundle-licenses` 4.2.0, and `jq` alongside the Windows build prerequisites above. Install the x64 MSVC target with `rustup target add --toolchain stable x86_64-pc-windows-msvc`, then run:
+
+```bash
+just installer
+```
+
+The recipe uses `C:/Program Files (x86)/Inno Setup 6/ISCC.exe` by default. Set `ISCC` to the compiler executable's path for another installation. It builds the self-contained release binary for x64 with a statically linked C runtime, stages the runtime files selected by the pinned Reactor setup helper, and compiles [the Inno Setup definition](packaging/circadia.iss). `target/installer/` receives an unsigned `*-setup.exe` and its SHA-256 checksum. The package includes its source commit in the filename and `BUILD.txt`; PDBs, native-check executables, and Cargo build directories are excluded.
+
+The installer uses a stable application ID and installs under `%LOCALAPPDATA%\Programs\Circadia` for the current user. Its Start menu shortcut launches the app normally. Setup and uninstall require the app's session mutex to be absent; the dialog directs users to Quit from the tray so normal shutdown can finish. Setup does not launch Circadia, enable management, or register startup at sign-in.
+
+Uninstall removes the startup Run value only when its command exactly matches the installed executable. A registration for another copy or a custom data directory is preserved. Configuration, backups, logs, and icon caches under `%LOCALAPPDATA%\Circadia` are preserved.
+
+[Dependency notices](packaging/licenses/README.md) are included in each installer. A runtime version change requires matching notice files, and a Rust dependency without any discovered license text stops packaging. Refresh the notices when updating dependencies.
+
+Compiling the installer does not install or launch it. Check installation, upgrades, uninstall, and launch on a clean Windows 11 machine separately before treating a build as release-ready. The automated installer job does not establish those behaviors or the minimum Windows build's compatibility.
 
 ## Routine checks
 
@@ -60,6 +78,8 @@ The [CI workflow](.github/workflows/ci.yml) runs on pull requests, pushes to `ma
 Rust jobs cache dependencies separately by project and check group; Python caches locked dependencies. Superseded runs are cancelled, and a failed Rust matrix job does not cancel the others. Formatting runs separately so compiled checks do not install nightly Rust. `just fmt-check` and `just clippy` run individually; `just lint` still runs both.
 
 CI executes test harnesses, including unit tests of native-check helpers, but does not launch the desktop application or probe windows. Desktop automation, screenshots, live Night Light checks, host-setting exercises, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
+
+On a push to `main`, an additional **Unsigned Windows installer** job waits for all check jobs to pass. It builds the current commit's installer and uploads **Circadia-windows-x64-unsigned**, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual workflow dispatch do not build an installer.
 
 External actions use full commit pins. [Dependabot](.github/dependabot.yml) proposes weekly action updates for review.
 
