@@ -162,6 +162,7 @@ impl ControllerCommand {
                                 .len()
                                 .saturating_add(entry.name.len())
                                 .saturating_add(entry.title.len())
+                                .saturating_add(entry.path.as_ref().map_or(0, String::len))
                                 .saturating_add(size_of::<crate::AppEntry>())
                         })
                         .fold(0_usize, usize::saturating_add),

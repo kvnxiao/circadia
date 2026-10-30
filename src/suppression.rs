@@ -1,4 +1,5 @@
 use crate::Config;
+use crate::ExecutablePath;
 use crate::ValidationError;
 use crate::normalize_executable;
 use jiff::Timestamp;
@@ -39,6 +40,10 @@ pub struct RecentApp {
     pub title: Option<String>,
     /// A suppression entry has the file name.
     pub included: bool,
+    /// Number of suppression rules covering this installation.
+    pub covering: usize,
+    /// The tray may remove one filename-only, title-free rule.
+    pub removable: bool,
     /// Title text of the first suppression entry with the file name, empty
     /// when that entry has no title condition.
     pub condition: String,
@@ -58,7 +63,7 @@ impl RecentApp {
 #[derive(Clone, Debug)]
 struct Recent {
     executable: String,
-    path: PathBuf,
+    path: ExecutablePath,
     focus_ended: Option<Duration>,
     title: Option<String>,
 }
@@ -66,6 +71,7 @@ struct Recent {
 #[derive(Clone, Debug)]
 struct Current {
     executable: String,
+    path: Option<ExecutablePath>,
     title: Option<String>,
 }
 
@@ -75,6 +81,8 @@ struct Current {
 pub struct PreviousWindow {
     /// Executable file name of the window's process.
     pub executable: String,
+    /// Full path of the previous window's executable.
+    pub path: PathBuf,
     /// Window title when focus left the window.
     pub title: String,
 }
@@ -120,36 +128,52 @@ impl ForegroundApps {
                 executable,
                 path,
                 title,
-            } => normalize_executable(executable)
-                .ok()
-                .map(|name| (name, path.clone(), title.clone())),
+            } => normalize_executable(executable).ok().map(|name| {
+                (
+                    name,
+                    path.to_str()
+                        .and_then(|path| ExecutablePath::new(path).ok()),
+                    title.clone(),
+                )
+            }),
             Foreground::Unknown | Foreground::Shell => None,
         };
         if let Some(previous) = previous
-            && let Ok(name) = normalize_executable(&previous.executable)
-            && application.as_ref().map(|(current, _, _)| current) != Some(&name)
-            && let Some(recent) = self
-                .recent
-                .iter_mut()
-                .find(|recent| recent.executable == name)
+            && let Some(path) = previous
+                .path
+                .to_str()
+                .and_then(|path| ExecutablePath::new(path).ok())
+            && application
+                .as_ref()
+                .and_then(|(_, current, _)| current.as_ref())
+                != Some(&path)
+            && let Some(recent) = self.recent.iter_mut().find(|recent| recent.path == path)
         {
             recent.title = Some(previous.title.clone());
         }
-        self.current = application.as_ref().map(|(name, _, title)| Current {
+        self.current = application.as_ref().map(|(name, path, title)| Current {
             executable: name.clone(),
+            path: path.clone(),
             title: title.clone(),
         });
-        let current = self.current.as_ref().map(|current| &current.executable);
+        let current = self
+            .current
+            .as_ref()
+            .and_then(|current| current.path.as_ref());
         for recent in &mut self.recent {
-            if recent.focus_ended.is_none() && current != Some(&recent.executable) {
+            if recent.focus_ended.is_none() && current != Some(&recent.path) {
                 recent.focus_ended = Some(now);
             }
         }
-        if let Some((name, path, title)) = application
-            && name != self.own_executable
-            && name != "applicationframehost.exe"
+        if let Some((name, Some(path), title)) = application
+            && !crate::is_fixed_exclusion(&name, &self.own_executable)
         {
-            self.recent.retain(|previous| previous.executable != name);
+            let path = self
+                .recent
+                .iter()
+                .find(|previous| previous.path == path)
+                .map_or(path.clone(), |previous| previous.path.clone());
+            self.recent.retain(|previous| previous.path != path);
             self.recent.insert(
                 0,
                 Recent {
@@ -174,8 +198,9 @@ impl ForegroundApps {
     pub fn matches(&self, config: &Config) -> bool {
         self.current.as_ref().is_some_and(|current| {
             config
-                .classify(
+                .classify_path(
                     &current.executable,
+                    current.path.as_ref(),
                     current.title.as_deref(),
                     &self.own_executable,
                 )
@@ -188,13 +213,20 @@ impl ForegroundApps {
         self.recent
             .iter()
             .map(|recent| {
-                let membership = config.classify(&recent.executable, None, &self.own_executable);
+                let membership = config.classify_path(
+                    &recent.executable,
+                    Some(&recent.path),
+                    None,
+                    &self.own_executable,
+                );
                 RecentApp {
                     executable: recent.executable.clone(),
-                    path: recent.path.clone(),
+                    path: recent.path.as_path().to_path_buf(),
                     focus_ended: recent.focus_ended,
                     title: recent.title.clone(),
-                    included: membership.included,
+                    included: membership.included(),
+                    covering: membership.covering,
+                    removable: membership.removable,
                     condition: membership.condition,
                     excluded: membership.excluded,
                 }
@@ -462,6 +494,55 @@ mod tests {
     use super::*;
     use crate::AppEntry;
     use crate::ConfigInput;
+
+    #[test]
+    fn same_name_installations_retain_independent_history_and_departure_titles() {
+        let mut apps = ForegroundApps::new("circadia.exe").expect("own name");
+        let application = |path: &str| Foreground::Application {
+            executable: "browser.exe".into(),
+            path: path.into(),
+            title: Some("Initial".into()),
+        };
+        apps.observe(&application(r"C:\A\browser.exe"), None, Duration::ZERO);
+        apps.observe(
+            &application(r"C:\B\browser.exe"),
+            Some(&PreviousWindow {
+                executable: "browser.exe".into(),
+                path: r"C:\A\browser.exe".into(),
+                title: "Final A".into(),
+            }),
+            Duration::from_secs(1),
+        );
+        let recent = apps.recent(&Config::default());
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].path, PathBuf::from(r"C:\B\browser.exe"));
+        assert_eq!(recent[0].title.as_deref(), Some("Initial"));
+        assert_eq!(recent[1].title.as_deref(), Some("Final A"));
+        assert_eq!(recent[1].focus_ended, Some(Duration::from_secs(1)));
+        apps.observe(
+            &application("c:/a/BROWSER.exe"),
+            None,
+            Duration::from_secs(2),
+        );
+        let recent = apps.recent(&Config::default());
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].path, PathBuf::from(r"C:\A\browser.exe"));
+        let config = ConfigInput {
+            suppression: vec![
+                AppEntry::new("browser.exe", "Browser").with_path(Some(r"C:\B\browser.exe".into())),
+            ],
+            ..ConfigInput::default()
+        }
+        .validate()
+        .expect("valid config");
+        assert!(!apps.matches(&config));
+        apps.observe(
+            &application(r"C:\B\browser.exe"),
+            None,
+            Duration::from_secs(3),
+        );
+        assert!(apps.matches(&config));
+    }
     use test_case::test_case;
 
     fn milliseconds(value: u64) -> Duration {

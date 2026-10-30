@@ -96,6 +96,170 @@ fn valid() -> String {
     document(|_| {})
 }
 
+#[test]
+fn a_late_name_updates_only_rules_still_using_its_source_path() {
+    let folder = Folder::new();
+    folder.write(Some(&valid()), None);
+    let mut configuration = folder.load();
+    let a = crate::ExecutablePath::new(r"C:\A\browser.exe").expect("A");
+    let b = crate::ExecutablePath::new(r"C:\B\browser.exe").expect("B");
+    let global = AppEntry::new("browser.exe", "browser.exe");
+    configuration
+        .add(
+            Field::Suppression,
+            vec![
+                global.clone(),
+                global.clone().with_path(Some(a.as_str().into())),
+                global.with_path(Some(b.as_str().into())),
+            ],
+        )
+        .expect("distinct scopes");
+    let sources = BTreeMap::from([(
+        crate::ExecutableName::new("browser.exe").expect("filename"),
+        b.clone(),
+    )]);
+    configuration.record_names(
+        &BTreeMap::from([(a.clone(), "Installation A".into())]),
+        &sources,
+    );
+    let names = |configuration: &Configuration| {
+        configuration
+            .accepted()
+            .expect("accepted")
+            .entries(Field::Suppression)
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        names(&configuration),
+        ["browser.exe", "Installation A", "browser.exe"]
+    );
+    configuration.record_names(
+        &BTreeMap::from([(a, "Installation A".into()), (b, "Installation B".into())]),
+        &sources,
+    );
+    assert_eq!(
+        names(&configuration),
+        ["Installation B", "Installation A", "Installation B"]
+    );
+    assert_eq!(
+        names(&folder.load()),
+        ["Installation B", "Installation A", "Installation B"]
+    );
+}
+
+#[test]
+fn a_stale_remove_cannot_redirect_to_another_same_name_installation() {
+    let folder = Folder::new();
+    folder.write(Some(&valid()), None);
+    let mut configuration = folder.load();
+    let a = AppEntry::new("browser.exe", "A").with_path(Some(r"C:\A\browser.exe".into()));
+    let b = AppEntry::new("browser.exe", "B").with_path(Some(r"C:\B\browser.exe".into()));
+    configuration
+        .add(Field::Suppression, vec![a.clone()])
+        .expect("A rule");
+    configuration.edit(vec![(
+        Field::Suppression,
+        FieldValue::Apps(vec![b.clone()]),
+    )]);
+    assert!(configuration.remove(Field::Suppression, 0, &a).is_none());
+    assert_eq!(
+        configuration
+            .accepted()
+            .expect("accepted")
+            .entries(Field::Suppression),
+        [b]
+    );
+}
+
+#[test]
+fn delayed_scope_mutations_recheck_rules_and_ignore_only_display_name_refreshes() {
+    let folder = Folder::new();
+    folder.write(Some(&valid()), None);
+    let mut configuration = folder.load();
+    let a = AppEntry::new("browser.exe", "Old name").with_path(Some("C:/A/browser.exe".into()));
+    let b = AppEntry::new("browser.exe", "B").with_path(Some("C:/B/browser.exe".into()));
+    configuration
+        .add(Field::Suppression, vec![a.clone(), b.clone()])
+        .expect("distinct installations");
+    assert_eq!(
+        configuration.add(Field::Suppression, vec![a.clone()]),
+        Err(FieldErrorKind::AlreadyListed)
+    );
+    assert!(
+        configuration
+            .set_title(
+                Field::Suppression,
+                0,
+                &a,
+                "Work".into(),
+                false,
+                b.path.clone()
+            )
+            .is_none()
+    );
+    let changed = a.clone().with_title("Work", false);
+    configuration.edit(vec![(
+        Field::Suppression,
+        FieldValue::Apps(vec![changed.clone(), b]),
+    )]);
+    assert!(configuration.remove(Field::Suppression, 0, &a).is_none());
+    assert!(
+        configuration
+            .set_title(
+                Field::Suppression,
+                0,
+                &a,
+                "New".into(),
+                false,
+                a.path.clone()
+            )
+            .is_none()
+    );
+    let path = crate::ExecutablePath::new("C:/A/browser.exe").expect("A");
+    configuration.record_names(
+        &BTreeMap::from([(path, "New display name".into())]),
+        &BTreeMap::new(),
+    );
+    assert!(
+        configuration
+            .remove(Field::Suppression, 0, &changed)
+            .is_some()
+    );
+}
+
+#[test]
+fn tray_actions_recheck_overlap_restrictions_exclusions_and_captured_regex() {
+    let folder = Folder::new();
+    folder.write(Some(&valid()), None);
+    let mut configuration = folder.load();
+    let path = crate::ExecutablePath::new("C:/A/browser.exe").expect("A");
+    let global = AppEntry::new("browser.exe", "Browser");
+    let a = global.clone().with_path(Some(path.as_str().into()));
+    configuration
+        .add(Field::Suppression, vec![global.clone(), a.clone()])
+        .expect("overlap");
+    assert!(configuration.toggle(global.clone(), &path, false).is_none());
+    assert!(configuration.toggle(global.clone(), &path, true).is_none());
+    configuration.edit(vec![(Field::Suppression, FieldValue::Apps(vec![a]))]);
+    assert!(configuration.toggle(global.clone(), &path, false).is_none());
+    configuration.edit(vec![(
+        Field::Suppression,
+        FieldValue::Apps(vec![global.clone().with_title("", true)]),
+    )]);
+    assert!(configuration.toggle(global.clone(), &path, false).is_none());
+    assert!(
+        configuration
+            .toggle(global.clone().with_title("", true), &path, false)
+            .is_some()
+    );
+    configuration
+        .add(Field::Exclusions, vec![global.clone()])
+        .expect("exclusion");
+    assert!(configuration.toggle(global, &path, true).is_none());
+}
+
 fn kelvin(configuration: &Configuration) -> (i64, i64, i64) {
     let input = configuration.accepted().expect("accepted").input();
     (
@@ -116,7 +280,7 @@ fn records_matching<'a>(records: &'a [String], text: &str) -> Vec<&'a str> {
 #[test]
 fn a_syntax_error_restores_the_usable_backup_and_logs_the_file() {
     let folder = Folder::new();
-    let broken = "schema_version = 2\nwake = \"07:00\"\nbedtime = \n";
+    let broken = "schema_version = 3\nwake = \"07:00\"\nbedtime = \n";
     let backup = document(|table| set(table, "bedtime", "22:00"));
     folder.write(Some(broken), Some(&backup));
     let records = crate::log::capture(Level::INFO, || {
@@ -147,7 +311,7 @@ fn a_syntax_error_restores_the_usable_backup_and_logs_the_file() {
         restored[0]
     );
     assert!(
-        restored[0].contains(r#"content="schema_version = 2\nwake = \"07:00\"\nbedtime = \n""#),
+        restored[0].contains(r#"content="schema_version = 3\nwake = \"07:00\"\nbedtime = \n""#),
         "{}",
         restored[0]
     );
@@ -457,7 +621,11 @@ fn conflicting_input_survives_reopening_and_tray_toggles_but_not_exit() {
         Some(&FieldValue::Clock(23 * 60))
     );
     let toggled = configuration
-        .toggle(crate::AppEntry::new("game.exe", "game.exe"), true)
+        .toggle(
+            crate::AppEntry::new("game.exe", "game.exe"),
+            &crate::ExecutablePath::new("C:/Apps/game.exe").expect("fixture path"),
+            true,
+        )
         .expect("toggle applies");
     assert_eq!(
         toggled.input().suppression,
@@ -615,7 +783,7 @@ fn reset_writes_the_defaults_over_both_files() {
     assert!(configuration.error().is_none());
     let (saved, backup) = folder.read();
     let saved = saved.expect("written file");
-    assert!(saved.contains("schema_version = 2"), "{saved}");
+    assert!(saved.contains("schema_version = 3"), "{saved}");
     assert_eq!(backup.as_deref(), Some(saved.as_str()));
 }
 
@@ -671,6 +839,55 @@ fn launch_opens_settings_by_start_minimized_new_install_and_problems() {
 }
 
 #[test]
+fn changing_a_restriction_discards_the_previous_installations_display_name() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let mut configuration = Configuration::load(directory.path(), "circadia.exe");
+    let a =
+        AppEntry::new("browser.exe", "Installation A").with_path(Some(r"C:\A\browser.exe".into()));
+    configuration
+        .add(Field::Suppression, vec![a.clone()])
+        .expect("rule added");
+    configuration
+        .set_title(
+            Field::Suppression,
+            0,
+            &a,
+            String::new(),
+            false,
+            Some(r"C:\B\browser.exe".into()),
+        )
+        .expect("path changed");
+    assert_eq!(
+        configuration
+            .accepted()
+            .expect("accepted")
+            .entries(Field::Suppression)[0]
+            .name,
+        "browser.exe"
+    );
+}
+
+#[test]
+fn tray_removes_the_captured_global_rule_after_an_unrelated_restricted_rule() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let mut configuration = Configuration::load(directory.path(), "circadia.exe");
+    let restricted = AppEntry::new("browser.exe", "A").with_path(Some(r"C:\A\browser.exe".into()));
+    let global = AppEntry::new("browser.exe", "Browser");
+    configuration
+        .add(Field::Suppression, vec![restricted.clone(), global.clone()])
+        .expect("rules added");
+    let b = crate::ExecutablePath::new(r"C:\B\browser.exe").expect("B path");
+    assert!(configuration.toggle(global, &b, false).is_some());
+    assert_eq!(
+        configuration
+            .accepted()
+            .expect("accepted")
+            .entries(Field::Suppression),
+        [restricted]
+    );
+}
+
+#[test]
 fn removing_an_entry_that_moved_since_the_click_changes_nothing() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let mut configuration = Configuration::load(directory.path(), "circadia.exe");
@@ -685,7 +902,7 @@ fn removing_an_entry_that_moved_since_the_click_changes_nothing() {
         .expect("added");
     assert!(
         configuration
-            .remove(Field::Suppression, 0, "tool.exe")
+            .remove(Field::Suppression, 0, &AppEntry::new("tool.exe", ""))
             .is_none()
     );
     assert_eq!(
@@ -712,14 +929,19 @@ fn a_tray_toggle_does_not_remove_an_entry_with_a_title_condition() {
         .set_title(
             Field::Suppression,
             0,
-            "javaw.exe",
+            &AppEntry::new("javaw.exe", ""),
             "Minecraft".to_owned(),
             false,
+            None,
         )
         .expect("title saved");
     assert!(
         configuration
-            .toggle(AppEntry::new("javaw.exe", "Java"), false)
+            .toggle(
+                AppEntry::new("javaw.exe", "Java"),
+                &crate::ExecutablePath::new("C:/Apps/javaw.exe").expect("fixture path"),
+                false
+            )
             .is_none()
     );
     assert_eq!(
@@ -746,15 +968,23 @@ fn an_invalid_expression_or_a_moved_entry_does_not_change_the_title() {
             .set_title(
                 Field::Suppression,
                 0,
-                "javaw.exe",
+                &AppEntry::new("javaw.exe", ""),
                 "minecraft(".to_owned(),
-                true
+                true,
+                None
             )
             .is_none()
     );
     assert!(
         configuration
-            .set_title(Field::Suppression, 0, "game.exe", "Game".to_owned(), false)
+            .set_title(
+                Field::Suppression,
+                0,
+                &AppEntry::new("game.exe", ""),
+                "Game".to_owned(),
+                false,
+                None
+            )
             .is_none()
     );
     assert_eq!(

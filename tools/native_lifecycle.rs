@@ -32,6 +32,9 @@ mod location;
 #[path = "native/output.rs"]
 mod output;
 #[cfg(windows)]
+#[path = "native/paths.rs"]
+mod paths;
+#[cfg(windows)]
 #[path = "native/picker.rs"]
 mod picker;
 #[cfg(windows)]
@@ -99,6 +102,7 @@ fn main() -> std::io::Result<()> {
         Some("--modal-shutdown") => shutdown::run(&arguments),
         Some("--translation") => translation::run(&arguments),
         Some("--identity") => identity::run(&arguments),
+        Some("--paths") => paths::run(&arguments),
         _ => lifecycle::run(&arguments),
     }
 }

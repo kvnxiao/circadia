@@ -158,6 +158,14 @@ identifiers! {
     TITLE_DIALOG_LAST_SEEN = "title-dialog-last-seen";
     /// Command that uses the last seen window title.
     TITLE_DIALOG_USE = "title-dialog-use";
+    /// Installation restriction in the match-conditions editor.
+    RULE_RESTRICTION = "rule-restriction";
+    /// Select a replacement executable in the match-conditions editor.
+    RULE_BROWSE = "rule-browse";
+    /// Installation path in the match-conditions editor.
+    RULE_PATH = "rule-path";
+    /// Invalid or duplicate installation scope.
+    RULE_PATH_ERROR = "rule-path-error";
     /// Transition length slider.
     TRANSITION_SLIDER = "transition-slider";
     /// Transition length number field.
@@ -196,7 +204,7 @@ identifiers! {
     ABOUT_QUIT = "about-quit";
 }
 
-const PREFIXES: [&str; 11] = [
+const PREFIXES: &[&str] = &[
     "banner-go-to-",
     "summary-",
     "graph-",
@@ -208,6 +216,7 @@ const PREFIXES: [&str; 11] = [
     "exclusion-",
     "fixed:",
     "dialog-choice:",
+    "dialog-restriction:",
 ];
 
 const SUFFIXES: [&str; 14] = [
@@ -330,19 +339,31 @@ pub fn solar_conflict(index: usize) -> String {
     format!("solar-conflict-{index}")
 }
 
-/// Name a recent-app row by its executable file name.
-pub fn recent(executable: &str) -> String {
-    format!("recent:{executable}")
+/// Encode a component identity without separator ambiguity.
+pub fn identity(value: &str) -> String {
+    use std::fmt::Write;
+    value
+        .as_bytes()
+        .iter()
+        .fold(String::new(), |mut output, byte| {
+            let _written = write!(output, "{byte:02x}");
+            output
+        })
+}
+
+/// Name a recent-app row by its normalized installation path.
+pub fn recent(path: &str) -> String {
+    format!("recent:{}", identity(path))
 }
 
 /// Name a recent app's Add command.
-pub fn recent_add(executable: &str) -> String {
-    format!("recent-add:{executable}")
+pub fn recent_add(path: &str) -> String {
+    format!("recent-add:{}", identity(path))
 }
 
 /// Name a recent app's Remove command.
-pub fn recent_remove(executable: &str) -> String {
-    format!("recent-remove:{executable}")
+pub fn recent_remove(path: &str) -> String {
+    format!("recent-remove:{}", identity(path))
 }
 
 /// Name the suppression-list entry at `index`.
@@ -372,7 +393,35 @@ pub fn remove(entry: &str) -> String {
 
 /// Name an app's checkbox in the Add app and Add exclusion dialogs.
 pub fn dialog_choice(executable: &str) -> String {
-    format!("dialog-choice:{executable}")
+    format!("dialog-choice:{}", identity(executable))
+}
+
+/// Name a candidate's installation restriction checkbox.
+pub fn dialog_restriction(path: &str) -> String {
+    format!("dialog-restriction:{}", identity(path))
+}
+
+/// Name a saved rule by scope, with a duplicate occurrence disambiguator.
+pub fn rule(list: Field, entry: &crate::AppEntry, occurrence: usize) -> String {
+    let name = entry
+        .file_name()
+        .unwrap_or_else(|| entry.executable.clone());
+    let path = entry
+        .restriction()
+        .ok()
+        .flatten()
+        .map(|path| path.as_str().to_owned())
+        .or_else(|| entry.path.clone());
+    format!(
+        "{}-scope:{}:{}:{occurrence}",
+        if list == Field::Exclusions {
+            "exclusion"
+        } else {
+            "suppression"
+        },
+        identity(&name),
+        path.map_or_else(|| "global".into(), |path| identity(&path))
+    )
 }
 
 #[cfg(test)]
@@ -430,7 +479,7 @@ mod tests {
     fn composed_identifiers_keep_their_published_form() {
         assert_eq!(field_message(Field::SleepKelvin), "sleep_kelvin-message");
         assert_eq!(retry(BANNER_NATIVE), "banner-native-retry");
-        assert_eq!(recent_add("game.exe"), "recent-add:game.exe");
+        assert_eq!(recent_add("game.exe"), "recent-add:67616d652e657865");
         assert_eq!(remove(&suppression_entry(2)), "suppression-2-remove");
         assert_eq!(mark(NAV_APPS), "nav-apps-mark");
     }

@@ -7,6 +7,8 @@ mod config;
 #[cfg(windows)]
 mod controller;
 mod diagnostics;
+mod executable_name;
+mod executable_path;
 mod l10n;
 mod log;
 #[cfg(all(windows, feature = "output-measurement"))]
@@ -129,6 +131,11 @@ pub use diagnostics::DiagnosticCategory;
 pub use diagnostics::DiagnosticFailure;
 pub use diagnostics::DiagnosticLog;
 pub use diagnostics::DiagnosticOperation;
+pub use executable_name::ExecutableName;
+pub use executable_name::InvalidExecutableName;
+pub(crate) use executable_name::same_executable;
+pub use executable_path::ExecutablePath;
+pub use executable_path::InvalidExecutablePath;
 pub use l10n::InterfaceText;
 #[cfg(all(windows, feature = "output-measurement"))]
 pub use measurement::OutputMeasurement;

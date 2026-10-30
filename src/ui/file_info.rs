@@ -1,3 +1,4 @@
+use crate::ExecutablePath;
 use crate::platform::file_info::FileStamp;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -13,6 +14,37 @@ pub(super) const ICON_PIXELS: [u16; 3] = [32, 48, 64];
 pub(super) struct AppFile {
     pub(super) executable: String,
     pub(super) path: PathBuf,
+}
+
+impl AppFile {
+    pub(super) fn identity(&self) -> Option<ExecutablePath> {
+        let path = ExecutablePath::new(self.path.to_str()?).ok()?;
+        crate::same_executable(path.file_name(), &self.executable).then_some(path)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct AppSelection {
+    pub(super) file: AppFile,
+    pub(super) restricted: bool,
+}
+
+impl From<AppFile> for AppSelection {
+    fn from(file: AppFile) -> Self {
+        Self {
+            file,
+            restricted: false,
+        }
+    }
+}
+
+impl AppSelection {
+    pub(super) fn entry(&self, name: String) -> crate::AppEntry {
+        crate::AppEntry::new(self.file.executable.clone(), name).with_path(
+            self.restricted
+                .then(|| self.file.path.to_string_lossy().into_owned()),
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,30 +153,30 @@ fn read_generic(reader: &dyn FileReader) -> Option<IconImages> {
 }
 
 enum Request {
-    Name(AppFile),
-    Icon(IconRequest),
+    Name(ExecutablePath),
+    Icon(ExecutablePath, IconRequest),
     Generic,
 }
 
 enum Reply {
-    Name(String, Option<String>),
-    Icon(String, IconRead),
+    Name(ExecutablePath, Option<String>),
+    Icon(ExecutablePath, IconRead),
     Generic(Option<IconImages>),
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Received {
-    pub(super) names: Vec<(String, String)>,
-    pub(super) icons: Vec<(String, IconRead)>,
+    pub(super) names: Vec<(ExecutablePath, String)>,
+    pub(super) icons: Vec<(ExecutablePath, IconRead)>,
     pub(super) generic: Option<IconImages>,
 }
 
 pub(super) struct FileInfoClient {
     requests: mpsc::Sender<Request>,
     replies: mpsc::Receiver<Reply>,
-    requested: BTreeSet<String>,
-    reading_icons: BTreeSet<String>,
-    names: BTreeMap<String, String>,
+    requested: BTreeSet<ExecutablePath>,
+    reading_icons: BTreeSet<ExecutablePath>,
+    names: BTreeMap<ExecutablePath, String>,
 }
 
 impl FileInfoClient {
@@ -172,18 +204,24 @@ impl FileInfoClient {
     }
 
     pub(super) fn request(&mut self, executable: &str, path: &Path) {
-        if !self.requested.contains(executable) {
-            self.requested.insert(executable.to_owned());
-            let _sent = self.requests.send(Request::Name(AppFile {
-                executable: executable.to_owned(),
-                path: path.to_owned(),
-            }));
+        let Some(path) = (AppFile {
+            executable: executable.to_owned(),
+            path: path.to_owned(),
+        })
+        .identity() else {
+            return;
+        };
+        if self.requested.insert(path.clone()) {
+            let _sent = self.requests.send(Request::Name(path));
         }
     }
 
     pub(super) fn request_icon(&mut self, request: IconRequest) {
-        if self.reading_icons.insert(request.file.executable.clone()) {
-            let _sent = self.requests.send(Request::Icon(request));
+        let Some(path) = request.file.identity() else {
+            return;
+        };
+        if self.reading_icons.insert(path.clone()) {
+            let _sent = self.requests.send(Request::Icon(path, request));
         }
     }
 
@@ -204,11 +242,11 @@ impl FileInfoClient {
         received
     }
 
-    pub(super) fn name(&self, executable: &str) -> Option<&str> {
-        self.names.get(executable).map(String::as_str)
+    pub(super) fn name(&self, path: &ExecutablePath) -> Option<&str> {
+        self.names.get(path).map(String::as_str)
     }
 
-    pub(super) fn names(&self) -> &BTreeMap<String, String> {
+    pub(super) fn names(&self) -> &BTreeMap<ExecutablePath, String> {
         &self.names
     }
 }
@@ -221,17 +259,16 @@ fn serve(
 ) {
     for request in received {
         let reply = match request {
-            Request::Name(file) => {
-                let name = reader.display_name(&file.path);
+            Request::Name(path) => {
+                let name = reader.display_name(path.as_path());
                 tracing::debug!(
-                    executable = %file.executable,
-                    path = %file.path.display(),
+                    path = path.as_str(),
                     name = name.as_deref(),
                     "display name read"
                 );
-                Reply::Name(file.executable, name)
+                Reply::Name(path, name)
             }
-            Request::Icon(request) => {
+            Request::Icon(path, request) => {
                 let read = read_icons(&request, reader);
                 tracing::debug!(
                     executable = %request.file.executable,
@@ -244,7 +281,7 @@ fn serve(
                     },
                     "icon checked"
                 );
-                Reply::Icon(request.file.executable, read)
+                Reply::Icon(path, read)
             }
             Request::Generic => Reply::Generic(read_generic(reader)),
         };
@@ -274,5 +311,42 @@ impl<F: Fn(&Path) -> Option<String> + Send + 'static> FileReader for Names<F> {
 
     fn generic_icon(&self, _pixels: u16) -> io::Result<Vec<u8>> {
         Err(io::ErrorKind::NotFound.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn pending_names_with_the_same_filename_are_read_and_returned_by_path() {
+        let (ready, received) = mpsc::channel();
+        let mut client = FileInfoClient::spawn(
+            Names(|path: &Path| Some(path.display().to_string())),
+            move || {
+                let _sent = ready.send(());
+            },
+        )
+        .expect("worker");
+        let a = ExecutablePath::new(r"C:\A\browser.exe").expect("A");
+        let b = ExecutablePath::new(r"C:\B\browser.exe").expect("B");
+        client.request("browser.exe", a.as_path());
+        client.request("browser.exe", b.as_path());
+        for _ in 0..3 {
+            received
+                .recv_timeout(Duration::from_secs(5))
+                .expect("generic and two name replies");
+        }
+        let replies = client.receive();
+        assert_eq!(
+            replies.names,
+            [
+                (a.clone(), r"C:\A\browser.exe".into()),
+                (b.clone(), r"C:\B\browser.exe".into())
+            ]
+        );
+        assert_eq!(client.name(&a), Some(r"C:\A\browser.exe"));
+        assert_eq!(client.name(&b), Some(r"C:\B\browser.exe"));
     }
 }

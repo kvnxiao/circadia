@@ -250,12 +250,12 @@ entry-title-detail =
         [yes] { $executable } · Title matches
        *[no] { $executable } · Title contains
     }
-entry-title-name = Window title condition for { $name }
-title-dialog-title = Match window titles
+entry-title-name = Match conditions for { $name }
+title-dialog-title = Match conditions
 title-dialog-description =
     { $regex ->
-        [yes] Limit this entry to windows whose title matches this pattern. Leave it empty to match every window of { $executable }.
-       *[no] Limit this entry to windows whose title contains this text. Leave it empty to match every window of { $executable }.
+        [yes] Limit this entry to windows whose title matches this pattern. Leave it empty to remove the window-title condition.
+       *[no] Limit this entry to windows whose title contains this text. Leave it empty to remove the window-title condition.
     }
 title-dialog-field =
     { $regex ->
@@ -290,10 +290,10 @@ dialog-exclude-description = Pick from apps you used recently, or browse for any
 dialog-recent = Recently focused
 dialog-all-listed = Every recent app is already on your list.
 dialog-file-title = Choose an app file
-dialog-file-description = Matched by file name, such as game.exe, in any folder.
+dialog-file-description = Match this file name in any folder, or choose only this installation.
 dialog-browse = Browse
 dialog-file-types = Apps (*.exe)
-dialog-already-listed = { $executable } is already on your list. To match several window titles, use a regular expression such as minecraft|terraria in its window title condition.
+dialog-already-listed = This rule for { $executable } is already on your list. Change “Only this installation” to add a different installation, or edit the existing rule. To match several window titles, use a regular expression such as minecraft|terraria.
 dialog-fixed = { $executable } is always excluded from automatic suppression, so it can't be added to either list.
 dialog-add =
     { $count ->
@@ -529,3 +529,11 @@ action-quit = Quit Circadia
 
 status-saving-paused = Some settings are invalid; changes are not saved until they are fixed.
 status-write-failed = Changes are running but not saved.
+entry-path-invalid = Choose an absolute executable path with valid folder and file names.
+entry-path-filename = The selected executable must have the same file name as this rule.
+installation-only = Only this installation
+tray-installation = { $app } — { $folder }
+installation-browse = Browse…
+installation-unknown = Choose this installation's executable file before saving.
+dialog-scope-duplicate = A rule for this filename and installation is already selected or on the list. Change “Only this installation” to add a different rule.
+recent-multiple-rules = Multiple rules cover this installation. Edit them in the rule list.

@@ -251,7 +251,11 @@ fn visit(
     automation.invoke(
         settings,
         process,
-        &automation_id::title(&automation_id::suppression_entry(0)),
+        &automation_id::title(&automation_id::rule(
+            circadia::Field::Suppression,
+            &circadia::AppEntry::new("javaw.exe", ""),
+            0,
+        )),
     )?;
     dialog(
         automation,
@@ -500,15 +504,15 @@ fn tray(automation: &Automation, process: u32, inspection: &mut Inspection) -> i
     crate::tray::click(settings)
 }
 
-struct Inspection {
-    directory: PathBuf,
+pub(super) struct Inspection {
+    pub(super) directory: PathBuf,
     views: usize,
     texts: BTreeSet<String>,
-    findings: BTreeSet<String>,
+    pub(super) findings: BTreeSet<String>,
 }
 
 impl Inspection {
-    fn new() -> io::Result<Self> {
+    pub(super) fn new() -> io::Result<Self> {
         let directory = tempfile::Builder::new()
             .prefix("translation-100-")
             .tempdir_in("target")?
@@ -527,7 +531,7 @@ impl Inspection {
         })
     }
 
-    fn page(
+    pub(super) fn page(
         &mut self,
         automation: &Automation,
         window: &HWND,
@@ -542,7 +546,7 @@ impl Inspection {
         self.traverse(automation, window, process, place, scroll.as_ref())
     }
 
-    fn dialog(
+    pub(super) fn dialog(
         &mut self,
         automation: &Automation,
         window: &HWND,
@@ -607,7 +611,7 @@ impl Inspection {
         )))
     }
 
-    fn snapshot(
+    pub(super) fn snapshot(
         &mut self,
         window: &HWND,
         process: u32,
@@ -642,7 +646,7 @@ impl Inspection {
         Ok(())
     }
 
-    fn finish(&self) -> io::Result<()> {
+    pub(super) fn finish(&self) -> io::Result<()> {
         fs_err::write(
             self.directory.join("result.txt"),
             format!(
@@ -787,6 +791,11 @@ fn classify(name: &str, values: &BTreeSet<String>) -> Class {
         .chars()
         .filter(|character| !matches!(*character, ISOLATE | END_ISOLATE))
         .collect();
+    let plain = plain
+        .lines()
+        .filter(|line| !Path::new(line).is_absolute())
+        .collect::<Vec<_>>()
+        .join("\n");
     let plain = plain.trim();
     if plain.is_empty() || values.contains(plain) || exempt(plain) {
         return Class::Exempt;
@@ -821,7 +830,7 @@ fn exempt(text: &str) -> bool {
         && text
             .split(|character: char| !character.is_alphabetic())
             .all(|word| word.chars().count() <= 2);
-    executable || number
+    executable || number || Path::new(text).is_absolute()
 }
 
 fn isolated(name: &str) -> Vec<String> {
@@ -895,6 +904,10 @@ mod tests {
     #[test_case("[Ŝéţţîñĝš] Minimum1200", Class::Untranslated ; "English text after pseudo-locale text")]
     #[test_case("[Ŵåķé \u{2068}[Ţîɱé]\u{2069} !!]", Class::Translated ; "nested pseudo-locale value")]
     #[test_case("Not a.exe", Class::Untranslated ; "sentence ending in exe")]
+    #[test_case(r"C:\Program Files\Installation A", Class::Exempt ; "installation folder")]
+    #[test_case(r"C:\Program Files\Installation A\game.exe", Class::Exempt ; "installation path")]
+    #[test_case("game.exe\nC:\\Program Files\\Installation A", Class::Exempt ; "filename and installation folder")]
+    #[test_case("Settings\nC:\\Program Files\\Installation A", Class::Untranslated ; "English followed by installation folder")]
     fn text_is_classified(name: &str, class: Class) {
         assert_eq!(classify(name, &BTreeSet::new()), class);
     }

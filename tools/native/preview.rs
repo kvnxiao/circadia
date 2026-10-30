@@ -170,7 +170,13 @@ fn automatic_suppression(
     focus(automation, &focused, fixture.id())?;
     focus(automation, settings, process)?;
     show_page(automation, settings, process, automation_id::NAV_APPS)?;
-    let add = automation_id::recent_add(&filename);
+    let path = circadia::ExecutablePath::new(
+        executable
+            .to_str()
+            .ok_or_else(|| io::Error::other("harness path is not Unicode"))?,
+    )
+    .map_err(io::Error::other)?;
+    let add = automation_id::recent_add(path.as_str());
     wait("focused fixture appears in Recently focused", || {
         automation.enabled(settings, process, &add)
     })?;
@@ -214,7 +220,7 @@ fn automatic_suppression(
     wait_temperature(native, 3000)?;
     drop(fixture);
     show_page(automation, settings, process, automation_id::NAV_APPS)?;
-    let remove = automation_id::recent_remove(&filename);
+    let remove = automation_id::recent_remove(path.as_str());
     wait("listed fixture offers Remove", || {
         automation.enabled(settings, process, &remove)
     })?;

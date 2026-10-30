@@ -47,6 +47,9 @@ native-identity *args: build-self-contained
 native-translation: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- --language qps-Ploc --translation target/debug/circadia.exe
 
+native-paths: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --language qps-Ploc --paths target/debug/circadia.exe
+
 native-deployment executable:
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- --deployment "{{executable}}"
 

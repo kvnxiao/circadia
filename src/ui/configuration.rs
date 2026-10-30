@@ -453,11 +453,11 @@ impl Configuration {
         &mut self,
         list: Field,
         index: usize,
-        executable: &str,
+        expected: &AppEntry,
     ) -> Option<Arc<Config>> {
         let mut entries = self.accepted.as_ref()?.entries(list).to_vec();
         let entry = entries.get(index)?;
-        if entry.executable != executable && entry.file_name().as_deref() != Some(executable) {
+        if !entry.same_rule(expected) {
             return None;
         }
         entries.remove(index);
@@ -466,65 +466,99 @@ impl Configuration {
         changed
     }
 
-    pub(crate) fn toggle(&mut self, entry: AppEntry, included: bool) -> Option<Arc<Config>> {
+    pub(crate) fn toggle(
+        &mut self,
+        entry: AppEntry,
+        path: &crate::ExecutablePath,
+        add: bool,
+    ) -> Option<Arc<Config>> {
         if self.toggles() != Toggles::Available {
             return None;
         }
-        if included {
+        let executable = entry.file_name()?;
+        let membership = self.accepted.as_ref()?.classify_path(
+            &executable,
+            Some(path),
+            None,
+            &self.running_executable,
+        );
+        if membership.excluded {
+            return None;
+        }
+        if add && !membership.included() {
             return self.add(Field::Suppression, vec![entry]).ok().flatten();
         }
-        let executable = entry.file_name()?;
+        if add || !membership.removable {
+            return None;
+        }
         let index = self
             .accepted
             .as_ref()?
             .entries(Field::Suppression)
             .iter()
             .enumerate()
-            .find(|(_, listed)| listed.file_name().as_deref() == Some(executable.as_str()))
-            .filter(|(_, listed)| listed.title.is_empty())
+            .find(|(_, listed)| listed.same_rule(&entry))
             .map(|(index, _)| index)?;
-        self.remove(Field::Suppression, index, &executable)
+        self.remove(Field::Suppression, index, &entry)
     }
 
     pub(crate) fn set_title(
         &mut self,
         list: Field,
         index: usize,
-        executable: &str,
+        expected: &AppEntry,
         title: String,
         regex: bool,
+        path: Option<String>,
     ) -> Option<Arc<Config>> {
         if !crate::valid_title(&title, regex) {
             return None;
         }
         let mut entries = self.accepted.as_ref()?.entries(list).to_vec();
         let entry = entries.get_mut(index)?;
-        if entry.executable != executable && entry.file_name().as_deref() != Some(executable) {
+        if !entry.same_rule(expected) {
             return None;
         }
-        *entry = std::mem::take(entry).with_title(title, regex);
+        let mut replacement = entry.clone().with_title(title, regex).with_path(path);
+        if entry.restriction() != replacement.restriction() {
+            replacement.name.clone_from(&replacement.executable);
+        }
+        if replacement.restriction().is_err()
+            || entries.iter().enumerate().any(|(position, other)| {
+                position != index && other.scope().is_some() && other.scope() == replacement.scope()
+            })
+        {
+            return None;
+        }
+        *entries.get_mut(index)? = replacement;
         let changed = self.edit(vec![(list, FieldValue::Apps(entries))]);
         self.write();
         changed
     }
 
-    pub(crate) fn record_name(&mut self, executable: &str, name: &str) -> Option<Arc<Config>> {
+    pub(crate) fn record_names(
+        &mut self,
+        names: &BTreeMap<crate::ExecutablePath, String>,
+        sources: &BTreeMap<crate::ExecutableName, crate::ExecutablePath>,
+    ) -> Option<Arc<Config>> {
         let accepted = self.accepted.as_ref()?;
-        let stale = |entry: &AppEntry| {
-            entry.file_name().as_deref() == Some(executable) && entry.name != name
-        };
-        let edits: Vec<(Field, FieldValue)> = [Field::Suppression, Field::Exclusions]
-            .into_iter()
-            .filter(|list| accepted.entries(*list).iter().any(stale))
-            .map(|list| {
-                let mut entries = accepted.entries(list).to_vec();
-                entries
-                    .iter_mut()
-                    .filter(|entry| stale(entry))
-                    .for_each(|entry| name.clone_into(&mut entry.name));
-                (list, FieldValue::Apps(entries))
-            })
-            .collect();
+        let mut edits = Vec::new();
+        for list in [Field::Suppression, Field::Exclusions] {
+            let mut entries = accepted.entries(list).to_vec();
+            let mut changed = false;
+            let replacements = entries.iter_mut().filter_map(|entry| {
+                let path = super::icon_cache::source(entry, sources)?;
+                let name = names.get(&path)?;
+                (entry.name != *name).then_some((entry, name))
+            });
+            for (entry, name) in replacements {
+                entry.name.clone_from(name);
+                changed = true;
+            }
+            if changed {
+                edits.push((list, FieldValue::Apps(entries)));
+            }
+        }
         if edits.is_empty() {
             return None;
         }

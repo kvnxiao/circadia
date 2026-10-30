@@ -57,7 +57,7 @@ windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "3b6be
 windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", default-features = false, features = ["reactor"] }
 windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
 windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-sys = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", features = ["datetimeapi", "errhandlingapi", "fileapi", "libloaderapi", "minwinbase", "minwindef", "ntstatus", "powerbase", "processthreadsapi", "realtimeapiset", "shellapi", "shlobj_core", "synchapi", "timezoneapi", "verrsrc", "wdm", "winbase", "windef", "winerror", "winevt", "wingdi", "winnls", "winnt", "winuser", "winver", "wtsapi32"] }
+windows-sys = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", features = ["datetimeapi", "errhandlingapi", "fileapi", "libloaderapi", "minwinbase", "minwindef", "ntstatus", "powerbase", "processthreadsapi", "realtimeapiset", "shellapi", "shlobj_core", "stringapiset", "synchapi", "timezoneapi", "verrsrc", "wdm", "winbase", "windef", "winerror", "winevt", "wingdi", "winnls", "winnt", "winuser", "winver", "wtsapi32"] }
 winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
 
 [build-dependencies]

@@ -7,6 +7,7 @@ observed-in:
   - f.lux developer forum discussions retrieved 2026-10-29
   - Microsoft Windows file-naming documentation retrieved 2026-10-30
   - Microsoft CompareStringOrdinal documentation retrieved 2026-10-30
+  - Circadia installation-restriction implementation based on 13d8e66, checked on Windows 11 x64 at 96 DPI on 2026-10-30
 recheck-when: Foreground identity, executable selection, or f.lux matching behavior changes.
 ---
 
@@ -53,9 +54,27 @@ Use filename plus optional path as the identity of a saved rule. Separate paths 
 
 Retain the path in foreground history and asynchronous metadata replies. Read and cache each installation's icon and display name independently. A late reply for one path must not update a different installation with the same filename.
 
-## Remaining implementation checks
+## Implementation checks, 2026-10-30
 
-The evidence supports the interaction and its access requirements. Implementation still needs tests for malformed paths, loaded duplicates, schema rejection, and overlapping scopes. Native acceptance must exercise two same-name executables in different folders and a moved executable. It must also invoke a control after its underlying list changes and verify that the action still targets the original installation. Folder wrapping and the extra scope controls need the same narrow-window and expanded-text checks as other app rows. f.lux's current matching algorithm remains undocumented in the inspected sources and is not an implementation dependency.
+**Observed in automated checks of the implementation based on `13d8e66`:** path tests cover ordinary and extended drive/UNC forms, Unicode case comparison, malformed restrictions, and distinct normalized scopes. Configuration tests reject schema 2, retain invalid path fields as nonmatching rules, and check overlapping inclusions and exclusions. Metadata tests keep names and icons separate by path across delayed replies, cache reloads, missing files, and source changes. Invalid title expressions do not match. Their valid filename and path conditions still count toward installation coverage, which determines listed status and whether a recent-app or tray action can remove one unambiguous rule.
+
+**Observed through Windows ordinal comparison on this host:** `Σ.exe` and `σ.exe` compare equal, while `Σ.exe` and `ς.exe` differ. `İ.exe` and `i` followed by U+0307 and `.exe` also differ. Unicode lowercasing would merge the latter pair. Filename identities therefore retain non-ASCII spelling and use the same Windows comparator as paths; ASCII letters are lowercased for serialization. These observations concern ordinal filename comparison, not the Unicode folding used for window-title conditions.
+
+Cache failure checks retain an old index while preventing its replacement and permitting PNG writes. Pruning an installation, loading another, and restarting cannot assign the second installation's icon to the first. The checks also cover an index whose PNGs are missing. Name checks use the filename while a new installation's result is unavailable, preserve this fallback after restart, and discard the old label when a restriction changes to a different path.
+
+**Observed through `just native-paths`:** two copies of one executable in separate temporary folders received actual foreground focus. A selected installation retained its native control and keyboard focus while recent history reordered; invoking Add then saved that installation's path. The run also checked:
+
+- Filename-only and two distinct path-restricted rules coexisting on the suppression list, whose foreground matches request a temporary 6500 K override when management is on.
+- A path-restricted exclusion overriding the matching installation without disabling the other installation.
+- Duplicate restrictions keeping Save unavailable, and Cancel preserving the saved configuration.
+- Browse selecting a replacement path after a fixture moved; configuration matching rejected the new location until that edit was saved.
+- Tray items identifying both folders and remaining unavailable for overlapping or excluded rules.
+
+These checks used a debug build with bundled Windows App SDK 2.6.4 and Windows Reactor at `3b6bea553787d9419b3fdd29e2c5436666d7325b`, on Windows 11 x64 at 96 DPI. Night Light management stayed off. Classification checks used saved configuration and the public matching API; this run does not establish native temperature output or optical display behavior.
+
+The native run captured 65 screenshots at 640×480, 799×600, 800×600, and 1184×992 client sizes. The debug pseudo-locale uses accented, bracketed text expanded by at least 40% to test layout; release builds exclude its generator. Automated checks reported no untranslated application text or overflowing text bounds. Visual inspection confirmed wrapping recent-app explanations and complete actions at all four sizes. Both lists' Add dialogs and condition editors retain complete controls through scrolling, including long paths and a long window-title suggestion. Fixture processes and the test application exited after each completed run.
+
+The [native-check instructions](../../tools/README.md#installation-restrictions) describe reproduction and desktop-input effects. Higher display scales, other themes, representative third-party applications, and actual Narrator delivery remain separate validation. f.lux's current matching algorithm remains undocumented in the inspected sources and is not an implementation dependency.
 
 ## Sources
 

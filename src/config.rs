@@ -1,9 +1,10 @@
+use crate::ExecutablePath;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 const MAX_EXACT_INTEGER: i64 = 1 << 53;
 
 /// Store manually entered or explicitly acquired solar coordinates.
@@ -24,7 +25,7 @@ pub struct Coordinates {
 ///   `regex` is.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct AppEntry {
-    /// Executable file name, lowercase when it is a valid file name.
+    /// Executable file name, with ASCII characters lowercased when valid.
     pub executable: String,
     /// Display name read from the executable's version information.
     pub name: String,
@@ -32,10 +33,15 @@ pub struct AppEntry {
     pub title: String,
     /// Whether `title` is a regular expression instead of literal text.
     pub regex: bool,
+    /// Optional absolute executable installation restriction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     #[serde(skip)]
     wrong_type: bool,
     #[serde(skip)]
     wrong_title: bool,
+    #[serde(skip)]
+    wrong_path: Option<crate::InvalidExecutablePath>,
 }
 
 impl AppEntry {
@@ -47,8 +53,10 @@ impl AppEntry {
             name: name.into(),
             title: String::new(),
             regex: false,
+            path: None,
             wrong_type: false,
             wrong_title: false,
+            wrong_path: None,
         }
     }
 
@@ -60,6 +68,72 @@ impl AppEntry {
         self.regex = regex;
         self.wrong_title = false;
         self
+    }
+
+    /// Replace or explicitly clear the installation restriction.
+    #[must_use]
+    pub fn with_path(mut self, path: Option<String>) -> Self {
+        self.path = path;
+        self.wrong_path = None;
+        self
+    }
+
+    /// Return the validated installation restriction.
+    ///
+    /// # Errors
+    ///
+    /// Reject malformed paths and filenames different from the rule's filename.
+    pub fn restriction(&self) -> Result<Option<ExecutablePath>, EntryProblem> {
+        if self.wrong_path.is_some() {
+            return Err(EntryProblem::Path);
+        }
+        self.path
+            .as_ref()
+            .map(|path| {
+                let path = ExecutablePath::new(path).map_err(|_error| EntryProblem::Path)?;
+                if !self
+                    .file_name()
+                    .is_some_and(|name| crate::same_executable(path.file_name(), &name))
+                {
+                    return Err(EntryProblem::PathFilename);
+                }
+                Ok(path)
+            })
+            .transpose()
+    }
+
+    /// Return the valid filename and optional installation that identify a
+    /// rule.
+    pub fn scope(&self) -> Option<(crate::ExecutableName, Option<ExecutablePath>)> {
+        Some((
+            crate::ExecutableName::new(&self.file_name()?).ok()?,
+            self.restriction().ok()?,
+        ))
+    }
+
+    /// Compare a captured mutation target without its refreshable display name.
+    pub fn same_rule(&self, other: &Self) -> bool {
+        let scope = match (self.scope(), other.scope()) {
+            (Some(left), Some(right)) => left == right,
+            _ => self.executable == other.executable && self.path == other.path,
+        };
+        scope
+            && self.title == other.title
+            && self.regex == other.regex
+            && self.wrong_type == other.wrong_type
+            && self.wrong_title == other.wrong_title
+            && self.wrong_path == other.wrong_path
+    }
+
+    /// Check filename and installation coverage independently of title text.
+    pub fn covers(&self, executable: &str, path: Option<&ExecutablePath>) -> bool {
+        self.file_name()
+            .is_some_and(|name| crate::same_executable(&name, executable))
+            && self.restriction().is_ok_and(|restriction| {
+                restriction
+                    .as_ref()
+                    .is_none_or(|wanted| Some(wanted) == path)
+            })
     }
 
     /// Return the normalized file name that the entry matches, or none for an
@@ -96,7 +170,11 @@ pub enum EntryProblem {
     /// The title condition is a regular expression that does not compile, or
     /// the title or its option has the wrong type; the entry matches nothing.
     Expression,
-    /// Another entry on the same list has the same file name.
+    /// The installation path is malformed or has the wrong type.
+    Path,
+    /// The installation path names another executable.
+    PathFilename,
+    /// Another entry on the same list has the same filename and restriction.
     Duplicate,
 }
 
@@ -154,8 +232,11 @@ pub fn valid_title(title: &str, regex: bool) -> bool {
 pub struct Membership {
     /// Some suppression entry matches the window and no exclusion does.
     pub matches: bool,
-    /// A suppression entry has the window's file name.
-    pub included: bool,
+    /// Number of suppression rules whose filename and path cover this
+    /// installation.
+    pub covering: usize,
+    /// Exactly one covering rule is filename-only and has no title condition.
+    pub removable: bool,
     /// Title text of the first suppression entry with the file name, empty
     /// when that entry has no title condition or there is no such entry.
     pub condition: String,
@@ -166,11 +247,18 @@ pub struct Membership {
 
 pub(crate) const SHARED_HOST: &str = "ApplicationFrameHost.exe";
 
+impl Membership {
+    /// Report whether at least one suppression rule covers the installation.
+    pub fn included(&self) -> bool {
+        self.covering != 0
+    }
+}
+
 /// Report whether an executable file name is a fixed exclusion:
 /// `ApplicationFrameHost.exe` or the running executable's file name.
 pub fn is_fixed_exclusion(executable: &str, running_executable: &str) -> bool {
-    executable.eq_ignore_ascii_case(SHARED_HOST)
-        || executable.to_lowercase() == running_executable.to_lowercase()
+    crate::same_executable(executable, SHARED_HOST)
+        || crate::same_executable(executable, running_executable)
 }
 
 /// Collect settings before validating their complete state.
@@ -901,34 +989,77 @@ impl Config {
         title: Option<&str>,
         running_executable: &str,
     ) -> Membership {
-        let executable = executable.to_lowercase();
+        self.classify_path(executable, None, title, running_executable)
+    }
+
+    /// Classify filename, installation and title under both lists and fixed
+    /// exclusions.
+    pub fn classify_path(
+        &self,
+        executable: &str,
+        path: Option<&ExecutablePath>,
+        title: Option<&str>,
+        running_executable: &str,
+    ) -> Membership {
         let named = |list: Field| {
             self.entries(list)
                 .iter()
                 .zip(self.titles(list))
-                .filter(|(entry, _)| entry.file_name().as_deref() == Some(executable.as_str()))
+                .filter(|(entry, _)| entry.covers(executable, path))
         };
         let matching = |list: Field| named(list).any(|(_, matcher)| matcher.matches(title));
-        let fixed = is_fixed_exclusion(&executable, running_executable);
-        let first = named(Field::Suppression).next().map(|(entry, _)| entry);
+        let fixed = is_fixed_exclusion(executable, running_executable);
+        let covering = named(Field::Suppression).count();
+        let first = named(Field::Suppression).next();
         Membership {
             matches: !fixed && matching(Field::Suppression) && !matching(Field::Exclusions),
-            included: first.is_some(),
-            condition: first.map(|entry| entry.title.clone()).unwrap_or_default(),
-            excluded: fixed || named(Field::Exclusions).any(|(entry, _)| entry.title.is_empty()),
+            covering,
+            removable: covering == 1
+                && first.is_some_and(|(entry, matcher)| {
+                    entry.path.is_none() && matches!(matcher, TitleMatcher::Any)
+                }),
+            condition: first
+                .filter(|_| covering == 1)
+                .map(|(entry, _)| entry.title.clone())
+                .unwrap_or_default(),
+            excluded: fixed
+                || named(Field::Exclusions)
+                    .any(|(_, matcher)| matches!(matcher, TitleMatcher::Any)),
         }
     }
 
     /// Report whether an entry with a title condition on either list has the
     /// executable file name.
     pub fn has_title_condition(&self, executable: &str) -> bool {
-        let executable = executable.to_lowercase();
+        self.has_path_title_condition(executable, None)
+    }
+
+    /// Report whether a title condition covers this filename and installation.
+    pub fn has_path_title_condition(
+        &self,
+        executable: &str,
+        path: Option<&ExecutablePath>,
+    ) -> bool {
         [Field::Suppression, Field::Exclusions]
             .into_iter()
             .flat_map(|list| self.entries(list))
-            .any(|entry| {
-                !entry.title.is_empty() && entry.file_name().as_deref() == Some(executable.as_str())
-            })
+            .any(|entry| !entry.title.is_empty() && entry.covers(executable, path))
+    }
+
+    /// Report whether a title-free exclusion covers the rule's complete scope.
+    pub fn inactive(&self, entry: &AppEntry, running_executable: &str) -> bool {
+        let Some((name, path)) = entry.scope() else {
+            return false;
+        };
+        is_fixed_exclusion(name.as_str(), running_executable)
+            || self
+                .entries(Field::Exclusions)
+                .iter()
+                .zip(self.titles(Field::Exclusions))
+                .any(|(excluded, matcher)| {
+                    matches!(matcher, TitleMatcher::Any)
+                        && excluded.covers(name.as_str(), path.as_ref())
+                })
     }
 
     /// Return the entries of the suppression or exclusion list.
@@ -947,22 +1078,23 @@ impl Config {
     }
 
     /// Mark each entry of a list that is invalid, that has a regular
-    /// expression that does not compile, or that shares its file name with
-    /// another entry, compared case-insensitively.
+    /// expression that does not compile, or that shares its filename and
+    /// installation restriction with another entry.
     pub fn entry_problems(&self, list: Field) -> Vec<Option<EntryProblem>> {
         let entries = self.entries(list);
         entries
             .iter()
             .zip(self.titles(list))
             .map(|(entry, matcher)| {
-                let name = entry.executable.to_lowercase();
                 if entry.file_name().is_none() {
                     Some(EntryProblem::Invalid)
+                } else if let Err(problem) = entry.restriction() {
+                    Some(problem)
                 } else if matches!(matcher, TitleMatcher::Invalid) {
                     Some(EntryProblem::Expression)
                 } else if entries
                     .iter()
-                    .filter(|other| other.executable.to_lowercase() == name)
+                    .filter(|other| other.scope() == entry.scope())
                     .nth(1)
                     .is_some()
                 {
@@ -992,7 +1124,7 @@ impl Config {
     ///   executable file name.
     /// - [`FieldErrorKind::FixedExclusion`] for a fixed exclusion.
     /// - [`FieldErrorKind::AlreadyListed`] when the list, including an entry
-    ///   added before it, has the same file name.
+    ///   added before it, has the same filename and installation restriction.
     pub fn add_entries(
         &self,
         list: Field,
@@ -1002,12 +1134,15 @@ impl Config {
         let mut entries = self.entries(list).to_vec();
         for mut entry in added {
             let name = entry.file_name().ok_or(FieldErrorKind::Executable)?;
+            entry
+                .restriction()
+                .map_err(|_error| FieldErrorKind::Executable)?;
             if is_fixed_exclusion(&name, running_executable) {
                 return Err(FieldErrorKind::FixedExclusion);
             }
             if entries
                 .iter()
-                .any(|existing| existing.executable.to_lowercase() == name)
+                .any(|existing| existing.scope() == entry.scope())
             {
                 return Err(FieldErrorKind::AlreadyListed);
             }
@@ -1050,14 +1185,14 @@ fn format_clock(minutes: u16) -> String {
     format!("{:02}:{:02}", minutes / 60 % 24, minutes % 60)
 }
 
-/// Normalize an executable filename for case-insensitive matching.
+/// Validate an executable filename and lowercase its ASCII characters.
 ///
 /// # Errors
 ///
 /// Reject paths, non-executable extensions, and characters forbidden in Windows
 /// filenames.
 pub fn normalize_executable(name: &str) -> Result<String, ValidationError> {
-    let normalized = name.to_lowercase();
+    let normalized = name.to_ascii_lowercase();
     if normalized.len() <= 4
         || !normalized
             .rsplit_once('.')
@@ -1398,10 +1533,21 @@ fn decode_entry(
         }
         None => false,
     };
+    let mut wrong_path = false;
+    let path = match table.get("path") {
+        None => None,
+        Some(toml::Value::String(path)) => Some(path.clone()),
+        Some(other) => {
+            wrong_path = true;
+            Some(other.to_string())
+        }
+    };
     for key in table.keys() {
         let path = format!("{}.{key}", list.key());
-        if !matches!(key.as_str(), "executable" | "name" | "title" | "regex")
-            && !unknown.contains(&path)
+        if !matches!(
+            key.as_str(),
+            "executable" | "name" | "title" | "regex" | "path"
+        ) && !unknown.contains(&path)
         {
             unknown.push(path);
         }
@@ -1417,8 +1563,10 @@ fn decode_entry(
         name: String::new(),
         title,
         regex,
+        path,
         wrong_type,
         wrong_title,
+        wrong_path: wrong_path.then_some(crate::InvalidExecutablePath),
     };
     entry.normalize();
     entry.name = name.unwrap_or_else(|| entry.executable.clone());
@@ -1449,7 +1597,7 @@ mod tests {
         assert_eq!(config.wake_minutes(), 420);
         assert_eq!(config.bedtime_minutes(), 1380);
         let input = config.input();
-        assert_eq!(input.schema_version, 2);
+        assert_eq!(input.schema_version, 3);
         assert_eq!(
             (
                 input.daytime_kelvin,
@@ -1855,8 +2003,8 @@ mod tests {
             [Some(EntryProblem::Invalid)]
         );
         assert!(config.has_entry_problems());
-        assert!(!config.classify(name, None, "circadia.exe").included);
-        assert!(!config.classify("game.exe", None, "circadia.exe").included);
+        assert!(!config.classify(name, None, "circadia.exe").included());
+        assert!(!config.classify("game.exe", None, "circadia.exe").included());
     }
 
     #[test]
@@ -1865,7 +2013,7 @@ mod tests {
             schema_version: 1,
             ..ConfigInput::default()
         };
-        assert_eq!(input.validate().expect("valid").input().schema_version, 2);
+        assert_eq!(input.validate().expect("valid").input().schema_version, 3);
     }
 
     #[test]
@@ -1892,7 +2040,7 @@ mod tests {
         assert!(
             config
                 .classify("NIGHT-COLORS.EXE", None, "circadia.exe")
-                .included
+                .included()
         );
         assert!(
             config
@@ -1970,6 +2118,247 @@ mod tests {
             load(&lines.join("\n"), None),
             Err(Unusable::Syntax { line: Some(12) })
         );
+    }
+
+    #[test]
+    fn filename_only_development_schema_is_rejected() {
+        let file = file(|table| set(table, "schema_version", 2));
+        assert_eq!(load(&file, None), Err(Unusable::Version));
+    }
+
+    #[test]
+    fn path_scopes_distinguish_global_and_installations_and_mark_normalized_duplicates() {
+        let global = AppEntry::new("browser.exe", "Browser");
+        let a = global.clone().with_path(Some(r"C:\A\browser.exe".into()));
+        let b = global.clone().with_path(Some(r"C:\B\browser.exe".into()));
+        let config = config(ConfigInput {
+            suppression: vec![global.clone(), a.clone(), b.clone()],
+            ..ConfigInput::default()
+        });
+        assert_eq!(
+            config.entry_problems(Field::Suppression),
+            [None, None, None]
+        );
+        assert_eq!(
+            config.add_entries(
+                Field::Suppression,
+                [a.clone()
+                    .with_path(Some(r"\\?\c:\A\dir\..\BROWSER.EXE".into()))],
+                "circadia.exe"
+            ),
+            Err(FieldErrorKind::AlreadyListed)
+        );
+        let input = ConfigInput {
+            suppression: vec![a.clone(), a.with_path(Some("c:/a/BROWSER.exe".into()))],
+            ..ConfigInput::default()
+        };
+        let duplicate = input.validate().expect("usable marked entries");
+        assert_eq!(
+            duplicate.entry_problems(Field::Suppression),
+            [Some(EntryProblem::Duplicate), Some(EntryProblem::Duplicate)]
+        );
+        let serialized = toml::to_string(&config.input()).expect("serialize");
+        let (loaded, report) = load(&serialized, None).expect("schema 3");
+        assert_eq!(loaded, config);
+        assert_eq!(report.missing_entry_keys, Vec::<String>::new());
+        assert_eq!(serialized.matches("path = ").count(), 2);
+    }
+
+    #[test]
+    fn restriction_matching_and_exclusion_coverage_use_the_complete_scope() {
+        let global = AppEntry::new("browser.exe", "Browser");
+        let a = global.clone().with_path(Some(r"C:\A\browser.exe".into()));
+        let b = global.clone().with_path(Some(r"C:\B\browser.exe".into()));
+        let pa = ExecutablePath::new(r"c:/a/BROWSER.EXE").expect("A path");
+        let pb = ExecutablePath::new(r"C:\B\browser.exe").expect("B path");
+        let restricted = config(ConfigInput {
+            suppression: vec![a.clone()],
+            ..ConfigInput::default()
+        });
+        assert!(
+            restricted
+                .classify_path("browser.exe", Some(&pa), None, "circadia.exe")
+                .matches
+        );
+        assert!(
+            !restricted
+                .classify_path("browser.exe", Some(&pb), None, "circadia.exe")
+                .matches
+        );
+        assert!(
+            !restricted
+                .classify("browser.exe", None, "circadia.exe")
+                .matches
+        );
+        let excluded = config(ConfigInput {
+            suppression: vec![global.clone(), a.clone(), b.clone()],
+            exclusions: vec![a.clone()],
+            ..ConfigInput::default()
+        });
+        assert!(
+            !excluded
+                .classify_path("browser.exe", Some(&pa), None, "circadia.exe")
+                .matches
+        );
+        assert!(
+            excluded
+                .classify_path("browser.exe", Some(&pb), None, "circadia.exe")
+                .matches
+        );
+        assert!(!excluded.inactive(&global, "circadia.exe"));
+        assert!(excluded.inactive(&a, "circadia.exe"));
+        assert!(!excluded.inactive(&b, "circadia.exe"));
+        assert!(excluded.inactive(
+            &AppEntry::new("CIRCADIA.EXE", "Self").with_path(Some(r"C:\A\circadia.exe".into())),
+            "circadia.exe"
+        ));
+        let global_excluded = config(ConfigInput {
+            exclusions: vec![global.clone()],
+            ..ConfigInput::default()
+        });
+        assert!(global_excluded.inactive(&a, "circadia.exe"));
+        assert!(global_excluded.inactive(&global, "circadia.exe"));
+    }
+
+    #[test]
+    fn path_title_conditions_follow_only_the_covered_installation() {
+        let config = config(ConfigInput {
+            suppression: vec![
+                AppEntry::new("browser.exe", "Browser")
+                    .with_path(Some(r"C:\A\browser.exe".into()))
+                    .with_title("Work", false),
+            ],
+            ..ConfigInput::default()
+        });
+        let a = ExecutablePath::new(r"C:\A\browser.exe").expect("A path");
+        let b = ExecutablePath::new(r"C:\B\browser.exe").expect("B path");
+        assert!(config.has_path_title_condition("BROWSER.EXE", Some(&a)));
+        assert!(!config.has_path_title_condition("browser.exe", Some(&b)));
+        assert!(!config.has_title_condition("browser.exe"));
+        assert!(
+            config
+                .classify_path("browser.exe", Some(&a), Some("Work tab"), "circadia.exe")
+                .matches
+        );
+        assert!(
+            !config
+                .classify_path(
+                    "browser.exe",
+                    Some(&a),
+                    Some("Personal tab"),
+                    "circadia.exe"
+                )
+                .matches
+        );
+        let bad = AppEntry::new("browser.exe", "Browser").with_path(Some(r"C:\A\other.exe".into()));
+        assert_eq!(bad.restriction(), Err(EntryProblem::PathFilename));
+    }
+
+    #[test]
+    fn unicode_filename_normalization_agrees_with_its_original_restricted_path() {
+        for (name, path) in [
+            ("Éngine.exe", r"C:\Apps\Éngine.exe"),
+            ("İ.exe", r"C:\Apps\İ.exe"),
+        ] {
+            let entry = AppEntry::new(name, name).with_path(Some(path.into()));
+            let config = config(ConfigInput {
+                suppression: vec![entry],
+                ..ConfigInput::default()
+            });
+            let path = ExecutablePath::new(path).expect("valid Unicode filename");
+            assert_eq!(config.entry_problems(Field::Suppression), [None]);
+            assert!(
+                config
+                    .classify_path(name, Some(&path), None, "circadia.exe")
+                    .matches
+            );
+            assert!(
+                config
+                    .classify_path(
+                        &name.to_ascii_lowercase(),
+                        Some(&path),
+                        None,
+                        "circadia.exe"
+                    )
+                    .matches
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn ordinal_filename_identity_agrees_across_restrictions_duplicates_and_matching() {
+        let entry = AppEntry::new("Σ.exe", "Sigma").with_path(Some(r"C:\Apps\σ.exe".into()));
+        assert!(entry.restriction().is_ok());
+        let config = config(ConfigInput {
+            suppression: vec![entry],
+            ..ConfigInput::default()
+        });
+        let path = ExecutablePath::new(r"C:\Apps\σ.exe").expect("sigma path");
+        assert!(
+            config
+                .classify_path("σ.exe", Some(&path), None, "circadia.exe")
+                .matches
+        );
+        assert!(
+            !config
+                .classify_path("ς.exe", Some(&path), None, "circadia.exe")
+                .matches
+        );
+        assert_eq!(
+            config.add_entries(
+                Field::Suppression,
+                [AppEntry::new("σ.exe", "Duplicate").with_path(Some(r"C:\Apps\Σ.exe".into()))],
+                "circadia.exe"
+            ),
+            Err(FieldErrorKind::AlreadyListed)
+        );
+        let dotted = self::config(ConfigInput {
+            suppression: vec![AppEntry::new("İ.exe", "Dotted I")],
+            ..ConfigInput::default()
+        });
+        assert!(
+            !dotted
+                .classify("i\u{307}.exe", None, "circadia.exe")
+                .matches
+        );
+        assert!(
+            dotted
+                .add_entries(
+                    Field::Suppression,
+                    [AppEntry::new("i\u{307}.exe", "Combining dot")],
+                    "circadia.exe"
+                )
+                .is_ok()
+        );
+        assert_eq!(
+            AppEntry::new("i\u{307}.exe", "Combining dot")
+                .with_path(Some(r"C:\Apps\İ.exe".into()))
+                .restriction(),
+            Err(EntryProblem::PathFilename)
+        );
+    }
+
+    #[test]
+    fn invalid_path_never_becomes_an_unrestricted_rule() {
+        for path in ["".into(), "relative/game.exe".into(), 42.into()] {
+            let file = file(|table| {
+                set(
+                    table,
+                    "suppression",
+                    vec![entry_table(&[
+                        ("executable", "game.exe".into()),
+                        ("name", "Game".into()),
+                        ("title", "".into()),
+                        ("regex", false.into()),
+                        ("path", path),
+                    ])],
+                );
+            });
+            let (config, _) = load(&file, None).expect("current schema");
+            assert!(config.has_entry_problems());
+            assert!(!config.classify("game.exe", None, "circadia.exe").matches);
+        }
     }
 
     #[test]
@@ -2410,8 +2799,8 @@ mod tests {
             );
         });
         let (config, report) = load(&file, Some(&backup)).expect("usable file");
-        assert!(config.classify("vlc.exe", None, "circadia.exe").included);
-        assert!(!config.classify("game.exe", None, "circadia.exe").included);
+        assert!(config.classify("vlc.exe", None, "circadia.exe").included());
+        assert!(!config.classify("game.exe", None, "circadia.exe").included());
         assert_eq!(
             report.marks,
             BTreeMap::from([(
@@ -2420,7 +2809,7 @@ mod tests {
             )])
         );
         let (config, report) = load(&file, None).expect("usable file");
-        assert!(!config.classify("game.exe", None, "circadia.exe").included);
+        assert!(!config.classify("game.exe", None, "circadia.exe").included());
         assert_eq!(
             report
                 .marks
@@ -2444,7 +2833,7 @@ mod tests {
             );
         });
         let (config, report) = load(&file, None).expect("usable file");
-        assert!(config.classify("game.exe", None, "circadia.exe").included);
+        assert!(config.classify("game.exe", None, "circadia.exe").included());
         assert!(report.marks.is_empty(), "{:?}", report.marks);
         assert_eq!(report.unknown, ["suppression.color"]);
     }
@@ -2468,7 +2857,7 @@ mod tests {
             [Some(EntryProblem::Duplicate), Some(EntryProblem::Duplicate)]
         );
         assert!(config.has_entry_problems());
-        assert!(config.classify("game.exe", None, "circadia.exe").included);
+        assert!(config.classify("game.exe", None, "circadia.exe").included());
         for removed in 0..2 {
             let mut remaining = config.entries(Field::Suppression).to_vec();
             remaining.remove(removed);
@@ -2479,7 +2868,7 @@ mod tests {
             assert!(errors.is_empty(), "{errors:?}");
             assert_eq!(edited.entry_problems(Field::Suppression), [None]);
             assert!(!edited.has_entry_problems());
-            assert!(edited.classify("game.exe", None, "circadia.exe").included);
+            assert!(edited.classify("game.exe", None, "circadia.exe").included());
         }
     }
 
@@ -2503,7 +2892,7 @@ mod tests {
             config.entry_problems(Field::Suppression),
             [Some(EntryProblem::Invalid)]
         );
-        assert!(!config.classify("game.exe", None, "circadia.exe").included);
+        assert!(!config.classify("game.exe", None, "circadia.exe").included());
     }
 
     #[test]
@@ -2520,7 +2909,7 @@ mod tests {
             config.entry_problems(Field::Suppression),
             [Some(EntryProblem::Invalid)]
         );
-        assert!(!config.classify("game.exe", None, "circadia.exe").included);
+        assert!(!config.classify("game.exe", None, "circadia.exe").included());
     }
 
     #[test]
@@ -2538,7 +2927,7 @@ mod tests {
             config.entries(Field::Suppression),
             [AppEntry::new("game.exe", "Game")]
         );
-        assert!(config.classify("GAME.exe", None, "circadia.exe").included);
+        assert!(config.classify("GAME.exe", None, "circadia.exe").included());
         assert!(!config.has_entry_problems());
     }
 
@@ -2562,7 +2951,7 @@ mod tests {
         assert!(
             config
                 .classify("applicationframehost.exe", None, "circadia.exe")
-                .included
+                .included()
         );
         assert!(
             config
@@ -2700,7 +3089,8 @@ mod tests {
             membership,
             Membership {
                 matches: true,
-                included: true,
+                covering: 1,
+                removable: true,
                 condition: String::new(),
                 excluded: false,
             }
@@ -2730,7 +3120,8 @@ mod tests {
             config.classify("javaw.exe", Some("IntelliJ IDEA"), "circadia.exe"),
             Membership {
                 matches: false,
-                included: true,
+                covering: 1,
+                removable: false,
                 condition: "Minecraft".to_owned(),
                 excluded: false,
             }
@@ -2739,7 +3130,8 @@ mod tests {
             config.classify("game.exe", Some("Game"), "circadia.exe"),
             Membership {
                 matches: false,
-                included: true,
+                covering: 1,
+                removable: true,
                 condition: String::new(),
                 excluded: true,
             }
@@ -2818,6 +3210,10 @@ mod tests {
         assert!(config.has_entry_problems());
         assert!(!matches(&config, "javaw.exe", Some("minecraft(")));
         assert!(!matches(&config, "javaw.exe", None));
+        assert_eq!(
+            config.classify("javaw.exe", None, "circadia.exe").covering,
+            1
+        );
         let cleared = vec![AppEntry::new("javaw.exe", "Java").with_title("", true)];
         let (edited, errors) = apply_inputs(
             &config,
