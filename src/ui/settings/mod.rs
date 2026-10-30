@@ -530,7 +530,7 @@ pub(super) struct Settings {
     pane_open: bool,
     write: PendingWrite,
     timer: Option<ComponentTimer>,
-    tick: Option<ComponentTimer>,
+    tick: Option<(Instant, ComponentTimer)>,
     preview_deadline: Option<(Instant, ComponentTimer)>,
     minute: Option<ComponentTimer>,
     indicator: Option<ComponentTimer>,
@@ -675,11 +675,12 @@ impl Settings {
             self.pane_visible() && self.phase().progress.is_some(),
         ) {
             self.tick = None;
-        } else if self.tick.is_none()
-            && let Some(playing) = &self.input.model.playing
-        {
-            let delay = playing.next_text_update(self.schedule(), now);
-            self.tick = Some(context.set_local_timeout(delay, || Message::Tick));
+        } else if let Some(playing) = &self.input.model.playing {
+            let delay = playing.next_text_update(self.schedule(), now, self.page == Page::Schedule);
+            let at = now + delay;
+            if self.tick.as_ref().map(|(at, _)| *at) != Some(at) {
+                self.tick = Some((at, context.set_local_timeout(delay, || Message::Tick)));
+            }
         }
         match schedule::indicator_delay(
             self.page,

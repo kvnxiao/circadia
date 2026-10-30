@@ -203,7 +203,7 @@ impl Playing {
 
     fn progress(&self, now: Instant) -> f64 {
         let elapsed = now.saturating_duration_since(self.started).as_secs_f64();
-        (elapsed / self.playback.duration().as_secs_f64()).min(1.0)
+        (elapsed / super::progress::bar_duration(self.playback.duration()).as_secs_f64()).min(1.0)
     }
 
     pub(super) fn instant(&self, now: Instant) -> Option<jiff::Timestamp> {
@@ -216,6 +216,7 @@ impl Playing {
         &self,
         schedule: Option<&crate::CalculatedSchedule>,
         now: Instant,
+        bar_shown: bool,
     ) -> Duration {
         let elapsed = now.saturating_duration_since(self.started);
         let next_second = Duration::from_secs(elapsed.as_secs() + 1);
@@ -223,8 +224,12 @@ impl Playing {
             let view = graph::view_at(schedule, self.instant(now)?);
             self.playback.elapsed_at(view.end).ok()
         });
+        let bar_end = super::progress::bar_duration(self.playback.duration());
+        let bar_end = (bar_shown && elapsed < bar_end).then_some(bar_end);
         boundary
-            .map_or(next_second, |boundary| boundary.min(next_second))
+            .into_iter()
+            .chain(bar_end)
+            .fold(next_second, Duration::min)
             .saturating_sub(elapsed)
     }
 
@@ -450,7 +455,9 @@ fn preview_progress(settings: &Settings, progress: f64) -> View {
     if let Some(motion) = motion {
         layers.push(super::progress::view(
             motion,
-            super::progress::Shape::Bar,
+            super::progress::Shape::Bar {
+                complete: progress >= 1.0,
+            },
             &settings.palette(),
             settings.accents,
         ));

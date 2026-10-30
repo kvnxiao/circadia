@@ -196,10 +196,10 @@ When translated text does not fit, the text wraps within its column. If a column
 
 A 1 epx divider runs across the top of the footer. The footer has 12 epx vertical and 20 epx horizontal padding and 16 epx between its parts:
 
-- **Left:** a caption in Caption and secondary text. While Preview plays, a 3 epx progress bar (accent fill on a neutral track) appears 8 epx below the caption. Its fill advances linearly from playback start to deadline, independently of Night Light writes.
+- **Left:** a caption in Caption and secondary text. While Preview plays, a 3 epx progress bar (accent fill on a neutral track) appears 8 epx below the caption. Its fill advances linearly to full width shortly before the playback deadline, independently of Night Light writes.
 - **Right:** a button at least 112 epx wide with a play glyph and "Preview", or a stop glyph and "Stop" while Preview plays.
 
-On natural completion, display the progress bar at full width for 200 ms before removing it. This completion feedback does not extend playback or delay editing, the graph's return to current time, or removal of Windows Night Light's temporary preview state. Stop and other cancellations remove the bar immediately. Starting another Preview or hiding the Schedule page clears the previous completion feedback.
+The bar reaches full width before the playback deadline by the smaller of 100 ms and 10% of the duration captured when playback starts. It stays full until the actual deadline, then disappears. Its accessible progress value follows that visual fill; the playback clock and graph continue on the actual timeline. Editing unlocks at the actual deadline. The visual deadline does not change the timing of Night Light requests. Stop and the other cancellations defined by [the Preview contract](../specs/application.md#req-preview-temperature-curve--preview-a-complete-daily-cycle) remove the bar immediately. Starting another Preview replaces the visual timeline, and hiding the Schedule page stops its animation.
 
 | State | Caption |
 | :-- | :-- |

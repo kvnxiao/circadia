@@ -50,8 +50,8 @@ native-translation: build-self-contained
 native-deployment executable:
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- --deployment "{{executable}}"
 
-measure-graph:
-    cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-graph
+measure-graph *args:
+    cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-graph {{args}}
 
 measure-activity args="":
     cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-activity {{args}}
