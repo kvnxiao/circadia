@@ -52,8 +52,50 @@ jobs:
       - name: Check installer shell script
         run: shellcheck packaging/build-installer.sh
 
+  cargo-git:
+    name: Prepare Cargo Git sources
+    runs-on: windows-2025
+    timeout-minutes: 15
+    outputs:
+      cache-key: ${{ steps.key.outputs.value }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compute Git source cache key
+        id: key
+        run: |
+          sources=$(sed -n '/^source = "git+/p' Cargo.lock tools/windows-reactor/Cargo.lock tools/windows-reactor/settings-design/Cargo.lock | tr -d '\r' | LC_ALL=C sort -u | sha256sum)
+          echo "value=cargo-git-v1-Windows-${sources%% *}" >> "$GITHUB_OUTPUT"
+      - name: Look up shared Git sources
+        id: sources
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/git
+          key: ${{ steps.key.outputs.value }}
+          lookup-only: true
+      - name: Install stable Rust
+        if: steps.sources.outputs.cache-hit != 'true'
+        run: rustup toolchain install stable --profile minimal
+      - name: Fetch locked dependencies
+        if: steps.sources.outputs.cache-hit != 'true'
+        run: |
+          for manifest in Cargo.toml tools/windows-reactor/Cargo.toml tools/windows-reactor/settings-design/Cargo.toml; do
+            cargo +stable fetch --locked --manifest-path "$manifest" --target x86_64-pc-windows-msvc
+          done
+      - name: Save shared Git sources before checks
+        if: steps.sources.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/git
+          key: ${{ steps.key.outputs.value }}
+
   rust:
     name: ${{ matrix.name }}
+    needs: cargo-git
     runs-on: windows-2025
     timeout-minutes: 45
     strategy:
@@ -93,11 +135,21 @@ jobs:
           tool: just
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal --component clippy
+      - name: Install binding generator formatter
+        if: matrix.cache == 'application-checks'
+        run: rustup component add rustfmt --toolchain stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        id: compiled
         with:
           key: ${{ matrix.cache }}
           workspaces: ${{ matrix.project }} -> target
           cache-bin: false
+      - name: Restore shared Git sources
+        if: matrix.cache != 'solar' && steps.compiled.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/git
+          key: ${{ needs.cargo-git.outputs.cache-key }}
       - name: Run checks
         env:
           CHECK_RECIPES: ${{ matrix.recipes }}
@@ -155,7 +207,7 @@ jobs:
   installer:
     name: Unsigned Windows installer
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [formatting, rust, python, dependencies]
+    needs: [formatting, cargo-git, rust, python, dependencies]
     runs-on: windows-2025
     timeout-minutes: 30
     defaults:
@@ -171,9 +223,16 @@ jobs:
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        id: compiled
         with:
           key: installer-release
           cache-bin: false
+      - name: Restore shared Git sources
+        if: steps.compiled.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/git
+          key: ${{ needs.cargo-git.outputs.cache-key }}
       - name: Build unsigned installer
         run: just installer
       - name: Upload installer and checksum
