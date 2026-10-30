@@ -77,6 +77,7 @@ pub(super) fn page(field: Field) -> Page {
         | Field::OutputRateHz
         | Field::PreviewSeconds => Page::Transitions,
         Field::StartAtSignIn | Field::StartMinimized | Field::InterfaceLanguage => Page::General,
+        Field::CheckUpdatesAutomatically => Page::About,
     }
 }
 

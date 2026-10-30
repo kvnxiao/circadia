@@ -32,6 +32,9 @@ native-explorer *args: build-self-contained
 native-settings *args: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --settings target/debug/circadia.exe
 
+native-about *args: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --about target/debug/circadia.exe
+
 native-startup *args: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --startup target/debug/circadia.exe
 

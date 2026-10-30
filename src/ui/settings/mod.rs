@@ -1,3 +1,4 @@
+mod about;
 mod apps;
 pub(super) mod general;
 mod graph;
@@ -96,10 +97,17 @@ pub(super) enum Page {
     Apps,
     Transitions,
     General,
+    About,
 }
 
 impl Page {
-    const ALL: [Self; 4] = [Self::Schedule, Self::Apps, Self::Transitions, Self::General];
+    const ALL: [Self; 5] = [
+        Self::Schedule,
+        Self::Apps,
+        Self::Transitions,
+        Self::General,
+        Self::About,
+    ];
 
     fn tag(self) -> &'static str {
         match self {
@@ -107,6 +115,7 @@ impl Page {
             Self::Apps => "apps",
             Self::Transitions => "transitions",
             Self::General => "general",
+            Self::About => "about",
         }
     }
 
@@ -116,6 +125,7 @@ impl Page {
             Self::Apps => automation_id::NAV_APPS,
             Self::Transitions => automation_id::NAV_TRANSITIONS,
             Self::General => automation_id::NAV_GENERAL,
+            Self::About => automation_id::NAV_ABOUT,
         }
     }
 
@@ -126,6 +136,7 @@ impl Page {
             Self::Apps => fl!("nav-apps"),
             Self::Transitions => fl!("nav-transitions"),
             Self::General => fl!("nav-general"),
+            Self::About => fl!("nav-about"),
         }
     }
 
@@ -135,6 +146,7 @@ impl Page {
             Self::Apps => "\u{F0E2}",
             Self::Transitions => "\u{E9D9}",
             Self::General => "\u{E713}",
+            Self::About => "\u{E946}",
         }
     }
 }
@@ -390,6 +402,7 @@ pub(super) struct Input {
     pub(super) icons: Rc<AppIcons>,
     pub(super) sign_in: general::SignInStatus,
     pub(super) location: location::Status,
+    pub(super) updates: crate::updates::Status,
     pub(super) contrast: Option<crate::platform::contrast::ContrastColors>,
     pub(super) visual_revision: u64,
     pub(super) activation: u64,
@@ -410,6 +423,7 @@ impl PartialEq for Input {
             && Rc::ptr_eq(&self.icons, &other.icons)
             && self.sign_in == other.sign_in
             && self.location == other.location
+            && self.updates == other.updates
             && self.contrast == other.contrast
             && self.visual_revision == other.visual_revision
             && self.activation == other.activation
@@ -431,6 +445,7 @@ pub(super) enum Folder {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Command {
+    CheckUpdates,
     Reset,
     Retry,
     RetryNative,
@@ -1294,6 +1309,7 @@ impl Settings {
             Page::Apps => apps::view(self, context),
             Page::Transitions => transitions::view(self, context),
             Page::General => general::view(self, context),
+            Page::About => about::view(self, context),
         }
     }
 }

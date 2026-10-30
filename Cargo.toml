@@ -45,6 +45,9 @@ png = "0.18"
 regex = "1.13"
 rust-embed = { version = "8", features = ["debug-embed"] }
 serde = { version = "1.0", features = ["derive"] }
+semver = "1.0"
+serde_json = "1.0"
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 solar-positioning = { version = "0.7.1", default-features = false, features = ["std"] }
 tempfile.workspace = true
 thiserror = "2.0"
@@ -55,18 +58,18 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 [target.'cfg(windows)'.dependencies]
 win-nightlight-lib = "0.5.0"
 win-nightlight-watch = "0.5.0"
-windows-result = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", features = ["Devices_Geolocation", "Foundation", "Security_Authorization_AppCapabilityAccess", "UI_ViewManagement"] }
-windows-future = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-core = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-collections = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-numerics = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-time = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", features = ["composition", "reactor"] }
-windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", default-features = false, features = ["reactor"] }
-windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-sys = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", features = ["datetimeapi", "errhandlingapi", "fileapi", "libloaderapi", "minwinbase", "minwindef", "ntstatus", "powerbase", "processthreadsapi", "realtimeapiset", "shellapi", "shlobj_core", "stringapiset", "synchapi", "timezoneapi", "verrsrc", "wdm", "winbase", "windef", "winerror", "winevt", "wingdi", "winnls", "winnt", "winuser", "winver", "wtsapi32"] }
+windows-result = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953", features = ["Devices_Geolocation", "Foundation", "Security_Authorization_AppCapabilityAccess", "UI_ViewManagement"] }
+windows-future = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-core = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-collections = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-numerics = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-time = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953", features = ["composition", "reactor"] }
+windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953", default-features = false, features = ["reactor"] }
+windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-sys = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953", features = ["datetimeapi", "errhandlingapi", "fileapi", "libloaderapi", "minwinbase", "minwindef", "ntstatus", "powerbase", "processthreadsapi", "realtimeapiset", "shellapi", "shlobj_core", "stringapiset", "synchapi", "timezoneapi", "verrsrc", "wdm", "winbase", "windef", "winerror", "winevt", "wingdi", "winnls", "winnt", "winuser", "winver", "wtsapi32"] }
 winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
 
 [build-dependencies]
@@ -76,17 +79,17 @@ ico = "0.6"
 resvg = { version = "0.49", default-features = false }
 
 [target.'cfg(windows)'.build-dependencies]
-windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b", optional = true }
+windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953", optional = true }
 
 [dev-dependencies]
 fluent-syntax = "0.12"
 test-case = "3"
 
 [patch.crates-io]
-windows-result = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-registry = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-strings = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
-windows-link = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea553787d9419b3fdd29e2c5436666d7325b" }
+windows-result = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-registry = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-strings = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-link = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
 
 [profile.release]
 debug = "line-tables-only"

@@ -23,6 +23,7 @@ mod storage;
 mod suppression;
 #[cfg(windows)]
 mod ui;
+mod updates;
 
 #[cfg(all(windows, feature = "graph-measurement"))]
 pub use activity::ActivityEvent;

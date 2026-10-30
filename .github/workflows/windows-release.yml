@@ -1,0 +1,87 @@
+name: Windows stable release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stable-release-${{ github.event.release.id }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CIRCADIA_CHANNEL: stable
+
+jobs:
+  package:
+    name: Stable x64 installer
+    if: github.event.release.prerelease == false
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.ref }}
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just,cargo-bundle-licenses@4.2.0
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
+      - name: Validate release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(cargo +stable metadata --no-deps --format-version 1 --locked | jq -er '.packages[] | select(.name == "circadia") | .version')
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_TAG" == "v$version" ]]
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: installer-release
+          cache-bin: false
+          cache-directories: '!~/.cargo/git'
+      - name: Build unsigned installer
+        id: build
+        run: just installer
+      - name: Upload installer and checksum
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stable-installer
+          path: |
+            ${{ steps.build.outputs.installer }}
+            ${{ steps.build.outputs.installer }}.sha256
+          if-no-files-found: error
+          compression-level: 0
+      - name: Archive matching debug symbols
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Circadia-windows-x64-symbols
+          path: target/x86_64-pc-windows-msvc/release/circadia.pdb
+          if-no-files-found: error
+          retention-days: 90
+
+  attach:
+    name: Attach stable installer
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download and attach build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh run download "$RUN_ID" --name stable-installer --dir installer
+          gh release upload "$RELEASE_TAG" installer/* --clobber

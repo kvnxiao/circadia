@@ -13,6 +13,35 @@ struct Fixture {
     region: RegionalFormat,
 }
 
+#[test]
+fn update_preference_recovery_names_the_update_setting_on_about() {
+    let fixture = Fixture::new();
+    assert_eq!(
+        name(&fixture.text, Field::CheckUpdatesAutomatically),
+        "Check for updates automatically"
+    );
+    let saved = toml::to_string(&ConfigInput::default()).expect("default settings");
+    fixture.write(
+        "config.toml",
+        &saved.replace(
+            "check_updates_automatically = true",
+            "check_updates_automatically = 'yes'",
+        ),
+    );
+    let configuration = fixture.load();
+    let Some(Feedback::Error(message)) =
+        fixture.feedback(&configuration, Field::CheckUpdatesAutomatically)
+    else {
+        panic!("invalid preference must have feedback");
+    };
+    assert!(
+        message.contains("Check for updates automatically"),
+        "{message}"
+    );
+    assert!(!message.contains("Start minimized"), "{message}");
+    assert_eq!(page(Field::CheckUpdatesAutomatically), Page::About);
+}
+
 impl Fixture {
     fn new() -> Self {
         Self {

@@ -410,6 +410,7 @@ struct Desktop {
     location_event: Arc<Mutex<Option<settings::location::Event>>>,
     held_location: Option<crate::Coordinates>,
     stopped_preview: Option<std::time::Instant>,
+    updates: Option<crate::updates::Client>,
 }
 
 impl Application for Desktop {
@@ -523,6 +524,10 @@ impl Application for Desktop {
                     icons: self.icons.view(),
                     sign_in: self.sign_in.status(),
                     location: self.location.status(),
+                    updates: self.updates.as_ref().map_or(
+                        crate::updates::Status::Failed,
+                        crate::updates::Client::status,
+                    ),
                     contrast: self.contrast,
                     visual_revision: self.visual_revision,
                     activation: self.settings_activation,
@@ -586,6 +591,7 @@ impl Desktop {
             location_event: Arc::default(),
             held_location: None,
             stopped_preview: None,
+            updates: None,
         }
     }
 
@@ -723,6 +729,12 @@ impl Desktop {
             context.sender(),
         ) {
             Ok(session) => {
+                let update_wake = session.wake.clone();
+                self.updates = crate::updates::Client::spawn(self.automatic_updates(), move || {
+                    let _notified = update_wake.notify();
+                })
+                .inspect_err(|error| tracing::warn!(%error, "starting update checker"))
+                .ok();
                 let wake = session.wake.clone();
                 self.file_info = FileInfoClient::spawn(file_info::WindowsFiles, move || {
                     let _notified = wake.notify();
@@ -762,6 +774,11 @@ impl Desktop {
 
     fn command(&mut self, command: settings::Command) {
         match command {
+            settings::Command::CheckUpdates => {
+                if let Some(updates) = &self.updates {
+                    updates.check();
+                }
+            }
             settings::Command::Quit => self.quit(),
             settings::Command::Reset => {
                 self.cancel_location();
@@ -972,11 +989,21 @@ impl Desktop {
     }
 
     fn configure(&mut self, changed: Option<Arc<crate::Config>>) {
+        if let Some(updates) = &self.updates {
+            updates.configure(self.automatic_updates());
+        }
         if let Some(config) = changed {
             let revision = self.configuration.borrow().revision();
             self.queue(ControllerCommand::Configure { config, revision });
             self.prune_icons();
         }
+    }
+
+    fn automatic_updates(&self) -> bool {
+        self.configuration
+            .borrow()
+            .accepted()
+            .is_some_and(|config| config.input().check_updates_automatically)
     }
 
     fn prune_icons(&mut self) {
@@ -1260,6 +1287,7 @@ impl Desktop {
     }
 
     fn begin_exit(&mut self) {
+        self.updates = None;
         self.cancel_location();
         if !self.exiting {
             self.configuration.borrow_mut().exit();

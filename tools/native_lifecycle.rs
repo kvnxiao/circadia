@@ -1,6 +1,9 @@
 //! Exercise the complete application with live Night Light and isolated
 //! settings.
 
+#[cfg(windows)]
+#[path = "native/about.rs"]
+mod about;
 #[cfg(all(windows, feature = "graph-measurement"))]
 #[path = "native/activity.rs"]
 mod activity;
@@ -70,6 +73,7 @@ fn main() -> std::io::Result<()> {
     let arguments = lifecycle::arguments(std::env::args_os().skip(1))?;
     let mode = arguments.first().and_then(|mode| mode.to_str());
     match mode {
+        Some("--about") => about::run(&arguments),
         Some("--deployment") => deployment::run(&arguments),
         #[cfg(feature = "graph-measurement")]
         Some("--measure-activity") => activity::run(&arguments),

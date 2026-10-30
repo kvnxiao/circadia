@@ -29,7 +29,7 @@ The tray also offers toggles for recently focused apps. Automatic fullscreen det
 
 The Schedule page shows the temperature curve, event times, current target, and next change. Preview plays the coming day on your display in a few seconds, taking precedence over suppression while it runs. Settings edits are temporarily disabled during playback.
 
-Valid edits apply and save automatically. The four settings pages group scheduling, app rules, transitions, and general preferences. The interface follows Windows themes and regional time and number formats; English is currently the only shipped language.
+Valid edits apply and save automatically. The five pages group scheduling, app rules, transitions, settings, and application information. The interface follows Windows themes and regional time and number formats; English is currently the only shipped language.
 
 ### Run from the tray
 
@@ -42,13 +42,15 @@ Circadia requires Windows 11 x64 with working native Night Light. The intended m
 ### Install the latest development build
 
 1. Sign in to GitHub and open the [Windows packaging runs](https://github.com/kvnxiao/circadia/actions/workflows/windows-installer.yml).
-2. Open the newest successful run with a completed **Unsigned x64 installer** job. Under **Artifacts**, download **Circadia-windows-x64-unsigned** and extract the ZIP.
+2. Open the newest successful run with a completed **Unsigned x64 installer** job. Under **Artifacts**, download `Circadia-windows-x64-unsigned-<commit>` and extract the ZIP.
 3. Run `Circadia-<version>-<commit>-windows-x64-unsigned-setup.exe`. If Circadia is already running, choose **Quit** from its tray menu before continuing.
 4. Finish setup, then open **Circadia** from the Windows Start menu.
 
 The installer includes the required runtime and installs for your Windows account without requesting administrator access. Downloads appear after the first successful installer build on `main` and expire after 90 days. If no download is available, you can [build from source](DEVELOPMENT.md#build-and-run).
 
 **Unsigned application:** Circadia and its installer are not code-signed yet. Expect a Microsoft Defender SmartScreen warning on the first run of a downloaded installer or app. If Windows displays **Windows protected your PC**, verify that you downloaded it from this repository, choose **More info**, then **Run anyway** to approve it manually. Windows may identify the publisher as **Unknown publisher**. New builds may prompt again. If Windows policy blocks execution without a **Run anyway** option, these instructions cannot override that policy.
+
+About shows the installed version and offers Check for updates. Automatic checks are enabled by default and run at startup and daily; their results appear in About. Stable installations check GitHub releases, and preview installations check successful main builds. The download link opens the matching page in your browser.
 
 To update, quit Circadia and run the newer installer. To uninstall, quit Circadia and use **Settings → Apps → Installed apps → Circadia → Uninstall**. Your saved settings remain available for a later installation.
 
@@ -67,6 +69,6 @@ While management is on, Circadia keeps Night Light enabled, disables Windows' ow
 - [Tools and experiments](tools/README.md): application checks and dependency experiments, with their prerequisites and system effects.
 - [Specification](docs/specs/SPEC.md), [visual design](docs/design/README.md), and [research](docs/research/README.md): intended behavior, interface design, and supporting evidence.
 
-[Report a problem](https://github.com/kvnxiao/circadia/issues/new?template=bug_report.md) with the relevant log from **General → Logs → Open folder**. Logs can include coordinates, executable names, paths, and window titles; remove personal information before sharing them. Circadia does not upload logs automatically.
+[Report a problem](https://github.com/kvnxiao/circadia/issues/new?template=bug_report.md) with the relevant log from **Settings → Logs → Open folder**. Logs can include coordinates, executable names, paths, and window titles; remove personal information before sharing them. Circadia does not upload logs automatically.
 
 Circadia is licensed under the [MIT License](LICENSE).

@@ -200,6 +200,32 @@ The displayed effective state reflects Windows' startup enablement, including di
 - The user turns startup on and registration fails: the preference is saved, settings shows startup's effective disabled state and the error at the switch, and offers a retry. An unrelated edit does not retry it.
 - The user turns startup off and removing registration fails: the stored preference is off, settings shows the still-enabled effective state and the error, and removal can be retried at the switch.
 
+## Application updates
+
+### REQ-application-updates — Check the installed distribution for updates
+
+About identifies the installed version, source commit, and architecture. Stable builds display the release version; main-branch packages append `-preview`, such as `0.1.0-preview`. Source builds identify themselves as development builds and do not claim to be current with a distribution.
+
+Stable installations check published, non-prerelease GitHub releases using semantic version order. An update is available only when its installer and checksum are available. Preview installations check successfully built main-branch packages, using build identity independently of the base version. Failed builds and expired or missing packages are not offered. Checks stay within the installed channel.
+
+Check for updates shows an in-progress banner, then an up-to-date result, an available-update result with a download-page link, or a readable failure. An absent downloadable build is reported separately from being up to date. Only one check runs at a time. The download action opens the browser; Circadia does not download or install the update itself. Preview download links explain that GitHub sign-in is required.
+
+Check for updates automatically is a saved preference, enabled by default. When enabled, Circadia checks at startup and once every 24 hours while running. A manual check restarts that interval. Disabling the preference stops future automatic checks; an in-flight check may finish. Results remain available in About until another check or process exit. Checks do not open settings, display notifications, or interrupt Night Light management.
+
+Checks use bounded network work outside UI message handling. Failures allow a later manual check or the next daily check. Requests send only the metadata needed to query the distribution; configuration, logs, location, and application lists are not uploaded. Exit stops further checks and does not delay Night Light cleanup for a pending network response.
+
+**Scenarios:**
+
+- A stable installation at 0.1.0 finds a published 0.2.0 release with an installer and checksum: About offers its release page. A prerelease is not offered.
+- The base version stays 0.1.0 while main produces a later successful package: the preview installation offers that package's download page.
+- CI for an older source commit is rerun after a newer package was installed: the older source is not offered as an update. A rebuild of the installed source is not a new version.
+- A release is published before packaging finishes: About reports that a downloadable build is not yet available.
+- A preview build fails, or its artifact expires: it is not offered for download.
+- A user starts a check: About immediately shows progress and prevents duplicate checks, then shows the result. A network failure is not reported as up to date.
+- Automatic checks are disabled and Circadia restarts: it makes no automatic update request; Check for updates still works.
+- Settings is closed while an automatic check completes: it stays closed, and About shows the result when opened.
+- The user quits during a check: Night Light cleanup proceeds without waiting for GitHub.
+
 ## Resource use and background work
 
 ### REQ-lean-background — Measure the single process's resource use

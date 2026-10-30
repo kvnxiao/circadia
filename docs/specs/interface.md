@@ -15,7 +15,7 @@ An initial explicit or sign-in launch with an accepted configuration follows Sta
 
 The tray opens one settings window in the same Reactor process. Closing it keeps the controller running and writes any pending settings change without a prompt, except while saving is paused under [REQ-paused-saving](application.md#req-paused-saving--pause-saving-until-marked-values-are-fixed).
 
-A title bar shows Circadia's icon and name. A navigation pane shows the current phase art (the status illustration of REQ-status-display), the name Circadia, and one status line, and lists four pages: Schedule, shown first, App suppression, Transitions, and General. At a window client width of at least 800 effective pixels, the pane is expanded beside the page. Below 800 effective pixels, the pane is hidden and a hamburger menu button opens it as a left-side overlay without moving or narrowing the page. Selecting a page, pressing Escape, or clicking outside dismisses the overlay. Resizing preserves the selected page and valid edits.
+A title bar shows Circadia's icon and name. A navigation pane shows the current phase art (the status illustration of REQ-status-display), the name Circadia, and one status line, and lists five pages together in this order: Schedule, shown first, App suppression, Transitions, Settings, and About. At a window client width of at least 800 effective pixels, the pane is expanded beside the page. Below 800 effective pixels, the pane is hidden and a hamburger menu button opens it as a left-side overlay without moving or narrowing the page. Selecting a page, pressing Escape, or clicking outside dismisses the overlay. Resizing preserves the selected page and valid edits.
 
 At 100% scaling, settings is usable on 1280×720 and 1366×768 displays, including the space occupied by the taskbar. Its initial window and dialogs fit the monitor's available desktop area. Content scrolls vertically when needed, and rows wrap or rearrange at narrower widths so labels and actions remain reachable without horizontal clipping.
 
@@ -39,7 +39,7 @@ The distributed executable and bundled runtime support direct launch and a user-
 - Settings is displayed at 100% scaling: every page and dialog can be scrolled through its full content, with readable labels and operable action targets.
 - Settings opens on a 1280×720 or 1366×768 display at 100% scaling: its title bar and window controls fit the available desktop area, and scrolling reaches every setting and dialog action.
 - The client width changes from 800 to 799 effective pixels: the expanded pane becomes a hamburger menu; opening its overlay preserves the page's width and scroll position.
-- A user selects General in the narrow overlay and dismisses it, then widens settings to 800 effective pixels: General remains selected in the expanded navigation pane.
+- A user selects Settings in the narrow overlay and dismisses it, then widens settings to 800 effective pixels: Settings remains selected in the expanded navigation pane.
 - A keyboard user opens narrow navigation and presses Escape: the overlay closes and keyboard focus returns to its menu button.
 
 ### REQ-settings-appearance — Follow Windows themes
@@ -51,7 +51,7 @@ Settings uses native controls and follows the system light, dark, and contrast t
 - Settings opens in light, dark, and a contrast theme: it follows each system theme with native controls and remains readable.
 - Settings opens in the Night sky contrast theme: every graph, phase-art, and indicator drawing uses the theme's system colors, no temperature color appears, and each temperature level and the current temperature remain readable as numbers. A listed app's icon keeps its own colors.
 
-### REQ-settings-pages — Organize settings into four pages
+### REQ-settings-pages — Organize the application into five pages
 
 The Schedule page has, in order:
 
@@ -71,11 +71,15 @@ The App suppression page has:
 
 The Transitions page has the scheduled transition duration, labeled Transition length, with a slider and number field and a worked example of a transition that reaches the evening temperature at sunset; Fade duration, the ordinary fade; Preview length; and Maximum update rate, the output-rate ceiling.
 
-The General page has the interface language of REQ-interface-language; Start at sign-in and Start minimized; an explanation of how Circadia manages Night Light with the current management state; Open folder commands for the configuration file and the log; and Circadia's icon, name, version, and Quit Circadia.
+The Settings page has the interface language of REQ-interface-language; Start at sign-in and Start minimized; an explanation of how Circadia manages Night Light with the current management state; Open folder commands for the configuration file and the log; and a Quit Circadia card.
+
+The About page shows Circadia's icon, name, version, source commit, architecture, and Check for updates. Its Update settings section has only Check for updates automatically. Its Feedback section has only Report a bug. Other links opens the GitHub repository, contribution guidelines, and license in the browser. About does not have a Quit command, feature-request link, Discussions link, or FAQ link. Update behavior follows REQ-application-updates.
 
 **Scenarios:**
 
 - Solar timing is disabled: Morning and evening is marked as not used and remains editable.
+- The user selects Settings: Quit Circadia is available. The user selects About: build identity and update checking are available, and Quit is absent.
+- The user selects Report a bug or an Other links entry: the browser opens the corresponding repository page without uploading application data.
 - Daytime is 5000 K and the user chooses Restore recommended colors: Daytime, Morning and evening, and Bedtime become 6500 K, 3400 K, and 2400 K in one edit.
 - Two recent apps are chosen in the Add app dialog: its command reads "Add 2 apps"; with none chosen, the command is unavailable.
 - An installation covered by one suppression entry appears in Recently focused: it shows that it is on the list and offers Remove for that entry. Multiple covering entries remain editable in the rule list.
