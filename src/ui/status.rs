@@ -1447,7 +1447,11 @@ mod tests {
             })
             .collect();
         let noon = at("2026-10-27T13:00:00Z");
-        for language in [LanguageTag::english(), LanguageTag::pseudo()] {
+        for language in [
+            LanguageTag::english(),
+            #[cfg(debug_assertions)]
+            LanguageTag::pseudo(),
+        ] {
             let text = Text::load(&language).expect("catalog loads");
             let mut tooltips = vec![tooltip(
                 &text,
@@ -1707,6 +1711,7 @@ mod tests {
         );
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn pseudo_localized_tray_menu_has_no_english_label() {
         let text = Text::load(&LanguageTag::pseudo()).expect("pseudo-locale loads");

@@ -102,7 +102,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         Field::Wake,
                         picker(settings, Field::Wake, automation_id::WAKE, context),
                     ))
-                    .view(),
+                    .view(settings.stacked()),
             ),
             widgets::card(
                 Row::new(
@@ -114,7 +114,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                     Field::Bedtime,
                     picker(settings, Field::Bedtime, automation_id::BEDTIME, context),
                 ))
-                .view(),
+                .view(settings.stacked()),
             ),
             solar_card(settings, context),
         ]),
@@ -492,7 +492,7 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
     }
     let mut state: Vec<View> = vec![
         StackPanel::new()
-            .orientation(Orientation::Horizontal)
+            .orientation(Orientation::Vertical)
             .spacing(4.0)
             .children(line)
             .into(),
@@ -507,13 +507,17 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
         .content(
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto])
+                .rows([GridLength::Auto, GridLength::Auto])
+                .row_spacing(if settings.stacked() { 12.0 } else { 0.0 })
                 .column_spacing(16.0)
                 .children((
                     StackPanel::new()
                         .vertical_alignment(VerticalAlignment::Center)
                         .children(state),
                     Button::new()
-                        .grid_column(1)
+                        .grid_column(i32::from(!settings.stacked()))
+                        .grid_row(i32::from(settings.stacked()))
+                        .horizontal_alignment(HorizontalAlignment::Right)
                         .min_width(112.0)
                         .is_enabled(preview.enabled)
                         .automation_id(automation_id::PREVIEW)
@@ -745,7 +749,12 @@ fn summary_view(settings: &Settings, palette: &Palette) -> View {
     );
     let contrast = palette.contrast();
     Grid::new()
-        .columns([GridLength::STAR; 4])
+        .columns(vec![
+            GridLength::STAR;
+            if settings.stacked() { 2 } else { 4 }
+        ])
+        .rows([GridLength::Auto, GridLength::Auto])
+        .row_spacing(12.0)
         .column_spacing(8.0)
         .margin(Thickness::new(20.0, 16.0, 20.0, 18.0))
         .children(
@@ -759,7 +768,8 @@ fn summary_view(settings: &Settings, palette: &Palette) -> View {
                     let time = widgets::strong(&column.time)
                         .automation_id(automation_id::summary_time(column.id));
                     StackPanel::new()
-                        .grid_column(index)
+                        .grid_column(if settings.stacked() { index % 2 } else { index })
+                        .grid_row(if settings.stacked() { index / 2 } else { 0 })
                         .opacity(if column.used || contrast.is_some() {
                             1.0
                         } else {
@@ -804,7 +814,9 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
     };
     Grid::new()
         .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+        .rows([GridLength::Auto, GridLength::Auto])
         .column_spacing(20.0)
+        .row_spacing(if settings.stacked() { 12.0 } else { 0.0 })
         .margin(Thickness::new(20.0, 20.0, 20.0, 12.0))
         .children((
             super::phase::view(
@@ -818,11 +830,16 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
             ),
             StackPanel::new()
                 .grid_column(1)
+                .grid_column_span(if settings.stacked() { 2 } else { 1 })
                 .spacing(2.0)
                 .vertical_alignment(VerticalAlignment::Center)
                 .children((
                     StackPanel::new()
-                        .orientation(Orientation::Horizontal)
+                        .orientation(if settings.stacked() {
+                            Orientation::Vertical
+                        } else {
+                            Orientation::Horizontal
+                        })
                         .spacing(12.0)
                         .children((
                             widgets::title(temperature)
@@ -836,7 +853,10 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
                         .automation_id(automation_id::STATUS_SENTENCE),
                 )),
             Border::new()
-                .grid_column(2)
+                .grid_column(if settings.stacked() { 1 } else { 2 })
+                .grid_row(i32::from(settings.stacked()))
+                .grid_column_span(if settings.stacked() { 2 } else { 1 })
+                .horizontal_alignment(HorizontalAlignment::Right)
                 .vertical_alignment(VerticalAlignment::Top)
                 .content(apps::manual_button(
                     apps::manual_view(model, text, region),
@@ -891,7 +911,7 @@ fn management_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         .into(),
                 ),
             )
-            .view(),
+            .view(settings.stacked()),
     )
 }
 
@@ -1016,6 +1036,8 @@ fn temperature_card(
             .content(
                 Grid::new()
                     .columns([GridLength::STAR, GridLength::Auto])
+                    .rows([GridLength::Auto, GridLength::Auto])
+                    .row_spacing(if settings.stacked() { 12.0 } else { 0.0 })
                     .column_spacing(16.0)
                     .children((
                         StackPanel::new()
@@ -1029,7 +1051,9 @@ fn temperature_card(
                                 widgets::caption(description),
                             )),
                         StackPanel::new()
-                            .grid_column(1)
+                            .grid_column(i32::from(!settings.stacked()))
+                            .grid_row(i32::from(settings.stacked()))
+                            .horizontal_alignment(HorizontalAlignment::Right)
                             .children(settings.with_feedback(
                                 field,
                                 settings.number_controls(
@@ -1474,6 +1498,8 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
             Field::UseWindowsLocation,
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto])
+                .rows([GridLength::Auto, GridLength::Auto])
+                .row_spacing(if settings.stacked() { 12.0 } else { 0.0 })
                 .column_spacing(16.0)
                 .children((
                     StackPanel::new()
@@ -1481,7 +1507,9 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
                         .vertical_alignment(VerticalAlignment::Center)
                         .children(lines),
                     ToggleSwitch::new()
-                        .grid_column(1)
+                        .grid_column(i32::from(!settings.stacked()))
+                        .grid_row(i32::from(settings.stacked()))
+                        .horizontal_alignment(HorizontalAlignment::Right)
                         .is_on(on)
                         .is_enabled(solar_options_enabled(model))
                         .vertical_alignment(VerticalAlignment::Center)
@@ -1547,6 +1575,8 @@ fn coordinates_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             Field::Coordinates,
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto])
+                .rows([GridLength::Auto, GridLength::Auto])
+                .row_spacing(if settings.stacked() { 12.0 } else { 0.0 })
                 .column_spacing(16.0)
                 .children((
                     StackPanel::new()
@@ -1557,7 +1587,9 @@ fn coordinates_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                             widgets::caption(text!(text, "coordinates-description")),
                         )),
                     StackPanel::new()
-                        .grid_column(1)
+                        .grid_column(i32::from(!settings.stacked()))
+                        .grid_row(i32::from(settings.stacked()))
+                        .horizontal_alignment(HorizontalAlignment::Right)
                         .orientation(Orientation::Horizontal)
                         .spacing(12.0)
                         .children((
@@ -1618,7 +1650,7 @@ fn solar_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View 
                 ))
                 .into(),
         )])
-        .view();
+        .view(settings.stacked());
     let mut rows = vec![header];
     rows.extend(
         solar_messages(
@@ -1634,8 +1666,9 @@ fn solar_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View 
             widgets::feature_row(
                 message,
                 &name,
-                model.editable() && model.management.is_on() && !model.retrying,
-                context.message(Message::Command(Command::RetryNative)),
+                (model.editable() && model.management.is_on() && !model.retrying)
+                    .then(|| context.message(Message::Command(Command::RetryNative))),
+                settings.stacked(),
             )
         }),
     );

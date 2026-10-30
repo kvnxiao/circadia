@@ -83,6 +83,10 @@ windows-link = { git = "https://github.com/microsoft/windows-rs", rev = "3b6bea5
 [profile.release]
 debug = "line-tables-only"
 
+[profile.testrelease]
+inherits = "test"
+debug-assertions = false
+
 [lints.rust]
 unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"

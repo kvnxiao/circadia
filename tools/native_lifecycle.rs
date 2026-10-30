@@ -20,6 +20,9 @@ mod environment;
 #[path = "native/graph.rs"]
 mod graph;
 #[cfg(windows)]
+#[path = "native/identity.rs"]
+mod identity;
+#[cfg(windows)]
 #[path = "native/lifecycle.rs"]
 mod lifecycle;
 #[cfg(windows)]
@@ -40,6 +43,9 @@ mod recovery;
 #[cfg(windows)]
 #[path = "native/resources.rs"]
 mod resources;
+#[cfg(windows)]
+#[path = "native/responsive.rs"]
+mod responsive;
 #[cfg(windows)]
 #[path = "native/settings.rs"]
 mod settings;
@@ -92,6 +98,7 @@ fn main() -> std::io::Result<()> {
         Some("--picker") => picker::run(&arguments),
         Some("--modal-shutdown") => shutdown::run(&arguments),
         Some("--translation") => translation::run(&arguments),
+        Some("--identity") => identity::run(&arguments),
         _ => lifecycle::run(&arguments),
     }
 }

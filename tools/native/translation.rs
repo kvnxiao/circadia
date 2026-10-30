@@ -84,6 +84,50 @@ fn check(executable: &Path, directory: &Path) -> io::Result<()> {
     )?;
     let mut inspection = Inspection::new()?;
     automation.focus(&settings, process)?;
+    let default_client = settings.GetClientRect().map_err(io::Error::other)?;
+    crate::responsive::exercise(&automation, &settings, process)?;
+    for (name, width, height) in [
+        ("default", default_client.right, default_client.bottom),
+        ("minimum-640x480", 640, 480),
+        ("narrow-700", 700, 600),
+        ("expanded-800", 800, 600),
+    ] {
+        crate::responsive::resize_client(&settings, width, height)?;
+        pages(&automation, &settings, process, &mut inspection, name)?;
+    }
+    transition_examples(&automation, &settings, process, &mut inspection)?;
+    let outer = settings.GetWindowRect().map_err(io::Error::other)?;
+    let client = settings.GetClientRect().map_err(io::Error::other)?;
+    let chrome = (
+        outer.right - outer.left - client.right,
+        outer.bottom - outer.top - client.bottom,
+    );
+    for (name, height) in [("work-area-1280x672", 672), ("work-area-1366x720", 720)] {
+        crate::responsive::resize_client(&settings, 1200 - chrome.0, height - chrome.1)?;
+        pages(&automation, &settings, process, &mut inspection, name)?;
+    }
+    report(
+        "Captured simulated 1280x720 and 1366x768 desktop work areas with a 48 px taskbar; host geometry unchanged",
+    );
+    crate::responsive::resize_client(&settings, 640, 480)?;
+    let button = automation.navigation_button(&settings, process)?;
+    automation.invoke(&settings, process, &button)?;
+    wait("minimum-size navigation overlay", || {
+        Ok(automation
+            .visible(&settings, process, automation_id::NAV_GENERAL)?
+            .then_some(()))
+    })?;
+    std::thread::sleep(Duration::from_millis(250));
+    inspection.snapshot(
+        &settings,
+        process,
+        "minimum-navigation-overlay",
+        "640x480 client",
+    )?;
+    crate::automation::press_key(winsafe::co::VK::ESCAPE)?;
+    wait("minimum overlay closes", || {
+        Ok((!automation.visible(&settings, process, automation_id::NAV_GENERAL)?).then_some(()))
+    })?;
     visit(&automation, &settings, process, &mut inspection)?;
     extras(&automation, &settings, process, &mut inspection)?;
     crate::lifecycle::quit(&automation, &settings, process)?;
@@ -108,6 +152,35 @@ fn check(executable: &Path, directory: &Path) -> io::Result<()> {
         "PASS: captured translation views pass automated text and bounds checks at 100%; screenshots require visual inspection; Night Light was not managed",
     );
     Ok(())
+}
+
+fn transition_examples(
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+    inspection: &mut Inspection,
+) -> io::Result<()> {
+    show_page(
+        automation,
+        settings,
+        process,
+        automation_id::NAV_TRANSITIONS,
+    )?;
+    for minutes in [1.0, 240.0] {
+        automation.set_number(settings, process, automation_id::TRANSITION_NUMBER, minutes)?;
+        wait("transition example uses the requested duration", || {
+            Ok(automation
+                .number(settings, process, automation_id::TRANSITION_NUMBER)?
+                .filter(|value| (*value - minutes).abs() < f64::EPSILON))
+        })?;
+        inspection.page(
+            automation,
+            settings,
+            process,
+            &format!("expanded-800-transition-{minutes}-minutes"),
+        )?;
+    }
+    automation.set_number(settings, process, automation_id::TRANSITION_NUMBER, 60.0)
 }
 
 fn seed(directory: &Path) -> io::Result<()> {
@@ -137,15 +210,6 @@ fn visit(
     process: u32,
     inspection: &mut Inspection,
 ) -> io::Result<()> {
-    for navigation in [
-        automation_id::NAV_SCHEDULE,
-        automation_id::NAV_APPS,
-        automation_id::NAV_TRANSITIONS,
-        automation_id::NAV_GENERAL,
-    ] {
-        show_page(automation, settings, process, navigation)?;
-        inspection.page(automation, settings, process, navigation)?;
-    }
     show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     automation.toggle(settings, process, automation_id::SOLAR_TIMING)?;
     wait("solar timing options", || {
@@ -181,13 +245,6 @@ fn visit(
     )?;
     show_page(automation, settings, process, automation_id::NAV_APPS)?;
     automation.invoke(settings, process, automation_id::EXCLUSIONS_EXPAND)?;
-    wait("expanded exclusions", || {
-        automation.enabled(
-            settings,
-            process,
-            &automation_id::remove(&automation_id::exclusion_entry(0)),
-        )
-    })?;
     inspection.page(automation, settings, process, "expanded exclusions")?;
     automation.invoke(settings, process, automation_id::ADD_APP)?;
     dialog(automation, settings, process, inspection, "Add app dialog")?;
@@ -203,6 +260,30 @@ fn visit(
         inspection,
         "window title dialog",
     )
+}
+
+fn pages(
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+    inspection: &mut Inspection,
+    dimensions: &str,
+) -> io::Result<()> {
+    for navigation in [
+        automation_id::NAV_SCHEDULE,
+        automation_id::NAV_APPS,
+        automation_id::NAV_TRANSITIONS,
+        automation_id::NAV_GENERAL,
+    ] {
+        show_page(automation, settings, process, navigation)?;
+        inspection.page(
+            automation,
+            settings,
+            process,
+            &format!("{dimensions}-{navigation}"),
+        )?;
+    }
+    Ok(())
 }
 
 fn dialog(
@@ -252,6 +333,13 @@ fn extras(
     picker(automation, settings, process, inspection)?;
     show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     for id in [automation_id::WAKE, automation_id::BEDTIME] {
+        if let Some(scroll) = automation
+            .scrolls(settings, process)?
+            .into_iter()
+            .find(|scroll| scroll.id == automation_id::SCROLL)
+        {
+            scroll_to(&scroll, 0.0)?;
+        }
         wait("visible clock entry", || {
             Ok(automation
                 .show_control(settings, process, id)?
@@ -273,11 +361,27 @@ fn extras(
         })?;
     }
     show_page(automation, settings, process, automation_id::NAV_GENERAL)?;
+    if let Some(scroll) = automation
+        .scrolls(settings, process)?
+        .into_iter()
+        .find(|scroll| scroll.id == automation_id::SCROLL)
+    {
+        scroll_to(&scroll, 0.0)?;
+    }
     wait("visible language entry", || {
         Ok(automation
             .show_control(settings, process, automation_id::LANGUAGE)?
             .then_some(()))
     })?;
+    let bounds = [
+        automation.bounds(settings, process, automation_id::LANGUAGE)?,
+        automation.bounds(settings, process, automation_id::SCROLL)?,
+        settings.GetWindowRect().map_err(io::Error::other)?,
+    ]
+    .map(|rect| (rect.left, rect.top, rect.right, rect.bottom));
+    report(&format!(
+        "Language menu anchor, viewport and window: {bounds:?}"
+    ));
     automation.expand(settings, process, automation_id::LANGUAGE)?;
     std::thread::sleep(Duration::from_millis(300));
     inspection.inspect(automation, settings, process, "language menu")?;
@@ -328,7 +432,18 @@ fn picker(
             == *settings,
         "picker owner differs from settings",
     )?;
-    std::thread::sleep(Duration::from_millis(300));
+    wait("picker filename and action controls", || {
+        let controls = automation.controls_with_parents(&picker, process)?;
+        Ok(["1148", "1", "2"]
+            .iter()
+            .all(|id| {
+                controls.iter().any(|(control, _)| {
+                    control.id == *id && control.enabled && control.bounds.3 > control.bounds.1
+                })
+            })
+            .then_some(()))
+    })?;
+    std::thread::sleep(Duration::from_millis(500));
     inspection.snapshot(
         &picker,
         process,
@@ -419,10 +534,11 @@ impl Inspection {
         process: u32,
         place: &str,
     ) -> io::Result<()> {
-        let scroll = automation
-            .scrolls(window, process)?
-            .into_iter()
-            .find(|scroll| scroll.id == automation_id::SCROLL);
+        let scroll = wait("page scroll patterns", || {
+            automation.scrolls(window, process).map(Some)
+        })?
+        .into_iter()
+        .find(|scroll| scroll.id == automation_id::SCROLL);
         self.traverse(automation, window, process, place, scroll.as_ref())
     }
 
@@ -546,7 +662,11 @@ impl Inspection {
         process: u32,
         place: &str,
     ) -> io::Result<()> {
-        let controls = automation.controls_with_parents(settings, process)?;
+        let controls = wait("current viewport automation tree", || {
+            automation
+                .controls_with_parents(settings, process)
+                .map(Some)
+        })?;
         let mut values: BTreeSet<String> = controls
             .iter()
             .flat_map(|(control, _)| isolated(&control.name))
@@ -578,7 +698,7 @@ impl Inspection {
 
 // WinUI names these parts of its controls, by automation identifier, with its
 // own text. That text follows WinUI's resources, which have no pseudo-locale.
-const WINUI_TEXT: [(&str, &str); 9] = [
+const WINUI_TEXT: [(&str, &str); 13] = [
     ("Close", "Close"),
     ("Maximize", "Maximize"),
     ("Minimize", "Minimize"),
@@ -587,6 +707,10 @@ const WINUI_TEXT: [(&str, &str); 9] = [
     ("StandardIcon", "Informational icon"),
     ("StandardIcon", "Warning icon"),
     ("VerticalScrollBar", "Vertical"),
+    ("VerticalLargeDecrease", "Vertical Large Decrease"),
+    ("VerticalLargeIncrease", "Vertical Large Increase"),
+    ("VerticalSmallDecrease", "Vertical Small Decrease"),
+    ("VerticalSmallIncrease", "Vertical Small Increase"),
     ("Light Dismiss", "Close"),
 ];
 

@@ -88,6 +88,19 @@ This recipe runs the Browse cases of the Add app and Add exclusion dialogs separ
 
 It uses isolated configuration with management off, so it does not change Night Light. On failure, the harness attempts graceful exit and prints the retained temporary directory.
 
+## Recent-app action identity
+
+Close any running Circadia instance, then run:
+
+```bash
+just native-identity
+just native-identity --language qps-Ploc
+```
+
+The check opens two temporary test windows and switches between them and Settings. It changes the recent-app order while an app's Add button or checkbox has keyboard focus. The same control must still target that app and preserve focus and selection. Invoking Add must save the intended executable. The test windows close when the run ends, including on failure.
+
+This check sends desktop input and requires 100% scaling; leave the desktop idle. It uses isolated configuration with Night Light management off and saves screenshots under `target/identity-100-*`.
+
 ## Sign-in startup
 
 Close any running Circadia instance, then run:
@@ -333,9 +346,11 @@ Close any running Circadia instance, then run:
 just native-translation
 ```
 
-This recipe starts Circadia in the `qps-Ploc` pseudo-locale, an artificial language with expanded test text, with management off. It does not change Night Light. Its configuration has an invalid focus delay, an unknown key, two suppression entries including a title condition, an exclusion, and a saved crash notice. Those fixtures exercise validation messages and banners.
+This recipe builds the debug application and starts it in the `qps-Ploc` pseudo-locale, an artificial language with expanded test text, with management off. It does not change Night Light. Release builds exclude the test-text generator and reject the developer language option. The fixture configuration has an invalid focus delay, an unknown key, two suppression entries including a title condition, an exclusion, and a saved crash notice. Those fixtures exercise validation messages and banners.
 
-The recipe inspects and captures every page through overlapping scroll positions. It also visits expanded exclusions, consent dialogs, both Add dialogs, the title-condition editor, both time flyouts, the language popup and restart message, and the tray menu. It opens and cancels the Windows file picker and verifies the tray tooltip's accessible text. It sends mouse and keyboard input for those interactions; leave the desktop idle. Cancelling location consent does not request a Windows position. The fixture's selected language can change, but Windows' language and other host settings do not.
+The recipe inspects and captures every page through overlapping scroll positions at the default size, 640×480, 700×600, and 800×600 client sizes. It also sizes the window to work areas equivalent to 1280×720 and 1366×768 desktops with taskbar space excluded, without changing the monitor resolution. It exercises the hamburger overlay and dismissal, tests navigation at 799 and 800 effective pixels, and checks that an existing number-field value survives resizing.
+
+The run also visits expanded exclusions, consent dialogs, both Add dialogs, the title-condition editor, both time flyouts, the language popup and restart message, and the tray menu. It opens and cancels the Windows file picker and verifies the tray tooltip's accessible text. It sends mouse and keyboard input for those interactions; leave the desktop idle. Cancelling location consent does not request a Windows position. The fixture's selected language can change, but Windows' language and other host settings do not.
 
 In each view the recipe reads the text of every element and reports:
 
@@ -347,6 +362,10 @@ Windows' caption buttons, the system menu, and WinUI's popup hosts show Windows'
 UI Automation reports a text element's rectangle clipped to its layout slot, so it cannot establish that a glyph or text fits inside that slot. The recipe scrolls through content and records PNG captures in a fresh ignored `target/translation-100-*` directory with an ordered `manifest.tsv`. Unexpected automation failures fail the run. Automated success still requires visual inspection of the complete screenshot set; `result.txt` records that distinction. This acceptance recipe requires 100% scaling. Checks at 150% and 200% are [post-MVP work](../docs/specs/SPEC.md#future-work). Failure retains the temporary configuration directory.
 
 ## Recorded results
+
+On 2026-10-29, the responsive settings checks passed with windows-rs `3b6bea5` and Windows App SDK runtime 2.6.4 on Windows 11 build 26300.9711 at 100% scaling. The translation run captured 129 views and checked 264 distinct texts. Visual review covered every page through overlapping scroll positions, expanded sections, dialogs, flyouts, and the tray menu, followed by fresh captures of corrected sliders, transition labels, the file picker, and the language popup. The checks covered 640×480, 700×600, and 800×600 client sizes and the initial 1200×1000 outer window. Additional window sizes reproduced the available work areas of 1280×720 and 1366×768 desktops without changing the actual monitor resolution.
+
+The navigation check verified a hamburger overlay at 799 epx client width and an expanded pane at 800 epx, plus overlay dismissal, selection, focus restoration, and preservation of an existing number-field value during reflow. The identity check activated both owned fixture windows and verified the same focused native actions after history reordered. Settings integration passed with real Night Light calls and cleanup. The graph check used simulated native calls; its maximum input-to-render callback delay was 27.639 ms over 15 samples. With the navigation pane hidden on General, a 600 ms observation recorded no animation starts, text-timer wakes, or settings renders. A separate 600 ms observation after closing Settings recorded the same counts. These results do not verify higher display scales, Narrator delivery, or optical Night Light output.
 
 At windows-rs `5cfe2c9` on 2026-10-29, Windows 11 build 26300.9711 at 100% scaling passed the binding-migration checks for location, both settings-startup variants, and all five shutdown cases. The completed animations passed captured-pixel and accessible-value checks with native output blocked; the [measurement record](../docs/research/resource-measurement.md#progress-bar-phase-ring-and-marker-color) gives the results and limits. Recovery passed 167 serialized simulated calls. The quick activity check recorded one indicator update during 60.039 seconds with settings open and zero UI ticks or views during 59.925 seconds after closing.
 

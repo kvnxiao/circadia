@@ -79,6 +79,14 @@ Each bump is its own dependency change. It records the new commit and its date a
 
 These dependency checks do not establish narrow-window layout acceptance, Narrator delivery, higher-scale layout, or optical Night Light output.
 
+### Responsive layout and native control identity
+
+**Observed on 2026-10-29 at the same pin, OS build, and 100% scale:** Circadia passed navigation checks at client widths of 799 and 800 effective pixels, including overlay dismissal, page selection, and keyboard-focus restoration. Full scrolling captures covered 640×480, 700×600, and 800×600 client sizes and the initial 1200×1000 outer window. Additional window sizes reproduced the available work areas of 1280×720 and 1366×768 desktops; the actual monitor resolution stayed unchanged. Visual inspection and targeted recaptures verified complete action glyphs, aligned delete and lock icons, wrapping descriptions, sliders, transition labels, and dialogs. [Recorded harness results](../../tools/README.md#recorded-results) distinguish automated checks from visual inspection and list the remaining limits.
+
+`MaxWidth` alone did not give a slider a useful desired width inside a content-sized action group. A zero-height, 220 epx-wide sibling in the same Grid cell supplies that measurement while the slider stretches within the available width. The surrounding Grid reserves content-sized columns for the number field and unit. Captures verified a complete slider in the initial window and a shortened slider with a readable unit at 800 epx client width.
+
+Keyed children preserved the native Add button and checkbox instances and their executable targets during recent-history reordering. Native checkbox focus still required an explicit focus request when its keyed row changed position. Apps selected through Browse remain in the dialog's Browse section when they also become recently focused apps; moving them to the Recent section would replace their native controls. The regression harness verifies actual fixture foreground activation before checking history; requesting focus alone did not establish that the fixture became foreground.
+
 ## Reference pin `5cfe2c9`
 
 **Source inspection, 2026-10-29:** `master` was at `5cfe2c96ea029b119d5e07fca2a92d7628c22aeb`, committed 2026-10-29T21:22:25Z. The [comparison with `8786f59`](https://github.com/microsoft/windows-rs/compare/8786f59d1f6bc216324b202ec17d3de696d3b843...5cfe2c96ea029b119d5e07fca2a92d7628c22aeb) has two commits:

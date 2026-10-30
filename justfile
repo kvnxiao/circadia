@@ -41,6 +41,9 @@ native-shutdown *args: build-self-contained
 native-picker *args: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --picker target/debug/circadia.exe
 
+native-identity *args: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --identity target/debug/circadia.exe {{args}}
+
 native-translation: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- --language qps-Ploc --translation target/debug/circadia.exe
 
@@ -78,6 +81,10 @@ fix:
 test:
     cargo +stable test --workspace --all-features --locked
 
+test-release-text:
+    cargo +stable test --profile testrelease --lib l10n::tests --locked
+    cargo +stable test --profile testrelease --bin circadia --locked
+
 doc:
     RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -D warnings" cargo +stable doc --workspace --all-features --no-deps --locked
 
@@ -85,7 +92,7 @@ dependencies:
     cargo +stable audit
     cargo +stable machete
 
-check: lint test doc dependencies check-composition-bindings
+check: lint test test-release-text doc dependencies check-composition-bindings
 
 [positional-arguments]
 check-msrv package="circadia":

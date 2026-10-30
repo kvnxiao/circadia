@@ -30,14 +30,19 @@ use windows_reactor::Border;
 use windows_reactor::Button;
 use windows_reactor::ButtonStyle;
 use windows_reactor::CheckBox;
+use windows_reactor::Component;
+use windows_reactor::ComponentContext;
 use windows_reactor::ContentDialog;
 use windows_reactor::ContentDialogButton;
 use windows_reactor::ContentDialogExt;
+use windows_reactor::ElementRef;
+use windows_reactor::FocusEventInfo;
 use windows_reactor::FontIcon;
 use windows_reactor::Grid;
 use windows_reactor::GridLength;
 use windows_reactor::HorizontalAlignment;
 use windows_reactor::HyperlinkButton;
+use windows_reactor::KeyedView;
 use windows_reactor::Orientation;
 use windows_reactor::StackPanel;
 use windows_reactor::TextBox;
@@ -46,6 +51,7 @@ use windows_reactor::Thickness;
 use windows_reactor::VerticalAlignment;
 use windows_reactor::View;
 use windows_reactor::ViewContext;
+use windows_reactor::keyed;
 
 const SUN_GLYPH: &str = "\u{E706}";
 const ADD_GLYPH: &str = "\u{E710}";
@@ -67,7 +73,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         kelvin = problems::kelvin(region, 6500)
                     ),
                 )
-                .view(),
+                .view(settings.stacked()),
             ),
             widgets::card(
                 Row::new(
@@ -76,7 +82,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                     manual.description.clone(),
                 )
                 .controls(vec![manual_button(manual, context)])
-                .view(),
+                .view(settings.stacked()),
             ),
         ]),
         widgets::section(text!(text, "section-recent"), false),
@@ -107,7 +113,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                     context,
                 ),
             ))
-            .view(),
+            .view(settings.stacked()),
     ));
     vec![
         Border::new()
@@ -515,10 +521,10 @@ pub(super) fn dialog_view(
             .map(|file| DialogRow {
                 name: display_name(model, &file.executable),
                 checked: dialog.chosen.contains(&file.executable),
-                browsed: !model
-                    .recent
+                browsed: dialog
+                    .browsed
                     .iter()
-                    .any(|recent| recent.executable == file.executable),
+                    .any(|browsed| browsed.executable == file.executable),
                 executable: file.executable,
             })
             .collect(),
@@ -644,7 +650,14 @@ pub(super) fn title_dialog_view(
     }
 }
 
-fn app_row(icon: View, name: &str, detail: Vec<View>, controls: Vec<View>, id: String) -> View {
+fn app_row(
+    icon: View,
+    name: &str,
+    detail: Vec<View>,
+    controls: Vec<View>,
+    id: String,
+    stacked: bool,
+) -> View {
     Border::new()
         .min_height(60.0)
         .padding(Thickness::new(16.0, 10.0, 16.0, 10.0))
@@ -652,11 +665,14 @@ fn app_row(icon: View, name: &str, detail: Vec<View>, controls: Vec<View>, id: S
         .content(
             Grid::new()
                 .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                .rows([GridLength::Auto, GridLength::Auto])
+                .row_spacing(if stacked { 12.0 } else { 0.0 })
                 .column_spacing(16.0)
                 .children((
                     icon,
                     StackPanel::new()
                         .grid_column(1)
+                        .grid_column_span(if stacked { 2 } else { 1 })
                         .spacing(2.0)
                         .vertical_alignment(VerticalAlignment::Center)
                         .children(
@@ -664,7 +680,10 @@ fn app_row(icon: View, name: &str, detail: Vec<View>, controls: Vec<View>, id: S
                                 .chain(detail)
                                 .collect::<Vec<View>>(),
                         ),
-                    widgets::action_group(controls).grid_column(2),
+                    widgets::action_group(controls)
+                        .grid_column(if stacked { 1 } else { 2 })
+                        .grid_row(i32::from(stacked))
+                        .grid_column_span(if stacked { 2 } else { 1 }),
                 )),
         )
         .into()
@@ -714,7 +733,7 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 .content(widgets::caption(text!(text, "recent-empty"))),
         );
     }
-    let views: Vec<View> = rows
+    let views: Vec<KeyedView> = rows
         .into_iter()
         .enumerate()
         .map(|(position, row)| {
@@ -776,11 +795,12 @@ fn recent_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
                 vec![widgets::caption(&row.detail).into()],
                 controls,
                 automation_id::recent(&executable),
+                settings.stacked(),
             );
-            divided(row_view, position > 0)
+            keyed(executable, divided(row_view, position > 0))
         })
         .collect();
-    widgets::card(StackPanel::new().children(views))
+    widgets::card(StackPanel::new().keyed_children(views))
 }
 
 fn divided(view: View, divider: bool) -> View {
@@ -806,12 +826,16 @@ fn list_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
         .len();
     Grid::new()
         .columns([GridLength::STAR, GridLength::Auto])
+        .rows([GridLength::Auto, GridLength::Auto])
+        .row_spacing(if settings.stacked() { 8.0 } else { 0.0 })
         .margin(Thickness::new(0.0, 28.0, 0.0, 8.0))
         .children((
             widgets::strong(text!(text, "section-suppression", count = count))
                 .vertical_alignment(VerticalAlignment::Center),
             Button::new()
-                .grid_column(1)
+                .grid_column(i32::from(!settings.stacked()))
+                .grid_row(i32::from(settings.stacked()))
+                .horizontal_alignment(HorizontalAlignment::Right)
                 .style(ButtonStyle::Accent)
                 .is_enabled(settings.input.model.editable())
                 .automation_id(automation_id::ADD_APP)
@@ -847,6 +871,7 @@ fn entry_card(row: &EntryRow, settings: &Settings, controls: Vec<View>, id: Stri
             detail,
             controls,
             id,
+            settings.stacked(),
         ))
         .into()
 }
@@ -862,7 +887,7 @@ fn suppression_cards(settings: &Settings, context: &ViewContext<'_, Settings>) -
                 text!(text, "list-empty-title"),
                 text!(text, "list-empty-description"),
             )
-            .view(),
+            .view(settings.stacked()),
         )];
     }
     let cards = rows
@@ -921,7 +946,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         ])
         .into(),
     ])
-    .view();
+    .view(settings.stacked());
     let mut children: Vec<View> = vec![header];
     children.extend(settings.feedback(Field::Exclusions));
     if expanded {
@@ -945,6 +970,7 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                         .into(),
                 ],
                 &automation_id::fixed_exclusion(&row.executable.to_lowercase()),
+                settings.stacked(),
             )
         }));
         children.extend(rows.iter().map(|row| {
@@ -973,14 +999,12 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 StackPanel::new().spacing(2.0).children(detail).into(),
                 actions,
                 &id,
+                settings.stacked(),
             )
         }));
         if rows.is_empty() {
             children.push(
-                Border::new()
-                    .padding(Thickness::new(52.0, 10.0, 16.0, 10.0))
-                    .border_brush(ThemeBrush::CardStroke)
-                    .border_thickness(Thickness::new(0.0, 1.0, 0.0, 0.0))
+                widgets::nested("exclusions-empty")
                     .content(widgets::caption(text!(text, "exclusions-empty")))
                     .into(),
             );
@@ -989,23 +1013,80 @@ fn exclusions_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
     widgets::card(StackPanel::new().children(children))
 }
 
-fn nested_app_row(icon: View, name: &str, detail: View, actions: Vec<View>, id: &str) -> View {
+fn nested_app_row(
+    icon: View,
+    name: &str,
+    detail: View,
+    actions: Vec<View>,
+    id: &str,
+    stacked: bool,
+) -> View {
     widgets::nested(id)
         .content(
             Grid::new()
                 .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                .rows([GridLength::Auto, GridLength::Auto])
+                .row_spacing(if stacked { 12.0 } else { 0.0 })
                 .column_spacing(12.0)
                 .children((
                     icon,
                     StackPanel::new()
                         .grid_column(1)
+                        .grid_column_span(if stacked { 2 } else { 1 })
                         .spacing(2.0)
                         .vertical_alignment(VerticalAlignment::Center)
                         .children((widgets::body(name), detail)),
-                    widgets::action_group(actions).grid_column(2),
+                    widgets::action_group(actions)
+                        .grid_column(if stacked { 1 } else { 2 })
+                        .grid_row(i32::from(stacked))
+                        .grid_column_span(if stacked { 2 } else { 1 }),
                 )),
         )
         .into()
+}
+
+#[derive(Clone, PartialEq)]
+struct CandidateInput {
+    position: usize,
+    checkbox: CheckBox,
+}
+
+struct Candidate {
+    input: CandidateInput,
+    checkbox: ElementRef<CheckBox>,
+    focused: bool,
+}
+
+impl Component for Candidate {
+    type Input = CandidateInput;
+    type Message = bool;
+
+    fn create(input: &Self::Input, _: &ComponentContext<Self>) -> Self {
+        Self {
+            input: input.clone(),
+            checkbox: ElementRef::new(),
+            focused: false,
+        }
+    }
+
+    fn input_changed(&mut self, input: &Self::Input, _: &ComponentContext<Self>) {
+        if input.position != self.input.position && self.focused && !self.checkbox.request_focus() {
+            tracing::debug!("candidate focus request rejected");
+        }
+        self.input = input.clone();
+    }
+
+    fn update(&mut self, focused: bool, _: &ComponentContext<Self>) {
+        self.focused = focused;
+    }
+
+    fn view(&self, input: &Self::Input, context: &mut ViewContext<'_, Self>) -> View {
+        Border::new()
+            .on_got_focus(context.callback(|_: FocusEventInfo| true))
+            .on_lost_focus(context.callback(|_: FocusEventInfo| false))
+            .content(input.checkbox.clone().element_ref(&self.checkbox))
+            .into()
+    }
 }
 
 fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> ContentDialog {
@@ -1020,40 +1101,48 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
         return dialog;
     };
     let view = dialog_view(model, text, region, state);
-    let choice = |row: DialogRow| -> View {
+    let choice = |(position, row): (usize, DialogRow)| -> KeyedView {
         let executable = row.executable.clone();
-        CheckBox::new()
-            .is_checked(row.checked)
-            .automation_id(automation_id::dialog_choice(&row.executable))
-            .automation_name(text!(
-                text,
-                "app-entry-name",
-                name = row.name.as_str(),
-                executable = row.executable.as_str()
-            ))
-            .on_is_checked_changed(context.callback(move |checked: Option<bool>| {
-                Message::Choose(executable.clone(), checked == Some(true))
-            }))
-            .content(
-                Grid::new()
-                    .columns([GridLength::Auto, GridLength::STAR])
-                    .column_spacing(14.0)
-                    .children((
-                        icon(settings, &row.executable, 28.0),
-                        StackPanel::new().grid_column(1).children((
-                            widgets::body(&row.name),
-                            widgets::caption(&row.executable),
-                        )),
-                    )),
-            )
-            .into()
+        keyed(
+            executable.clone(),
+            View::component::<Candidate>(CandidateInput {
+                position,
+                checkbox: CheckBox::new()
+                    .is_checked(row.checked)
+                    .automation_id(automation_id::dialog_choice(&row.executable))
+                    .automation_name(text!(
+                        text,
+                        "app-entry-name",
+                        name = row.name.as_str(),
+                        executable = row.executable.as_str()
+                    ))
+                    .on_is_checked_changed(context.callback(move |checked: Option<bool>| {
+                        Message::Choose(executable.clone(), checked == Some(true))
+                    }))
+                    .content(
+                        Grid::new()
+                            .columns([GridLength::Auto, GridLength::STAR])
+                            .column_spacing(14.0)
+                            .children((
+                                icon(settings, &row.executable, 28.0),
+                                StackPanel::new().grid_column(1).children((
+                                    widgets::body(&row.name),
+                                    widgets::caption(&row.executable),
+                                )),
+                            )),
+                    ),
+            }),
+        )
     };
     let (browsed, recent): (Vec<DialogRow>, Vec<DialogRow>) =
         view.rows.into_iter().partition(|row| row.browsed);
-    let rows: Vec<View> = if recent.is_empty() {
-        vec![widgets::caption(text!(text, "dialog-all-listed")).into()]
+    let rows: Vec<KeyedView> = if recent.is_empty() {
+        vec![keyed(
+            "empty",
+            widgets::caption(text!(text, "dialog-all-listed")),
+        )]
     } else {
-        recent.into_iter().map(choice).collect()
+        recent.into_iter().enumerate().map(choice).collect()
     };
     let mut browse: Vec<View> = vec![
         widgets::body(text!(text, "dialog-file-title")).into(),
@@ -1069,7 +1158,11 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
             ))
             .into(),
     ];
-    browse.extend(browsed.into_iter().map(choice));
+    browse.push(
+        StackPanel::new()
+            .keyed_children(browsed.into_iter().enumerate().map(choice))
+            .into(),
+    );
     if let Some(message) = view.message {
         browse.push(
             widgets::caption(message)
@@ -1088,7 +1181,7 @@ fn add_dialog(settings: &Settings, context: &ViewContext<'_, Settings>) -> Conte
                 widgets::caption(view.description),
                 StackPanel::new().spacing(6.0).children((
                     widgets::strong(text!(text, "dialog-recent")),
-                    StackPanel::new().spacing(2.0).children(rows),
+                    StackPanel::new().spacing(2.0).keyed_children(rows),
                 )),
                 Border::new()
                     .height(1.0)

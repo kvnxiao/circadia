@@ -29,6 +29,7 @@ fn parse(arguments: impl IntoIterator<Item = std::ffi::OsString>) -> std::io::Re
             parsed.verbose = true;
             continue;
         }
+        #[cfg(debug_assertions)]
         if argument == "--language" && parsed.language.is_none() {
             parsed.language = Some(
                 arguments
@@ -89,8 +90,8 @@ mod tests {
     #[test_case(&["--data-dir", "D:\\data"], Some("D:\\data"), false, None; "data directory")]
     #[test_case(&["-V", "--data-dir", "D:\\data"], Some("D:\\data"), true, None; "flag before directory")]
     #[test_case(&["--data-dir", "D:\\data", "--verbose"], Some("D:\\data"), true, None; "flag after directory")]
-    #[test_case(&["--language", "qps-Ploc"], None, false, Some("qps-Ploc"); "forced language")]
-    #[test_case(&["--language", "xx-XX", "-V"], None, true, Some("xx-XX"); "unvalidated language")]
+    #[cfg_attr(debug_assertions, test_case(&["--language", "qps-Ploc"], None, false, Some("qps-Ploc"); "forced language"))]
+    #[cfg_attr(debug_assertions, test_case(&["--language", "xx-XX", "-V"], None, true, Some("xx-XX"); "unvalidated language"))]
     fn accepted_arguments(
         arguments: &[&str],
         directory: Option<&str>,
@@ -114,6 +115,7 @@ mod tests {
     #[test_case(&["--verbose", "extra"]; "positional argument")]
     #[test_case(&["--language"]; "missing language")]
     #[test_case(&["--language", "en-US", "--language", "qps-Ploc"]; "repeated language")]
+    #[cfg_attr(not(debug_assertions), test_case(&["--language", "qps-Ploc"]; "pseudo language is debug only"))]
     fn rejected_arguments(arguments: &[&str]) {
         assert_eq!(
             parse(arguments.iter().map(Into::into))

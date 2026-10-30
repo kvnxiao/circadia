@@ -39,7 +39,12 @@ pub(super) fn verify(
     input: &mut ConfigInput,
 ) -> io::Result<()> {
     let process = std::process::id();
-    automation.select(settings, process, automation_id::NAV_TRANSITIONS)?;
+    crate::lifecycle::show_page(
+        automation,
+        settings,
+        process,
+        automation_id::NAV_TRANSITIONS,
+    )?;
     automation.set_number(
         settings,
         process,
@@ -49,7 +54,7 @@ pub(super) fn verify(
     automation.set_number(settings, process, automation_id::TRANSITION_NUMBER, 240.0)?;
     input.preview_seconds = 60;
     input.scheduled_transition_minutes = 240;
-    automation.select(settings, process, automation_id::NAV_SCHEDULE)?;
+    crate::lifecycle::show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     automation.toggle(settings, process, automation_id::SOLAR_TIMING)?;
     input.solar_timing = false;
     wait("graph visible for progress capture", || {
@@ -61,12 +66,12 @@ pub(super) fn verify(
         Ok(measurement.output_blocked()?.then_some(()))
     })?;
     crate::automation::wait_until(
-        "captured phase begins",
+        "captured phase reaches its interior",
         Instant::now() + Duration::from_secs(55),
         || {
             Ok(automation
                 .number(settings, process, automation_id::PANE_PROGRESS)?
-                .filter(|value| (0.0..70.0).contains(value)))
+                .filter(|value| (20.0..70.0).contains(value)))
         },
     )?;
     let settings_colors = UISettings::new().map_err(io::Error::other)?;
@@ -91,28 +96,7 @@ pub(super) fn verify(
     report(&format!(
         "PASS: compositor pixels during blocked output: {bars} bar extents, {rings} ring extents, {colors} dot colors in 900 ms; native ranges before={before:?}, after={after:?}"
     ));
-    automation.select(settings, process, automation_id::NAV_GENERAL)?;
-    let initial_value = automation
-        .range(settings, process, automation_id::PANE_PROGRESS)?
-        .0;
-    let mut ring = Capture::region(automation, settings, automation_id::PANE_PROGRESS)?;
-    let first = accent_pixels(&mut ring, &accents)?;
-    std::thread::sleep(Duration::from_millis(350));
-    let next = accent_pixels(&mut ring, &accents)?;
-    require(
-        first != next,
-        "visible navigation phase ring stopped on General",
-    )?;
-    crate::automation::wait_until(
-        "navigation ring's accessible value advances on General",
-        Instant::now() + Duration::from_secs(2),
-        || {
-            let current = automation
-                .range(settings, process, automation_id::PANE_PROGRESS)?
-                .0;
-            Ok((current > initial_value).then_some(()))
-        },
-    )?;
+    navigation_motion(automation, settings, &accents)?;
     require(
         measurement.output_blocked()?,
         "native output returned before the navigation range advanced",
@@ -122,7 +106,7 @@ pub(super) fn verify(
         Ok(hidden(activity).is_ok().then_some(()))
     })?;
     let _restored = settings.ShowWindow(winsafe::co::SW::RESTORE);
-    automation.select(settings, process, automation_id::NAV_SCHEDULE)?;
+    crate::lifecycle::show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     automation.invoke(settings, process, automation_id::PREVIEW)?;
     wait("Stop restores editing with progress output blocked", || {
         Ok(automation
@@ -138,6 +122,36 @@ pub(super) fn verify(
         "PASS: the visible navigation ring and its accessible value advance off-page; minimize removes all progress animations; Stop restores editing before native completion",
     );
     Ok(())
+}
+
+fn navigation_motion(
+    automation: &Automation,
+    settings: &HWND,
+    accents: &[[u8; 3]],
+) -> io::Result<()> {
+    let process = std::process::id();
+    crate::lifecycle::show_page(automation, settings, process, automation_id::NAV_GENERAL)?;
+    let initial_value = automation
+        .range(settings, process, automation_id::PANE_PROGRESS)?
+        .0;
+    let mut ring = Capture::region(automation, settings, automation_id::PANE_PROGRESS)?;
+    let first = accent_pixels(&mut ring, accents)?;
+    std::thread::sleep(Duration::from_millis(350));
+    let next = accent_pixels(&mut ring, accents)?;
+    require(
+        first != next,
+        "visible navigation phase ring stopped on General",
+    )?;
+    crate::automation::wait_until(
+        "navigation ring's accessible value advances on General",
+        Instant::now() + Duration::from_secs(2),
+        || {
+            let current = automation
+                .range(settings, process, automation_id::PANE_PROGRESS)?
+                .0;
+            Ok((current > initial_value).then_some(()))
+        },
+    )
 }
 
 fn ranges(automation: &Automation, settings: &HWND) -> io::Result<[(f64, f64, f64); 2]> {
