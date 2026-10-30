@@ -83,6 +83,8 @@ When selected checks need Reactor, a preparation job caches Cargo Git sources be
 
 GitHub scopes pull-request caches to that pull request; caches saved on `main` are also available to pull requests. Cache eviction or a cache-service failure can still require Cargo to fetch sources again.
 
+Rust check jobs emit line-table debug information for the dev, test, and testrelease profiles. This preserves file/line backtraces while reducing build output and linking work; test assertions and optimization levels are unchanged. Local builds retain their default debug information, and packaging retains its release-profile settings.
+
 Superseded runs are cancelled, and a failed Rust matrix job does not cancel the others. Formatting runs separately so compiled checks do not install nightly Rust. The bindings check installs stable rustfmt for code generation; the generated file uses LF line endings on every checkout. `just fmt-check` and `just clippy` run individually; `just lint` still runs both.
 
 CI executes test harnesses, including unit tests of native-check helpers, but does not launch the desktop application or probe windows. Desktop automation, screenshots, live Night Light checks, host-setting exercises, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
