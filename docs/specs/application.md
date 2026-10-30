@@ -60,6 +60,8 @@ The defaults are Daytime 6500 K, Morning/Evening 3400 K, Sleep 2400 K, Wake 07:0
 
 A configuration file or backup is usable when Circadia can read it, it is valid TOML, and it records the current format version. Invalid values in a usable file are recovered under REQ-recover-invalid-fields.
 
+The format version distinguishes installation-path restrictions from filename-only formats. A binary that cannot interpret the restriction rejects that format instead of ignoring the path and broadening a rule. Files from earlier unreleased development formats are not migrated automatically.
+
 When the configuration file is unusable or missing and its backup exists, Circadia does not fall back to the bundled defaults. When the backup is usable, Circadia records in the log under [REQ-local-log](diagnostics.md#req-local-log--keep-a-local-rotating-log) the unusable file's content, or the beginning of a large file, and the problem, or the read error when the content cannot be read. It then writes the backup over the configuration file, accepts it with its values checked under REQ-recover-invalid-fields using the bundled defaults as replacements, and starts normally. Settings shows a banner on every page that names the kind of problem (unreadable, a syntax error with its line number, or another format version) until the user dismisses it or Circadia exits, and the tray tooltip reports the restore under REQ-status-display until then. Circadia does not open settings because of a restore. If writing the restored file fails, Circadia accepts the backup in memory, starts control, and settings reports that changes are not saved until a write succeeds.
 
 When neither a usable configuration file nor a usable backup exists, but at least one of them exists, a configuration error applies. Circadia does not modify either file and does not begin Night Light access. The tray tooltip reports that settings could not be read, and a launch shows only the tray icon. When the user opens settings, it shows the problem with "Reset to default settings" and "Open folder"; other settings and tray toggles, Preview, manual suppression, and the management setting are unavailable until the reset. Reset to default settings writes the bundled defaults to the configuration file and its backup and accepts them, with management off. If writing the configuration file fails, Circadia still accepts the defaults in memory, and settings reports that changes are not saved until a write succeeds.
@@ -74,6 +76,7 @@ When neither a usable configuration file nor a usable backup exists, but at leas
 - The configuration file and its backup are both unreadable: neither file changes, Night Light is not accessed, the tray tooltip reports the problem, and no window opens. Opening settings offers Reset to default settings and Open folder.
 - The user chooses Reset to default settings during a configuration error: both files have the defaults, management is off, and the other settings become available.
 - The configuration file and its backup have an earlier or a later format version: a configuration error applies, and Reset to default settings writes both files in the current format with management off.
+- A file with installation-path restrictions is opened by a filename-only binary: the incompatible format is rejected, rather than silently applying those entries to every installation with the same filename.
 - Bundled inputs are valid but Windows time-zone evaluation fails: control waits for calculation recovery; settings remains available.
 - Solar timing is enabled without coordinates in settings: the coordinate fields report the error and the preceding valid configuration continues.
 
@@ -88,8 +91,9 @@ Settings marks each field whose value in use differs from the value that the fil
 
 Each entry of the suppression and exclusion lists is checked separately:
 
-- An entry is invalid when its executable file name is missing, empty, or not a plain file name, when one of its values has the wrong type, or when its regular expression is invalid under [REQ-edit-executable-list](suppression.md#req-edit-executable-list--edit-the-suppression-list). An invalid entry matches nothing. It is fixed when the user removes it, or corrects or clears its title condition when that is its only problem.
-- Entries with the same executable file name on one list, compared case-insensitively, are duplicates. Each matches under its own title condition. They are fixed when the user removes entries until one remains for that file name.
+- An entry is invalid when its executable filename is missing, empty, or not a plain filename; when a value has the wrong type; or when its path restriction or regular expression is invalid under [REQ-edit-executable-list](suppression.md#req-edit-executable-list--edit-the-suppression-list). An invalid entry matches nothing, including when its path is invalid. Removing it fixes the mark; correcting or clearing a path or title condition fixes it when that is the only problem.
+- Entries with the same rule scope on one list are duplicates. Each valid entry still matches under its own title condition. The marks clear when removal or a valid scope edit leaves one entry per scope. Different paths and a filename-only rule are distinct scopes.
+- An absent path restriction means filename-only matching and is not a missing key. An empty, wrongly typed, relative, or mismatched path is invalid and never falls back to filename-only matching.
 - An entry without a title text or regular-expression option has no title condition, and that missing value counts as a missing key.
 - A list value that is not a list of entries is invalid: it takes the backup's list if that is a list, with its entries checked the same way, and otherwise an empty list. Settings marks the list, and the mark is fixed when the user adds or removes an entry on that list.
 
@@ -107,6 +111,8 @@ Settings marks each invalid or duplicate entry. A missing key is not marked: set
 - The suppression list has two `javaw.exe` entries, one with the title text "Minecraft" and one without: both are marked, every `javaw.exe` window matches, and removing either entry fixes both.
 - A list entry has the regular expression `minecraft(`: it matches nothing and is marked; clearing its title text fixes it.
 - A suppression entry has an empty file name: it matches nothing and is marked until the user removes it.
+- A rule has a relative path or a path ending in a different filename: it is marked, matches nothing, and pauses saving. Clearing that restriction explicitly makes it filename-only and clears the mark when no other problem remains.
+- The file has two `browser.exe` rules restricted to equivalent case or slash forms of the same path: both are marked duplicates. Rules for distinct paths, and a filename-only rule, are not duplicates.
 - Sleep is marked and shows 2400 K, and the user raises Morning/Evening to 3700 K: Sleep stays marked. Committing 2200 K in the Sleep field fixes it.
 - The file has no focus delay, and the backup has 300 ms: control uses 300 ms, settings notes the missing key, and the next write stores 300 ms.
 - The file has a key `theme` that Circadia does not define: settings lists it in a banner at each launch until a write leaves it out.

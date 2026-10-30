@@ -55,7 +55,7 @@ Night Light stores its schedule, temperature, and native preview flag in a setti
 
 Each record has a whole-second timestamp. The library stamps each write at least 2 s after the stored timestamp and after the same handle's earlier writes, so frequent writes move the timestamp ahead of real time. That difference is the timestamp lead; without writes, real time reduces it by 1 s per second. Windows behaves as if it ignores temperature changes stamped at or below the highest timestamp it has applied, so Circadia never moves a timestamp backward.
 
-The suppression list stores entries explicitly added by the user, each an executable file name with an optional window-title condition. A separate exclusion list overrides it for automatic suppression. Matching depends on current foreground identity and, for entries with a title condition, the window title, not window geometry, fullscreen mode, monitor arrangement, or display scaling.
+The suppression list stores entries explicitly added by the user, each an executable file name with optional installation-path and window-title restrictions. Filename-only rules cover every installation with that name; a path restriction limits a rule to one executable location. A separate exclusion list overrides suppression for the windows it matches. Matching depends on current foreground identity and any title condition, not window geometry, fullscreen mode, monitor arrangement, or display scaling.
 
 | Term | Meaning |
 | :-- | :-- |
@@ -78,7 +78,8 @@ The suppression list stores entries explicitly added by the user, each an execut
 | Accepted configuration | The validated configuration in effect: loaded at startup with invalid values replaced under REQ-recover-invalid-fields, restored from its backup, bundled defaults for a new install or after Reset to default settings, or the result of the last valid settings edit. Its schedule includes any permitted solar fallback. |
 | Saved configuration | The configuration file on disk. It can differ from the accepted configuration, for example while a write is pending, after a failed write, or while saving is paused. |
 | Configuration error | Startup found neither a usable configuration file nor a usable backup, but at least one of them exists. It lasts until the user resets to defaults. |
-| Tray toggle | A recent-app entry in the tray menu that shows whether its app has a suppression-list entry. Selecting it adds an entry without a title condition or removes such an entry; the tray cannot remove an entry with a title condition. |
+| Rule scope | An executable file name and its optional normalized absolute path. Two rules have the same scope when both values are equal, including whether a path restriction is absent. |
+| Tray toggle | A recent-app entry in the tray menu that shows whether suppression rules cover its installation. Available toggles add or remove a filename-only rule without a title condition; restricted or overlapping rules are edited in Settings. |
 | Usable configuration | A configuration file or backup that Circadia can read, that is valid TOML, and that records the current format version. Individual values in it can be invalid; REQ-recover-invalid-fields recovers them. |
 | Paused saving | The state in which Circadia writes neither the configuration file nor its backup because a value or list entry that startup marked under REQ-recover-invalid-fields remains. Settings edits still apply (REQ-paused-saving). |
 | Preview | A user-started traversal of the accepted schedule from the current instant through the same local clock on the next date, uniformly compressed into a configurable 1–60 seconds, initially ten. |
@@ -237,7 +238,7 @@ The [design documents](../design/README.md) describe the intended visual design 
 
 ## Security
 
-Wake and Bedtime clocks, temperature levels, coordinates, list entries (executable names, display names, and title conditions), cached application icons with their file paths, and preferences are stored per user. Circadia does not upload them or call a daily solar service. Enabling Use my Windows location requires confirmation that Circadia requests positions through Windows, including at tray-only startup; that operating-system service can use network-backed positioning. The saved preference authorizes the requests defined by REQ-configure-solar-location, subject to current Windows permission. Manual coordinates do not require location permission.
+Wake and Bedtime clocks, temperature levels, coordinates, list entries (executable names, optional installation paths, display names, and title conditions), cached application icons with their file paths, and preferences are stored per user. Circadia does not upload them or call a daily solar service. Enabling Use my Windows location requires confirmation that Circadia requests positions through Windows, including at tray-only startup; that operating-system service can use network-backed positioning. The saved preference authorizes the requests defined by REQ-configure-solar-location, subject to current Windows permission. Manual coordinates do not require location permission.
 
 The local log stays on the computer and can include personal data; [REQ-local-log](diagnostics.md#req-local-log--keep-a-local-rotating-log) and [REQ-crash-notice](diagnostics.md#req-crash-notice--offer-to-report-a-crash) govern its content and how the user shares it.
 
