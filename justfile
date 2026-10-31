@@ -119,4 +119,5 @@ check-msrv package="circadia":
     cargo +"$msrv" check --package "$1" --all-targets --all-features --locked
 
 installer:
-    bash packaging/build-installer.sh
+    # Mixing MSYS2 and Git Bash drops inherited environment variables.
+    "$BASH" packaging/build-installer.sh
