@@ -4,11 +4,11 @@ Circadia is a powerful manager for [Windows Night light](https://support.microso
 
 Circadia is a **Windows 11 x64 application in development**. Unsigned preview installers are built on every push to `main`, alongside automated checks.
 
-## Features
-
 <p align="center">
   <img src="assets/screenshots/schedule.png" alt="Circadia screenshot">
 </p>
+
+## Features
 
 - **Daily temperature schedule**
   - Set Wake and Bedtime schedules with different color temperature levels that support gradual transitions. The schedule supports one daily waking period and one overnight sleep period, including bedtimes after midnight.
@@ -24,34 +24,36 @@ Circadia is a **Windows 11 x64 application in development**. Unsigned preview in
 - **Tray controls and optional startup**
   - Keep Circadia running when Settings closes, reopen it from the tray or by launching the app again, and optionally start it at sign-in. Quit ends control and requests Night light off.
 
+## Comparison with similar tools
+
+Circadia combines native Windows 11 controls with scheduling and app rules for Windows Night light. Its interface follows your light, dark, or contrast theme.
+
+| Feature | Circadia | Windows Night light | f.lux |
+| :-- | :---: | :---: | :---: |
+| Settings interface | Native Windows 11 controls | Windows Settings | Custom f.lux interface |
+| Uses native Windows Night light | ✓ | ✓ | ✗ |
+| Sunrise and sunset scheduling | ✓ | ✓ | ✓ |
+| Separate daytime, evening, and bedtime temperatures | ✓ | ✗ | ✓ |
+| Automatically pauses for selected apps | ✓ | ✗ | ✓ |
+| Automatically pauses for specifically fullscreen apps | ✗ | ✗ | ✓ |
+| Included with Windows | ✗ | ✓ | ✗ |
+
+**Calibration profiles:** Circadia does not directly write GPU gamma ramps or modify `.icc`/`.icm` profiles; it delegates color changes to Windows Night light. Whereas [f.lux is known to conflict](https://justgetflux.com/faq.html?q=vcgt) with some custom display calibration settings and display profile loaders.
+
+Circadia lets you set Wake and Bedtime independently and combine them with optional sunrise and sunset times. Automatic suppression follows your app rules in any window mode.
+
+Sources: [Windows Night light settings](https://support.microsoft.com/en-us/windows/hardware/display-graphics/change-display-brightness-and-color-in-windows#bkmk_night_light), [f.lux for Windows](https://justgetflux.com/news/pages/v4/welcome/), [f.lux release notes](https://justgetflux.com/news/pages/v4/readme/), and [f.lux FAQ](https://justgetflux.com/faq.html).
+
 ## Getting started
 
-Circadia requires Windows 11 x64 with working native Night light. The intended minimum is build 22000; execution on that minimum build remains unverified. Recorded desktop checks used build 26300.9711 at 100% scaling. See the [compatibility evidence](docs/research/windows-compatibility.md) for the tested scope.
-
-### Install the latest development build
+Requires Windows 11 x64 with working native Night light. See [tested compatibility](docs/research/windows-compatibility.md).
 
 1. Sign in to GitHub and open the [Preview runs](https://github.com/kvnxiao/circadia/actions/workflows/preview.yml?query=event%3Apush+branch%3Amain).
-2. Open the newest successful run with a completed **Build Windows x64 installer** job. Under **Artifacts**, download `Circadia-windows-x64-unsigned-<commit>` and extract the ZIP.
-3. Run `Circadia-<version>-<commit>-windows-x64-unsigned-setup.exe`. If Circadia is already running, choose **Quit** from its tray menu before continuing.
-4. Finish setup, then open **Circadia** from the Windows Start menu.
+2. Select the latest successful run, then download `Circadia-windows-x64-unsigned-<commit>` under **Artifacts**.
+3. Extract the ZIP. Quit Circadia from its tray menu if it is running. Run the extracted `*-setup.exe`.
+4. Finish installation and open **Circadia** from the Start menu.
 
-Preview builds installed before the move to the Preview workflow need a one-time manual update using these steps. Their update checkers search the previous workflows and cannot find new builds.
-
-The installer includes the required runtime and installs for your Windows account without requesting administrator access. Downloads appear after the first successful installer build on `main` and expire after 90 days. If no download is available, you can [build from source](DEVELOPMENT.md#build-and-run).
-
-**Unsigned application:** Circadia and its installer are not code-signed yet. Expect a Microsoft Defender SmartScreen warning on the first run of a downloaded installer or app. If Windows displays **Windows protected your PC**, verify that you downloaded it from this repository, choose **More info**, then **Run anyway** to approve it manually. Windows may identify the publisher as **Unknown publisher**. New builds may prompt again. If Windows policy blocks execution without a **Run anyway** option, these instructions cannot override that policy.
-
-About shows the installed version and offers Check for updates. Automatic checks are enabled by default and run at startup and daily; their results appear in About. Stable installations check GitHub releases, and preview installations check successful main builds. The download link opens the matching page in your browser.
-
-To update, quit Circadia and run the newer installer. To uninstall, quit Circadia and use **Settings → Apps → Installed apps → Circadia → Uninstall**. Your saved settings remain available for a later installation.
-
-### Set up your schedule
-
-1. Set Wake, Bedtime, and your temperature levels on the Schedule page.
-2. Turn on Night light management and read the consent prompt.
-3. Use Preview to check the schedule, then close Settings to continue from the tray.
-
-While management is on, Circadia keeps Night light enabled, disables Windows' own Night light schedule, and corrects changes made in Windows Settings or Quick Settings. Turning management off or quitting requests Night light off; **it does not restore Windows' schedule**. Re-enable that schedule in Windows Settings if you want it afterward.
+Preview builds are unsigned, so Windows may show a SmartScreen warning. See the [user guide](docs/user-guide.md#installation-and-updates) for installation help, updates, and schedule setup.
 
 ## Help and development
 

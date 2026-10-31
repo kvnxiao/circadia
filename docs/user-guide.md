@@ -2,6 +2,22 @@
 
 Circadia runs in the Windows notification area and manages Night light only when you enable it. Open Settings from the tray or by launching Circadia again. Closing Settings keeps the app running; Quit ends it.
 
+## Installation and updates
+
+Circadia requires Windows 11 x64 with working native Night light. The intended minimum is build 22000; execution on that minimum build remains unverified. Recorded desktop checks used build 26300.9711 at 100% scaling. See the [compatibility evidence](research/windows-compatibility.md) for the tested scope.
+
+Download the latest preview installer using the [README instructions](../README.md#getting-started).
+
+If an older preview build cannot find new builds, update manually using the [README download steps](../README.md#getting-started). Some older update checkers search previous workflows and cannot find current packages.
+
+The installer includes the required runtime and installs for your Windows account without requesting administrator access. Downloads appear after the first successful installer build on `main` and expire after 90 days. If no download is available, you can [build from source](../DEVELOPMENT.md#build-and-run).
+
+**Unsigned application:** Circadia and its installer are not code-signed yet. Expect a Microsoft Defender SmartScreen warning on the first run of a downloaded installer or app. If Windows displays **Windows protected your PC**, verify that you downloaded it from this repository, choose **More info**, then **Run anyway** to approve it manually. Windows may identify the publisher as **Unknown publisher**. New builds may prompt again. If Windows policy blocks execution without a **Run anyway** option, these instructions cannot override that policy.
+
+About shows the installed version and offers Check for updates. Automatic checks are enabled by default and run at startup and daily; their results appear in About. Stable installations check GitHub releases, and preview installations check successful main builds. The download link opens the matching page in your browser.
+
+To update, quit Circadia and run the newer installer. To uninstall, quit Circadia and use **Settings → Apps → Installed apps → Circadia → Uninstall**. Your saved settings remain available for a later installation.
+
 ## Night light management
 
 On the Schedule page, turn on Night light management and confirm the explanation. Circadia disables Windows' Night light schedule, requests Night light on, and fades to the current target. While management is on, changes made in Windows Settings or Quick Settings are corrected to Circadia's target.
