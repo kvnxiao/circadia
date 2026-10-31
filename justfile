@@ -8,6 +8,10 @@ fmt:
 build:
     cargo +stable build --bin circadia --locked
 
+[positional-arguments]
+screenshot output="assets/screenshots/schedule.png":
+    pwsh.exe -NoProfile -STA -File tools/screenshots/capture-schedule.ps1 -Output "$1"
+
 build-self-contained:
     cargo +stable build --bin circadia --features self-contained --locked
 
