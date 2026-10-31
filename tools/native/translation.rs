@@ -19,12 +19,7 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
-use windows::Win32::uiautomationclient::UIA_MenuBarControlTypeId;
-use windows::Win32::uiautomationclient::UIA_PaneControlTypeId;
-use windows::Win32::uiautomationclient::UIA_TextControlTypeId;
-use windows::Win32::uiautomationclient::UIA_TitleBarControlTypeId;
-use windows::Win32::uiautomationclient::UIA_ToolTipControlTypeId;
-use windows::Win32::uiautomationclient::UIA_WindowControlTypeId;
+use uiautomation::types::ControlType;
 use winsafe::HWND;
 
 const PSEUDO_LOCALE: &str = "qps-Ploc";
@@ -726,23 +721,23 @@ fn translation(
     values: &BTreeSet<String>,
 ) -> Option<String> {
     let chrome = parent.is_some_and(|parent| {
-        parent.kind == UIA_TitleBarControlTypeId || parent.kind == UIA_MenuBarControlTypeId
+        parent.kind == ControlType::TitleBar || parent.kind == ControlType::MenuBar
     });
     let native_close_tooltip = control.id.is_empty()
         && control.name == "Close"
         && parent.is_some_and(|parent| {
             parent.id.is_empty()
-                && ((control.kind == UIA_ToolTipControlTypeId
-                    && parent.kind == UIA_WindowControlTypeId
+                && ((control.kind == ControlType::ToolTip
+                    && parent.kind == ControlType::Window
                     && parent.name == "Popup")
-                    || (control.kind == UIA_TextControlTypeId
-                        && parent.kind == UIA_ToolTipControlTypeId
+                    || (control.kind == ControlType::Text
+                        && parent.kind == ControlType::ToolTip
                         && parent.name == "Close"))
         });
     let checked = !chrome
         && !native_close_tooltip
-        && control.kind != UIA_PaneControlTypeId
-        && control.kind != UIA_WindowControlTypeId
+        && control.kind != ControlType::Pane
+        && control.kind != ControlType::Window
         && !WINUI_TEXT.contains(&(control.id.as_str(), control.name.as_str()));
     // A NumberBox's text box appends WinUI's range text to the header.
     let name = match control.id.as_str() {
@@ -761,7 +756,7 @@ fn translation(
 fn clipping(control: &Control, parent: &Control) -> Option<String> {
     let (left, top, right, bottom) = control.bounds;
     let (outer_left, outer_top, outer_right, outer_bottom) = parent.bounds;
-    if control.kind != UIA_TextControlTypeId
+    if control.kind != ControlType::Text
         || right <= left
         || bottom <= top
         || outer_right <= outer_left
@@ -771,7 +766,7 @@ fn clipping(control: &Control, parent: &Control) -> Option<String> {
     }
     let horizontal = left < outer_left - 1 || right > outer_right + 1;
     let vertical = top < outer_top - 1 || bottom > outer_bottom + 1;
-    (horizontal || (vertical && parent.kind != UIA_PaneControlTypeId)).then(|| {
+    (horizontal || (vertical && parent.kind != ControlType::Pane)).then(|| {
         format!(
             "{:?} ({}) at {:?} extends past its parent {:?} at {:?}",
             control.name, control.id, control.bounds, parent.id, parent.bounds
@@ -940,7 +935,7 @@ mod tests {
         Control {
             id: id.into(),
             name: name.into(),
-            kind: UIA_TextControlTypeId,
+            kind: ControlType::Text,
             enabled: true,
             bounds: (0, 0, 10, 10),
         }
@@ -982,11 +977,11 @@ mod tests {
     fn native_close_tooltip_is_exempt_without_exempting_application_text() {
         let values = BTreeSet::new();
         let popup = Control {
-            kind: UIA_WindowControlTypeId,
+            kind: ControlType::Window,
             ..part("", "Popup")
         };
         let tooltip = Control {
-            kind: UIA_ToolTipControlTypeId,
+            kind: ControlType::ToolTip,
             ..part("", "Close")
         };
         assert_eq!(translation(&tooltip, Some(&popup), &values), None);
@@ -1011,19 +1006,19 @@ mod tests {
 
     #[test]
     fn text_past_its_parent_is_clipped_except_vertically_in_a_scroll_viewer() {
-        let control = |kind: i32, bounds| Control {
+        let control = |kind: ControlType, bounds| Control {
             id: String::new(),
             name: "[Ŝéţţîñĝš]".into(),
             kind,
             enabled: true,
             bounds,
         };
-        let text = control(UIA_TextControlTypeId, (10, 10, 120, 30));
-        let button = control(50000, (0, 0, 100, 40));
-        let pane = control(UIA_PaneControlTypeId, (0, 20, 200, 40));
+        let text = control(ControlType::Text, (10, 10, 120, 30));
+        let button = control(ControlType::Button, (0, 0, 100, 40));
+        let pane = control(ControlType::Pane, (0, 20, 200, 40));
         assert!(clipping(&text, &button).is_some());
         assert!(clipping(&text, &pane).is_none());
-        let inside = control(UIA_TextControlTypeId, (10, 10, 90, 30));
+        let inside = control(ControlType::Text, (10, 10, 90, 30));
         assert!(clipping(&inside, &button).is_none());
     }
 }

@@ -46,7 +46,7 @@ Successful cleanup clears Windows' native preview flag, used to request immediat
 
 On failure, the harness attempts graceful cleanup of its child. If the child cannot exit, the harness forcibly terminates it and reports that Night light may retain its state at termination. The harness prints the retained temporary directory for inspection.
 
-UI Automation runs on the harness's COM multithreaded apartment. Searches are restricted to process-verified application windows, the Shell taskbar, and its visible hidden-icons area. The application and harness share the `windows` bindings from the same Git revision as Reactor; UI Automation features are enabled only for the harness.
+UI Automation runs on the harness's COM multithreaded apartment. Searches are restricted to process-verified application windows, the Shell taskbar, and its visible hidden-icons area. The harness uses `uiautomation` 0.25.1 and its published `windows` 0.62.2 bindings through the optional `native-tests` feature. Ordinary application builds exclude this wrapper and continue to use the same Git revision as Reactor.
 
 Power, session, and taskbar messages sent directly to the application are synthetic. `just native-lifecycle` does not restart Explorer, suspend Windows, sign out, or shut down the machine. These messages verify application handling, not delivery during an actual power or session transition. Successful library readback establishes native settings, not displayed color or smooth transitions.
 

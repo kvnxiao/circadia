@@ -25,7 +25,7 @@ repository.workspace = true
 
 [features]
 self-contained = ["dep:windows-reactor-setup"]
-native-tests = ["windows/combaseapi", "windows/windef", "windows/wtypesbase", "windows/uiautomationclient", "windows/uiautomationcore", "windows/uiautomationcoreapi", "windows-sys/winternl", "windows-sys/psapi", "winsafe/ole"]
+native-tests = ["dep:uiautomation", "windows/uiautomationcoreapi", "windows-sys/winternl", "winsafe/ole", "winsafe/psapi"]
 graph-measurement = ["native-tests", "windows-reactor/test"]
 output-measurement = ["native-tests"]
 
@@ -56,6 +56,7 @@ tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "registry"] }
 
 [target.'cfg(windows)'.dependencies]
+uiautomation = { version = "0.25.1", optional = true }
 win-nightlight-lib = "0.5.0"
 win-nightlight-watch = "0.5.0"
 windows-result = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }

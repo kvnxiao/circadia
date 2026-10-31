@@ -385,7 +385,13 @@ fn measure(
         .map_err(io::Error::other)?
         .color_temperature();
     let mut changes = 0;
-    let initial = counters::sample(application.handle(), application.id())?;
+    let handle = winsafe::HPROCESS::OpenProcess(
+        winsafe::co::PROCESS::QUERY_LIMITED_INFORMATION,
+        false,
+        application.id(),
+    )
+    .map_err(io::Error::other)?;
+    let initial = counters::sample(&handle, application.id())?;
     let cpu = initial.cpu;
     let started = initial.at;
     let deadline = started + Duration::from_secs(seconds);
@@ -403,7 +409,7 @@ fn measure(
                 .saturating_duration_since(Instant::now())
                 .min(Duration::from_secs(1)),
         );
-        let current = counters::sample(application.handle(), application.id())?;
+        let current = counters::sample(&handle, application.id())?;
         let kelvin = native
             .read_settings()
             .map_err(io::Error::other)?

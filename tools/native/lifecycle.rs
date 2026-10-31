@@ -7,8 +7,6 @@ use circadia::InterfaceText;
 use circadia::automation_id;
 use std::ffi::OsString;
 use std::io;
-use std::os::windows::io::AsHandle;
-use std::os::windows::io::BorrowedHandle;
 use std::path::Path;
 use std::process::Child;
 use std::process::Command;
@@ -646,10 +644,6 @@ pub(super) struct Process {
 }
 
 impl Process {
-    pub(super) fn handle(&self) -> BorrowedHandle<'_> {
-        self.child.as_handle()
-    }
-
     pub(super) fn start(executable: &Path, directory: &Path) -> io::Result<Self> {
         let mut command = Command::new(executable);
         command.arg("--data-dir").arg(directory);

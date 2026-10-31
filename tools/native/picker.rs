@@ -12,15 +12,10 @@ use circadia::automation_id;
 use std::ffi::OsString;
 use std::io;
 use std::path::Path;
-use windows::Win32::uiautomationclient::IUIAutomationInvokePattern;
-use windows::Win32::uiautomationclient::IUIAutomationSelectionItemPattern;
-use windows::Win32::uiautomationclient::IUIAutomationValuePattern;
-use windows::Win32::uiautomationclient::UIA_DataItemControlTypeId;
-use windows::Win32::uiautomationclient::UIA_EditControlTypeId;
-use windows::Win32::uiautomationclient::UIA_InvokePatternId;
-use windows::Win32::uiautomationclient::UIA_ListItemControlTypeId;
-use windows::Win32::uiautomationclient::UIA_SelectionItemPatternId;
-use windows::Win32::uiautomationclient::UIA_ValuePatternId;
+use uiautomation::patterns::UIInvokePattern;
+use uiautomation::patterns::UISelectionItemPattern;
+use uiautomation::patterns::UIValuePattern;
+use uiautomation::types::ControlType;
 use winsafe::HWND;
 
 pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
@@ -327,10 +322,6 @@ fn fixture_rule(list: circadia::Field) -> String {
     automation_id::rule(list, &circadia::AppEntry::new("picker-fixture.exe", ""), 0)
 }
 
-#[expect(
-    unsafe_code,
-    reason = "navigate the owned picker through its filename value and Open action"
-)]
 fn navigate(automation: &Automation, dialog: &HWND, process: u32, folder: &Path) -> io::Result<()> {
     let folder = folder
         .to_str()
@@ -339,16 +330,12 @@ fn navigate(automation: &Automation, dialog: &HWND, process: u32, folder: &Path)
         filename_value(automation, dialog, process)
     })?;
     let destination = format!("{}\\", folder.trim_end_matches(['\\', '/']));
-    // SAFETY: The owned BSTR remains live for this synchronous call.
-    unsafe { value.SetValue(&destination.clone().into()) }
-        .ok()
-        .map_err(io::Error::other)?;
+    value.set_value(&destination).map_err(io::Error::other)?;
     wait("picker filename contains the fixture directory", || {
         let Some(value) = filename_value(automation, dialog, process)? else {
             return Ok(None);
         };
-        // SAFETY: The live pattern returns an owned value.
-        let actual = unsafe { value.CurrentValue() }.map_err(io::Error::other)?;
+        let actual = value.get_value().map_err(io::Error::other)?;
         Ok((actual == destination).then_some(()))
     })?;
     confirm(automation, dialog, process)?;
@@ -356,11 +343,9 @@ fn navigate(automation: &Automation, dialog: &HWND, process: u32, folder: &Path)
     // followed by the folder path.
     wait("picker navigated to the fixture directory", || {
         for element in automation.elements(dialog, process)? {
-            // SAFETY: The binding owns the returned accessible name.
-            if unsafe { element.CurrentName() }
+            if element
+                .get_name()
                 .map_err(io::Error::other)?
-                .display()
-                .to_string()
                 .ends_with(folder)
             {
                 return Ok(Some(()));
@@ -370,39 +355,26 @@ fn navigate(automation: &Automation, dialog: &HWND, process: u32, folder: &Path)
     })
 }
 
-#[expect(
-    unsafe_code,
-    reason = "reacquire the filename editor in the process-checked picker"
-)]
 fn filename_value(
     automation: &Automation,
     dialog: &HWND,
     process: u32,
-) -> io::Result<Option<IUIAutomationValuePattern>> {
+) -> io::Result<Option<UIValuePattern>> {
     for element in automation.elements(dialog, process)? {
-        // SAFETY: The process-checked element returns a scalar control type.
-        let control = unsafe { element.CurrentControlType() }.map_err(io::Error::other)?;
-        if control != UIA_EditControlTypeId {
+        let control = element.get_control_type().map_err(io::Error::other)?;
+        if control != ControlType::Edit {
             continue;
         }
         // The common file dialog's filename editor keeps its control ID 1148
         // as its automation identifier in every interface language.
-        // SAFETY: The live interface returns an owned automation identifier.
-        if unsafe { element.CurrentAutomationId() }.map_err(io::Error::other)? != "1148" {
+        if element.get_automation_id().map_err(io::Error::other)? != "1148" {
             continue;
         }
-        // SAFETY: The requested interface matches the value pattern ID.
-        return unsafe { element.GetCurrentPatternAs(UIA_ValuePatternId) }
-            .map(Some)
-            .map_err(io::Error::other);
+        return element.get_pattern().map(Some).map_err(io::Error::other);
     }
     Ok(None)
 }
 
-#[expect(
-    unsafe_code,
-    reason = "select the exact managed file in the owned Shell dialog"
-)]
 fn select_file(
     automation: &Automation,
     dialog: &HWND,
@@ -410,41 +382,26 @@ fn select_file(
     filename: &str,
 ) -> io::Result<Option<()>> {
     for element in automation.elements(dialog, process)? {
-        // SAFETY: The process-checked element returns a scalar control type.
-        let control = unsafe { element.CurrentControlType() }.map_err(io::Error::other)?;
-        if control != UIA_ListItemControlTypeId && control != UIA_DataItemControlTypeId {
+        let control = element.get_control_type().map_err(io::Error::other)?;
+        if control != ControlType::ListItem && control != ControlType::DataItem {
             continue;
         }
-        // SAFETY: The binding owns the returned name.
-        if unsafe { element.CurrentName() }.map_err(io::Error::other)? != filename {
+        if element.get_name().map_err(io::Error::other)? != filename {
             continue;
         }
-        // SAFETY: The requested interface matches the selection pattern ID.
-        let pattern: IUIAutomationSelectionItemPattern =
-            unsafe { element.GetCurrentPatternAs(UIA_SelectionItemPatternId) }
-                .map_err(io::Error::other)?;
-        // SAFETY: Selection targets only the verified fixture item.
-        unsafe { pattern.Select() }.ok().map_err(io::Error::other)?;
-        // SAFETY: The pattern belongs to the identified fixture item.
-        let selected = unsafe { pattern.CurrentIsSelected() }.map_err(io::Error::other)?;
-        return Ok(selected.as_bool().then_some(()));
+        let pattern: UISelectionItemPattern = element.get_pattern().map_err(io::Error::other)?;
+        pattern.select().map_err(io::Error::other)?;
+        let selected = pattern.is_selected().map_err(io::Error::other)?;
+        return Ok(selected.then_some(()));
     }
     Ok(None)
 }
 
-#[expect(
-    unsafe_code,
-    reason = "invoke the process-checked picker Open button by its native control handle"
-)]
 fn confirm(automation: &Automation, dialog: &HWND, process: u32) -> io::Result<()> {
     let button = dialog.GetDlgItem(1).map_err(io::Error::other)?;
-    let pattern: IUIAutomationInvokePattern = wait("picker Open button", || {
+    let pattern: UIInvokePattern = wait("picker Open button", || {
         let element = automation.root(&button, process)?;
-        // SAFETY: The requested interface matches the invoke pattern ID.
-        unsafe { element.GetCurrentPatternAs(UIA_InvokePatternId) }
-            .map(Some)
-            .map_err(io::Error::other)
+        element.get_pattern().map(Some).map_err(io::Error::other)
     })?;
-    // SAFETY: The live pattern belongs to the verified dialog button.
-    unsafe { pattern.Invoke() }.ok().map_err(io::Error::other)
+    pattern.invoke().map_err(io::Error::other)
 }

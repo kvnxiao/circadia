@@ -13,11 +13,10 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
+use uiautomation::UIElement;
+use uiautomation::patterns::UIRangeValuePattern;
 use windows::UI::ViewManagement::UIColorType;
 use windows::UI::ViewManagement::UISettings;
-use windows::Win32::uiautomationclient::IUIAutomationElement;
-use windows::Win32::uiautomationclient::IUIAutomationRangeValuePattern;
-use windows::Win32::uiautomationclient::UIA_RangeValuePatternId;
 use winsafe::HWND;
 
 pub(super) fn completion(
@@ -347,15 +346,11 @@ fn continuous_step(
 }
 
 struct Semantics {
-    editing: IUIAutomationElement,
-    progress: IUIAutomationRangeValuePattern,
+    editing: UIElement,
+    progress: UIRangeValuePattern,
 }
 
 impl Semantics {
-    #[expect(
-        unsafe_code,
-        reason = "retain the native range interface of a process-checked progress bar"
-    )]
     fn new(automation: &Automation, settings: &HWND) -> io::Result<Self> {
         let process = std::process::id();
         let editing = automation
@@ -364,32 +359,16 @@ impl Semantics {
         let progress = automation
             .find(settings, process, automation_id::PREVIEW_PROGRESS)?
             .ok_or_else(|| io::Error::other("Preview progress is absent"))?;
-        // SAFETY: The requested pattern ID matches the retained interface.
-        let progress = unsafe { progress.GetCurrentPatternAs(UIA_RangeValuePatternId) }
-            .map_err(io::Error::other)?;
+        let progress = progress.get_pattern().map_err(io::Error::other)?;
         Ok(Self { editing, progress })
     }
 
-    #[expect(
-        unsafe_code,
-        reason = "read scalar properties from retained process-checked native controls"
-    )]
     fn editable(&self) -> io::Result<bool> {
-        // SAFETY: The retained interfaces return scalar values without borrowed
-        // pointers.
-        unsafe { self.editing.CurrentIsEnabled() }
-            .map(windows_core::BOOL::as_bool)
-            .map_err(io::Error::other)
+        self.editing.is_enabled().map_err(io::Error::other)
     }
 
-    #[expect(
-        unsafe_code,
-        reason = "read the scalar value from the retained native range interface"
-    )]
     fn value(&self) -> io::Result<f64> {
-        // SAFETY: The retained interface returns a scalar without borrowed
-        // pointers.
-        unsafe { self.progress.CurrentValue() }.map_err(io::Error::other)
+        self.progress.get_value().map_err(io::Error::other)
     }
 }
 
