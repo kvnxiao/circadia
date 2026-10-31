@@ -4,7 +4,7 @@ This probe uses the selected Reactor revision to exercise a native temperature g
 
 ## Dependencies and environment
 
-The single crate pins `windows-reactor` and its optional setup helper to `windows-rs` revision `6d88349841f193536a73b63cece7f7e8fcf25953` (2026-10-30), the same reference pin as the application. The pin follows windows-rs `master` under the [tracking policy](../../docs/research/windows-reactor-ui.md#tracking-policy). Both still declare version 0.100.0, which does not identify the published release. `Cargo.lock` records the full dependency graph, including `winsafe` 0.0.29 and `num-traits` 0.2.19. The manifest declares Rust 1.95 as its minimum.
+The single crate pins `windows-reactor` and its optional setup helper to `windows-rs` revision `ff933fe45cbfdf4a638256181aae26a60932e84e` (2026-10-31), the same reference pin as the application. The pin follows windows-rs `master` under the [tracking policy](../../docs/research/windows-reactor-ui.md#tracking-policy). Both still declare version 0.100.0, which does not identify the published release. `Cargo.lock` records the full dependency graph, including `winsafe` 0.0.29 and `num-traits` 0.2.19. The manifest declares Rust 1.95 as its minimum.
 
 Use Windows with Rust's MSVC toolchain, the linker and Windows SDK, stable Rust, nightly rustfmt, and `just`. Dependency checks also require `cargo-audit` and `cargo-machete`; the minimum-version check requires `jq` and Rust 1.95 installed through rustup. The recorded environment is Windows 11 x64 build 26300.9711 with Rust 1.99.0.
 

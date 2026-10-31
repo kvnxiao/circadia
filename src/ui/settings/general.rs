@@ -301,10 +301,11 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
                 fl!("night-light-title"),
                 fl!("night-light-description"),
             )
-            .controls(vec![widgets::pill(management_label(
-                &settings.input.model,
-                text,
-            ))])
+            .controls(vec![widgets::pill(
+                management_label(&settings.input.model, text),
+                settings.input.model.managing(),
+                &settings.palette(),
+            )])
             .view(settings.stacked()),
         ),
         widgets::section(fl!("section-troubleshooting"), false),

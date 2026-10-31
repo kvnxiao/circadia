@@ -74,6 +74,10 @@ just --justfile tools/justfile python-audit
 
 Read a native check's instructions before running it. Some send mouse and keyboard input, change Night light, or restart Explorer. Temporary configuration directories do not isolate Windows Night light state.
 
+## README screenshot
+
+Run `just screenshot` to refresh `assets/screenshots/schedule.png` from a preview build. Close Circadia first. The command uses isolated settings but changes live Night light and moves the pointer. Read the [screenshot instructions](tools/screenshots/README.md) for desktop prerequisites, cleanup behavior, and candidate output paths.
+
 ## Continuous integration
 
 The [CI workflow](.github/workflows/ci.yml) and [Tools workflow](.github/workflows/tools.yml) run independently on pull requests, pushes to `main`, merge queues, and manual dispatch.

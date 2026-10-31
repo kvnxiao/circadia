@@ -181,15 +181,30 @@ pub(super) fn field_note(text: impl AsRef<str>, id: &str) -> View {
         .into()
 }
 
-pub(super) fn pill(text: impl AsRef<str>) -> View {
+pub(super) fn pill(text: impl AsRef<str>, on: bool, palette: &super::palette::Palette) -> View {
+    let (background, foreground) = if on {
+        (palette.accent(), palette.on_accent.into())
+    } else {
+        (palette.status_fill.into(), palette.primary())
+    };
     Border::new()
-        .height(22.0)
+        .min_height(22.0)
         .corner_radius(11.0)
-        .padding(Thickness::new(8.0, 0.0, 8.0, 0.0))
-        .border_brush(ThemeBrush::CardStroke)
-        .border_thickness(1.0)
+        .padding(Thickness::new(8.0, 2.0, 8.0, 2.0))
+        .background(background)
+        .border_brush(palette.primary())
+        .border_thickness(if palette.contrast().is_some() {
+            1.0
+        } else {
+            0.0
+        })
+        .horizontal_alignment(HorizontalAlignment::Left)
         .vertical_alignment(VerticalAlignment::Center)
-        .content(caption(text).vertical_alignment(VerticalAlignment::Center))
+        .content(
+            caption(text)
+                .foreground(foreground)
+                .vertical_alignment(VerticalAlignment::Center),
+        )
         .into()
 }
 

@@ -8,6 +8,10 @@ fmt:
 build:
     cargo +stable build --bin circadia --locked
 
+[positional-arguments]
+screenshot output="assets/screenshots/schedule.png":
+    pwsh.exe -NoProfile -STA -File tools/screenshots/capture-schedule.ps1 -Output "$1"
+
 build-self-contained:
     cargo +stable build --bin circadia --features self-contained --locked
 
@@ -34,6 +38,9 @@ native-settings *args: build-self-contained
 
 native-about *args: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --about target/debug/circadia.exe
+
+native-layout: build-self-contained
+    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --layout target/debug/circadia.exe
 
 native-startup *args: build-self-contained
     cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --startup target/debug/circadia.exe

@@ -29,7 +29,7 @@ These documents record evidence for Circadia's design and implementation. Each t
 | Topic | Scope |
 | :-- | :-- |
 | [Desktop process architecture](desktop-process-architecture.md) | Application lifetime, one versus two processes, runtime retention, and deployment boundaries. |
-| [Windows Reactor capabilities](windows-reactor-ui.md) | Published and Git API differences, input events, failure behavior, controls, and dated desktop observations. |
+| [Windows Reactor capabilities](windows-reactor-ui.md) | Published and Git API differences, input events, failure behavior, controls, resize and menu-animation limits, and dated desktop observations. |
 | [Settings design support](settings-design-support.md) | Renderers, time entry, icons, compositor animation, and accessibility values. |
 | [Localization](localization.md) | Fluent messages, Windows language and regional formats, native-control text, and right-to-left limits. |
 | [Resource and UI measurements](resource-measurement.md) | CPU and memory baseline, counter methodology, graph latency, and rendered Preview motion. |
