@@ -1,21 +1,9 @@
-use std::ffi::OsString;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::ffi::OsStringExt;
 use std::path::Path;
-use std::path::PathBuf;
-use windows_sys::Win32::errhandlingapi::SetLastError;
-use windows_sys::Win32::fileapi::GetFileAttributesExW;
-use windows_sys::Win32::fileapi::WIN32_FILE_ATTRIBUTE_DATA;
-use windows_sys::Win32::minwinbase::GetFileExInfoStandard;
-use windows_sys::Win32::shellapi::SHGSI_ICONLOCATION;
-use windows_sys::Win32::shellapi::SHGetStockIconInfo;
-use windows_sys::Win32::shellapi::SHSTOCKICONINFO;
-use windows_sys::Win32::shellapi::SIID_APPLICATION;
 use windows_sys::Win32::shlobj_core::SHDefExtractIconW;
 use windows_sys::Win32::verrsrc::FILE_VER_GET_LOCALISED;
 use windows_sys::Win32::windef::HBITMAP;
-use windows_sys::Win32::windef::HDC;
 use windows_sys::Win32::windef::HICON;
 use windows_sys::Win32::winerror::ERROR_RESOURCE_DATA_NOT_FOUND;
 use windows_sys::Win32::winerror::ERROR_RESOURCE_TYPE_NOT_FOUND;
@@ -24,9 +12,7 @@ use windows_sys::Win32::wingdi::BI_RGB;
 use windows_sys::Win32::wingdi::BITMAP;
 use windows_sys::Win32::wingdi::BITMAPINFO;
 use windows_sys::Win32::wingdi::BITMAPINFOHEADER;
-use windows_sys::Win32::wingdi::CreateCompatibleDC;
 use windows_sys::Win32::wingdi::DIB_RGB_COLORS;
-use windows_sys::Win32::wingdi::DeleteDC;
 use windows_sys::Win32::wingdi::DeleteObject;
 use windows_sys::Win32::wingdi::GetDIBits;
 use windows_sys::Win32::wingdi::GetObjectW;
@@ -36,6 +22,9 @@ use windows_sys::Win32::winuser::ICONINFO;
 use windows_sys::Win32::winver::GetFileVersionInfoExW;
 use windows_sys::Win32::winver::GetFileVersionInfoSizeExW;
 use windows_sys::Win32::winver::VerQueryValueW;
+use winsafe::co;
+use winsafe::guard::DeleteDCGuard;
+use winsafe::prelude::Handle;
 
 const ENGLISH_UNICODE: &str = "040904B0";
 
@@ -152,26 +141,20 @@ pub(crate) struct FileStamp {
 ///
 /// # Errors
 ///
-/// Returns the Windows error when the file is missing or inaccessible.
-#[expect(
-    unsafe_code,
-    reason = "read file attributes into a local structure of the requested level"
-)]
+/// Returns an error if the path is not Unicode, or the Windows error when the
+/// file is missing or inaccessible.
 pub(crate) fn stamp(path: &Path) -> io::Result<FileStamp> {
-    let path = wide(path);
-    let mut data = WIN32_FILE_ATTRIBUTE_DATA::default();
-    // SAFETY: The path is NUL-terminated and outlives the call, and the
-    // structure matches the standard information level and is writable.
-    let read = unsafe {
-        GetFileAttributesExW(path.as_ptr(), GetFileExInfoStandard, (&raw mut data).cast())
-    };
-    if read == 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let path = path.to_str().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "executable path is not Unicode",
+        )
+    })?;
+    let data = winsafe::GetFileAttributesEx(path)
+        .map_err(|error| io::Error::from_raw_os_error(error.raw().cast_signed()))?;
     Ok(FileStamp {
-        size: u64::from(data.nFileSizeHigh) << 32 | u64::from(data.nFileSizeLow),
-        modified: u64::from(data.ftLastWriteTime.dwHighDateTime) << 32
-            | u64::from(data.ftLastWriteTime.dwLowDateTime),
+        size: data.nFileSize(),
+        modified: data.ftLastWriteTime.into(),
     })
 }
 
@@ -195,36 +178,10 @@ pub(crate) fn read_icon(path: &Path, pixels: u16) -> io::Result<Option<Vec<u8>>>
 ///
 /// Returns an error when Windows does not report the icon's location or the
 /// icon cannot be read.
-#[expect(
-    unsafe_code,
-    reason = "query the stock icon's location into a local structure"
-)]
 pub(crate) fn generic_icon(pixels: u16) -> io::Result<Vec<u8>> {
-    let mut info = SHSTOCKICONINFO {
-        cbSize: u32::try_from(size_of::<SHSTOCKICONINFO>()).map_err(io::Error::other)?,
-        ..SHSTOCKICONINFO::default()
-    };
-    // SAFETY: The structure is writable and its size field matches its type;
-    // the location flag returns a path and index without an icon handle.
-    let result = unsafe {
-        SHGetStockIconInfo(
-            SIID_APPLICATION,
-            SHGSI_ICONLOCATION.cast_unsigned(),
-            &raw mut info,
-        )
-    };
-    if result != 0 {
-        return Err(io::Error::from_raw_os_error(result));
-    }
-    let length = info
-        .szPath
-        .iter()
-        .position(|unit| *unit == 0)
-        .unwrap_or(info.szPath.len());
-    let path = PathBuf::from(OsString::from_wide(
-        info.szPath.get(..length).unwrap_or_default(),
-    ));
-    Icon::extract(&path, info.iIcon, pixels)?
+    let info = winsafe::SHGetStockIconInfo(co::SIID::APPLICATION, co::SHGSI::ICONLOCATION)
+        .map_err(|error| io::Error::from_raw_os_error(error.raw().cast_signed()))?;
+    Icon::extract(Path::new(&info.szPath()), info.iIcon, pixels)?
         .ok_or_else(|| io::Error::other("the generic application icon is missing"))?
         .png()
 }
@@ -272,8 +229,7 @@ impl Icon {
     fn extract(path: &Path, index: i32, pixels: u16) -> io::Result<Option<Self>> {
         let path = wide(path);
         let mut icon: HICON = std::ptr::null_mut();
-        // SAFETY: Setting the calling thread's last error has no preconditions.
-        unsafe { SetLastError(0) };
+        winsafe::SetLastError(co::ERROR::SUCCESS);
         // SAFETY: The path is NUL-terminated and outlives the call, the
         // large-icon output is writable, and the documented small-icon output
         // may be null.
@@ -381,17 +337,14 @@ impl Drop for Bitmap {
     }
 }
 
-struct DeviceContext(HDC);
+struct DeviceContext(DeleteDCGuard);
 
 impl DeviceContext {
-    #[expect(unsafe_code, reason = "create a memory device context for GetDIBits")]
     fn new() -> io::Result<Self> {
-        // SAFETY: A null device creates a context compatible with the screen.
-        let context = unsafe { CreateCompatibleDC(std::ptr::null_mut()) };
-        if context.is_null() {
-            return Err(io::Error::other("creating a device context failed"));
-        }
-        Ok(Self(context))
+        winsafe::HDC::NULL
+            .CreateCompatibleDC()
+            .map(Self)
+            .map_err(io::Error::other)
     }
 
     #[expect(
@@ -423,7 +376,7 @@ impl DeviceContext {
         // `width` 32-bit pixels, the format the header requests.
         let copied = unsafe {
             GetDIBits(
-                self.0,
+                self.0.ptr().cast(),
                 bitmap.0,
                 0,
                 lines,
@@ -436,14 +389,6 @@ impl DeviceContext {
             return Err(io::Error::other("reading the icon bitmap failed"));
         }
         Ok(pixels)
-    }
-}
-
-impl Drop for DeviceContext {
-    #[expect(unsafe_code, reason = "delete the device context this value owns")]
-    fn drop(&mut self) {
-        // SAFETY: The context came from CreateCompatibleDC and is deleted once.
-        unsafe { DeleteDC(self.0) };
     }
 }
 
@@ -466,6 +411,19 @@ mod tests {
         fs_err::write(&path, b"not an executable").expect("fixture file");
         assert_eq!(display_name(&path), None);
         assert_eq!(display_name(&directory.path().join("missing.exe")), None);
+    }
+
+    #[test]
+    fn nonunicode_metadata_paths_are_rejected() {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+        let path = OsString::from_wide(&[0xd800]);
+        let path = Path::new(&path);
+        assert_eq!(display_name(path), None);
+        assert_eq!(
+            stamp(path).expect_err("invalid path").kind(),
+            io::ErrorKind::InvalidInput
+        );
     }
 
     fn decoded(png: &[u8]) -> (u32, u32, Vec<u8>) {

@@ -3,22 +3,21 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows_sys::Win32::shlobj_core::SHDefExtractIconW;
 use windows_sys::Win32::windef::HBITMAP;
-use windows_sys::Win32::windef::HDC;
 use windows_sys::Win32::windef::HICON;
 use windows_sys::Win32::winerror::S_FALSE;
 use windows_sys::Win32::wingdi::BI_RGB;
 use windows_sys::Win32::wingdi::BITMAP;
 use windows_sys::Win32::wingdi::BITMAPINFO;
 use windows_sys::Win32::wingdi::BITMAPINFOHEADER;
-use windows_sys::Win32::wingdi::CreateCompatibleDC;
 use windows_sys::Win32::wingdi::DIB_RGB_COLORS;
-use windows_sys::Win32::wingdi::DeleteDC;
 use windows_sys::Win32::wingdi::DeleteObject;
 use windows_sys::Win32::wingdi::GetDIBits;
 use windows_sys::Win32::wingdi::GetObjectW;
 use windows_sys::Win32::winuser::DestroyIcon;
 use windows_sys::Win32::winuser::GetIconInfo;
 use windows_sys::Win32::winuser::ICONINFO;
+use winsafe::guard::DeleteDCGuard;
+use winsafe::prelude::Handle;
 
 /// Extract a file's first icon at a square pixel size and encode it as PNG.
 ///
@@ -170,17 +169,14 @@ impl Drop for Bitmap {
     }
 }
 
-struct DeviceContext(HDC);
+struct DeviceContext(DeleteDCGuard);
 
 impl DeviceContext {
-    #[expect(unsafe_code, reason = "create a memory device context for GetDIBits")]
     fn new() -> io::Result<Self> {
-        // SAFETY: A null device creates a context compatible with the screen.
-        let context = unsafe { CreateCompatibleDC(std::ptr::null_mut()) };
-        if context.is_null() {
-            return Err(io::Error::other("creating a device context failed"));
-        }
-        Ok(Self(context))
+        winsafe::HDC::NULL
+            .CreateCompatibleDC()
+            .map(Self)
+            .map_err(io::Error::other)
     }
 
     #[expect(
@@ -212,7 +208,7 @@ impl DeviceContext {
         // `width` 32-bit pixels, the format the header requests.
         let copied = unsafe {
             GetDIBits(
-                self.0,
+                self.0.ptr().cast(),
                 bitmap.0,
                 0,
                 lines,
@@ -225,14 +221,6 @@ impl DeviceContext {
             return Err(io::Error::other("reading the icon bitmap failed"));
         }
         Ok(pixels)
-    }
-}
-
-impl Drop for DeviceContext {
-    #[expect(unsafe_code, reason = "delete the device context this value owns")]
-    fn drop(&mut self) {
-        // SAFETY: The context came from CreateCompatibleDC and is deleted once.
-        unsafe { DeleteDC(self.0) };
     }
 }
 

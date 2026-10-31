@@ -1,15 +1,8 @@
 use std::collections::BTreeMap;
 use std::io;
-use std::os::windows::io::AsRawHandle;
-use std::os::windows::io::BorrowedHandle;
 use std::time::Duration;
 use std::time::Instant;
-use windows_sys::Win32::minwindef::FILETIME;
 use windows_sys::Win32::ntstatus::STATUS_INFO_LENGTH_MISMATCH;
-use windows_sys::Win32::processthreadsapi::GetProcessTimes;
-use windows_sys::Win32::psapi::GetProcessMemoryInfo;
-use windows_sys::Win32::psapi::PROCESS_MEMORY_COUNTERS;
-use windows_sys::Win32::psapi::PROCESS_MEMORY_COUNTERS_EX;
 use windows_sys::Win32::winternl::NtQuerySystemInformation;
 use windows_sys::Win32::winternl::SYSTEM_PROCESS_INFORMATION;
 use windows_sys::Win32::winternl::SYSTEM_THREAD_INFORMATION;
@@ -23,51 +16,13 @@ pub(super) struct Snapshot {
     pub(super) threads: BTreeMap<(usize, i64), u32>,
 }
 
-#[expect(
-    unsafe_code,
-    reason = "read counters from an owned live process handle"
-)]
-pub(super) fn sample(handle: BorrowedHandle<'_>, process: u32) -> io::Result<Snapshot> {
-    let mut created = FILETIME::default();
-    let mut exited = FILETIME::default();
-    let mut kernel = FILETIME::default();
-    let mut user = FILETIME::default();
-    // SAFETY: The borrowed handle remains live; Windows writes four local
-    // structures.
-    if unsafe {
-        GetProcessTimes(
-            handle.as_raw_handle(),
-            &raw mut created,
-            &raw mut exited,
-            &raw mut kernel,
-            &raw mut user,
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
+pub(super) fn sample(handle: &winsafe::HPROCESS, process: u32) -> io::Result<Snapshot> {
+    let (_, _, kernel, user) = handle.GetProcessTimes().map_err(io::Error::other)?;
     let at = Instant::now();
-    let mut memory = PROCESS_MEMORY_COUNTERS_EX {
-        cb: u32::try_from(size_of::<PROCESS_MEMORY_COUNTERS_EX>()).map_err(io::Error::other)?,
-        ..PROCESS_MEMORY_COUNTERS_EX::default()
-    };
-    // SAFETY: The size selects EX output; its initial fields have the base
-    // structure's ABI.
-    if unsafe {
-        GetProcessMemoryInfo(
-            handle.as_raw_handle(),
-            (&raw mut memory).cast::<PROCESS_MEMORY_COUNTERS>(),
-            memory.cb,
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    let ticks =
-        |time: FILETIME| u64::from(time.dwHighDateTime) << 32 | u64::from(time.dwLowDateTime);
+    let memory = handle.GetProcessMemoryInfo().map_err(io::Error::other)?;
     let cpu = Duration::from_nanos(
-        ticks(kernel)
-            .checked_add(ticks(user))
+        u64::from(kernel)
+            .checked_add(u64::from(user))
             .and_then(|value| value.checked_mul(100))
             .ok_or_else(|| io::Error::other("process CPU time overflow"))?,
     );
@@ -119,40 +74,48 @@ fn system_processes() -> io::Result<Vec<u8>> {
     }
 }
 
-#[expect(
-    unsafe_code,
-    reason = "parse bounds-checked Windows process and thread records without dereferencing embedded pointers"
-)]
+fn field<const N: usize>(bytes: &[u8], offset: usize) -> io::Result<[u8; N]> {
+    bytes
+        .get(offset..)
+        .and_then(|bytes| bytes.first_chunk())
+        .copied()
+        .ok_or_else(|| io::Error::other("truncated process metadata field"))
+}
+
 fn process_threads(mut records: &[u8], process: u32) -> io::Result<BTreeMap<(usize, i64), u32>> {
-    let (records, header) = loop {
+    let (records, count) = loop {
         let header = records
             .get(..size_of::<SYSTEM_PROCESS_INFORMATION>())
             .ok_or_else(|| io::Error::other("truncated process header"))?;
-        // SAFETY: The complete byte range is initialized. This C structure has
-        // no invalid bit patterns; embedded addresses remain opaque.
-        let header = unsafe {
-            header
-                .as_ptr()
-                .cast::<SYSTEM_PROCESS_INFORMATION>()
-                .read_unaligned()
-        };
-        let length = if header.NextEntryOffset == 0 {
+        let next = u32::from_ne_bytes(field(
+            header,
+            std::mem::offset_of!(SYSTEM_PROCESS_INFORMATION, NextEntryOffset),
+        )?);
+        let length = if next == 0 {
             records.len()
         } else {
-            header.NextEntryOffset as usize
+            next as usize
         };
         if length < size_of::<SYSTEM_PROCESS_INFORMATION>() || length > records.len() {
             return Err(io::Error::other("invalid process record length"));
         }
-        if header.UniqueProcessId as usize == process as usize {
+        let identifier = usize::from_ne_bytes(field(
+            header,
+            std::mem::offset_of!(SYSTEM_PROCESS_INFORMATION, UniqueProcessId),
+        )?);
+        if identifier == process as usize {
+            let count = u32::from_ne_bytes(field(
+                header,
+                std::mem::offset_of!(SYSTEM_PROCESS_INFORMATION, NumberOfThreads),
+            )?);
             break (
                 records
                     .get(..length)
                     .ok_or_else(|| io::Error::other("invalid process record length"))?,
-                header,
+                count,
             );
         }
-        if header.NextEntryOffset == 0 {
+        if next == 0 {
             return Err(io::Error::other(
                 "measured process is absent from system metadata",
             ));
@@ -162,10 +125,10 @@ fn process_threads(mut records: &[u8], process: u32) -> io::Result<BTreeMap<(usi
             .ok_or_else(|| io::Error::other("invalid next process offset"))?;
     };
     let mut threads = BTreeMap::new();
-    if header.NumberOfThreads == 0 {
+    if count == 0 {
         return Err(io::Error::other("measured process has no live threads"));
     }
-    let bytes = (header.NumberOfThreads as usize)
+    let bytes = (count as usize)
         .checked_mul(size_of::<SYSTEM_THREAD_INFORMATION>())
         .and_then(|size| size.checked_add(size_of::<SYSTEM_PROCESS_INFORMATION>()))
         .ok_or_else(|| io::Error::other("thread record length overflow"))?;
@@ -176,28 +139,28 @@ fn process_threads(mut records: &[u8], process: u32) -> io::Result<BTreeMap<(usi
         .as_chunks::<{ size_of::<SYSTEM_THREAD_INFORMATION>() }>()
         .0
     {
-        // SAFETY: Each initialized chunk has the complete structure size;
-        // addresses are read as identifiers, never dereferenced.
-        let thread = unsafe {
-            value
-                .as_ptr()
-                .cast::<SYSTEM_THREAD_INFORMATION>()
-                .read_unaligned()
-        };
-        if thread.ClientId.UniqueProcess as usize != process as usize {
+        let owner = usize::from_ne_bytes(field(
+            value,
+            std::mem::offset_of!(SYSTEM_THREAD_INFORMATION, ClientId.UniqueProcess),
+        )?);
+        if owner != process as usize {
             return Err(io::Error::other("thread belongs to another process"));
         }
-        // MS-TSTS defines Reserved1[2] as creation time and Reserved3 as
-        // ContextSwitches.
-        // SAFETY: LARGE_INTEGER stores the initialized signed 64-bit time.
-        let created = unsafe { thread.Reserved1[2].QuadPart };
-        if threads
-            .insert(
-                (thread.ClientId.UniqueThread as usize, created),
-                thread.Reserved3,
-            )
-            .is_some()
-        {
+        // MS-TSTS defines Reserved1[2] as a signed 64-bit creation time and
+        // Reserved3 as ContextSwitches.
+        let created = i64::from_ne_bytes(field(
+            value,
+            std::mem::offset_of!(SYSTEM_THREAD_INFORMATION, Reserved1) + 2 * size_of::<i64>(),
+        )?);
+        let identifier = usize::from_ne_bytes(field(
+            value,
+            std::mem::offset_of!(SYSTEM_THREAD_INFORMATION, ClientId.UniqueThread),
+        )?);
+        let switches = u32::from_ne_bytes(field(
+            value,
+            std::mem::offset_of!(SYSTEM_THREAD_INFORMATION, Reserved3),
+        )?);
+        if threads.insert((identifier, created), switches).is_some() {
             return Err(io::Error::other("duplicate thread identity"));
         }
     }
@@ -222,6 +185,21 @@ pub(super) fn context_delta(previous: &Snapshot, current: &Snapshot) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queries_cpu_memory_and_threads_with_limited_process_access() {
+        let process = std::process::id();
+        let handle = winsafe::HPROCESS::OpenProcess(
+            winsafe::co::PROCESS::QUERY_LIMITED_INFORMATION,
+            false,
+            process,
+        )
+        .expect("open current process for metadata queries");
+        let snapshot = sample(&handle, process).expect("read current process counters");
+        assert!(snapshot.working_set > 0);
+        assert!(snapshot.private_bytes > 0);
+        assert!(!snapshot.threads.is_empty());
+    }
 
     fn fixture() -> Vec<u8> {
         assert_eq!(size_of::<SYSTEM_PROCESS_INFORMATION>(), 256);

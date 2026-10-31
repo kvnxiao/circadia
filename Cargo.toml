@@ -25,7 +25,7 @@ repository.workspace = true
 
 [features]
 self-contained = ["dep:windows-reactor-setup"]
-native-tests = ["windows/combaseapi", "windows/windef", "windows/wtypesbase", "windows/uiautomationclient", "windows/uiautomationcore", "windows/uiautomationcoreapi", "windows-sys/winternl", "windows-sys/psapi", "winsafe/ole", "winsafe/gdi"]
+native-tests = ["dep:uiautomation", "windows/uiautomationcoreapi", "windows-sys/winternl", "winsafe/ole", "winsafe/psapi"]
 graph-measurement = ["native-tests", "windows-reactor/test"]
 output-measurement = ["native-tests"]
 
@@ -56,6 +56,7 @@ tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "registry"] }
 
 [target.'cfg(windows)'.dependencies]
+uiautomation = { version = "0.25.1", optional = true }
 win-nightlight-lib = "0.5.0"
 win-nightlight-watch = "0.5.0"
 windows-result = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
@@ -65,12 +66,13 @@ windows-core = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe
 windows-collections = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
 windows-numerics = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
 windows-time = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
+windows-version = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
 windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e", features = ["composition", "reactor"] }
 windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e", default-features = false, features = ["reactor"] }
 windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
 windows-window = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
-windows-sys = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e", features = ["datetimeapi", "errhandlingapi", "fileapi", "libloaderapi", "minwinbase", "minwindef", "ntstatus", "powerbase", "processthreadsapi", "realtimeapiset", "shellapi", "shlobj_core", "stringapiset", "synchapi", "timezoneapi", "verrsrc", "wdm", "winbase", "windef", "winerror", "winevt", "wingdi", "winnls", "winnt", "winuser", "winver", "wtsapi32"] }
-winsafe = { version = "0.0.29", features = ["user", "shell", "advapi"] }
+windows-sys = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e", features = ["datetimeapi", "errhandlingapi", "minwinbase", "minwindef", "ntstatus", "powerbase", "processthreadsapi", "realtimeapiset", "shellapi", "shlobj_core", "stringapiset", "synchapi", "timezoneapi", "verrsrc", "winbase", "windef", "winerror", "winevt", "wingdi", "winnls", "winnt", "winuser", "winver", "wtsapi32"] }
+winsafe = { version = "0.0.29", features = ["user", "shell", "advapi", "gdi"] }
 
 [build-dependencies]
 embed-resource = "3.0.12"

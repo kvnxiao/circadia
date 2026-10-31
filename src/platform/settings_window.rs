@@ -5,11 +5,6 @@ use windows_reactor::WindowHandle;
 use windows_reactor::WindowPlacement;
 use windows_sys::Win32::winuser::EVENT_SYSTEM_MINIMIZEEND;
 use windows_sys::Win32::winuser::EVENT_SYSTEM_MINIMIZESTART;
-use windows_sys::Win32::winuser::GetDpiForWindow;
-use windows_sys::Win32::winuser::IsIconic;
-use windows_sys::Win32::winuser::SW_RESTORE;
-use windows_sys::Win32::winuser::SetForegroundWindow;
-use windows_sys::Win32::winuser::ShowWindow;
 use winsafe::prelude::Handle;
 
 pub(crate) fn initial_placement() -> io::Result<WindowPlacement> {
@@ -47,33 +42,23 @@ pub(crate) fn open_page(target: &str) -> io::Result<()> {
         .map_err(io::Error::other)
 }
 
-#[expect(
-    unsafe_code,
-    reason = "activate the live settings window supplied by Reactor"
-)]
-pub(crate) fn activate(window: &WindowHandle<'_>) {
-    let window = window.as_raw().cast();
-    // SAFETY: Reactor keeps this window alive on its owning UI thread for the
-    // callback.
-    if unsafe { IsIconic(window) } != 0 {
-        // SAFETY: The same live window receives a documented scalar show
-        // command.
-        unsafe { ShowWindow(window, SW_RESTORE) };
-    }
-    // SAFETY: This live window belongs to the caller. Windows may deny a
-    // background launch's foreground request; denial does not invalidate
-    // the open window.
-    unsafe { SetForegroundWindow(window) };
+pub(crate) fn native_window(window: &WindowHandle<'_>) -> io::Result<winsafe::HWND> {
+    let mut found = None;
+    winsafe::EnumThreadWindows(winsafe::GetCurrentThreadId(), |candidate| {
+        if candidate.ptr() == window.as_raw() {
+            found = Some(candidate);
+        }
+        true
+    })
+    .map_err(io::Error::other)?;
+    found.ok_or_else(|| io::Error::other("settings window is unavailable"))
 }
 
-#[expect(
-    unsafe_code,
-    reason = "read the DPI of the live settings window supplied by Reactor"
-)]
 pub(crate) fn dpi(window: &WindowHandle<'_>) -> u32 {
-    // SAFETY: Reactor keeps this window alive on its owning UI thread for the
-    // callback.
-    unsafe { GetDpiForWindow(window.as_raw().cast()) }
+    native_window(window)
+        .map(|window| window.GetDpiForWindow())
+        .inspect_err(|error| tracing::warn!(%error, "reading settings window DPI"))
+        .unwrap_or(0)
 }
 
 // Settings is the only window in this process that can be minimized, so the

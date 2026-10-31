@@ -391,7 +391,6 @@ struct Desktop {
     snapshot: Option<Arc<ControllerSnapshot>>,
     pending: VecDeque<ControllerCommand>,
     retry: Option<u64>,
-    settings_activation: u64,
     fatal: Option<io::Error>,
     exiting: bool,
     settings_open: bool,
@@ -454,7 +453,7 @@ impl Application for Desktop {
         }
         match message {
             Message::Start => self.start(context),
-            Message::Open => self.open_settings(context),
+            Message::Open => context.show_window("settings"),
             Message::Opened => self.set_settings_open(true),
             Message::Closed => self.settings_closed(),
             Message::Edit(edits) => self.edit(edits),
@@ -530,7 +529,6 @@ impl Application for Desktop {
                     ),
                     contrast: self.contrast,
                     visual_revision: self.visual_revision,
-                    activation: self.settings_activation,
                     exiting: self.exiting,
                     opened: context.message(Message::Opened),
                     closed: context.message(Message::Closed),
@@ -572,7 +570,6 @@ impl Desktop {
             snapshot: None,
             pending: VecDeque::new(),
             retry: None,
-            settings_activation: 0,
             fatal: None,
             exiting: false,
             settings_open: false,
@@ -753,11 +750,6 @@ impl Desktop {
                 self.quit();
             }
         }
-    }
-
-    fn open_settings(&mut self, context: &ApplicationContext<Self>) {
-        self.settings_activation = self.settings_activation.wrapping_add(1);
-        context.show_window("settings");
     }
 
     fn manual_command(&self) -> ManualCommand {
@@ -1144,7 +1136,7 @@ impl Desktop {
 
     fn menu(&mut self, key: &Key, context: &ApplicationContext<Self>) {
         match key.as_str() {
-            Some("settings") => self.open_settings(context),
+            Some("settings") => context.show_window("settings"),
             Some("quit") => self.quit(),
             Some("manual-start") => self.queue(ControllerCommand::Manual(ManualCommand::Start)),
             Some("manual-stop") => self.queue(ControllerCommand::Manual(ManualCommand::Stop)),
@@ -1187,7 +1179,7 @@ impl Desktop {
 
     fn native_event(&mut self, event: DesktopEvent, context: &ApplicationContext<Self>) {
         match event {
-            DesktopEvent::Activate => self.open_settings(context),
+            DesktopEvent::Activate => context.show_window("settings"),
             DesktopEvent::WorkerChanged => self.refresh(),
             DesktopEvent::ClockChanged => {
                 self.visual_revision = self.visual_revision.wrapping_add(1);

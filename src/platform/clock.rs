@@ -13,7 +13,6 @@ use windows_sys::Win32::minwinbase::SYSTEMTIME;
 use windows_sys::Win32::timezoneapi::DYNAMIC_TIME_ZONE_INFORMATION;
 use windows_sys::Win32::timezoneapi::GetDynamicTimeZoneInformation;
 use windows_sys::Win32::timezoneapi::GetTimeZoneInformationForYear;
-use windows_sys::Win32::timezoneapi::SystemTimeToTzSpecificLocalTime;
 use windows_sys::Win32::timezoneapi::TIME_ZONE_ID_INVALID;
 use windows_sys::Win32::timezoneapi::TIME_ZONE_INFORMATION;
 
@@ -259,12 +258,8 @@ impl WindowsZone {
     }
 }
 
-#[expect(
-    unsafe_code,
-    reason = "Windows synchronously converts between caller-owned date structures"
-)]
 fn convert(utc: DateTime, rules: &TIME_ZONE_INFORMATION) -> Result<DateTime, ScheduleError> {
-    let source = SYSTEMTIME {
+    let source = winsafe::SYSTEMTIME {
         wYear: u16::try_from(utc.year())?,
         wMonth: u16::try_from(utc.month())?,
         wDay: u16::try_from(utc.day())?,
@@ -272,14 +267,28 @@ fn convert(utc: DateTime, rules: &TIME_ZONE_INFORMATION) -> Result<DateTime, Sch
         wMinute: u16::try_from(utc.minute())?,
         wSecond: u16::try_from(utc.second())?,
         wMilliseconds: u16::try_from(utc.millisecond())?,
-        ..SYSTEMTIME::default()
+        ..winsafe::SYSTEMTIME::default()
     };
-    let mut output = SYSTEMTIME::default();
-    // SAFETY: Rules and both date structures are initialized and live for the
-    // call; output is uniquely writable.
-    if unsafe { SystemTimeToTzSpecificLocalTime(rules, &raw const source, &raw mut output) } == 0 {
-        return Err(ScheduleError::windows(io::Error::last_os_error()));
-    }
+    let transition = |value: SYSTEMTIME| winsafe::SYSTEMTIME {
+        wYear: value.wYear,
+        wMonth: value.wMonth,
+        wDayOfWeek: value.wDayOfWeek,
+        wDay: value.wDay,
+        wHour: value.wHour,
+        wMinute: value.wMinute,
+        wSecond: value.wSecond,
+        wMilliseconds: value.wMilliseconds,
+    };
+    let mut zone = winsafe::TIME_ZONE_INFORMATION::default();
+    zone.bias = rules.Bias;
+    zone.standardBias = rules.StandardBias;
+    zone.daylightBias = rules.DaylightBias;
+    zone.standardDate = transition(rules.StandardDate);
+    zone.daylightDate = transition(rules.DaylightDate);
+    let output =
+        winsafe::SystemTimeToTzSpecificLocalTime(Some(&zone), &source).map_err(|error| {
+            ScheduleError::windows(io::Error::from_raw_os_error(error.raw().cast_signed()))
+        })?;
     Ok(DateTime::new(
         i16::try_from(output.wYear)?,
         i8::try_from(output.wMonth)?,

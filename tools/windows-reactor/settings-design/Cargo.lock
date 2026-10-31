@@ -82,6 +82,7 @@ dependencies = [
  "png",
  "rust-embed",
  "test-case",
+ "windows",
  "windows-canvas",
  "windows-collections",
  "windows-composition",
@@ -91,6 +92,7 @@ dependencies = [
  "windows-reactor-setup",
  "windows-sys 0.100.0",
  "windows-time",
+ "winsafe",
 ]
 
 [[package]]
@@ -835,6 +837,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows"
+version = "0.100.0"
+source = "git+https://github.com/microsoft/windows-rs?rev=ff933fe45cbfdf4a638256181aae26a60932e84e#ff933fe45cbfdf4a638256181aae26a60932e84e"
+dependencies = [
+ "windows-collections",
+ "windows-core",
+ "windows-future",
+ "windows-numerics",
+ "windows-reference",
+ "windows-time",
+]
+
+[[package]]
 name = "windows-canvas"
 version = "0.100.0"
 source = "git+https://github.com/microsoft/windows-rs?rev=ff933fe45cbfdf4a638256181aae26a60932e84e#ff933fe45cbfdf4a638256181aae26a60932e84e"
@@ -1009,6 +1024,12 @@ source = "git+https://github.com/microsoft/windows-rs?rev=ff933fe45cbfdf4a638256
 dependencies = [
  "windows-core",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ef0ffc427f045c0cc9ebffd6f4f91153dcd2a1547b5c3c29ee3f541e16e95c6"
 
 [[package]]
 name = "zerofrom"

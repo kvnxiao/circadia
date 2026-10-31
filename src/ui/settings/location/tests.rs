@@ -254,7 +254,7 @@ fn opening_settings_with_the_toggle_on_requests_and_switching_pages_does_not() {
     let (_directory, desktop) = desktop(&located_file());
     let model = model(&desktop);
     assert!(starts_request(&Message::Opened, &model));
-    assert!(!starts_request(&Message::Activated, &model));
+    assert!(!starts_request(&Message::Placed, &model));
     assert!(!starts_request(
         &Message::Navigate(Some("apps".to_owned())),
         &model
