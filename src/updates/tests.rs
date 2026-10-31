@@ -91,11 +91,14 @@ fn automatic_update_preference_defaults_on_and_round_trips() {
 }
 
 fn runs() -> Runs {
-    serde_json::from_str(r#"{"workflow_runs":[
-        {"id":100,"run_number":10,"event":"workflow_run","conclusion":"success","head_branch":"main"},
-        {"id":120,"run_number":12,"event":"workflow_run","conclusion":"success","head_branch":"main"},
-        {"id":110,"run_number":11,"event":"workflow_run","conclusion":"success","head_branch":"main"}
-    ]}"#).expect("workflow fixture")
+    serde_json::from_str(
+        r#"{"workflow_runs":[
+        {"id":100,"run_number":10,"event":"push","conclusion":"success","head_branch":"main"},
+        {"id":120,"run_number":12,"event":"push","conclusion":"success","head_branch":"main"},
+        {"id":110,"run_number":11,"event":"push","conclusion":"success","head_branch":"main"}
+    ]}"#,
+    )
+    .expect("workflow fixture")
 }
 
 fn artifact(id: u64, expired: bool) -> Artifacts {
@@ -240,8 +243,10 @@ fn preview_rejects_untrusted_runs_and_propagates_network_failures() {
     let invalid = serde_json::from_str(
         r#"{"workflow_runs":[
         {"id":1,"run_number":1,"event":"pull_request","conclusion":"success","head_branch":"main"},
-        {"id":2,"run_number":2,"event":"workflow_run","conclusion":"failure","head_branch":"main"},
-        {"id":3,"run_number":3,"event":"workflow_run","conclusion":"success","head_branch":"other"}
+        {"id":2,"run_number":2,"event":"push","conclusion":"failure","head_branch":"main"},
+        {"id":3,"run_number":3,"event":"push","conclusion":"success","head_branch":"other"},
+        {"id":4,"run_number":4,"event":"workflow_run","conclusion":"success","head_branch":"main"},
+        {"id":5,"run_number":5,"event":"workflow_dispatch","conclusion":"success","head_branch":"main"}
     ]}"#,
     )
     .expect("invalid runs");
