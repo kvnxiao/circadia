@@ -156,6 +156,7 @@ dependencies = [
  "windows-result",
  "windows-sys 0.100.0",
  "windows-time",
+ "windows-version",
  "windows-window",
  "winsafe",
 ]
@@ -1853,6 +1854,14 @@ version = "0.100.0"
 source = "git+https://github.com/microsoft/windows-rs?rev=ff933fe45cbfdf4a638256181aae26a60932e84e#ff933fe45cbfdf4a638256181aae26a60932e84e"
 dependencies = [
  "windows-core",
+]
+
+[[package]]
+name = "windows-version"
+version = "0.100.0"
+source = "git+https://github.com/microsoft/windows-rs?rev=ff933fe45cbfdf4a638256181aae26a60932e84e#ff933fe45cbfdf4a638256181aae26a60932e84e"
+dependencies = [
+ "windows-link 0.100.0",
 ]
 
 [[package]]

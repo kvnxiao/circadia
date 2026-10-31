@@ -77,11 +77,7 @@ impl Drop for WinEventHook {
     }
 }
 
-#[expect(
-    unsafe_code,
-    reason = "Windows invokes this static callback with the WinEvent ABI"
-)]
-unsafe extern "system" fn dispatch(
+extern "system" fn dispatch(
     hook: HWINEVENTHOOK,
     event: u32,
     window: RawWindow,

@@ -2,7 +2,6 @@ use std::io;
 use windows_sys::Win32::datetimeapi::GetTimeFormatEx;
 use windows_sys::Win32::minwinbase::SYSTEMTIME;
 use windows_sys::Win32::winnls::GetLocaleInfoEx;
-use windows_sys::Win32::winnls::GetNumberFormatEx;
 use windows_sys::Win32::winnls::GetUserPreferredUILanguages;
 use windows_sys::Win32::winnls::LOCALE_ILZERO;
 use windows_sys::Win32::winnls::LOCALE_INEGNUMBER;
@@ -12,7 +11,6 @@ use windows_sys::Win32::winnls::LOCALE_SDECIMAL;
 use windows_sys::Win32::winnls::LOCALE_SNEGATIVESIGN;
 use windows_sys::Win32::winnls::LOCALE_SSHORTTIME;
 use windows_sys::Win32::winnls::MUI_LANGUAGE_NAME;
-use windows_sys::Win32::winnls::NUMBERFMTW;
 use windows_sys::Win32::winnls::SetProcessPreferredUILanguages;
 
 #[expect(unsafe_code, reason = "read the user's preferred UI language list")]
@@ -230,13 +228,17 @@ impl RegionalFormat {
             .replace(SHORT_DESIGNATOR, &initial))
     }
 
-    // NUMBERFMTW has no negative-sign field, so NLS formats the magnitude and
-    // this function adds the captured sign.
     pub(crate) fn format_decimal(
         &self,
         value: f64,
         max_fraction_digits: u32,
     ) -> io::Result<String> {
+        if !value.is_finite() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "number is not finite",
+            ));
+        }
         let digits = usize::try_from(max_fraction_digits).map_err(io::Error::other)?;
         let rounded = format!("{:.digits$}", value.abs());
         let magnitude = if rounded.contains('.') {
@@ -244,13 +246,12 @@ impl RegionalFormat {
         } else {
             rounded.as_str()
         };
-        let fraction = magnitude
-            .split_once('.')
-            .map_or(0, |(_, fraction)| fraction.len());
-        let formatted = self.format_number(
-            magnitude,
-            u32::try_from(fraction).map_err(io::Error::other)?,
-        )?;
+        let formatted = if self.leading_zero == 0 && magnitude.starts_with("0.") {
+            magnitude.strip_prefix('0').unwrap_or(magnitude)
+        } else {
+            magnitude
+        }
+        .replace('.', &self.decimal);
         if value.is_sign_negative() && magnitude != "0" {
             let (prefix, suffix) = self.negative_affixes();
             Ok(format!("{prefix}{formatted}{suffix}"))
@@ -262,39 +263,8 @@ impl RegionalFormat {
     pub(crate) fn format_kelvin(&self, kelvin: u16) -> io::Result<String> {
         Ok(format!(
             "{}\u{a0}K",
-            self.format_number(&kelvin.to_string(), 0)?
+            self.format_decimal(f64::from(kelvin), 0)?
         ))
-    }
-
-    #[expect(
-        unsafe_code,
-        reason = "format an invariant number with the captured NLS fields"
-    )]
-    fn format_number(&self, invariant: &str, fraction_digits: u32) -> io::Result<String> {
-        let value: Vec<u16> = invariant.encode_utf16().chain(Some(0)).collect();
-        let mut decimal: Vec<u16> = self.decimal.encode_utf16().chain(Some(0)).collect();
-        let mut thousand = [0_u16];
-        let format = NUMBERFMTW {
-            NumDigits: fraction_digits,
-            LeadingZero: self.leading_zero,
-            Grouping: 0,
-            lpDecimalSep: decimal.as_mut_ptr(),
-            lpThousandSep: thousand.as_mut_ptr(),
-            NegativeOrder: self.negative_order,
-        };
-        // SAFETY: The locale is null or NUL-terminated, the value and both
-        // separators are NUL-terminated and outlive the call, and the buffer
-        // is writable for `length` UTF-16 units.
-        read_text(|buffer, length| unsafe {
-            GetNumberFormatEx(
-                self.locale_pointer(),
-                0,
-                value.as_ptr(),
-                &raw const format,
-                buffer,
-                length,
-            )
-        })
     }
 
     pub(crate) fn parse_decimal(&self, text: &str) -> Option<f64> {
@@ -538,6 +508,41 @@ mod tests {
                 .format_decimal(40.712_8, 6)
                 .expect("decimal formats"),
             "40.7128"
+        );
+    }
+
+    #[test_case("::", 1, 0.5, "0::5"; "multiple characters")]
+    #[test_case("\u{066b}", 0, 0.5, "\u{066b}5"; "unicode separator")]
+    #[test_case(".", 0, 0.0, "0"; "whole zero")]
+    #[test_case(".", 0, -0.0, "0"; "negative zero")]
+    #[test_case(".", 1, 1234.5, "1234.5"; "no grouping")]
+    fn decimals_follow_custom_separators(
+        decimal: &str,
+        leading_zero: u32,
+        value: f64,
+        expected: &str,
+    ) {
+        let format = RegionalFormat {
+            decimal: decimal.to_owned(),
+            leading_zero,
+            ..format("en-US")
+        };
+        assert_eq!(
+            format.format_decimal(value, 4).expect("decimal formats"),
+            expected
+        );
+    }
+
+    #[test_case(f64::NAN; "not a number")]
+    #[test_case(f64::INFINITY; "positive infinity")]
+    #[test_case(f64::NEG_INFINITY; "negative infinity")]
+    fn nonfinite_decimals_are_rejected(value: f64) {
+        assert_eq!(
+            format("en-US")
+                .format_decimal(value, 4)
+                .expect_err("nonfinite number")
+                .kind(),
+            io::ErrorKind::InvalidInput,
         );
     }
 

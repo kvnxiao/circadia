@@ -79,21 +79,9 @@ pub(crate) fn record_start(configuration: &str, restore_cause: Option<&str>, pro
 }
 
 #[cfg(windows)]
-#[expect(unsafe_code, reason = "read the running Windows version from ntdll")]
 pub(crate) fn windows_build() -> Option<String> {
-    use windows_sys::Win32::winnt::OSVERSIONINFOW;
-    let mut version = OSVERSIONINFOW {
-        dwOSVersionInfoSize: u32::try_from(size_of::<OSVERSIONINFOW>()).ok()?,
-        ..OSVERSIONINFOW::default()
-    };
-    // SAFETY: RtlGetVersion writes one OSVERSIONINFOW whose size field is set.
-    // The structure lives through this synchronous call.
-    let status = unsafe { windows_sys::Win32::wdm::RtlGetVersion(&raw mut version) };
-    windows_result::NTSTATUS(status).ok().ok()?;
-    Some(format!(
-        "{}.{}.{}",
-        version.dwMajorVersion, version.dwMinorVersion, version.dwBuildNumber
-    ))
+    let version = windows_version::OsVersion::current();
+    (version.major != 0).then(|| format!("{}.{}.{}", version.major, version.minor, version.build))
 }
 
 #[cfg(test)]

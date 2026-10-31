@@ -1,6 +1,4 @@
-use std::ffi::OsString;
 use std::ffi::c_void;
-use std::os::windows::ffi::OsStringExt;
 use std::panic::PanicHookInfo;
 use std::path::Path;
 use std::path::PathBuf;
@@ -8,11 +6,6 @@ use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use windows_sys::Win32::errhandlingapi::SetUnhandledExceptionFilter;
-use windows_sys::Win32::libloaderapi::GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS;
-use windows_sys::Win32::libloaderapi::GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
-use windows_sys::Win32::libloaderapi::GetModuleFileNameW;
-use windows_sys::Win32::libloaderapi::GetModuleHandleExW;
-use windows_sys::Win32::minwindef::HMODULE;
 use windows_sys::Win32::winnt::EXCEPTION_POINTERS;
 use windows_sys::Win32::winnt::RtlCaptureStackBackTrace;
 
@@ -101,35 +94,16 @@ fn frames() -> String {
         .join(",")
 }
 
-#[expect(unsafe_code, reason = "resolve an address to its loaded module")]
 fn module_offset(address: *const c_void) -> Option<(String, usize)> {
-    let mut module: HMODULE = std::ptr::null_mut();
-    // SAFETY: With FROM_ADDRESS, the name argument is only compared with loaded
-    // module ranges. UNCHANGED_REFCOUNT leaves no reference to release, and the
-    // output is one writable handle.
-    let found = unsafe {
-        GetModuleHandleExW(
-            (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT)
-                .cast_unsigned(),
-            address.cast(),
-            &raw mut module,
-        )
-    };
-    if found == 0 {
-        return None;
-    }
-    let mut path = [0_u16; 1024];
-    let capacity = u32::try_from(path.len()).unwrap_or(0);
-    // SAFETY: The buffer is writable for `capacity` UTF-16 units and outlives
-    // this synchronous call.
-    let length = unsafe { GetModuleFileNameW(module, path.as_mut_ptr(), capacity) };
-    let path = OsString::from_wide(
-        path.get(..usize::try_from(length).unwrap_or(0))
-            .unwrap_or_default(),
-    );
+    let module = winsafe::HINSTANCE::GetModuleHandleEx(
+        winsafe::AddrStr::Addr(address.cast_mut()),
+        winsafe::co::GET_MODULE_HANDLE_EX_FLAG::NoValue,
+    )
+    .ok()?;
+    let path = module.GetModuleFileName().ok()?;
     let name = Path::new(&path).file_name().map_or_else(
         || "unknown".into(),
         |name| name.to_string_lossy().into_owned(),
     );
-    Some((name, address.addr().wrapping_sub(module.addr())))
+    Some((name, address.addr().wrapping_sub(module.ptr().addr())))
 }

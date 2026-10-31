@@ -1,7 +1,6 @@
 use std::io;
 use std::os::windows::io::FromRawHandle;
 use std::os::windows::io::OwnedHandle;
-use windows_sys::Win32::errhandlingapi::GetLastError;
 use windows_sys::Win32::synchapi::CreateMutexW;
 use windows_sys::Win32::winerror::ERROR_ALREADY_EXISTS;
 use windows_sys::Win32::winuser::PostMessageW;
@@ -61,9 +60,7 @@ impl InstanceClaim {
         // attributes select a noninheritable handle with the caller's
         // default security.
         let mutex = unsafe { CreateMutexW(std::ptr::null_mut(), 0, wide.as_ptr()) };
-        // SAFETY: Capture this thread's creation result before another Win32
-        // call.
-        let status = unsafe { GetLastError() };
+        let status = winsafe::GetLastError().raw();
         if mutex.is_null() {
             return Err(io::Error::from_raw_os_error(status.cast_signed()));
         }

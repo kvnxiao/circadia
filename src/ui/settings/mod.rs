@@ -405,7 +405,6 @@ pub(super) struct Input {
     pub(super) updates: crate::updates::Status,
     pub(super) contrast: Option<crate::platform::contrast::ContrastColors>,
     pub(super) visual_revision: u64,
-    pub(super) activation: u64,
     pub(super) exiting: bool,
     pub(super) opened: Callback<()>,
     pub(super) closed: Callback<()>,
@@ -426,7 +425,6 @@ impl PartialEq for Input {
             && self.updates == other.updates
             && self.contrast == other.contrast
             && self.visual_revision == other.visual_revision
-            && self.activation == other.activation
             && self.exiting == other.exiting
             && self.opened == other.opened
             && self.closed == other.closed
@@ -519,7 +517,6 @@ pub(super) enum Message {
     Placed,
     Dpi(u32),
     Opened,
-    Activated,
     Edit(Vec<(Field, FieldValue)>),
     Number(Field, Option<f64>),
     Language(Option<usize>),
@@ -905,13 +902,6 @@ impl Settings {
     fn read_dpi(context: &ComponentContext<Self>) {
         let _queued = context
             .run_window(|window| Message::Dpi(crate::platform::settings_window::dpi(&window)));
-    }
-
-    fn activate(context: &ComponentContext<Self>, activated: Message) {
-        let _queued = context.run_window(move |window| {
-            crate::platform::settings_window::activate(&window);
-            activated
-        });
     }
 
     fn solar_update(&mut self, message: Message, context: &ComponentContext<Self>) {
@@ -1371,7 +1361,6 @@ impl Component for Settings {
     }
 
     fn input_changed(&mut self, input: &Input, context: &ComponentContext<Self>) {
-        let activated = input.activation != self.input.activation;
         if input.visual_revision != self.input.visual_revision {
             self.accents = progress::accent_colors();
         }
@@ -1394,9 +1383,6 @@ impl Component for Settings {
         }
         self.animate(context);
         self.request_icons();
-        if activated && self.placed {
-            Self::activate(context, Message::Activated);
-        }
     }
 
     fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
@@ -1421,12 +1407,11 @@ impl Component for Settings {
             Message::Placed => {
                 if !self.placed {
                     self.placed = true;
-                    Self::activate(context, Message::Opened);
+                    let _queued = context.sender().send(Message::Opened);
                 }
                 Self::read_dpi(context);
             }
             Message::Dpi(dpi) => self.dpi = dpi,
-            Message::Activated => {}
             Message::Edit(edits) => self.edit(edits, context),
             Message::Number(field, value) => {
                 if let Some(edits) = number_edits(field, value) {

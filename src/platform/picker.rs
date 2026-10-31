@@ -36,15 +36,7 @@ pub(crate) fn executable(
     title: &str,
     file_types: &str,
 ) -> io::Result<Option<(String, PathBuf)>> {
-    let mut parent = None;
-    winsafe::EnumThreadWindows(winsafe::GetCurrentThreadId(), |candidate| {
-        if candidate.ptr() == window.as_raw() {
-            parent = Some(candidate);
-        }
-        true
-    })
-    .map_err(io::Error::other)?;
-    let parent = parent.ok_or_else(|| io::Error::other("settings window is unavailable"))?;
+    let parent = super::settings_window::native_window(window)?;
     let dialog: winsafe::IFileOpenDialog = winsafe::CoCreateInstance(
         &co::CLSID::FileOpenDialog,
         None::<&winsafe::IUnknown>,
