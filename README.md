@@ -6,6 +6,10 @@ Circadia is a **Windows 11 x64 application in development**. Unsigned preview in
 
 ## Features
 
+<p align="center">
+  <img src="assets/screenshots/schedule.png" alt="Circadia screenshot">
+</p>
+
 - **Daily temperature schedule**
   - Set Wake and Bedtime schedules with different color temperature levels that support gradual transitions. The schedule supports one daily waking period and one overnight sleep period, including bedtimes after midnight.
 - **Optional sunrise and sunset timing**
