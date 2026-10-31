@@ -285,7 +285,7 @@ struct Artifact {
 
 fn preview(api: &Api) -> io::Result<Status> {
     let Some(runs) = api.get::<Runs>(
-        "actions/workflows/checks.yml/runs?event=push&status=success&branch=main&per_page=20",
+        "actions/workflows/preview.yml/runs?event=push&status=success&branch=main&per_page=20",
     )?
     else {
         return Ok(Status::Unpublished);

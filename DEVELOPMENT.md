@@ -48,7 +48,7 @@ Set the application version in `Cargo.toml`. The executable, About page, and ins
 
 The main packaging workflow sets `CIRCADIA_CHANNEL=preview`. These packages display `-preview`, and their artifact names include the exact packaged source commit. Update checks inspect available artifacts from successful builds and compare their source commits with the installed commit. Only a descendant source is offered, so rerunning CI for older source does not offer a downgrade. Among available descendants, the check selects the one furthest ahead in commit history. Checks inspect up to 20 recent successful packaging runs and stop after a shared 30-second network deadline.
 
-To publish a stable version, update Cargo's version, commit the change, and create a GitHub release with a matching `v` tag, such as `v0.1.0`. Publishing a non-prerelease starts the [Windows stable release workflow](.github/workflows/windows-release.yml), which builds that tag with `CIRCADIA_CHANNEL=stable` and attaches the installer and checksum. Saving a draft does not start packaging. About offers the release only after its installer and checksum are present. Matching symbols remain in the workflow artifacts.
+To publish a stable version, update Cargo's version, commit the change, and create a GitHub release with a matching `v` tag, such as `v0.1.0`. Publishing a non-prerelease starts the [Release workflow](.github/workflows/windows-release.yml), which builds that tag with `CIRCADIA_CHANNEL=stable` and attaches the installer and checksum. Saving a draft does not start packaging. About offers the release only after its installer and checksum are present. Matching symbols remain in the workflow artifacts.
 
 Automatic update checks default on, run at startup and daily, and save their preference through the same configuration path as other settings. They query public GitHub metadata without a token. Downloads open in the user's browser; preview artifact downloads require GitHub sign-in. The application does not install updates itself.
 
@@ -76,7 +76,7 @@ Read a native check's instructions before running it. Some send mouse and keyboa
 
 ## Continuous integration
 
-The [Tests and code quality workflow](.github/workflows/checks.yml) and [Tools and probes workflow](.github/workflows/tools.yml) run independently on pull requests, pushes to `main`, merge queues, and manual dispatch.
+The [CI workflow](.github/workflows/checks.yml) and [Tools workflow](.github/workflows/tools.yml) run independently on pull requests, pushes to `main`, merge queues, and manual dispatch.
 
 Application CI checks:
 
@@ -110,7 +110,9 @@ Superseded runs are cancelled, and a failed Rust matrix job does not cancel the 
 
 CI executes test harnesses, including unit tests of native-check helpers, but does not launch the desktop application or probe windows. Desktop automation, screenshots, live Night light checks, host-setting exercises, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
 
-The [Tests and code quality workflow](.github/workflows/checks.yml) packages every push to `main`. Packaging waits for check selection and shared Cargo Git source preparation, then runs alongside the application tests and lint checks. It restores the prepared Git source cache and its separate installer build cache. **All required checks** requires packaging to succeed on main pushes; packaging is skipped for other events. Preview update checks offer artifacts only from successful runs of this workflow. Its **Windows x64 installer** job uploads `Circadia-windows-x64-unsigned-<commit>`, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual workflow dispatch do not build an installer.
+The [Preview workflow](.github/workflows/preview.yml) packages every push to `main` independently of CI. Both workflows use the same Cargo Git source cache key and fetch locked dependencies on a cache miss; a cold cache can cause concurrent downloads. Compiled installer outputs use a separate cache from tests and lint. CI's **All required checks** covers its checks; Preview reports **Build Windows x64 installer** separately. Preview update checks offer artifacts from successful Preview runs, regardless of CI's result.
+
+The installer job uploads `Circadia-windows-x64-unsigned-<commit>`, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual CI dispatch do not build a preview installer.
 
 External actions use full commit pins. [Dependabot](.github/dependabot.yml) proposes weekly action updates for review.
 

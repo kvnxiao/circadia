@@ -1,37 +1,24 @@
 <h1>Circadia <img src="assets/icon/circadia.svg" width="48" alt="Circadia icon"></h1>
 
-Circadia is a powerful manager for [Windows Night light](https://support.microsoft.com/en-us/windows/hardware/display-graphics/change-display-brightness-and-color-in-windows#bkmk_night_light). It uses Windows’ native display warmth and adds schedules built around your waking and sleeping hours, three temperature levels, gradual transitions, and automatic warmth overrides for apps you choose.
+Circadia is a powerful manager for [Windows Night light](https://support.microsoft.com/en-us/windows/hardware/display-graphics/change-display-brightness-and-color-in-windows#bkmk_night_light). It adjusts your display’s color temperature through Windows’ native functionality, without directly writing GPU gamma ramps or modifying display calibration profiles. Set your preferred color temperatures, choose how gradually they change, and build a schedule around your waking and sleeping hours (with support for additional sunrise and sunset timings). Apps can be added to a suppression list to automatically pause Night light when focused.
 
 Circadia is a **Windows 11 x64 application in development**. Unsigned preview installers are built on every push to `main`, alongside automated checks.
 
 ## Features
 
-### A schedule around your day
-
-Choose Wake and Bedtime times and three temperature levels: Daytime, Morning/Evening, and Sleep. Transitions finish at their target times, so a 23:00 bedtime with a one-hour transition reaches your Sleep temperature at 23:00 and starts warming at 22:00.
-
-Optionally follow sunrise and sunset for the morning and evening changes. Enter coordinates yourself or let Windows supply your location. Solar times are calculated locally; when an event is unavailable, the schedule continues using the remaining targets. This schedule is intended for one daily waking period and one overnight sleep period, including bedtimes after midnight.
-
-### Temporarily remove warmth
-
-Circadia calls its temporary 6500 K override **suppression**. Add a game, photo editor, or other app to apply it whenever that app has focus, in any window mode.
-
-- Match an executable by filename, or restrict the rule to one installation.
-- Add a window-title condition to distinguish apps that share an executable, such as Java applications.
-- Use exclusions to keep the normal schedule for particular apps or windows.
-- Start or stop one-hour suppression from Settings or the tray, independently of app rules.
-
-The tray also offers toggles for recently focused apps. Automatic fullscreen detection is not included; you choose which apps suppress the schedule.
-
-### See and adjust the daily curve
-
-The Schedule page shows the temperature curve, event times, current target, and next change. Preview plays the coming day on your display in a few seconds, taking precedence over suppression while it runs. Settings edits are temporarily disabled during playback.
-
-Valid edits apply and save automatically. The five pages group scheduling, app rules, transitions, settings, and application information. The interface follows Windows themes and regional time and number formats; English is currently the only shipped language.
-
-### Run from the tray
-
-Closing Settings keeps Circadia running. Reopen it from the tray or by launching the app again, and optionally enable startup at sign-in. Quit ends control and requests Night light off.
+- **Daily temperature schedule**
+  - Set Wake and Bedtime schedules with three different color temperature levels and gradual transitions. The schedule supports one daily waking period and one overnight sleep period, including bedtimes after midnight.
+- **Optional sunrise and sunset timing**
+  - Follow solar events using coordinates you enter or a location supplied by Windows. Times are calculated locally, and unavailable events are skipped while the remaining schedule continues.
+- **Automatic and manual warmth overrides**
+  - Temporarily remove warmth with a 6500 K override, called **suppression**, whenever a chosen app has focus in any window mode. Rules support executable filenames or full paths, optional window-title conditions, and exclusions for apps or windows that should keep the normal schedule.
+  - Start or stop a separate one-hour override from Settings or the tray, which also offers toggles for recently focused apps. Automatic fullscreen detection is not included.
+- **Schedule graph and display preview**
+  - See the daily temperature curve, event times, current target, and next change. Preview plays the coming day on your display in seconds, temporarily taking precedence over suppression and disabling settings edits.
+- **Automatic saving and Windows preferences**
+  - Valid settings edits apply and save automatically. The interface follows Windows themes and regional time and number formats; English is currently the only shipped language.
+- **Tray controls and optional startup**
+  - Keep Circadia running when Settings closes, reopen it from the tray or by launching the app again, and optionally start it at sign-in. Quit ends control and requests Night light off.
 
 ## Getting started
 
@@ -39,12 +26,12 @@ Circadia requires Windows 11 x64 with working native Night light. The intended m
 
 ### Install the latest development build
 
-1. Sign in to GitHub and open the [Tests and code quality runs](https://github.com/kvnxiao/circadia/actions/workflows/checks.yml?query=event%3Apush+branch%3Amain).
-2. Open the newest successful run with a completed **Windows x64 installer** job. Under **Artifacts**, download `Circadia-windows-x64-unsigned-<commit>` and extract the ZIP.
+1. Sign in to GitHub and open the [Preview runs](https://github.com/kvnxiao/circadia/actions/workflows/preview.yml?query=event%3Apush+branch%3Amain).
+2. Open the newest successful run with a completed **Build Windows x64 installer** job. Under **Artifacts**, download `Circadia-windows-x64-unsigned-<commit>` and extract the ZIP.
 3. Run `Circadia-<version>-<commit>-windows-x64-unsigned-setup.exe`. If Circadia is already running, choose **Quit** from its tray menu before continuing.
 4. Finish setup, then open **Circadia** from the Windows Start menu.
 
-The preview built from commit `3108c69` needs a one-time manual update using these steps. Its update checker searches the previous packaging workflow and cannot find builds in the current workflow.
+Preview builds installed before the move to the Preview workflow need a one-time manual update using these steps. Their update checkers search the previous workflows and cannot find new builds.
 
 The installer includes the required runtime and installs for your Windows account without requesting administrator access. Downloads appear after the first successful installer build on `main` and expire after 90 days. If no download is available, you can [build from source](DEVELOPMENT.md#build-and-run).
 

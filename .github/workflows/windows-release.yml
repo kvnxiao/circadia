@@ -1,4 +1,4 @@
-name: Windows stable release
+name: Release
 
 on:
   release:

@@ -246,7 +246,9 @@ fn preview_rejects_untrusted_runs_and_propagates_network_failures() {
         {"id":2,"run_number":2,"event":"push","conclusion":"failure","head_branch":"main"},
         {"id":3,"run_number":3,"event":"push","conclusion":"success","head_branch":"other"},
         {"id":4,"run_number":4,"event":"workflow_run","conclusion":"success","head_branch":"main"},
-        {"id":5,"run_number":5,"event":"workflow_dispatch","conclusion":"success","head_branch":"main"}
+        {"id":5,"run_number":5,"event":"workflow_dispatch","conclusion":"success","head_branch":"main"},
+        {"id":6,"run_number":6,"event":"push","conclusion":"cancelled","head_branch":"main"},
+        {"id":7,"run_number":7,"event":"push","conclusion":null,"head_branch":"main"}
     ]}"#,
     )
     .expect("invalid runs");
