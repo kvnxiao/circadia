@@ -47,7 +47,7 @@ jobs:
           key: installer-release
           cache-bin: false
           cache-directories: '!~/.cargo/git'
-      - name: Build unsigned installer
+      - name: Build Windows x64 installer
         id: build
         run: just installer
       - name: Upload installer and checksum

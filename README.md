@@ -4,7 +4,7 @@
 
 Circadia schedules Windows Night Light around your waking and sleeping hours. Set your preferred daytime and bedtime color temperatures, then let the screen warm gradually before bed and cool again before you wake.
 
-Circadia is a **Windows 11 x64 application in development**. Unsigned installers are built after changes reach `main` and pass automated checks; they are development builds, not stable releases.
+Circadia is a **Windows 11 x64 application in development**. Unsigned preview installers are built on every push to `main`, alongside automated checks.
 
 ## Features
 
@@ -41,10 +41,12 @@ Circadia requires Windows 11 x64 with working native Night Light. The intended m
 
 ### Install the latest development build
 
-1. Sign in to GitHub and open the [Windows packaging runs](https://github.com/kvnxiao/circadia/actions/workflows/windows-installer.yml).
-2. Open the newest successful run with a completed **Unsigned x64 installer** job. Under **Artifacts**, download `Circadia-windows-x64-unsigned-<commit>` and extract the ZIP.
+1. Sign in to GitHub and open the [Tests and code quality runs](https://github.com/kvnxiao/circadia/actions/workflows/checks.yml?query=event%3Apush+branch%3Amain).
+2. Open the newest successful run with a completed **Windows x64 installer** job. Under **Artifacts**, download `Circadia-windows-x64-unsigned-<commit>` and extract the ZIP.
 3. Run `Circadia-<version>-<commit>-windows-x64-unsigned-setup.exe`. If Circadia is already running, choose **Quit** from its tray menu before continuing.
 4. Finish setup, then open **Circadia** from the Windows Start menu.
+
+The preview built from commit `3108c69` needs a one-time manual update using these steps. Its update checker searches the previous packaging workflow and cannot find builds in the current workflow.
 
 The installer includes the required runtime and installs for your Windows account without requesting administrator access. Downloads appear after the first successful installer build on `main` and expire after 90 days. If no download is available, you can [build from source](DEVELOPMENT.md#build-and-run).
 

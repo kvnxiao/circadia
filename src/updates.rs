@@ -284,7 +284,12 @@ struct Artifact {
 }
 
 fn preview(api: &Api) -> io::Result<Status> {
-    let Some(runs) = api.get::<Runs>("actions/workflows/windows-installer.yml/runs?event=workflow_run&status=success&branch=main&per_page=20")? else { return Ok(Status::Unpublished); };
+    let Some(runs) = api.get::<Runs>(
+        "actions/workflows/checks.yml/runs?event=push&status=success&branch=main&per_page=20",
+    )?
+    else {
+        return Ok(Status::Unpublished);
+    };
     preview_packages(
         runs,
         |id| api.get::<Artifacts>(&format!("actions/runs/{id}/artifacts?per_page=100")),
@@ -325,7 +330,7 @@ fn preview_packages(
     let mut current = false;
     let mut diverged = false;
     for run in runs.workflow_runs {
-        if run.event != "workflow_run"
+        if run.event != "push"
             || run.conclusion.as_deref() != Some("success")
             || run.head_branch != "main"
         {
