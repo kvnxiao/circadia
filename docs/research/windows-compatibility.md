@@ -50,8 +50,8 @@ sha256sum "$LOCALAPPDATA/windows-reactor-setup/temp/Microsoft.WindowsAppSDK.Runt
 
 ## Baseline and validation limits
 
-The evidence supports retaining the Windows 11 baseline at build 22000 rather than requiring a newer release solely for Reactor or its bundled runtime. A framework package's minimum does not prove every application path works on every intervening build. It also does not establish compatibility of the undocumented Night Light storage format across those builds.
+The evidence supports retaining the Windows 11 baseline at build 22000 rather than requiring a newer release solely for Reactor or its bundled runtime. A framework package's minimum does not prove every application path works on every intervening build. It also does not establish compatibility of the undocumented Night light storage format across those builds.
 
-The existing [Reactor validation](windows-reactor-ui.md) exercises build 26300.9711. Before release, run the packaged application on build 22000 and a current serviced Windows 11 build. Cover startup without a separately installed runtime, settings and graph interaction, tray behavior, the executable file picker, and Night Light access. A failure can require a compatibility fix or an explicit revision of the baseline.
+The existing [Reactor validation](windows-reactor-ui.md) exercises build 26300.9711. Before release, run the packaged application on build 22000 and a current serviced Windows 11 build. Cover startup without a separately installed runtime, settings and graph interaction, tray behavior, the executable file picker, and Night light access. A failure can require a compatibility fix or an explicit revision of the baseline.
 
 This technical minimum is separate from Microsoft's servicing lifecycle. It does not promise Microsoft support for older Windows releases. No additional Windows installation, virtual machine, or minimum-build runtime test was performed for this research.

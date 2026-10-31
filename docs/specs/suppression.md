@@ -166,7 +166,7 @@ The focus delay filters brief foreground changes. It does not add hysteresis or 
 - With the default 250 ms delay, focus leaves a listed app for 200 ms and returns: suppression continues without a new fade.
 - A modded Minecraft window gains focus titled "Minecraft* 1.20.1", and the only entry for `javaw.exe` has the title text "DeceasedCraft": suppression starts one focus delay after the window renames itself "DeceasedCraft".
 - A game remains focused from evening into the hour before Bedtime: after reaching 6500 K, the controller does not run underlying temperature updates at each scheduled step.
-- A retained Sunset target is 3400 K and occurs at least 60 minutes before Bedtime; Sleep is 2200 K and the scheduled duration is 60 minutes. Suppression ends 30 minutes before Bedtime: the schedule evaluates to 2800 K at that instant and continues toward 2200 K. Night Light remains enabled throughout.
+- A retained Sunset target is 3400 K and occurs at least 60 minutes before Bedtime; Sleep is 2200 K and the scheduled duration is 60 minutes. Suppression ends 30 minutes before Bedtime: the schedule evaluates to 2800 K at that instant and continues toward 2200 K. Night light remains enabled throughout.
 - A game closes or focus moves to an unlisted application after several scheduled transitions have passed: once the focus delay expires, the controller evaluates the current instant without replaying those transitions.
 - A delay of 0 or 5000 ms is accepted. Typing a negative delay gives 0 ms, and 5001 ms gives 5000 ms when the field commits.
 - Startup prerequisites pass with a listed game focused and a 5000 ms focus delay: automatic suppression becomes active immediately. Subsequent foreground changes use the configured delay.

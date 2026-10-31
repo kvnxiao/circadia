@@ -108,4 +108,4 @@ For example, a synthetic fixture can disable solar timing and set Wake to 07:00,
 
 The probe does not establish the application's elapsed-interval adjustment of Wake/Bedtime, graph-boundary clamping, notification delivery, or shared graph/controller calculation. Its relative-offset fixtures do not require product support for arbitrary schedule points.
 
-The read-only recipe does not change the clock, time zone, registry, display, location settings, or Night Light. The host-setting exercise is separately invoked and changes the time zone temporarily. Neither establishes supported-build coverage or universal historical conversion.
+The read-only recipe does not change the clock, time zone, registry, display, location settings, or Night light. The host-setting exercise is separately invoked and changes the time zone temporarily. Neither establishes supported-build coverage or universal historical conversion.

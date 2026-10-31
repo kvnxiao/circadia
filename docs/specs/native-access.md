@@ -2,7 +2,7 @@
 spec: SPEC.md
 ---
 
-# Native Night Light access
+# Native Night light access
 
 Read the shared terms and invariants in [SPEC.md](SPEC.md) before this area. A snapshot is a decoded settings or state record from a registry read, not an atomic capture of the write that signaled a watcher. The [0.5.0 transition research](../research/nightlight-transition-control.md) records the public operations and their limits.
 
@@ -20,7 +20,7 @@ An application refresh requests native application, meaning that Windows applies
 
 The controller is the only caller requesting writes and serializes whole public library calls. It uses one library handle for the process lifetime and enables the library's startup timestamp margin before any settings-record write. The margin stamps the handle's first successful settings-record write at least 699 s after the stored timestamp, above timestamps that Windows may have applied for an earlier process. The controller does not reconstruct the handle for each transition, move timestamps backward, or interpret timestamp changes as temperature interference. The margin reduces the chance that Windows ignores a new process's first writes; it does not guarantee that Windows applies every request.
 
-Before normal control writes, fresh settings-record and state-record reads satisfy REQ-night-light-read-failure. Native schedule disablement precedes activation. If Night Light is off, inactive preparation writes a temperature with the flag off before requesting on: 6500 K during startup and the current intended temperature otherwise. Startup chooses its origin from fresh reads; an ongoing transition retains its current intended step and deadline. A failed preparation prevents activation. A later attempt uses current inputs instead of replaying the failed step.
+Before normal control writes, fresh settings-record and state-record reads satisfy REQ-night-light-read-failure. Native schedule disablement precedes activation. If Night light is off, inactive preparation writes a temperature with the flag off before requesting on: 6500 K during startup and the current intended temperature otherwise. Startup chooses its origin from fresh reads; an ongoing transition retains its current intended step and deadline. A failed preparation prevents activation. A later attempt uses current inputs instead of replaying the failed step.
 
 Successful temperature storage updates the last written temperature even if later preview cleanup fails. Stored output is not an optical measurement.
 
@@ -33,12 +33,12 @@ Successful temperature storage updates the last written temperature even if late
 - Constant 3400 K output lasts ten minutes: the controller does not issue minute-based refreshes. A taskbar recreation event during that time requests one discrete refresh.
 - A short transition reaches its last rounded value before its deadline: completing the transition still clears native preview without repeating that temperature solely to mark completion.
 - An executing call outlasts cancellation: it finishes before cleanup or replacement, and canceled future steps do not run.
-- Inactive preparation fails: the attempt does not request Night Light on.
+- Inactive preparation fails: the attempt does not request Night light on.
 - Temperature storage succeeds but cleanup fails: the stored value remains known and the operation remains failed until recovery.
 
 ## Observation
 
-### REQ-night-light-observation — Reconcile observed Night Light changes
+### REQ-night-light-observation — Reconcile observed Night light changes
 
 Circadia registers separate settings and state watchers before initial reads. While native access has no pending failure, it compares decoded owned values with the current intention. Temperature comparison uses the intended temperature, not the curve's later calculated value. The native preview flag is expected on only during a short transition and off otherwise. Timestamp-only changes and matching values do not request writes.
 
@@ -69,7 +69,7 @@ Native schedule, activation, and preview-only corrections do not themselves rest
 
 **Scenarios:**
 
-- During constant 3400 K output, the stored Night Light temperature changes to 5000 K: a fresh confirmation starts a smooth return from 5000 K.
+- During constant 3400 K output, the stored Night light temperature changes to 5000 K: a fresh confirmation starts a smooth return from 5000 K.
 - Another writer changes temperature repeatedly during that return: correction preserves its completion deadline instead of starting another full fade after each notification.
 - Ten notifications arrive before a 60 Hz correction opportunity: one attempt uses fresh records and current inputs.
 - A successful repair is followed by another deviation: the next correction uses the next opportunity that the configured rate allows.
@@ -95,9 +95,9 @@ Settings and graph animation remain responsive. Native output failures do not ch
 
 ### REQ-night-light-read-failure — Stop normal writes when reads fail
 
-Each normal control attempt reads and decodes fresh settings and state records before writing temperature, schedule, or activation. Cached records and queued watcher snapshots do not satisfy this requirement. The state record's flag reporting whether Windows considers Night Light usable on this device does not independently prohibit control. Actual access failures govern it. A failed required read stops the attempt and starts recovery. Editing and graph calculation continue.
+Each normal control attempt reads and decodes fresh settings and state records before writing temperature, schedule, or activation. Cached records and queued watcher snapshots do not satisfy this requirement. The state record's flag reporting whether Windows considers Night light usable on this device does not independently prohibit control. Actual access failures govern it. A failed required read stops the attempt and starts recovery. Editing and graph calculation continue.
 
-Cleanup has narrower read requirements. Ending native preview uses its own fresh settings-record read and does not require a readable state record. Turning Night Light off on exit or when management turns off uses its own fresh state-record read and does not require a readable settings record. These exceptions do not authorize a replacement temperature or native schedule write.
+Cleanup has narrower read requirements. Ending native preview uses its own fresh settings-record read and does not require a readable state record. Turning Night light off on exit or when management turns off uses its own fresh state-record read and does not require a readable settings record. These exceptions do not authorize a replacement temperature or native schedule write.
 
 **Scenarios:**
 
@@ -122,12 +122,12 @@ During failure, Circadia retains the latest stored temperature and normal on/off
 
 Release evidence covers these Windows conditions:
 
-- On fresh profiles on build 22000 and a current supported build, test Night Light access before opening its native settings. Distinguish missing keys, missing values, and decode errors. Record any verified Windows action that creates missing Night Light data, and recovery through automatic or explicit retry. Do not prescribe opening Windows settings as a remedy without verifying that it initializes the missing data. Missing data follows the same unavailable-output status, detailed settings error, and retry behavior.
+- On fresh profiles on build 22000 and a current supported build, test Night light access before opening its native settings. Distinguish missing keys, missing values, and decode errors. Record any verified Windows action that creates missing Night light data, and recovery through automatic or explicit retry. Do not prescribe opening Windows settings as a remedy without verifying that it initializes the missing data. Missing data follows the same unavailable-output status, detailed settings error, and retry behavior.
 - Exercise schedule Preview and ordinary fades at configured rates on representative displays. Record visible warming and cooling, cancellation, and missing or erratic response. Successful native operations do not prove visible smoothness. The upstream 0.5.0 probe reports gradual held-preview transitions at 30–480 writes per second on its recorded host; rates below 30 writes per second were not tested.
-- After accumulated timestamp leads and long runs, quit Circadia and verify on each tested Windows build that the Windows Settings strength, schedule, and on/off controls still change the stored Night Light records and visible output.
+- After accumulated timestamp leads and long runs, quit Circadia and verify on each tested Windows build that the Windows Settings strength, schedule, and on/off controls still change the stored Night light records and visible output.
 
 ## Supporting evidence
 
 | Design decision or requirement | Evidence |
 | :-- | :-- |
-| Native Night Light ownership, observation, output precision, short and gradual transitions, cleanup, and timestamps | [0.5.0 transition, ownership, and watcher contracts](../research/nightlight-transition-control.md); optical guarantees and complete controller integration remain unverified. |
+| Native Night light ownership, observation, output precision, short and gradual transitions, cleanup, and timestamps | [0.5.0 transition, ownership, and watcher contracts](../research/nightlight-transition-control.md); optical guarantees and complete controller integration remain unverified. |

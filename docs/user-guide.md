@@ -1,14 +1,30 @@
 # Using Circadia
 
-Circadia runs in the Windows notification area and manages Night Light only when you enable it. Open Settings from the tray or by launching Circadia again. Closing Settings keeps the app running; Quit ends it.
+Circadia runs in the Windows notification area and manages Night light only when you enable it. Open Settings from the tray or by launching Circadia again. Closing Settings keeps the app running; Quit ends it.
 
-## Night Light management
+## Installation and updates
 
-On the Schedule page, turn on Night Light management and confirm the explanation. Circadia disables Windows' Night Light schedule, requests Night Light on, and fades to the current target. While management is on, changes made in Windows Settings or Quick Settings are corrected to Circadia's target.
+Circadia requires Windows 11 x64 with working native Night light. The intended minimum is build 22000; execution on that minimum build remains unverified. Recorded desktop checks used build 26300.9711 at 100% scaling. See the [compatibility evidence](research/windows-compatibility.md) for the tested scope.
 
-Turning management off stops Preview and manual suppression, fades toward 6500 K, and requests Night Light off. Quit also requests Night Light off. Neither action restores Windows' own schedule. A confirmed Windows sign-out or shutdown skips the fade and attempts cleanup immediately. Cleanup is best effort: a native failure or forced termination can leave Night Light at its last state.
+Download the latest preview installer using the [README instructions](../README.md#getting-started).
 
-During a management change, its switch is temporarily unavailable. If Night Light access fails, the banner identifies the operation and offers Retry while management remains on. A failed final off request is reported without an automatic retry.
+If an older preview build cannot find new builds, update manually using the [README download steps](../README.md#getting-started). Some older update checkers search previous workflows and cannot find current packages.
+
+The installer includes the required runtime and installs for your Windows account without requesting administrator access. Downloads appear after the first successful installer build on `main` and expire after 90 days. If no download is available, you can [build from source](../DEVELOPMENT.md#build-and-run).
+
+**Unsigned application:** Circadia and its installer are not code-signed yet. Expect a Microsoft Defender SmartScreen warning on the first run of a downloaded installer or app. If Windows displays **Windows protected your PC**, verify that you downloaded it from this repository, choose **More info**, then **Run anyway** to approve it manually. Windows may identify the publisher as **Unknown publisher**. New builds may prompt again. If Windows policy blocks execution without a **Run anyway** option, these instructions cannot override that policy.
+
+About shows the installed version and offers Check for updates. Automatic checks are enabled by default and run at startup and daily; their results appear in About. Stable installations check GitHub releases, and preview installations check successful main builds. The download link opens the matching page in your browser.
+
+To update, quit Circadia and run the newer installer. To uninstall, quit Circadia and use **Settings → Apps → Installed apps → Circadia → Uninstall**. Your saved settings remain available for a later installation.
+
+## Night light management
+
+On the Schedule page, turn on Night light management and confirm the explanation. Circadia disables Windows' Night light schedule, requests Night light on, and fades to the current target. While management is on, changes made in Windows Settings or Quick Settings are corrected to Circadia's target.
+
+Turning management off stops Preview and manual suppression, fades toward 6500 K, and requests Night light off. Quit also requests Night light off. Neither action restores Windows' own schedule. A confirmed Windows sign-out or shutdown skips the fade and attempts cleanup immediately. Cleanup is best effort: a native failure or forced termination can leave Night light at its last state.
+
+During a management change, its switch is temporarily unavailable. If Night light access fails, the banner identifies the operation and offers Retry while management remains on. A failed final off request is reported without an automatic retry.
 
 ## Schedule and Preview
 
@@ -18,7 +34,7 @@ On the Transitions page, set the maximum scheduled transition length. Each trans
 
 The graph shows the daily schedule from four clock hours before Wake through the same boundary the next day. Its labels identify Wake, Bedtime, and selected solar events. The status temperature is Circadia's requested target; it does not confirm the color physically displayed.
 
-Preview compresses the interval from now through the same local time tomorrow into 1–60 seconds. It changes Night Light as well as the graph. Preview takes precedence over automatic and manual suppression, which resume afterward if still active. Settings edits are disabled during playback; Stop ends it early. Closing Settings also stops Preview.
+Preview compresses the interval from now through the same local time tomorrow into 1–60 seconds. It changes Night light as well as the graph. Preview takes precedence over automatic and manual suppression, which resume afterward if still active. Settings edits are disabled during playback; Stop ends it early. Closing Settings also stops Preview.
 
 Valid edits apply and save automatically. A conflicting edit, such as equal Wake and Bedtime times, remains visible with an error while the last valid settings continue running. Correct it to apply the change. Invalid text stays available across closing and reopening Settings during that run; it is discarded at exit.
 
@@ -60,7 +76,7 @@ Circadia stores `config.toml` and `config.backup.toml` under `%LOCALAPPDATA%/Cir
 circadia [--data-dir DIRECTORY] [--verbose | -V]
 ```
 
-`--data-dir` selects another directory for configuration, logs, and icons. It does not isolate Windows Night Light. A second launch opens the existing instance without changing its data directory, log detail, or language.
+`--data-dir` selects another directory for configuration, logs, and icons. It does not isolate Windows Night light. A second launch opens the existing instance without changing its data directory, log detail, or language.
 
 Edit the TOML file only while Circadia is not running. It reads the file at startup and replaces the whole file when saving; it does not watch external edits. The current format requires `schema_version = 3`. Earlier unreleased formats are not migrated.
 
@@ -90,7 +106,7 @@ Rules compare filenames and normalized paths case-insensitively. They do not res
 
 At startup, Circadia uses the configuration file when readable with the current schema. Invalid values are replaced individually from the backup or defaults and marked in Settings. While any marked value or list entry remains, saving pauses so the original file is preserved. Edits still take effect; correct every mark to resume saving. Notes about missing or unknown keys do not pause saving.
 
-If the primary file is missing or unusable and its backup is usable, Circadia restores the backup and reports the restoration. If both are missing, it starts with defaults. If neither is usable and at least one exists, Circadia does not manage Night Light. Open Settings to inspect the error and choose **Reset to default settings** when ready to replace both files.
+If the primary file is missing or unusable and its backup is usable, Circadia restores the backup and reports the restoration. If both are missing, it starts with defaults. If neither is usable and at least one exists, Circadia does not manage Night light. Open Settings to inspect the error and choose **Reset to default settings** when ready to replace both files.
 
 A failed save keeps the edited configuration running and displays Retry. The next edit, Retry, or closing Settings attempts another write. A backup-write failure has its own banner and does not undo a successful primary save. Closing Settings, Quit, and confirmed session end flush pending changes unless saving is paused.
 

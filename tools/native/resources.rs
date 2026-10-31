@@ -132,7 +132,7 @@ fn exercise(executable: &Path, directory: &Path, quick: bool) -> io::Result<()> 
             errors.join("\n")
         ),
     )?;
-    report("Resource scenarios completed without recorded application errors; Night Light is off.");
+    report("Resource scenarios completed without recorded application errors; Night light is off.");
     Ok(())
 }
 
@@ -370,7 +370,7 @@ fn shutdown(application: &mut Process, native: &Nightlight) -> io::Result<()> {
             .map_err(io::Error::other)?
             .is_previewing()
             && !native.read_state().map_err(io::Error::other)?.is_active(),
-        "resource run did not clean up Night Light",
+        "resource run did not clean up Night light",
     )
 }
 

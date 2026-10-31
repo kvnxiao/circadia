@@ -375,7 +375,7 @@ fn check_autosave(
     })?;
     show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
     report(
-        "PASS: valid edits apply to Night Light and are written with their backup without Save; a number between steps rounds up",
+        "PASS: valid edits apply to Night light and are written with their backup without Save; a number between steps rounds up",
     );
     Ok(())
 }

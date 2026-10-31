@@ -28,7 +28,7 @@ Circadia uses `tracing` with its own synchronous size-rotating writer. The [diag
 | Crash class | Circadia's files | Windows records |
 | :-- | :-- | :-- |
 | Rust panic on the UI thread, including Reactor's fail-fast panics | Nothing. | Events 1000 and 1001 with `0xc0000409` and fast-fail code 7, a WER report, and a Reliability Monitor entry. A dump only if `LocalDumps` is configured under `HKEY_LOCAL_MACHINE`. |
-| Rust panic on the controller thread | Nothing. The process keeps running until exit but no longer controls Night Light. | Nothing, because the process does not crash. |
+| Rust panic on the controller thread | Nothing. The process keeps running until exit but no longer controls Night light. | Nothing, because the process does not crash. |
 | Access violation in WinUI or Circadia code | Nothing. | Event 1000 with `0xc0000005`, the faulting module, and its offset. |
 | Fail-fast raised by native code, including WinUI stowed exceptions (`0xc000027b`) | Nothing. | Events 1000 and 1001. Diagnosing a stowed exception needs a dump. |
 | Stack overflow | Nothing. | Event 1000 with `0xc00000fd`. |

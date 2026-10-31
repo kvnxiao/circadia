@@ -8,7 +8,7 @@ The timing binary uses the solar comparison tool's unchanged calculation functio
 
 Validated on 2026-10-17 with Rust 1.99.0, CPython 3.15.0a2, Windows 11 x64 build 26300.9711, and an AMD Ryzen 7 9800X3D. Builds use Cargo's default debug profile. The [solar comparison tool](../solar-calculation/README.md) supplies the exact Cargo manifest, lockfile, Rust configuration, reference tests, and fixtures. This directory supplies the additional timing binary and runner; it does not define a separate dependency set.
 
-Rust formatting, strict Clippy, pinned Ruff 0.17.1 and ty 0.0.89, and all six solar comparison tests passed. The four timing cases produced their expected event counts. Invalid repetition counts, malformed JSON, and invalid coordinates failed as expected. These results do not measure Windows location requests, time-zone conversion, UI work, Night Light writes, or release-build performance.
+Rust formatting, strict Clippy, pinned Ruff 0.17.1 and ty 0.0.89, and all six solar comparison tests passed. The four timing cases produced their expected event counts. Invalid repetition counts, malformed JSON, and invalid coordinates failed as expected. These results do not measure Windows location requests, time-zone conversion, UI work, Night light writes, or release-build performance.
 
 ## Run
 

@@ -117,7 +117,7 @@ fn exercise(executable: &Path, directory: &Path, case: ExitCase) -> io::Result<(
         )?;
     }
     report(&format!(
-        "PASS: {case:?} exits cleanly, clears Night Light, and keeps the written edit"
+        "PASS: {case:?} exits cleanly, clears Night light, and keeps the written edit"
     ));
     Ok(())
 }

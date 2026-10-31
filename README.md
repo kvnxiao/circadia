@@ -1,68 +1,59 @@
-<img src="assets/icon/circadia.svg" width="64" alt="Circadia icon">
+<h1>Circadia <img src="assets/icon/circadia.svg" width="32" alt="Circadia icon"></h1>
 
-# Circadia
-
-Circadia schedules Windows Night Light around your waking and sleeping hours. Set your preferred daytime and bedtime color temperatures, then let the screen warm gradually before bed and cool again before you wake.
+Circadia is a powerful manager for [Windows Night light](https://support.microsoft.com/en-us/windows/hardware/display-graphics/change-display-brightness-and-color-in-windows#bkmk_night_light). It adjusts your display’s color temperature through Windows’ native functionality, without directly writing GPU gamma ramps or modifying display calibration profiles. Set your preferred color temperatures, choose how gradually they change, and build a schedule around your waking and sleeping hours (with support for additional sunrise and sunset timings). Apps can be added to a suppression list to automatically pause Night light when focused.
 
 Circadia is a **Windows 11 x64 application in development**. Unsigned preview installers are built on every push to `main`, alongside automated checks.
 
+<p align="center">
+  <img src="assets/screenshots/schedule.png" alt="Circadia screenshot">
+</p>
+
 ## Features
 
-### A schedule around your day
+- **Daily temperature schedule**
+  - Set Wake and Bedtime schedules with different color temperature levels that support gradual transitions. The schedule supports one daily waking period and one overnight sleep period, including bedtimes after midnight.
+- **Optional sunrise and sunset timing**
+  - Follow solar events using explicit latitude and longitude coordinates or a location supplied by the Windows location service. Timings are calculated locally, and invalid events are skipped to keep the schedule running.
+- **Automatic and manual Night light suppression**
+  - Suppress Night light whenever a chosen app has focus, in any window mode. Rules support executable filenames or full paths, optional window-title conditions, and exclusions for apps or windows that should keep the normal schedule.
+  - Start or stop a separate one-hour suppression from Settings or the tray, which also offers toggles for recently focused apps. Automatic fullscreen detection is not included.
+- **Schedule graph and display preview**
+  - See the daily temperature curve, event times, current target, and next change. Preview plays the coming day on your display in seconds, temporarily taking precedence over suppression and disabling settings edits.
+- **Automatic saving and Windows preferences**
+  - Valid settings edits apply and save automatically. The interface follows Windows themes and regional time and number formats; English is currently the only shipped language.
+- **Tray controls and optional startup**
+  - Keep Circadia running when Settings closes, reopen it from the tray or by launching the app again, and optionally start it at sign-in. Quit ends control and requests Night light off.
 
-Choose Wake and Bedtime times and three temperature levels: Daytime, Morning/Evening, and Sleep. Transitions finish at their target times, so a 23:00 bedtime with a one-hour transition reaches your Sleep temperature at 23:00 and starts warming at 22:00.
+## Comparison with similar tools
 
-Optionally follow sunrise and sunset for the morning and evening changes. Enter coordinates yourself or let Windows supply your location. Solar times are calculated locally; when an event is unavailable, the schedule continues using the remaining targets. This schedule is intended for one daily waking period and one overnight sleep period, including bedtimes after midnight.
+Circadia combines native Windows 11 controls with scheduling and app rules for Windows Night light. Its interface follows your light, dark, or contrast theme.
 
-### Temporarily remove warmth
+| Feature | Circadia | Windows Night light | f.lux |
+| :-- | :---: | :---: | :---: |
+| Settings interface | Native Windows 11 controls | Windows Settings | Custom f.lux interface |
+| Uses native Windows Night light | ✓ | ✓ | ✗ |
+| Sunrise and sunset scheduling | ✓ | ✓ | ✓ |
+| Separate daytime, evening, and bedtime temperatures | ✓ | ✗ | ✓ |
+| Automatically pauses for selected apps | ✓ | ✗ | ✓ |
+| Automatically pauses for specifically fullscreen apps | ✗ | ✗ | ✓ |
+| Included with Windows | ✗ | ✓ | ✗ |
 
-Circadia calls its temporary 6500 K override **suppression**. Add a game, photo editor, or other app to apply it whenever that app has focus, in any window mode.
+**Calibration profiles:** Circadia does not directly write GPU gamma ramps or modify `.icc`/`.icm` profiles; it delegates color changes to Windows Night light. Whereas [f.lux is known to conflict](https://justgetflux.com/faq.html?q=vcgt) with some custom display calibration settings and display profile loaders.
 
-- Match an executable by filename, or restrict the rule to one installation.
-- Add a window-title condition to distinguish apps that share an executable, such as Java applications.
-- Use exclusions to keep the normal schedule for particular apps or windows.
-- Start or stop one-hour suppression from Settings or the tray, independently of app rules.
+Circadia lets you set Wake and Bedtime independently and combine them with optional sunrise and sunset times. Automatic suppression follows your app rules in any window mode.
 
-The tray also offers toggles for recently focused apps. Automatic fullscreen detection is not included; you choose which apps suppress the schedule.
-
-### See and adjust the daily curve
-
-The Schedule page shows the temperature curve, event times, current target, and next change. Preview plays the coming day on your display in a few seconds, taking precedence over suppression while it runs. Settings edits are temporarily disabled during playback.
-
-Valid edits apply and save automatically. The five pages group scheduling, app rules, transitions, settings, and application information. The interface follows Windows themes and regional time and number formats; English is currently the only shipped language.
-
-### Run from the tray
-
-Closing Settings keeps Circadia running. Reopen it from the tray or by launching the app again, and optionally enable startup at sign-in. Quit ends control and requests Night Light off.
+Sources: [Windows Night light settings](https://support.microsoft.com/en-us/windows/hardware/display-graphics/change-display-brightness-and-color-in-windows#bkmk_night_light), [f.lux for Windows](https://justgetflux.com/news/pages/v4/welcome/), [f.lux release notes](https://justgetflux.com/news/pages/v4/readme/), and [f.lux FAQ](https://justgetflux.com/faq.html).
 
 ## Getting started
 
-Circadia requires Windows 11 x64 with working native Night Light. The intended minimum is build 22000; execution on that minimum build remains unverified. Recorded desktop checks used build 26300.9711 at 100% scaling. See the [compatibility evidence](docs/research/windows-compatibility.md) for the tested scope.
+Requires Windows 11 x64 with working native Night light. See [tested compatibility](docs/research/windows-compatibility.md).
 
-### Install the latest development build
+1. Sign in to GitHub and open the [Preview runs](https://github.com/kvnxiao/circadia/actions/workflows/preview.yml?query=event%3Apush+branch%3Amain).
+2. Select the latest successful run, then download `Circadia-windows-x64-unsigned-<commit>` under **Artifacts**.
+3. Extract the ZIP. Quit Circadia from its tray menu if it is running. Run the extracted `*-setup.exe`.
+4. Finish installation and open **Circadia** from the Start menu.
 
-1. Sign in to GitHub and open the [Tests and code quality runs](https://github.com/kvnxiao/circadia/actions/workflows/checks.yml?query=event%3Apush+branch%3Amain).
-2. Open the newest successful run with a completed **Windows x64 installer** job. Under **Artifacts**, download `Circadia-windows-x64-unsigned-<commit>` and extract the ZIP.
-3. Run `Circadia-<version>-<commit>-windows-x64-unsigned-setup.exe`. If Circadia is already running, choose **Quit** from its tray menu before continuing.
-4. Finish setup, then open **Circadia** from the Windows Start menu.
-
-The preview built from commit `3108c69` needs a one-time manual update using these steps. Its update checker searches the previous packaging workflow and cannot find builds in the current workflow.
-
-The installer includes the required runtime and installs for your Windows account without requesting administrator access. Downloads appear after the first successful installer build on `main` and expire after 90 days. If no download is available, you can [build from source](DEVELOPMENT.md#build-and-run).
-
-**Unsigned application:** Circadia and its installer are not code-signed yet. Expect a Microsoft Defender SmartScreen warning on the first run of a downloaded installer or app. If Windows displays **Windows protected your PC**, verify that you downloaded it from this repository, choose **More info**, then **Run anyway** to approve it manually. Windows may identify the publisher as **Unknown publisher**. New builds may prompt again. If Windows policy blocks execution without a **Run anyway** option, these instructions cannot override that policy.
-
-About shows the installed version and offers Check for updates. Automatic checks are enabled by default and run at startup and daily; their results appear in About. Stable installations check GitHub releases, and preview installations check successful main builds. The download link opens the matching page in your browser.
-
-To update, quit Circadia and run the newer installer. To uninstall, quit Circadia and use **Settings → Apps → Installed apps → Circadia → Uninstall**. Your saved settings remain available for a later installation.
-
-### Set up your schedule
-
-1. Set Wake, Bedtime, and your temperature levels on the Schedule page.
-2. Turn on Night Light management and read the consent prompt.
-3. Use Preview to check the schedule, then close Settings to continue from the tray.
-
-While management is on, Circadia keeps Night Light enabled, disables Windows' own Night Light schedule, and corrects changes made in Windows Settings or Quick Settings. Turning management off or quitting requests Night Light off; **it does not restore Windows' schedule**. Re-enable that schedule in Windows Settings if you want it afterward.
+Preview builds are unsigned, so Windows may show a SmartScreen warning. See the [user guide](docs/user-guide.md#installation-and-updates) for installation help, updates, and schedule setup.
 
 ## Help and development
 

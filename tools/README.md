@@ -8,7 +8,7 @@ The [development guide](../DEVELOPMENT.md) describes routine checks and source b
 
 | Tool | Purpose | Run boundary |
 | :-- | :-- | :-- |
-| [Native application checks](native/README.md) | Exercise the built app, measure resource use and Night Light request timing, and inspect settings through UI Automation. | Some recipes change Night Light, send desktop input, change startup registration, or restart Explorer. Others use simulated output or leave management off; read the chosen recipe first. |
+| [Native application checks](native/README.md) | Exercise the built app, measure resource use and Night light request timing, and inspect settings through UI Automation. | Some recipes change Night light, send desktop input, change startup registration, or restart Explorer. Others use simulated output or leave management off; read the chosen recipe first. |
 | [Composition-binding generator](composition-bindings/README.md) | Generate and verify private Rust bindings for selected public Windows APIs. | Generation writes checked-in source; the freshness check is part of root `just check` and does not change the desktop. |
 
 ## Dependency and behavior experiments

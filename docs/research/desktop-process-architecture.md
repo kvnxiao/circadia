@@ -18,7 +18,7 @@ A second process could isolate UI dependencies and reclaim that process's resour
 
 ## Selected design and comparison scope
 
-Circadia needs an always-running Night Light controller and an occasionally open settings window with schedule controls and a generated temperature graph. [SPEC.md](../specs/SPEC.md) selects one Reactor process. The alternatives below explain the costs of separation without reopening that settled choice. The [Reactor UI research](windows-reactor-ui.md) maps the settings requirements to published and development APIs.
+Circadia needs an always-running Night light controller and an occasionally open settings window with schedule controls and a generated temperature graph. [SPEC.md](../specs/SPEC.md) selects one Reactor process. The alternatives below explain the costs of separation without reopening that settled choice. The [Reactor UI research](windows-reactor-ui.md) maps the settings requirements to published and development APIs.
 
 An executable is a file on disk. A process is a running instance of a program. Two processes can execute the same file with different startup arguments, or execute separate files. A tray icon and a settings window do not each require their own process.
 
@@ -50,7 +50,7 @@ Application state survives settings closure; component state does not. Circadia'
 
 Component-scoped tasks can be cancelled when settings closes. They suit operations whose results belong only to that window. Controller work and the saved Windows-location request lifecycle require application lifetime. Native registry observation, focus notifications, startup registration, and file picker ownership remain integrations to verify; declaring a Reactor control does not implement them.
 
-The development `show_window` method handles requests inside the current process. A second invocation still needs detection and signaling to that process. It must not initialize another controller or write Night Light. The lifecycle probe does not test cross-process activation.
+The development `show_window` method handles requests inside the current process. A second invocation still needs detection and signaling to that process. It must not initialize another controller or write Night light. The lifecycle probe does not test cross-process activation.
 
 Development `ComponentContext::run_window` exposes a scoped native window handle; the probe observed a non-null handle. The handle can identify the settings window as the owner of a native file picker. It does not establish that a picker can run without blocking controller work or that its result remains valid after settings closes.
 

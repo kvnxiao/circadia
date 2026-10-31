@@ -24,7 +24,7 @@ pub enum TemperatureMode {
     FinishHeld,
 }
 
-/// Select the temperature prepared before turning Night Light on.
+/// Select the temperature prepared before turning Night light on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActivationPreparation {
     /// Prepare 6500 K before startup activation.
@@ -204,7 +204,7 @@ pub(crate) trait NativeBackend: Send {
     fn set_active(&mut self, active: bool) -> Result<(), NativeFailure>;
 }
 
-/// Serialize public Night Light calls under one controller-owned handle.
+/// Serialize public Night light calls under one controller-owned handle.
 pub struct Native {
     backend: Box<dyn NativeBackend>,
     begun: bool,
@@ -456,7 +456,7 @@ impl Native {
         }
     }
 
-    /// End preview and request off independently once, then end Night Light
+    /// End preview and request off independently once, then end Night light
     /// access and observation until a later control attempt begins them again.
     ///
     /// - Does nothing before access began or after exit.

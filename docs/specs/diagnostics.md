@@ -61,7 +61,7 @@ Recording a crash does not extend the cleanup limit of [REQ-panic-cleanup](contr
 
 **Scenarios:**
 
-- An internal error in the settings window ends the process: the log has its crash record, and Night Light cleanup follows REQ-panic-cleanup.
+- An internal error in the settings window ends the process: the log has its crash record, and Night light cleanup follows REQ-panic-cleanup.
 - An access violation occurs in a native UI module: the log has the exception code, module, and offset.
 - A fail-fast termination ends the process: the next launch appends a record that identifies the earlier crash.
 - The user quits normally: the next launch records no crash.

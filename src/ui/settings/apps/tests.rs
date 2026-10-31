@@ -85,7 +85,7 @@ fn suppress_for_1_hour_is_disabled_with_its_reason_while_management_is_off() {
             ManualCommand::Start,
             "Suppress for 1 hour".to_owned(),
             false,
-            "Turn on Night Light management on the Schedule page to suppress.".to_owned()
+            "Turn on Night light management on the Schedule page to suppress.".to_owned()
         )
     );
 }

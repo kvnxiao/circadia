@@ -1,4 +1,4 @@
-name: Tools and probes
+name: Tools
 
 on:
   push:

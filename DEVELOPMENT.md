@@ -1,6 +1,6 @@
 # Developing Circadia
 
-Circadia builds as one Rust application with an on-demand settings window and a background Night Light controller. The [user guide](docs/user-guide.md) describes how to use it; the [approved specification](docs/specs/SPEC.md) defines intended behavior, including requirements that still need release validation.
+Circadia builds as one Rust application with an on-demand settings window and a background Night light controller. The [user guide](docs/user-guide.md) describes how to use it; the [approved specification](docs/specs/SPEC.md) defines intended behavior, including requirements that still need release validation.
 
 ## Build and run
 
@@ -14,7 +14,7 @@ just build-self-contained
 
 The self-contained build stages the Windows App SDK runtime beside the executable. Keep that runtime layout with the executable when copying a build; the executable alone is not a self-contained distribution. `just build` instead uses an installed compatible runtime. [Windows compatibility](docs/research/windows-compatibility.md) records runtime versions, the intended operating-system floor, and deployment limits.
 
-First launch opens Settings with Night Light management off. Read the consent prompt before enabling management. Closing Settings keeps the application running; use Quit to exit. A second launch activates the running instance.
+First launch opens Settings with Night light management off. Read the consent prompt before enabling management. Closing Settings keeps the application running; use Quit to exit. A second launch activates the running instance.
 
 Release builds use the same bundled-runtime feature:
 
@@ -22,7 +22,7 @@ Release builds use the same bundled-runtime feature:
 cargo +stable build --release --bin circadia --features self-contained --locked
 ```
 
-`just installer` builds and packages a release binary. The measurement recipes also build release binaries, but run separate experiments with desktop or Night Light effects.
+`just installer` builds and packages a release binary. The measurement recipes also build release binaries, but run separate experiments with desktop or Night light effects.
 
 ### Build an unsigned installer
 
@@ -48,7 +48,7 @@ Set the application version in `Cargo.toml`. The executable, About page, and ins
 
 The main packaging workflow sets `CIRCADIA_CHANNEL=preview`. These packages display `-preview`, and their artifact names include the exact packaged source commit. Update checks inspect available artifacts from successful builds and compare their source commits with the installed commit. Only a descendant source is offered, so rerunning CI for older source does not offer a downgrade. Among available descendants, the check selects the one furthest ahead in commit history. Checks inspect up to 20 recent successful packaging runs and stop after a shared 30-second network deadline.
 
-To publish a stable version, update Cargo's version, commit the change, and create a GitHub release with a matching `v` tag, such as `v0.1.0`. Publishing a non-prerelease starts the [Windows stable release workflow](.github/workflows/windows-release.yml), which builds that tag with `CIRCADIA_CHANNEL=stable` and attaches the installer and checksum. Saving a draft does not start packaging. About offers the release only after its installer and checksum are present. Matching symbols remain in the workflow artifacts.
+To publish a stable version, update Cargo's version, commit the change, and create a GitHub release with a matching `v` tag, such as `v0.1.0`. Publishing a non-prerelease starts the [Release workflow](.github/workflows/release.yml), which builds that tag with `CIRCADIA_CHANNEL=stable` and attaches the installer and checksum. Saving a draft does not start packaging. About offers the release only after its installer and checksum are present. Matching symbols remain in the workflow artifacts.
 
 Automatic update checks default on, run at startup and daily, and save their preference through the same configuration path as other settings. They query public GitHub metadata without a token. Downloads open in the user's browser; preview artifact downloads require GitHub sign-in. The application does not install updates itself.
 
@@ -62,7 +62,7 @@ just check
 just check-msrv
 ```
 
-`just check` runs formatting checks, Clippy, tests, release-text tests (localization with debug assertions disabled), rustdoc, dependency checks, and generated-binding verification. Builds, tests, and Clippy use stable Rust with the lockfile. Time-zone tests read installed Windows rules without changing the computer's time zone. Routine checks do not drive the desktop or change live Night Light.
+`just check` runs formatting checks, Clippy, tests, release-text tests (localization with debug assertions disabled), rustdoc, dependency checks, and generated-binding verification. Builds, tests, and Clippy use stable Rust with the lockfile. Time-zone tests read installed Windows rules without changing the computer's time zone. Routine checks do not drive the desktop or change live Night light.
 
 The [tools index](tools/README.md) lists separate application checks and experiments. Their own READMEs describe prerequisites, commands, side effects, and evidence limits. Moving them into one folder does not include them in `just check`. Python experiment checks use Python 3.15:
 
@@ -72,11 +72,11 @@ just --justfile tools/justfile python-test
 just --justfile tools/justfile python-audit
 ```
 
-Read a native check's instructions before running it. Some send mouse and keyboard input, change Night Light, or restart Explorer. Temporary configuration directories do not isolate Windows Night Light state.
+Read a native check's instructions before running it. Some send mouse and keyboard input, change Night light, or restart Explorer. Temporary configuration directories do not isolate Windows Night light state.
 
 ## Continuous integration
 
-The [Tests and code quality workflow](.github/workflows/checks.yml) and [Tools and probes workflow](.github/workflows/tools.yml) run independently on pull requests, pushes to `main`, merge queues, and manual dispatch.
+The [CI workflow](.github/workflows/ci.yml) and [Tools workflow](.github/workflows/tools.yml) run independently on pull requests, pushes to `main`, merge queues, and manual dispatch.
 
 Application CI checks:
 
@@ -108,9 +108,11 @@ Rust check jobs emit line-table debug information for the dev, test, and testrel
 
 Superseded runs are cancelled, and a failed Rust matrix job does not cancel the others. Formatting runs separately so compiled checks do not install nightly Rust. The bindings check installs stable rustfmt for code generation; the generated file uses LF line endings on every checkout. `just fmt-check` and `just clippy` run individually; `just lint` still runs both.
 
-CI executes test harnesses, including unit tests of native-check helpers, but does not launch the desktop application or probe windows. Desktop automation, screenshots, live Night Light checks, host-setting exercises, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
+CI executes test harnesses, including unit tests of native-check helpers, but does not launch the desktop application or probe windows. Desktop automation, screenshots, live Night light checks, host-setting exercises, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
 
-The [Tests and code quality workflow](.github/workflows/checks.yml) packages every push to `main`. Packaging waits for check selection and shared Cargo Git source preparation, then runs alongside the application tests and lint checks. It restores the prepared Git source cache and its separate installer build cache. **All required checks** requires packaging to succeed on main pushes; packaging is skipped for other events. Preview update checks offer artifacts only from successful runs of this workflow. Its **Windows x64 installer** job uploads `Circadia-windows-x64-unsigned-<commit>`, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual workflow dispatch do not build an installer.
+The [Preview workflow](.github/workflows/preview.yml) packages every push to `main` independently of CI. Both workflows use the same Cargo Git source cache key and fetch locked dependencies on a cache miss; a cold cache can cause concurrent downloads. Compiled installer outputs use a separate cache from tests and lint. CI's **All required checks** covers its checks; Preview reports **Build Windows x64 installer** separately. Preview update checks offer artifacts from successful Preview runs, regardless of CI's result.
+
+The installer job uploads `Circadia-windows-x64-unsigned-<commit>`, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual CI dispatch do not build a preview installer.
 
 External actions use full commit pins. [Dependabot](.github/dependabot.yml) proposes weekly action updates for review.
 
@@ -118,7 +120,7 @@ External actions use full commit pins. [Dependabot](.github/dependabot.yml) prop
 
 `Cargo.lock` pins resolved versions. While Reactor is in preview, `windows-reactor`, `windows-window`, and `windows-reactor-setup` track windows-rs `master` through one explicit Git revision. The application, [Reactor experiment](tools/windows-reactor/README.md), and [settings-design experiment](tools/windows-reactor/settings-design/README.md) use that revision. Direct Windows bindings also share it so their Rust COM types agree.
 
-Root patches align crates.io dependencies whose version ranges accept the pinned Windows crates. Dependencies requiring older versions keep them, including `windows-sys` 0.61 in the Night Light watcher and `tempfile`. The Night Light crates remain published dependencies; Circadia's pin policy does not change the separate `win-nightlight-cli` repository.
+Root patches align crates.io dependencies whose version ranges accept the pinned Windows crates. Dependencies requiring older versions keep them, including `windows-sys` 0.61 in the Night light watcher and `tempfile`. The Night light crates remain published dependencies; Circadia's pin policy does not change the separate `win-nightlight-cli` repository.
 
 ### Updating Reactor
 
@@ -146,9 +148,9 @@ The [generator package](tools/composition-bindings/README.md) builds independent
 
 The configuration owner validates settings and tray edits through one path. Valid edits become the running configuration immediately and are persisted after a short debounce. Persistence failures do not undo the running configuration; startup recovery and paused saving are defined in the [configuration contract](docs/specs/application.md).
 
-The controller is the only component requesting Night Light writes. It serializes public library calls on its worker thread. A separate calculation worker supplies schedule and graph results, so a blocked native call does not block graph calculation or the UI. Configuration revisions reject obsolete calculation results. Preview plays through one daily schedule at an accelerated rate. Its captured start time and deadline determine UI playback independently of native-call completion.
+The controller is the only component requesting Night light writes. It serializes public library calls on its worker thread. A separate calculation worker supplies schedule and graph results, so a blocked native call does not block graph calculation or the UI. Configuration revisions reject obsolete calculation results. Preview plays through one daily schedule at an accelerated rate. Its captured start time and deadline determine UI playback independently of native-call completion.
 
-The controller uses one Night Light handle for its lifetime and distinguishes successful temperature storage from clearing Windows' native preview flag after an immediate temperature change. Windows stores settings and on/off state separately, so exit cleanup makes independent best-effort requests. See [native access](docs/specs/native-access.md) and [lifecycle](docs/specs/control.md) for failure and ordering guarantees.
+The controller uses one Night light handle for its lifetime and distinguishes successful temperature storage from clearing Windows' native preview flag after an immediate temperature change. Windows stores settings and on/off state separately, so exit cleanup makes independent best-effort requests. See [native access](docs/specs/native-access.md) and [lifecycle](docs/specs/control.md) for failure and ordering guarantees.
 
 Foreground inspection uses window metadata and limited-query process identity. Display names and icons come from executable files on a separate worker. Circadia does not read other processes' memory, inject code, or request elevation. The [matching research](docs/research/executable-matching.md) explains identity and path limits.
 
@@ -159,7 +161,7 @@ Interface messages use Project Fluent `.ftl` files under `i18n/`, one directory 
 Use the [UI localization design guide](docs/design/localization.md) for shared wording, grammar, and layout principles. Create each locale catalog from [en-US](i18n/en-US/circadia.ftl). Preserve message identifiers, named arguments, and selector keys that represent application states; adapt plural categories to the target language.
 
 - [Shared terms](i18n/shared.ftl) define invariant brand names, including Circadia and GitHub, and are loaded into every language. Reference these terms without redefining them in a locale catalog. Change a brand in this shared file.
-- Terms at the start of en-US define official Windows names and repeated complete labels. Translate Windows feature names, including Night Light, using the official terminology dictionary for the target locale.
+- Terms at the start of en-US define official Windows names and repeated complete labels. Translate Windows feature names, including Night light, using the official terminology dictionary for the target locale.
 - Keep standalone event labels, such as Wake, and temperature labels, such as Daytime, consistent. Translate complete sentences for their grammar; locale-specific term forms and helper terms are allowed.
 - Preserve file names, executable names, technical codes, and values supplied through message arguments.
 

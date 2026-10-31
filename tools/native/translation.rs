@@ -149,7 +149,7 @@ fn check(executable: &Path, directory: &Path) -> io::Result<()> {
         ),
     )?;
     report(
-        "PASS: captured translation views pass automated text and bounds checks at 100%; screenshots require visual inspection; Night Light was not managed",
+        "PASS: captured translation views pass automated text and bounds checks at 100%; screenshots require visual inspection; Night light was not managed",
     );
     Ok(())
 }

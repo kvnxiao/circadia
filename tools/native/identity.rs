@@ -111,7 +111,7 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     crate::lifecycle::quit(&automation, &settings, process)?;
     application.wait_exit()?;
     report(
-        "PASS: recent actions and candidate checkboxes preserve native identity, focus and selection through history reorder; Add targets the retained executable; Night Light was not managed",
+        "PASS: recent actions and candidate checkboxes preserve native identity, focus and selection through history reorder; Add targets the retained executable; Night light was not managed",
     );
     Ok(())
 }

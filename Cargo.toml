@@ -20,7 +20,7 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 license.workspace = true
-description = "Schedule native Windows Night Light temperatures"
+description = "Schedule native Windows Night light temperatures"
 repository.workspace = true
 
 [features]

@@ -40,10 +40,10 @@ The status line summarizes the state and wraps to a second line instead of trunc
 
 | State | Status line |
 | :-- | :-- |
-| Managing | "Managing Night Light · 3400 K" |
+| Managing | "Managing Night light · 3400 K" |
 | Preview playing | "Previewing · 3100 K" |
 | Suppressed | "Suppressed · 6500 K" |
-| Not managing | "Not managing Night Light" |
+| Not managing | "Not managing Night light" |
 | An app-wide problem exists | Names the first app-wide problem, matching the tray tooltip. |
 
 **Items.** The pages are Schedule (selected when the window opens), App suppression, Transitions, Settings, and About. Each item is 36 epx tall with 4 epx corners and 12 epx horizontal padding: a 16 epx glyph, a 14 epx gap, and the label in Body. Hovering shows a subtle fill. The selected item shows the subtle fill and a 3 by 16 epx accent bar at its left edge, vertically centered. The glyphs are a clock (Schedule), a two-by-two grid of app tiles (App suppression), a line that steps down along a ramp (Transitions), a gear (Settings), and an information circle (About), each taken from Segoe Fluent Icons.
@@ -103,7 +103,7 @@ The Schedule page has, in order:
 
 ### Management card
 
-A shield-with-check glyph, the title "Let Circadia manage Night Light", the description "While on, Circadia fully controls Windows Night Light and reverts changes made in Windows Settings or Quick Settings.", and a toggle switch. Turning the switch on opens the [takeover consent dialog](#takeover-consent-dialog); the switch shows On only after the user selects Turn on. While management is turning on or off, the switch is disabled, and a line in Caption and secondary text below the description reads "Turning on…" or "Turning off…" until the change finishes.
+A shield-with-check glyph, the title "Let Circadia manage Night light", the description "While on, Circadia fully controls Windows Night light and reverts changes made in Windows Settings or Quick Settings.", and a toggle switch. Turning the switch on opens the [takeover consent dialog](#takeover-consent-dialog); the switch shows On only after the user selects Turn on. While management is turning on or off, the switch is disabled, and a line in Caption and secondary text below the description reads "Turning on…" or "Turning off…" until the change finishes.
 
 ### Status and graph card
 
@@ -114,8 +114,8 @@ This card has 8 epx corners, unlike the 4 epx of other cards, and no padding of 
 The header row has 20 epx of padding at the top and sides and 12 epx at the bottom, with 20 epx between its parts:
 
 - **Left:** the [phase art](#phase-art-in-the-window) at 64 epx.
-- **Middle:** Circadia's current target temperature in the Title style with tabular numerals, such as "3400 K", or "Off" when Circadia is not managing Night Light. This is the schedule, suppression, or Preview target, not confirmation of Windows' applied temperature. The [phase pill](#phase-pill) follows 12 epx to its right. Below them, 2 epx down, one status sentence in Body and secondary text.
-- **Right:** a button with a 16 epx sun glyph that reads "Suppress for 1 hour" or "Stop suppressing". It is disabled while Circadia is not managing Night Light.
+- **Middle:** Circadia's current target temperature in the Title style with tabular numerals, such as "3400 K", or "Off" when Circadia is not managing Night light. This is the schedule, suppression, or Preview target, not confirmation of Windows' applied temperature. The [phase pill](#phase-pill) follows 12 epx to its right. Below them, 2 epx down, one status sentence in Body and secondary text.
+- **Right:** a button with a 16 epx sun glyph that reads "Suppress for 1 hour" or "Stop suppressing". It is disabled while Circadia is not managing Night light.
 
 Example status sentences:
 
@@ -128,7 +128,7 @@ Example status sentences:
 | Preview playing | "Previewing 3:15 AM. Your schedule resumes when it ends." While suppression is active, the second sentence is "Suppression resumes when the preview ends." |
 | Manual suppression | "Showing 6500 K until 10:42 PM. Your schedule is at 3400 K." |
 | Automatic suppression | Names the focused app instead of an end time. |
-| Not managing | "Windows controls Night Light. Turn on management to follow this schedule." |
+| Not managing | "Windows controls Night light. Turn on management to follow this schedule." |
 
 #### Phase pill
 
@@ -136,7 +136,7 @@ The pill names the current state. The first matching row applies:
 
 | Pill | Shown when |
 | :-- | :-- |
-| Not managing | Circadia is not managing Night Light. |
+| Not managing | Circadia is not managing Night light. |
 | Preview | Preview is playing. |
 | Suppressed | Manual or automatic suppression is active. |
 | Shifting to <phase> | A scheduled transition is in progress. It names the phase the transition ends in, such as "Shifting to bedtime". |
@@ -169,7 +169,7 @@ The graph shows the scheduled temperature over one day. It sits 20 epx from the 
 
 **Chip glyphs.** Sunrise shows half a sun over a horizon with an upward arrow; Sunset shows the same with a downward arrow; Wake shows an alarm clock; Bedtime shows a crescent moon. The mockups drew 14 epx glyphs; 16 epx matches Segoe Fluent Icons' recommended sizes. Sunrise and Sunset glyphs use the darker color from the sun illustration's gradient (`#FFAE2E` dark, `#B86E00` light). The mockups used `#E8901F`, which measures 2.49:1 on the light theme's white chip, below the 3:1 minimum for graphics. Wake and Bedtime glyphs use the primary text color.
 
-**Preview.** While Preview plays, the current-time line and dot move continuously with the simulated schedule time, derived from Preview's recorded starting time and elapsed playback time. Windows paces their compositor animation independently of Night Light calls. Numerical text refreshes less often than marker motion. When the previewed instant passes the right edge, the graph shows the next day's view, and the line and dot continue from its left edge. Hiding the graph stops its animation; returning resumes from the current playback position.
+**Preview.** While Preview plays, the current-time line and dot move continuously with the simulated schedule time, derived from Preview's recorded starting time and elapsed playback time. Windows paces their compositor animation independently of Night light calls. Numerical text refreshes less often than marker motion. When the previewed instant passes the right edge, the graph shows the next day's view, and the line and dot continue from its left edge. Hiding the graph stops its animation; returning resumes from the current playback position.
 
 **Contrast themes.**
 
@@ -198,19 +198,19 @@ When translated text does not fit, the text wraps within its column. If a column
 
 A 1 epx divider runs across the top of the footer. The footer has 12 epx vertical and 20 epx horizontal padding and 16 epx between its parts:
 
-- **Left:** a caption in Caption and secondary text. While Preview plays, a 3 epx progress bar (accent fill on a neutral track) appears 8 epx below the caption. Its fill advances linearly to full width shortly before the playback deadline, independently of Night Light writes.
+- **Left:** a caption in Caption and secondary text. While Preview plays, a 3 epx progress bar (accent fill on a neutral track) appears 8 epx below the caption. Its fill advances linearly to full width shortly before the playback deadline, independently of Night light writes.
 - **Right:** a button at least 112 epx wide with a play glyph and "Preview", or a stop glyph and "Stop" while Preview plays.
 
-The bar reaches full width before the playback deadline by the smaller of 100 ms and 10% of the duration captured when playback starts. It stays full until the actual deadline, then disappears. Its accessible progress value follows that visual fill; the playback clock and graph continue on the actual timeline. Editing unlocks at the actual deadline. The visual deadline does not change the timing of Night Light requests. Stop and the other cancellations defined by [the Preview contract](../specs/application.md#req-preview-temperature-curve--preview-a-complete-daily-cycle) remove the bar immediately. Starting another Preview replaces the visual timeline, and hiding the Schedule page stops its animation.
+The bar reaches full width before the playback deadline by the smaller of 100 ms and 10% of the duration captured when playback starts. It stays full until the actual deadline, then disappears. Its accessible progress value follows that visual fill; the playback clock and graph continue on the actual timeline. Editing unlocks at the actual deadline. The visual deadline does not change the timing of Night light requests. Stop and the other cancellations defined by [the Preview contract](../specs/application.md#req-preview-temperature-curve--preview-a-complete-daily-cycle) remove the bar immediately. Starting another Preview replaces the visual timeline, and hiding the Schedule page stops its animation.
 
 | State | Caption |
 | :-- | :-- |
 | Ready | "Plays the next 24 hours on your screen in 10 seconds, even while suppressed." |
 | Playing | "Previewing 9:42 PM · 3100 K" |
 | Blocked by invalid input | "Fix the highlighted values to preview." |
-| Blocked because management is off | "Turn on Night Light management to preview." |
+| Blocked because management is off | "Turn on Night light management to preview." |
 
-Preview shows its colors through Night Light only. The window does not draw a tint, overlay, or simulated color while Preview plays.
+Preview shows its colors through Night light only. The window does not draw a tint, overlay, or simulated color while Preview plays.
 
 ### Times
 
@@ -262,7 +262,7 @@ The App suppression page has, in order:
 
 1. **An explanation card and a manual suppression card,** as one group without a header.
    - Explanation: a monitor glyph, the title "Suppress while listed apps are focused", and the description "Circadia fades to 6500 K while a listed app is in the foreground, in any window mode, and returns to your schedule after you switch away." It has no control.
-   - Manual suppression: a sun glyph, the title "Suppress for 1 hour", and a button that reads "Suppress for 1 hour" or "Stop suppressing". The description is "Request 6500 K for the next hour, whichever app is focused." when inactive, and the end time, such as "Suppressed until 10:42 PM.", when active. Settings shows the end time, not a countdown. The button is disabled while Circadia is not managing Night Light.
+   - Manual suppression: a sun glyph, the title "Suppress for 1 hour", and a button that reads "Suppress for 1 hour" or "Stop suppressing". The description is "Request 6500 K for the next hour, whichever app is focused." when inactive, and the end time, such as "Suppressed until 10:42 PM.", when active. Settings shows the end time, not a countdown. The button is disabled while Circadia is not managing Night light.
 2. **Recently focused:** one card with up to five installation rows separated by dividers. Each row is at least 60 epx tall with 10 epx vertical and 16 epx horizontal padding: the app icon, the display name in Body, and below it the executable name and the time since focus in Caption and secondary text, such as "firefox.exe · 4 min ago". Same-name installations also show their folders on a wrapping secondary line. The time updates while the window is visible. An installation without a covering suppression rule shows "Add" with a plus glyph; this creates a filename-only rule. One covering rule shows a success check, "On your list", and "Remove" for that rule. Multiple covering rules show "On your list" and "Edit rules below" without an ambiguous Remove action. Covering title-free exclusions show the excluded state. Accessible action names include the app and, when needed to distinguish installations, its folder. A note follows the card, 8 epx below it, in Caption and secondary text: "The last 5 apps you switched to. Circadia itself is never listed."
 3. **Suppression list (n):** the section header shows the number of rules, with an accent "Add app" button (plus glyph) aligned right on the header's line. It opens the [Add app dialog](#add-app-dialog). Each rule is its own card, at least 64 epx tall: the app icon, the display name, the executable name below it, a subtle filter button with the accessible name "Edit conditions for <name>", and a subtle trash button with the accessible name "Remove <name>". The filter opens the [condition editor](#window-title-dialog). A restricted rule shows its folder on a wrapping secondary line; its action names include that folder when another rule has the same filename. An entry with a title condition shows its title text in place of the display name, and the line below reads "javaw.exe · Title contains", or "javaw.exe · Title matches" when the regular-expression option is on. When the list is empty, one card reads "No apps yet" with the description "Add a game, video player or photo editor to keep its colors accurate."
 4. **Never suppress:** an expandable card with a prohibited-sign glyph, the title "Excluded apps", the description "Exclusions win over the suppression list. They don't affect Suppress for 1 hour.", an "Add exclusion" button, and the expand button. "Add exclusion" opens the [Add exclusion dialog](#add-exclusion-dialog). Each nested row starts with the app icon. The nested rows list the fixed exclusions first, each with a 16 epx lock glyph in tertiary text color in place of a remove button and the accessible name "Locked":
@@ -296,11 +296,11 @@ The Settings page has, in order:
 2. **Startup:**
    - "Start Circadia when I sign in to Windows", with the description "Runs in the notification area. No administrator rights needed." and a toggle switch. A registration failure, or a mismatch in which Windows has disabled startup that the user turned on (for example in Task Manager), appears in this card as a [feature message](#feature-messages-in-their-cards).
    - "Start minimized", with the description "Open to the notification area instead of this window." and a toggle switch.
-3. **Windows Night Light:** an explanation card with a shield glyph, the title "How Circadia uses Night Light", the description "While managing, Circadia keeps Night Light on, turns the Windows Night Light schedule off, and undoes outside changes. Turning management off or quitting fades to 6500 K, turns Night Light off, and hands control back to Windows.", and a phase-pill-style label that reads "Managing" or "Not managing".
+3. **Windows Night light:** an explanation card with a shield glyph, the title "How Circadia uses Night light", the description "While managing, Circadia keeps Night light on, turns the Windows Night light schedule off, and undoes outside changes. Turning management off or quitting fades to 6500 K, turns Night light off, and hands control back to Windows.", and a phase-pill-style label that reads "Managing" or "Not managing".
 4. **Troubleshooting:**
    - "Settings file", with a folder glyph, the description "Changes are saved here as you make them, with a backup of the last good copy.", and an "Open folder" button.
    - "Logs", with a document glyph, the description "Log files for troubleshooting. They stay on this PC and are never uploaded automatically.", and an "Open folder" button.
-5. **Application:** a Quit Circadia card with a power glyph, an explanation that quitting stops Night Light management, and a Quit Circadia button.
+5. **Application:** a Quit Circadia card with a power glyph, an explanation that quitting stops Night light management, and a Quit Circadia button.
 
 ### Language drop-down and restart prompt
 
@@ -353,7 +353,7 @@ The ring advances continuously through the scheduled transition. During Preview 
 | During a transition | The destination and progress, such as "Bedtime, shifting, 40% there" |
 | Manual suppression | "Suppressed for 1 hour" |
 | Automatic suppression | "Suppressed while an app is focused" |
-| Not managing | "Not managing Night Light" |
+| Not managing | "Not managing Night light" |
 
 ## Error presentation
 
@@ -397,8 +397,8 @@ While at least one invalid field is on a page other than the visible one, an err
 App-wide problems appear as banners at the top of every page:
 
 - Settings could not be read from either the settings file or its backup.
-- Circadia cannot determine a scheduled temperature, or a native Night Light request failed.
-- Circadia can no longer [observe Night Light](../specs/native-access.md#req-night-light-observation--reconcile-observed-night-light-changes) for changes made outside it.
+- Circadia cannot determine a scheduled temperature, or a native Night light request failed.
+- Circadia can no longer [observe Night light](../specs/native-access.md#req-night-light-observation--reconcile-observed-night-light-changes) for changes made outside it.
 - Settings could not be saved.
 - Some values in the settings file are invalid, so changes are not saved: the title "Changes aren't being saved" and the message "Some settings in config.toml are invalid. Change each marked setting to save again. Your changes apply now but are lost when Circadia quits."
 - The settings file was replaced by its backup: the title "Settings were restored from a backup" and a message that names the kind of problem without the parser's own text, such as "config.toml has a syntax error on line 12, so Circadia restored your last saved settings.", with a close button.
@@ -440,15 +440,15 @@ Wake time and Bedtime use a segmented button that opens a picker flyout, matchin
 A standard content dialog over a dimmed window, 500 epx wide in the mockups, with 8 epx corners. Source: [Dialog controls](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/dialogs-and-flyouts/dialogs).
 
 - **Content,** with 24 epx padding:
-  - Title in Subtitle, 12 epx above the body: "Let Circadia manage Night Light?"
-  - Body: "While Circadia is running, it fully controls Windows Night Light:"
-  - Three bullets, 4 epx apart and indented 20 epx: "Night Light stays on and follows Circadia's schedule." "The Windows Night Light schedule is turned off." "Changes you make in Windows Settings or Quick Settings are undone."
-  - A closing paragraph in secondary text: "To give control back, turn this off or quit Circadia from the notification area. Quitting fades out and turns Night Light off."
+  - Title in Subtitle, 12 epx above the body: "Let Circadia manage Night light?"
+  - Body: "While Circadia is running, it fully controls Windows Night light:"
+  - Three bullets, 4 epx apart and indented 20 epx: "Night light stays on and follows Circadia's schedule." "The Windows Night light schedule is turned off." "Changes you make in Windows Settings or Quick Settings are undone."
+  - A closing paragraph in secondary text: "To give control back, turn this off or quit Circadia from the notification area. Quitting fades out and turns Night light off."
 - **Footer:** 24 epx padding on the dialog footer fill with a 1 epx divider above it, and two equal-width buttons 8 epx apart: "Turn on" (accent, the default button, activated by Enter) and "Cancel" (activated by Esc).
 
 ## Location consent dialog
 
-Use the same standard content dialog and footer as the Night Light consent dialog. The title reads "Use Windows location?". Three body paragraphs, 12 epx apart, explain when requests run, Windows location services and possible network-based positioning, and the saved preference and coordinates. The first paragraph explicitly includes startup with only the tray icon visible. The footer offers "Turn on" as the default action and "Cancel". Cancelling keeps the preference off.
+Use the same standard content dialog and footer as the Night light consent dialog. The title reads "Use Windows location?". Three body paragraphs, 12 epx apart, explain when requests run, Windows location services and possible network-based positioning, and the saved preference and coordinates. The first paragraph explicitly includes startup with only the tray icon visible. The footer offers "Turn on" as the default action and "Cancel". Cancelling keeps the preference off.
 
 ## Add app dialog
 

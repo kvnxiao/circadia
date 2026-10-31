@@ -28,7 +28,7 @@ const FIXTURE_SHARED: &str = r#"-brand-name = { "Sample Brand" }
 "#;
 
 const FIXTURE_ENGLISH: &str = "\
--night-light = Night Light
+-night-light = Night light
 fixture-brand = { -brand-name } uses { -night-light }.
 fixture-greeting = Hello
 fixture-untranslated = Browse
@@ -523,7 +523,7 @@ fn shared_brand_and_locale_feature_terms_format_together() {
     let german = Text::load_from(&FIXTURE, &german()).expect("fixture loads");
     assert_eq!(
         english.loader().get("fixture-brand"),
-        "Sample Brand uses Night Light."
+        "Sample Brand uses Night light."
     );
     assert_eq!(
         german.loader().get("fixture-brand"),
@@ -551,7 +551,7 @@ fixture-brand = { -brand-name }
     let german = Text::load_from(&FIXTURE, &german()).expect("fixture loads");
     assert_eq!(
         english.loader().get("fixture-brand"),
-        "Renamed Brand uses Night Light."
+        "Renamed Brand uses Night light."
     );
     assert_eq!(german.loader().get("fixture-brand"), "Renamed Brand");
 }
@@ -589,7 +589,7 @@ fn pseudo_locale_preserves_shared_brand_names() {
 fn parity_rejects_missing_terms_and_shared_redefinitions() {
     assert_eq!(
         parity(
-            "-night-light = Night Light
+            "-night-light = Night light
 message = { -night-light }
 ",
             "-brand-name = Translated name
@@ -608,7 +608,7 @@ message = Translated message
 fn parity_allows_locale_specific_term_forms() {
     assert_eq!(
         parity(
-            "-night-light = Night Light
+            "-night-light = Night light
 message = { -night-light }
 ",
             "-night-light = { $case ->

@@ -2,11 +2,11 @@
 
 These documents record evidence for Circadia's design and implementation. Each topic states its observed versions, methods, findings, and limits. The [specification](../specs/SPEC.md) defines required behavior; an approved design or a successful probe does not establish release readiness. [Historical decisions](../decisions.md) preserve consequential evaluated directions.
 
-## Night Light and Windows integration
+## Night light and Windows integration
 
 | Topic | Scope |
 | :-- | :-- |
-| [Native Night Light control](nightlight-transition-control.md) | Public 0.5.0 operations, preview cleanup, watcher contracts, timestamp behavior, and single-host display observations. |
+| [Native Night light control](nightlight-transition-control.md) | Public 0.5.0 operations, preview cleanup, watcher contracts, timestamp behavior, and single-host display observations. |
 | [Session shutdown](session-shutdown.md) | Confirmed session-ending notifications and best-effort cleanup; actual Windows teardown and next-sign-in display state are unverified. |
 | [Suspend and resume](suspend-resume.md) | Power notifications, elapsed timers, and current-state reconciliation; synthetic messages do not establish hardware delivery. |
 | [One-hour suppression](timed-suppression.md) | Sleep-inclusive elapsed time and timer delivery. |

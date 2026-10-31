@@ -95,7 +95,7 @@ impl Drop for Client {
             self.shared.1.notify_one();
         }
         // An in-flight read has a deadline and cannot modify application data.
-        // Process exit must not wait for the network before Night Light
+        // Process exit must not wait for the network before Night light
         // cleanup.
     }
 }
@@ -285,7 +285,7 @@ struct Artifact {
 
 fn preview(api: &Api) -> io::Result<Status> {
     let Some(runs) = api.get::<Runs>(
-        "actions/workflows/checks.yml/runs?event=push&status=success&branch=main&per_page=20",
+        "actions/workflows/preview.yml/runs?event=push&status=success&branch=main&per_page=20",
     )?
     else {
         return Ok(Status::Unpublished);

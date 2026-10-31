@@ -3,7 +3,7 @@
 ## Scope and decisions
 
 - Read [SPEC.md](docs/specs/SPEC.md) and the relevant areas in its [area index](docs/specs/SPEC.md#area-specifications) before changing behavior. Treat their requirements as the product contract; use [research](docs/research/README.md) for evidence and limitations.
-- Preserve settled choices: one Rust process using the Windows Reactor UI library, native Night Light control, three ordered temperature levels with generated transitions around user-entered Wake/Bedtime clocks and optional solar targets, automatic suppression for explicitly listed foreground executables, and a one-hour manual suppression toggle. Both suppression sources request a temporary 6500 K override. For example, do not add a fullscreen detector to the MVP.
+- Preserve settled choices: one Rust process using the Windows Reactor UI library, native Night light control, three ordered temperature levels with generated transitions around user-entered Wake/Bedtime clocks and optional solar targets, automatic suppression for explicitly listed foreground executables, and a one-hour manual suppression toggle. Both suppression sources request a temporary 6500 K override. For example, do not add a fullscreen detector to the MVP.
 - Use the available `brainstorm` skill for explicitly open product decisions before implementation. For example, settle a question under Open questions instead of selecting its answer in a plan.
 - Keep implementations simple and proportional to the requirement. Prefer direct code; do not add services, separate UI processes, recovery subsystems, or general abstractions without a demonstrated need.
 - Do not change the sibling `win-nightlight-cli` repository as an incidental part of a Circadia task. Treat a required public library extension as a dependency task with its own authorized scope.
@@ -12,8 +12,8 @@
 
 - Follow [rust-rules](.agents/skills/rust-rules/SKILL.md) for Rust work, [python-rules](.agents/skills/python-rules/SKILL.md) for Python work, and [github-actions-rules](.agents/skills/github-actions-rules/SKILL.md) for workflow changes.
 - Write Python only for research and verification experiments under `tools/`. Do not add Python application code or general application tooling; for example, keep the application and its binding generator in Rust.
-- Keep the controller as the only component requesting Night Light writes. Route settings and tray configuration edits through the shared configuration validation and persistence path.
-- Use public Night Light library operations. Do not duplicate the undocumented registry codec or assume a proposed API exists in the pinned dependency.
+- Keep the controller as the only component requesting Night light writes. Route settings and tray configuration edits through the shared configuration validation and persistence path.
+- Use public Night light library operations. Do not duplicate the undocumented registry codec or assume a proposed API exists in the pinned dependency.
 - Keep foreground inspection limited to window metadata, process identity, and the size, last-write time, version information, and icon of an identified or user-selected executable file. Do not request elevation, inject code, or read another application's memory to improve matching; for example, read an app's display name from its executable's version resource and its icon from the executable's icon resource.
 - Track windows-rs `master` for `windows-reactor`, `windows-window`, and `windows-reactor-setup` while Reactor is in preview. Build against one reference commit, set through each manifest's `rev` field, and bump it to the latest `master` commit at the start of Reactor UI work, when Circadia needs a newer feature or fix, and before a release. For example, review the Reactor commits since the current pin, change the `rev` values in the application and Windows Reactor probe manifests, update their lockfiles, and rerun the application checks and the probe in one dependency change.
 - Default to no comments or private docstrings. Explain only constraints the code cannot express, such as an OS race or an ABI requirement; keep public documentation to the linter's required contract.
@@ -41,6 +41,7 @@ These conventions adapt [Windows responsive layout](https://learn.microsoft.com/
 
 ## Documentation
 
+- Use `Night light` (with the official Windows translation in localized text) or `display color temperature` in UI text, documentation, and code comments; do not use `display warmth` or `warmth overrides`. Keep `warming` and `cooling` for transition direction, and use `suppression` without defining it in introductory or UI copy. For example, write "Suppress Night light while this app is focused."
 - Keep the spec to intended observable behavior and its guarantees, with functional requirements, nonfunctional requirements, and non-goals before mechanics. Describe visuals, their measurements, and the design language in [docs/design](docs/design/README.md); mechanisms and measured results in research; and file names, control types, and crates that the spec does not require in implementation plans. For example, the spec says "a navigation pane lists the settings pages", while the design document gives its width.
 - Amend requirements and their scenarios together when behavior changes. Preserve requirement IDs when their meaning is refined; remove obsolete references when a requirement is retired.
 - Keep unresolved behavior explicit and the spec status accurate. Do not mark a draft approved or start implementation planning without the user's authorization for that step.
@@ -72,5 +73,5 @@ These conventions adapt [Windows responsive layout](https://learn.microsoft.com/
 - Keep host-setting exercises and performance measurements separate from routine checks. For example, `python-test` runs read-only clock tests, while the host time-zone exercise requires its explicit invocation.
 - Use Python 3.15 for `uv run` checks. Run the spec structural checker after spec changes: `uv run --python 3.15 "$HOME/.agents/skills/write-spec/scripts/check_spec.py" docs/specs/SPEC.md`. Check local Markdown links when moving or adding documents.
 - Test meaningful boundaries and failures with expectations independent of the implementation. For example, validate curve results against fixed reference cases rather than computing expected values with the function under test.
-- Keep tests that change live Night Light separate from default automated checks. Use controlled probes only within the authorized task and record their display and OS limitations.
+- Keep tests that change live Night light separate from default automated checks. Use controlled probes only within the authorized task and record their display and OS limitations.
 - Use the available `review-changes` skill with `mode=apply` on the accumulated changes before finishing implementation or preparing a commit or PR. Apply confirmed fixes, report remaining decisions, and preserve unrelated work.

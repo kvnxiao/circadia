@@ -10,7 +10,7 @@ Circadia aims to look like a native Windows 11 app: it follows Microsoft's Fluen
 | Theme | The light theme, the dark theme, or a contrast theme. Contrast themes are the Windows accessibility themes, such as Aquatic or Desert, that use a small set of user-adjustable system colors. |
 | Theme resource | A named color or brush that Windows UI (WinUI 3) defines for each theme and switches when the theme changes, such as `TextFillColorPrimaryBrush`. |
 | Phase | A display name for a part of the day: Morning (Wake to Sunrise), Daytime (Sunrise, or Wake when Sunrise is not used, to Sunset), Evening (Sunset to Bedtime), and Bedtime (Bedtime to Wake). Phases label the interface; the spec's temperature levels define the schedule. |
-| Phase art | A round picture that shows the current phase, or that Circadia is not managing Night Light. Each picture is a symbol drawn on a plate. |
+| Phase art | A round picture that shows the current phase, or that Circadia is not managing Night light. Each picture is a symbol drawn on a plate. |
 | Plate | The neutral filled circle behind each phase art symbol. |
 | Suppression | The temporary 6500 K override. Manual suppression is a one-hour override that the user starts from the tray menu or settings; automatic suppression applies while a listed app is in the foreground, after the focus delay. See the [spec's terms](../specs/SPEC.md#background-and-terms). |
 | Badge glyph | A small line drawing shown inside the suppression badge that overlaps the phase art. |
@@ -318,4 +318,4 @@ In contrast themes, do not draw kelvin colors. Omit the graph fill and the slide
 
 ### Limits
 
-Kelvin colors are illustrative. They do not reproduce what Night Light does to the screen: Windows applies Night Light as its own display color adjustment, and Circadia does not know or copy that adjustment. The display's calibration changes how every color appears. While Night Light is on, it also tints the settings window, so a swatch on screen shows the kelvin color with Night Light's tint added. Do not describe kelvin colors as previews of the output; [Preview](../specs/application.md#req-preview-temperature-curve--preview-a-complete-daily-cycle) plays the schedule through Night Light itself.
+Kelvin colors are illustrative. They do not reproduce what Night light does to the screen: Windows applies Night light as its own display color adjustment, and Circadia does not know or copy that adjustment. The display's calibration changes how every color appears. While Night light is on, it also tints the settings window, so a swatch on screen shows the kelvin color with Night light's tint added. Do not describe kelvin colors as previews of the output; [Preview](../specs/application.md#req-preview-temperature-curve--preview-a-complete-daily-cycle) plays the schedule through Night light itself.

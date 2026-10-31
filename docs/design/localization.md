@@ -9,9 +9,9 @@ Shared text has different roles. Reuse a name or phrase when its meaning and gra
 | Building block | Examples | Design guidance |
 | :-- | :-- | :-- |
 | Invariant brand name | Circadia, GitHub | Keep the official spelling across languages. Refer to one shared name so a rename remains consistent throughout the interface. |
-| Official Windows term | Night Light, Quick Settings, Windows Settings | Use the official term for the target locale so users can recognize the corresponding Windows feature. An English feature name is not an invariant brand. |
+| Official Windows term | Night light, Quick Settings, Windows Settings | Use the official term for the target locale so users can recognize the corresponding Windows feature. An English feature name is not an invariant brand. |
 | Repeated complete label | Wake, Bedtime, Cancel, Follow sunrise and sunset | Reuse the label when it names the same concept or action. Allow a different translation when its grammatical role changes. |
-| Complete message | Let Circadia manage Night Light | Translate the whole message, with names and values placed where the target language needs them. |
+| Complete message | Let Circadia manage Night light | Translate the whole message, with names and values placed where the target language needs them. |
 | Supplied value | An executable name, a path, a clock time, a temperature, an error code | Preserve its identity or value. Display times and numbers in the user's regional format; translate the surrounding explanation. |
 
 Identical English wording does not always represent the same concept. For example, Preview can name an action or the state of an ongoing preview. Give translators that context instead of requiring one translation in both positions.

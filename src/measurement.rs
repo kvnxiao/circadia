@@ -89,7 +89,7 @@ enum Lifecycle {
 pub struct OutputMeasurement(Arc<Shared>);
 
 impl OutputMeasurement {
-    /// Run the complete desktop application with live Night Light and isolated
+    /// Run the complete desktop application with live Night light and isolated
     /// data.
     ///
     /// # Errors

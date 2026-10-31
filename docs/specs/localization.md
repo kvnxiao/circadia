@@ -27,7 +27,7 @@ The first release ships English. Adding a language requires only its translation
 - The interface language is the pseudo-locale: every label, message, tray item, tooltip, and accessible name shows pseudo-localized text, including text from shared translatable terms. Invariant brand names, technical codes, and values supplied through placeholders are not transformed.
 - A translation of "Morning and evening (1900 K) can't be lower than Bedtime (2400 K)." places the second value, the Sleep temperature labeled Bedtime, first: both values appear in the translation's order with the correct numbers.
 - The suppression list has 1 entry, then 3 entries: its heading uses the language's singular form, then its plural form.
-- A translated message mentions Circadia, GitHub, and Night Light: the brand names retain their spelling, and Night Light uses the official Windows term for that language.
+- A translated message mentions Circadia, GitHub, and Night light: the brand names retain their spelling, and Night light uses the official Windows term for that language.
 - A translation lacks one message: that message appears in English, and the rest stay translated.
 - A native access error occurs: settings shows a translated explanation and the error code, such as 0x80070005, without the underlying library's English message.
 
@@ -61,7 +61,7 @@ Debug builds provide a developer-only command-line option that forces an interfa
 - The user selects another shipped language: the interface keeps its current language, settings says a restart is needed and offers Quit Circadia, and the new language appears after the user starts Circadia again.
 - The user changes the Windows display language and signs in again: Circadia starts in the new language when it ships that language.
 - A developer starts Circadia with the language option set to the pseudo-locale: the interface is pseudo-localized, and the saved setting is unchanged.
-- A release build is started with the developer language option: it reports a usage error before opening settings or accessing Night Light. Its normal language setting offers only shipped real languages.
+- A release build is started with the developer language option: it reports a usage error before opening settings or accessing Night light. Its normal language setting offers only shipped real languages.
 
 ## Regional formats
 

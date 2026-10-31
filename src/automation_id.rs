@@ -86,7 +86,7 @@ identifiers! {
     BANNER_CRASH = "banner-crash";
     /// Banner for a schedule evaluation failure.
     BANNER_SCHEDULE = "banner-schedule";
-    /// Banner for Night Light access failures.
+    /// Banner for Night light access failures.
     BANNER_NATIVE = "banner-native";
     /// Banner for invalid fields on other pages.
     BANNER_INVALID_FIELDS = "banner-invalid-fields";

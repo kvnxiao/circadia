@@ -70,7 +70,7 @@ Cache failure checks retain an old index while preventing its replacement and pe
 - Browse selecting a replacement path after a fixture moved; configuration matching rejected the new location until that edit was saved.
 - Tray items identifying both folders and remaining unavailable for overlapping or excluded rules.
 
-These checks used a debug build with bundled Windows App SDK 2.6.4 and Windows Reactor at `3b6bea553787d9419b3fdd29e2c5436666d7325b`, on Windows 11 x64 at 96 DPI. Night Light management stayed off. Classification checks used saved configuration and the public matching API; this run does not establish native temperature output or optical display behavior.
+These checks used a debug build with bundled Windows App SDK 2.6.4 and Windows Reactor at `3b6bea553787d9419b3fdd29e2c5436666d7325b`, on Windows 11 x64 at 96 DPI. Night light management stayed off. Classification checks used saved configuration and the public matching API; this run does not establish native temperature output or optical display behavior.
 
 The native run captured 65 screenshots at 640×480, 799×600, 800×600, and 1184×992 client sizes. The debug pseudo-locale uses accented, bracketed text expanded by at least 40% to test layout; release builds exclude its generator. Automated checks reported no untranslated application text or overflowing text bounds. Visual inspection confirmed wrapping recent-app explanations and complete actions at all four sizes. Both lists' Add dialogs and condition editors retain complete controls through scrolling, including long paths and a long window-title suggestion. Fixture processes and the test application exited after each completed run.
 

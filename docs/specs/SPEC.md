@@ -7,7 +7,7 @@ areas: [schedule.md, suppression.md, native-access.md, control.md, application.m
 
 ## Purpose and scope
 
-Circadia is a Windows 11 tray application for people who want native Night Light to follow their waking and sleeping hours. Its minimum viable product (MVP) supports one daily activity period and one overnight sleep period, including a bedtime after midnight.
+Circadia is a Windows 11 tray application for people who want native Night light to follow their waking and sleeping hours. Its minimum viable product (MVP) supports one daily activity period and one overnight sleep period, including a bedtime after midnight.
 
 The requirement summaries below are navigation to the authoritative blocks in this spec and its areas; they do not add separate obligations.
 
@@ -17,7 +17,7 @@ The requirement summaries below are navigation to the authoritative blocks in th
 | :-- | :-- |
 | Generate transitions between three ordered temperatures from Wake, Bedtime, and optional solar events. | [Schedule settings, solar selection, and curve evaluation](schedule.md) |
 | Temporarily request 6500 K for listed foreground applications or for one hour manually. | [Automatic and manual suppression](suppression.md) |
-| Start Night Light management with consent, recover from failures, and end management explicitly. | [Control and lifecycle](control.md), [native access](native-access.md) |
+| Start Night light management with consent, recover from failures, and end management explicitly. | [Control and lifecycle](control.md), [native access](native-access.md) |
 | Apply and save valid edits, recover configuration, preview the schedule, and optionally start at sign-in. | [Configuration, Preview, and launch](application.md) |
 | Show settings and tray controls with localizable text and regional times and numbers. | [Settings and tray](interface.md), [localization](localization.md) |
 | Record local diagnostics and report crashes when settings opens. | [Log and crash records](diagnostics.md) |
@@ -28,7 +28,7 @@ The requirement summaries below are navigation to the authoritative blocks in th
 | :-- | :-- |
 | Keep background work event-driven and settings responsive. | [Idle work](#req-event-driven-idle--perform-background-work-only-when-needed), [graph latency](interface.md#req-display-generated-curve--display-the-schedule-without-point-editing), [output timing](control.md#req-temperature-cadence--request-only-due-temperature-changes) |
 | Measure resource use in the single application process. | [Resource measurements](application.md#req-lean-background--measure-the-single-processs-resource-use) |
-| Use native Night Light, limited process access, and standard user rights. | [Invariants](#invariants), [security](#security) |
+| Use native Night light, limited process access, and standard user rights. | [Invariants](#invariants), [security](#security) |
 | Preserve native keyboard and accessibility behavior, and fit supported desktop sizes and translated text. | [Settings appearance and layout](interface.md), [translation layout](localization.md#req-translation-layout--fit-translated-text) |
 
 ## Non-goals
@@ -37,7 +37,7 @@ The requirement summaries below are navigation to the authoritative blocks in th
 - Arbitrary curve-point editing, user-defined offsets, extra fixed-clock targets, or weekday-specific schedules.
 - Night-shift scheduling, multiple daily sleep periods, city/address search, or continuous location tracking.
 - Per-monitor temperature control, per-app suppression temperatures, or changes to calibration profiles.
-- Using the Windows Night Light schedule to drive Circadia's curve.
+- Using the Windows Night light schedule to drive Circadia's curve.
 - A service, elevated helper, watchdog, crash-reporting helper, or separate settings process.
 - A temperature-write throughput benchmark, automatic output-rate calibration, or monitor refresh-rate queries.
 - Watching the configuration file for changes made outside Circadia while it runs.
@@ -47,19 +47,19 @@ The requirement summaries below are navigation to the authoritative blocks in th
 ## Constraints and assumptions
 
 - Use Rust and one `windows-reactor` application process per user session. The MVP targets Windows 11 x64, build 22000 or later, and distributes the required native Windows App SDK runtime alongside the executable.
-- Read and write Night Light through `win-nightlight-lib`; observe its decoded settings and state records through `win-nightlight-watch`.
-- Request the Windows Night Light schedule off during control. Errors, turning management off, and exit do not restore or enable that schedule.
+- Read and write Night light through `win-nightlight-lib`; observe its decoded settings and state records through `win-nightlight-watch`.
+- Request the Windows Night light schedule off during control. Errors, turning management off, and exit do not restore or enable that schedule.
 - Write temperatures only within the library's supported 1200 K to 6500 K range.
 - Prefer direct code and existing library capabilities. Introduce additional components or general abstractions only for a demonstrated requirement or measured limitation.
 - Executable size is not a resource target; memory use and CPU time while running are.
 
 **Dependencies:** Circadia uses `win-nightlight-lib` and `win-nightlight-watch` 0.5.0, plus `windows-reactor`, `windows-window`, and `windows-reactor-setup` from the `windows-rs` repository. While Reactor is in preview, these three follow the repository's `master` branch through one reference commit that the application manifest records for all three. Circadia adopts a new commit only after the application's automated checks and the Windows Reactor UI probe pass on it. Supporting evidence links the capability assessments, API contracts, and deployment research.
 
-Circadia does not write GPU gamma ramps or monitor calibration profiles. Successful library operations and decoded registry readback verify native requests. Preview lets the user assess visible output at the configured rate. Registry success alone does not verify smoothness or displayed color. Instrumented optical measurements, calibration preservation by Windows, and optical equivalence between 6500 K and Night Light off are outside the acceptance criteria.
+Circadia does not write GPU gamma ramps or monitor calibration profiles. Successful library operations and decoded registry readback verify native requests. Preview lets the user assess visible output at the configured rate. Registry success alone does not verify smoothness or displayed color. Instrumented optical measurements, calibration preservation by Windows, and optical equivalence between 6500 K and Night light off are outside the acceptance criteria.
 
 ## Background and terms
 
-Night Light stores its schedule, temperature, and native preview flag in a settings record, and its on/off state in a separate state record. Each record is an encoded registry value. Updating one does not atomically update the other. Circadia requests their desired values and observes subsequent changes; it cannot prevent another Windows component from writing them.
+Night light stores its schedule, temperature, and native preview flag in a settings record, and its on/off state in a separate state record. Each record is an encoded registry value. Updating one does not atomically update the other. Circadia requests their desired values and observes subsequent changes; it cannot prevent another Windows component from writing them.
 
 Each record has a whole-second timestamp. The library stamps each write at least 2 s after the stored timestamp and after the same handle's earlier writes, so frequent writes move the timestamp ahead of real time. That difference is the timestamp lead; without writes, real time reduces it by 1 s per second. Windows behaves as if it ignores temperature changes stamped at or below the highest timestamp it has applied, so Circadia never moves a timestamp backward.
 
@@ -67,9 +67,9 @@ The suppression list stores entries explicitly added by the user, each an execut
 
 | Term | Meaning |
 | :-- | :-- |
-| Controller | The component that evaluates the curve and focus, serializes Night Light operations, and tracks errors. |
+| Controller | The component that evaluates the curve and focus, serializes Night light operations, and tracks errors. |
 | Settings window | The on-demand editor within the same process as the controller and tray icon. |
-| Management | The saved setting under which Circadia controls Night Light. |
+| Management | The saved setting under which Circadia controls Night light. |
 | Temperature level | Daytime, Morning/Evening, or Sleep, ordered from highest to lowest kelvin. Morning and evening share one value. |
 | Schedule target | A Wake, Bedtime, Sunrise, or Sunset occurrence selected for the curve, with the temperature reached at that instant. |
 | Scheduled transition | The linear temperature change before a target, using the shared maximum duration or a shorter available interval. |
@@ -91,13 +91,13 @@ The suppression list stores entries explicitly added by the user, each an execut
 | Usable configuration | A configuration file or backup that Circadia can read, that is valid TOML, and that records the current format version. Individual values in it can be invalid; REQ-recover-invalid-fields recovers them. |
 | Paused saving | The state in which Circadia writes neither the configuration file nor its backup because a value or list entry that startup marked under REQ-recover-invalid-fields remains. Settings edits still apply (REQ-paused-saving). |
 | Preview | A user-started traversal of the accepted schedule from the current instant through the same local clock on the next date, uniformly compressed into a configurable 1–60 seconds, initially ten. |
-| Native preview flag | A Night Light setting that the library turns on to make Windows apply the stored temperature, distinct from Circadia's Preview playback. A brief preview turns it on and off within one library call; a held preview keeps it on across several temperature writes. Preview cleanup turns the flag off. |
+| Native preview flag | A Night light setting that the library turns on to make Windows apply the stored temperature, distinct from Circadia's Preview playback. A brief preview turns it on and off within one library call; a held preview keeps it on across several temperature writes. Preview cleanup turns the flag off. |
 | Last scheduled temperature | The last value that the accepted schedule or its Wake/Bedtime-only fallback stored successfully, kept under REQ-schedule-evaluation-failure. |
 | Target temperature | The selected output before rounding or fading: Preview's temperature while it plays; otherwise 6500 K during suppression; otherwise the active schedule. A time-zone failure can substitute the last scheduled temperature; without one, normal control stops until calculation recovers. |
 | Last written temperature | The last requested temperature known to have been stored successfully, including a write followed by a reported preview-cleanup failure. It is not a measurement of displayed color. |
-| Intended temperature | The temperature of the last issued output step (one temperature value requested from Night Light), rounded to 10 K under REQ-temperature-refresh. Observation compares native temperature with this value until the next permitted output step is issued. |
+| Intended temperature | The temperature of the last issued output step (one temperature value requested from Night light), rounded to 10 K under REQ-temperature-refresh. Observation compares native temperature with this value until the next permitted output step is issued. |
 | Temperature operation | A public library call that stores a temperature, applies it through a brief preview, or writes it while a held preview is on. |
-| Owned values | Native schedule disabled, Night Light active, intended temperature, and the native preview flag expected for the current temperature operation. Other native settings remain unrelated. |
+| Owned values | Native schedule disabled, Night light active, intended temperature, and the native preview flag expected for the current temperature operation. Other native settings remain unrelated. |
 | Control attempt | Fresh required reads followed by needed owned-value writes and any due temperature operation. Complete public calls are serialized. Preview cleanup and the off request have independent narrower read requirements. |
 | Output-rate ceiling | The user-configured 1–240 Hz maximum frequency of changing output steps and automatic correction attempts. |
 | Native recovery | Automatic retries after a native read, write, or observation failure under REQ-native-recovery. |
@@ -106,16 +106,16 @@ The suppression list stores entries explicitly added by the user, each an execut
 | Ordinary fade | A smooth transition using the configured fade duration, for startup, management start and end, Quit, suppression, recomputation, native recovery, and temperature correction. Scheduled interpolation is not an ordinary fade. |
 | Fade origin | The starting temperature, normally the last written value. Startup and an external temperature correction start from freshly read native state instead. |
 | Startup prerequisites | An accepted configuration with management on, plus successful Windows time-zone acquisition and conversion sufficient to evaluate its current curve. Solar failure permits a Wake/Bedtime-only fallback. |
-| Night Light access begun | The controller has passed startup prerequisites and is about to register watchers and read Night Light for the first time. It remains true until management turns off, even if those operations fail or a later time-zone failure stops control. |
+| Night light access begun | The controller has passed startup prerequisites and is about to register watchers and read Night light for the first time. It remains true until management turns off, even if those operations fail or a later time-zone failure stops control. |
 | Explicit retry action | Settings Retry, a Preview request that passes its availability checks, turning management on, or a user start or stop of manual suppression. These retry immediately, subject to serialization, startup prerequisites, schedule-failure rules, and fresh required reads. |
 | Clock gap / repeated interval | Local clock times skipped by a forward offset change / displayed twice by a backward offset change. |
 | Confirmed session end | Windows' notification that sign-out, shutdown, restart, or closure for servicing (closing apps to update their files) will proceed, distinct from its earlier query about whether the session can end. |
 
-Configuration and its backup, the local log, cached application icons, and a crash notice that the user has not dismissed persist across restarts. Focus history, pending delays, manual suppression and its deadline, active fades, and the last written and last scheduled temperatures are runtime state. Startup reconstructs control state from configuration, current focus, the clock, and fresh Night Light reads rather than resuming a persisted fade or timer.
+Configuration and its backup, the local log, cached application icons, and a crash notice that the user has not dismissed persist across restarts. Focus history, pending delays, manual suppression and its deadline, active fades, and the last written and last scheduled temperatures are runtime state. Startup reconstructs control state from configuration, current focus, the clock, and fresh Night light reads rather than resuming a persisted fade or timer.
 
 ## Architecture overview
 
-One process owns the configuration model, controller, tray icon, settings window, and local log. The controller is the sole component that requests Night Light writes. Settings and tray configuration edits share validation and persistence. A valid settings edit takes effect immediately and is written to the configuration file automatically; invalid input stays in its field without changing the accepted configuration. Manual suppression changes runtime state without saving configuration. Closing settings preserves the controller and tray icon. Once management is off and its [turn-off sequence](control.md#req-manage-night-light--opt-in-to-managing-night-light) has finished, the controller does not read, write, or observe Night Light.
+One process owns the configuration model, controller, tray icon, settings window, and local log. The controller is the sole component that requests Night light writes. Settings and tray configuration edits share validation and persistence. A valid settings edit takes effect immediately and is written to the configuration file automatically; invalid input stays in its field without changing the accepted configuration. Manual suppression changes runtime state without saving configuration. Closing settings preserves the controller and tray icon. Once management is off and its [turn-off sequence](control.md#req-manage-night-light--opt-in-to-managing-night-light) has finished, the controller does not read, write, or observe Night light.
 
 The controller selects one temperature source in this order:
 
@@ -134,7 +134,7 @@ flowchart LR
   M --> D[(Per-user configuration file and backup)]
   M --> C
   C --> L[win-nightlight-lib]
-  L --> N[Windows Night Light]
+  L --> N[Windows Night light]
   N --> W
   C --> U
   C --> G[(Local log)]
@@ -145,21 +145,21 @@ Schedule evaluation and registry observation do not block UI message handling. T
 
 ## Invariants
 
-### REQ-gamma-table-untouched — Change screen color only through Night Light
+### REQ-gamma-table-untouched — Change screen color only through Night light
 
-Circadia changes screen color only through the Night Light library. It does not call APIs that modify GPU gamma ramps, display calibration, or monitor color profiles, and it does not draw overlays or tints that imitate Night Light output, including in its own windows.
+Circadia changes screen color only through the Night light library. It does not call APIs that modify GPU gamma ramps, display calibration, or monitor color profiles, and it does not draw overlays or tints that imitate Night light output, including in its own windows.
 
-**Intent:** Use native Night Light without replacing calibration data through application-controlled color transforms, and show the user only the color Night Light produces.
+**Intent:** Use native Night light without replacing calibration data through application-controlled color transforms, and show the user only the color Night light produces.
 
 **Scenarios:**
 
 - An API trace covers scheduled changes, suppression, and fades: Circadia does not call gamma-ramp setters or calibration/profile mutation APIs.
-- An API trace covers Preview and restoration: Circadia makes native Night Light requests without gamma-ramp setters or calibration/profile mutation calls. Changes that Windows itself makes to the live display transform do not violate this invariant.
-- Preview plays while settings is visible: the settings window has no drawn tint; its color on screen comes only from Night Light.
+- An API trace covers Preview and restoration: Circadia makes native Night light requests without gamma-ramp setters or calibration/profile mutation calls. Changes that Windows itself makes to the live display transform do not violate this invariant.
+- Preview plays while settings is visible: the settings window has no drawn tint; its color on screen comes only from Night light.
 
 ### REQ-event-driven-idle — Perform background work only when needed
 
-Circadia minimizes CPU use by scheduling work for input events, necessary output changes, or an explicitly active operation. Foreground identity uses focus events and the title changes described in [REQ-executable-list-match](suppression.md#req-executable-list-match--match-listed-foreground-executables), and Night Light observation uses change notifications. Stable focus does not cause recurring process or window inspection. Curve output waits for its next 10 K change or the next schedule boundary, such as the start of a transition, instead of sampling at a fixed rate.
+Circadia minimizes CPU use by scheduling work for input events, necessary output changes, or an explicitly active operation. Foreground identity uses focus events and the title changes described in [REQ-executable-list-match](suppression.md#req-executable-list-match--match-listed-foreground-executables), and Night light observation uses change notifications. Stable focus does not cause recurring process or window inspection. Curve output waits for its next 10 K change or the next schedule boundary, such as the start of a transition, instead of sampling at a fixed rate.
 
 Constant output does not cause repeated temperature operations. Resume and taskbar recreation require discrete application refreshes, including at unchanged temperature. In long transitions, application refreshes replace some due output steps under REQ-temperature-refresh and do not add idle polling. Suppression stops underlying curve-output timers after reaching 6500 K. Schedule inputs are still recalculated on relevant configuration, date, clock, and resume events. Logging does not add timers or background threads. Other timed work is limited to:
 
@@ -168,7 +168,7 @@ Constant output does not cause repeated temperature operations. Resume and taskb
 - Required date boundaries and visible graph time indicators.
 - A pending configuration write after a settings edit.
 - Relative focus times in the recent-app list while settings is visible.
-- Pending native recovery and rate-limited corrections of observed Night Light changes.
+- Pending native recovery and rate-limited corrections of observed Night light changes.
 - Enabled daily application update checks and their bounded in-progress work under REQ-application-updates.
 
 Native recovery stops after success. Unchanged errors do not produce repeated identical log records. Closed or minimized settings do not animate their graph or update relative times. A graph on a settings page that is not selected does not animate.
@@ -181,14 +181,14 @@ Native recovery stops after success. Unchanged errors do not produce repeated id
 - A native read or write error persists without a resume event: only the native recovery sequence and explicit user actions attempt recovery; curve-output timers and notifications caused by Circadia's own writes do not create additional attempts.
 - Settings closes while the recent-app list shows relative times: the hidden list does not generate recurring UI updates.
 - Preview continues while settings is minimized or another settings page is selected: the graph does not animate; returning to the visible Schedule page shows the current playback instant.
-- Settings is visible during constant output: its current-time dot and relative focus times can update without causing a Night Light write.
-- Management is off for ten minutes: tracing shows no Night Light reads, writes, or watcher activity.
+- Settings is visible during constant output: its current-time dot and relative focus times can update without causing a Night light write.
+- Management is off for ten minutes: tracing shows no Night light reads, writes, or watcher activity.
 
-### REQ-app-owns-night-light — Maintain the desired Night Light state
+### REQ-app-owns-night-light — Maintain the desired Night light state
 
-While management is on and after startup prerequisites pass, Circadia manages native Night Light. It requests Night Light on, the native schedule off, its intended temperature, and the preview flag appropriate to the current operation. Native UI changes do not transfer control away from Circadia. Observed deviations are restored under REQ-repeated-native-changes; timestamp-only changes do not request repair. Unrelated native settings are preserved through public library operations.
+While management is on and after startup prerequisites pass, Circadia manages native Night light. It requests Night light on, the native schedule off, its intended temperature, and the preview flag appropriate to the current operation. Native UI changes do not transfer control away from Circadia. Observed deviations are restored under REQ-repeated-native-changes; timestamp-only changes do not request repair. Unrelated native settings are preserved through public library operations.
 
-Suppression requests 6500 K with Night Light enabled. Ordinary temperature corrections use smooth fades; settings edits and immediate Preview transitions have their specified exceptions. Circadia requests off only when management turns off and on graceful or abnormal exit. External writers can cause transient deviations, and registry readback does not establish displayed color.
+Suppression requests 6500 K with Night light enabled. Ordinary temperature corrections use smooth fades; settings edits and immediate Preview transitions have their specified exceptions. Circadia requests off only when management turns off and on graceful or abnormal exit. External writers can cause transient deviations, and registry readback does not establish displayed color.
 
 Read/write failures use native recovery. A time-zone failure follows REQ-schedule-evaluation-failure; when it prohibits normal ownership writes, pending cleanup of the native preview flag remains permitted. Resume allows one current-state recovery attempt without waiting for a pending native retry; duplicate notifications do not authorize more attempts. Exit ends ordinary control and makes the separate cleanup and off attempts of REQ-exit-night-light-off.
 
@@ -200,11 +200,11 @@ Read/write failures use native recovery. A time-zone failure follows REQ-schedul
 - Temperature changes during constant output: a correction fades from the fresh observed value toward the active target.
 - Native preview is unexpectedly on during constant output: cleanup restores the expected off flag without changing temperature.
 - A required normal-control read fails: the read-failure rule prevents normal ownership writes while independently eligible cleanup remains available.
-- Management is off and the user turns Night Light on in Windows Settings: Circadia does not change it.
+- Management is off and the user turns Night light on in Windows Settings: Circadia does not change it.
 
 ### REQ-single-instance — One application instance per session
 
-Only one instance controls Night Light in a user session. Starting Circadia again requests that the existing instance show its settings window. The second invocation does not write Night Light or create another controller.
+Only one instance controls Night light in a user session. Starting Circadia again requests that the existing instance show its settings window. The second invocation does not write Night light or create another controller.
 
 **Scenarios:**
 
@@ -223,7 +223,7 @@ Circadia reads only window metadata, process identity, and the size, last-write 
 
 ### REQ-unelevated-operation — Run without administrator rights
 
-Circadia runs with the user's standard rights and does not request elevation to configure or control Night Light. An inaccessible foreground identity follows REQ-executable-list-match rather than triggering an elevation request.
+Circadia runs with the user's standard rights and does not request elevation to configure or control Night light. An inaccessible foreground identity follows REQ-executable-list-match rather than triggering an elevation request.
 
 **Scenarios:**
 
@@ -236,7 +236,7 @@ Circadia runs with the user's standard rights and does not request elevation to 
 | :-- | :-- |
 | [Daily temperatures, Wake, Bedtime, and solar timing](schedule.md) | Pure schedule inputs, clock conversion, solar selection, and generated transitions. Read after the shared terms and invariants. |
 | [Automatic and manual suppression](suppression.md) | Executable identity, inclusion and exclusion lists with window-title conditions, app icons, focus delay, and one-hour manual suppression. Read after the root. |
-| [Native Night Light access](native-access.md) | Short and gradual transition operations, observation, timestamp handling, cleanup, and access failures. Read after the root. |
+| [Native Night light access](native-access.md) | Short and gradual transition operations, observation, timestamp handling, cleanup, and access failures. Read after the root. |
 | [Temperature control and lifecycle](control.md) | Management, startup, fades, schedule failures, recomputation, suspend/resume, and exit. Read after schedule, suppression, and native access. |
 | [Configuration, Preview, and launch](application.md) | Settings edits and persistence, defaults and startup recovery, Preview, sign-in startup, and resource use. Read after control and its dependencies. |
 | [Localization](localization.md) | Translatable text, interface language selection, regional formats, and translated layout. Read after the root. |
@@ -253,7 +253,7 @@ The local log stays on the computer and can include personal data; [REQ-local-lo
 
 Settings shows status, error details, and recovery actions under [REQ-error-placement](interface.md#req-error-placement--show-errors-at-their-source). The tray tooltip does not show technical error codes or personal data.
 
-Circadia writes its configuration and backup, its log, its icon cache, current-user Night Light values, and its optional sign-in registration. The controller alone requests Night Light writes. It does not execute a selected suppression-list file merely because the user adds it; it reads only that file's size, last-write time, version information, and icon. Process inspection is restricted by REQ-game-process-isolation and REQ-unelevated-operation. Compatibility with every anti-cheat product is outside the guarantee; representative elevated-game tests remain necessary.
+Circadia writes its configuration and backup, its log, its icon cache, current-user Night light values, and its optional sign-in registration. The controller alone requests Night light writes. It does not execute a selected suppression-list file merely because the user adds it; it reads only that file's size, last-write time, version information, and icon. Process inspection is restricted by REQ-game-process-isolation and REQ-unelevated-operation. Compatibility with every anti-cheat product is outside the guarantee; representative elevated-game tests remain necessary.
 
 ## Future work
 

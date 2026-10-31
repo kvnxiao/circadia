@@ -95,7 +95,7 @@ fn semantic_status_omits_changing_temperature_and_progress(current: &str) {
             Stored::default(),
             at(current)
         )),
-        "Circadia. Managing Night Light. Shifting to bedtime. Schedule available."
+        "Circadia. Managing Night light. Shifting to bedtime. Schedule available."
     );
 }
 
@@ -116,14 +116,14 @@ fn preview_announces_phase_changes_without_playback_numbers(playback: &str, phas
             Stored::default(),
             at("2026-10-27T13:00:00Z")
         )),
-        format!("Circadia. Managing Night Light. Preview. {phase}. Schedule available.")
+        format!("Circadia. Managing Night light. Preview. {phase}. Schedule available.")
     );
 }
 
-#[test_case(ManagementState::Off, "Not managing Night Light."; "off")]
-#[test_case(ManagementState::TurningOn, "Turning on Night Light management. Daytime. Schedule available."; "starting")]
-#[test_case(ManagementState::On, "Managing Night Light. Daytime. Schedule available."; "Preview ended")]
-#[test_case(ManagementState::TurningOff, "Turning off Night Light management."; "stopping")]
+#[test_case(ManagementState::Off, "Not managing Night light."; "off")]
+#[test_case(ManagementState::TurningOn, "Turning on Night light management. Daytime. Schedule available."; "starting")]
+#[test_case(ManagementState::On, "Managing Night light. Daytime. Schedule available."; "Preview ended")]
+#[test_case(ManagementState::TurningOff, "Turning off Night light management."; "stopping")]
 #[test_case(ManagementState::Exiting, "Exiting Circadia."; "exiting")]
 fn semantic_status_announces_management_mode(management: ManagementState, expected: &str) {
     let schedule = calculated(ConfigInput::default());
@@ -164,7 +164,7 @@ fn semantic_status_announces_schedule_failure_and_recovery(
                 Stored::default(),
                 at("2026-10-27T13:00:00Z")
             )),
-            format!("Circadia. Managing Night Light. Daytime. {expected}")
+            format!("Circadia. Managing Night light. Daytime. {expected}")
         );
     }
 }
@@ -189,7 +189,7 @@ fn semantic_status_announces_native_failure_and_recovery(
             Stored::default(),
             at("2026-10-27T13:00:00Z")
         )),
-        format!("Circadia. Managing Night Light. Daytime. Schedule available.{expected}")
+        format!("Circadia. Managing Night light. Daytime. Schedule available.{expected}")
     );
 }
 
@@ -211,7 +211,7 @@ fn suppression_announcements_omit_the_expiry_clock(expiry: u64) {
             Stored::default(),
             at("2026-10-27T13:00:00Z")
         )),
-        "Circadia. Managing Night Light. Suppressed for 1 hour. Schedule available."
+        "Circadia. Managing Night light. Suppressed for 1 hour. Schedule available."
     );
 }
 
@@ -406,7 +406,7 @@ fn stopped_preview_disappears_from_the_tooltip_before_the_native_snapshot_change
     let control = Control::new(&state, now, stopped);
     let tooltip = tooltip(&english(), &line(&control, Stored::default(), current));
     assert!(!tooltip.contains("Previewing"), "{tooltip}");
-    assert!(tooltip.contains("Managing Night Light"), "{tooltip}");
+    assert!(tooltip.contains("Managing Night light"), "{tooltip}");
     state.preview_deadline = Some(Duration::from_secs(20));
     assert!(Control::new(&state, now, stopped).preview_active);
 }
@@ -424,11 +424,11 @@ fn a_configuration_error_outranks_management_off() {
     };
     assert_eq!(
         line(&control, error, "2026-10-27T13:00:00Z"),
-        "Settings could not be read; Night Light is not managed."
+        "Settings could not be read; Night light is not managed."
     );
     assert_eq!(
         line(&control, Stored::default(), "2026-10-27T13:00:00Z"),
-        "Not managing Night Light."
+        "Not managing Night light."
     );
 }
 
@@ -503,7 +503,7 @@ fn a_restored_backup_shows_its_line_until_its_banner_is_dismissed() {
             Stored::new(&configuration),
             "2026-10-27T13:00:00Z"
         ),
-        "Managing Night Light · 6500 K"
+        "Managing Night light · 6500 K"
     );
 }
 
@@ -517,7 +517,7 @@ fn the_normal_line_names_the_current_temperature_and_its_source() {
             Stored::default(),
             "2026-10-27T23:30:00Z"
         ),
-        "Managing Night Light · 2400 K"
+        "Managing Night light · 2400 K"
     );
     let preview = Control {
         preview_active: true,
@@ -545,7 +545,7 @@ fn the_normal_line_names_the_current_temperature_and_its_source() {
     };
     assert_eq!(
         line(&fallback, Stored::default(), noon),
-        "Managing Night Light · 6500 K · Wake and Bedtime only"
+        "Managing Night light · 6500 K · Wake and Bedtime only"
     );
 }
 
@@ -602,7 +602,7 @@ fn a_failed_off_attempt_after_management_turned_off_does_not_report_unavailable_
     assert!(!control.output_failed);
     assert_eq!(
         line(&control, Stored::default(), "2026-10-27T13:00:00Z"),
-        "Not managing Night Light."
+        "Not managing Night light."
     );
 }
 

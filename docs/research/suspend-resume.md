@@ -6,12 +6,12 @@ questions:
 observed-in:
   - Microsoft Learn Windows power, timer, and Modern Standby documentation retrieved 2026-10-18
   - win-nightlight-lib and win-nightlight-watch 0.5.0, commit 0461529455f3594b9b9d6cc3d6c2e7a9736de9b5
-recheck-when: Supported Windows power states, notification integration, timer mechanisms, or the Night Light dependencies change.
+recheck-when: Supported Windows power states, notification integration, timer mechanisms, or the Night light dependencies change.
 ---
 
 # Windows suspend and resume
 
-Windows can preserve Circadia's process while time advances through sleep or hibernation, and Modern Standby can pause desktop execution. Temperature control therefore needs to reevaluate the current schedule when execution resumes. Existing timers and native records do not establish the current curve position or displayed color. Documented APIs support resume integration in the existing process; actual Windows 11 notification ordering and visible Night Light restoration remain unverified.
+Windows can preserve Circadia's process while time advances through sleep or hibernation, and Modern Standby can pause desktop execution. Temperature control therefore needs to reevaluate the current schedule when execution resumes. Existing timers and native records do not establish the current curve position or displayed color. Documented APIs support resume integration in the existing process; actual Windows 11 notification ordering and visible Night light restoration remain unverified.
 
 This research addresses the difference between resuming a preserved controller and launching a new process. The relevant decisions are how to discard obsolete temperature work, expire the one-hour manual override to 6500 K, and request native output after resume.
 
@@ -39,7 +39,7 @@ The existing [session lifecycle research](session-shutdown.md#pinned-framework-i
 
 The [manual suppression research](timed-suppression.md) records a sleep-inclusive elapsed counter that is independent of wall-clock adjustments. Daily scheduling instead needs the actual current instant and Windows time-zone rules. The two calculations can share a resume trigger without sharing their time source. A resumed process also needs current required dates for solar calculation and the existing elapsed-interval policy if a seasonal clock change occurred.
 
-**Observed in win-nightlight-lib 0.5.0 source:** While Night Light is on, `apply_color_temperature` writes the requested temperature with native preview on, waits 50 ms, then clears preview, even when the stored temperature already matches. This complete refresh requests application. Fresh decoded reads support reconciliation, and an inactive temperature can be prepared before activation. The [0.5.0 transition and watcher contracts](nightlight-transition-control.md) record cleanup retries and failure cases.
+**Observed in win-nightlight-lib 0.5.0 source:** While Night light is on, `apply_color_temperature` writes the requested temperature with native preview on, waits 50 ms, then clears preview, even when the stored temperature already matches. This complete refresh requests application. Fresh decoded reads support reconciliation, and an inactive temperature can be prepared before activation. The [0.5.0 transition and watcher contracts](nightlight-transition-control.md) record cleanup retries and failure cases.
 
 The library evidence does not exercise sleep, hibernation, or Modern Standby. Stored temperature equality does not measure the display transform. Requiring a complete refresh after resume explicitly requests application, but does not establish that every resume loses native output or that refresh guarantees an immediately correct physical display.
 
@@ -57,12 +57,12 @@ This approach preserves the configured fade when the selected temperature change
 
 ## Validation limits
 
-No host power state or Night Light setting was changed for this investigation. The evidence supports the design without requiring a new process architecture; the remaining checks concern implementation conformance and release behavior:
+No host power state or Night light setting was changed for this investigation. The evidence supports the design without requiring a new process architecture; the remaining checks concern implementation conformance and release behavior:
 
 - Verify notification delivery and ordering for each supported hardware power state with settings closed and without relying on unlock.
 - Exercise missing advance suspend notice, repeated resume notifications, and obsolete callbacks after a synchronous operation finishes.
 - Check interpolation midway through a transition and after several dates, including seasonal clock changes and manual suppression expiry.
 - Verify fresh native reads, unchanged-temperature refresh, inactive preparation, and retry behavior after failures.
-- Observe visible Night Light output after resume separately from decoded records, recording Windows build, display configuration, and supported power states.
+- Observe visible Night light output after resume separately from decoded records, recording Windows build, display configuration, and supported power states.
 
 The product contract does not promise a corrected display before Windows schedules the process and delivers the resume notification. Hardware that lacks a power state cannot validate that state; record the coverage limitation.
