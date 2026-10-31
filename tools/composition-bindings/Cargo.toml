@@ -12,7 +12,7 @@ description = "Generate Circadia's private Windows composition bindings"
 fs-err.workspace = true
 tempfile.workspace = true
 toml.workspace = true
-windows-bindgen = { git = "https://github.com/microsoft/windows-rs", rev = "6d88349841f193536a73b63cece7f7e8fcf25953" }
+windows-bindgen = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
 
 [lints]
 workspace = true

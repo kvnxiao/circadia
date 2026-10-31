@@ -1,5 +1,5 @@
 ---
-date: 2026-10-30
+date: 2026-10-31
 questions:
   - Which published windows-rs and Reactor versions support Circadia's settings and tray requirements?
   - Can Rust code draw and edit a temperature curve with native WinUI 3 controls?
@@ -8,7 +8,8 @@ questions:
   - Can the graph support point insertion, reanchoring (changing the reference time that a point's signed offset is measured from), 10 K point increments, and a temperature background?
   - Which Reactor changes at the current reference pin affect Circadia, how does its failure policy end the process, and when do its text inputs report edits?
 observed-in:
-  - microsoft/windows-rs master 6d88349841f193536a73b63cece7f7e8fcf25953 (2026-10-30), current reference pin; upstream diff inspection, automated checks of both Reactor probes, and Circadia About UI inspection
+  - microsoft/windows-rs master ff933fe45cbfdf4a638256181aae26a60932e84e (2026-10-31), current reference pin; upstream diff inspection, automated checks of both Reactor probes, and Reactor UI Automation smoke test
+  - microsoft/windows-rs master 6d88349841f193536a73b63cece7f7e8fcf25953 (2026-10-30), previous reference pin; upstream diff inspection, automated checks of both Reactor probes, and Circadia About UI inspection
   - windows 0.62.2 from the Cargo registry
   - windows-reactor and windows-reactor-setup 0.100.0, source revision a57cc321bfdbac6bb98c488ba49f399da8fcb98a
   - microsoft/windows-rs development revision 722f202100c3bd428627941d3834d87ad6679d1c (2026-10-16)
@@ -29,11 +30,25 @@ recheck-when: Each bump of the reference windows-rs commit, and when Microsoft p
 
 The inspected Git versions of Reactor support an application-owned tray icon and settings windows that can close and reopen without ending the process. Published 0.100.0 ends its window runner when the last window closes. Version numbers alone do not distinguish the published crate from Git revisions that still declare 0.100.0.
 
-Circadia's reference pin is `6d88349841f193536a73b63cece7f7e8fcf25953`, with Windows App SDK runtime 2.6.4. Desktop observations below apply to their stated revisions on Windows 11 build 26300.9711. The [compatibility assessment](windows-compatibility.md) supports an intended build 22000 floor; execution on that minimum is unverified.
+Circadia's reference pin is `ff933fe45cbfdf4a638256181aae26a60932e84e`, with Windows App SDK runtime 2.6.4. Desktop observations below apply to their stated revisions on Windows 11 build 26300.9711. The [compatibility assessment](windows-compatibility.md) supports an intended build 22000 floor; execution on that minimum is unverified.
 
 The retained graph experiment uses fixed anchor fixtures and arbitrary point editing. It verifies controls and pointer behavior, not Circadia's generated schedule, automatic saving, or Preview contract. [Settings design support](settings-design-support.md) covers the four-page design, segmented time entry, composition drawing, and finite animations. The [spec](../specs/SPEC.md) defines product behavior.
 
 ## Versions and evidence boundaries
+
+### Reference pin `ff933fe`
+
+On 2026-10-31, the [single commit since `6d88349`](https://github.com/microsoft/windows-rs/compare/6d88349841f193536a73b63cece7f7e8fcf25953...ff933fe45cbfdf4a638256181aae26a60932e84e) projects `must_use` annotations in generated Windows bindings. It does not change Reactor's window or menu implementation or its bundled runtime version. Both retained Reactor probes pass their automated checks. The Reactor probe's bundled build and UI Automation smoke test also pass on the recorded host at 100% scaling.
+
+### Window resizing and tray menu animation
+
+Source inspection and issue checks on 2026-10-31 establish these limits:
+
+- A supplied recording shows solid black strips inside Circadia's window during interactive resizing. This is consistent with [WinUI resize issue 5148](https://github.com/microsoft/microsoft-ui-xaml/issues/5148), which remains open, but the recording alone does not establish the cause. A Microsoft contributor explains that WinUI 3's in-process compositor does not synchronize window resizing in the same way as UWP's system compositor.
+- The [Windows App SDK release notes](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/release-notes/windows-app-sdk-2-0?pivots=stable) identify 2.6.4 as the current stable release. Circadia already bundles it. Its compositor fixes do not establish that ordinary WinUI windows have synchronized resizing. The [CompositionEngine API](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.composition.compositionengine) remains an unstable Limited Access Feature. Circadia does not opt into it or use private resize-synchronization APIs.
+- Reactor's `Menu` declaration exposes items and the click callback. Its transient menu host creates a WinUI `MenuFlyout` and uses the default opening animation. WinUI's public [AreOpenCloseAnimationsEnabled property](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.controls.primitives.flyoutbase.areopencloseanimationsenabled) can disable opening and closing animations; it does not set their duration. Reactor does not expose that property for application menus at this pin. An application-specific animation toggle requires a Reactor API extension. Circadia does not change system-wide animation preferences.
+
+Recheck these limits when Reactor adds menu animation controls or Microsoft documents general availability of synchronized WinUI resizing. The dependency update does not claim to fix either behavior.
 
 ### Reference pin `6d88349`
 
