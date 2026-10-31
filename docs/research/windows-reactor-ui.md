@@ -50,6 +50,17 @@ Source inspection and issue checks on 2026-10-31 establish these limits:
 
 Recheck these limits when Reactor adds menu animation controls or Microsoft documents general availability of synchronized WinUI resizing. The dependency update does not claim to fix either behavior.
 
+#### Resize workaround assessment
+
+On 2026-10-31, Circadia at `70a8778` was compared with and without `WS_EX_COMPOSITED` on Windows 11 build 26300.9711 at 100% scaling. An isolated configuration kept Night light management and automatic updates off. Each run dragged the right edge through four expansion/contraction cycles between approximately 1000 and 1600 physical pixels, with the style applied before the drag and restored afterward. Both recordings show black strips during resizing. This test does not establish a latency improvement, and it does not test the issue comment's separate background-erasure handler or delayed layout update. Screen recording dropped frames, so it is evidence of visible artifacts rather than a frame-timing benchmark. The scratch harness and recordings remain local.
+
+The issue's suggestions have different applicability to Reactor:
+
+- [`WS_EX_COMPOSITED`](https://learn.microsoft.com/en-us/windows/win32/winmsg/extended-window-styles) changes descendant painting order and double buffering. The tested style alone did not remove Circadia's artifacts, so it is not enabled in the application.
+- Handling [`WM_ERASEBKGND`](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-erasebkgnd) with a matching solid fill can conceal exposed background. It does not synchronize XAML rendering, and one solid color cannot reproduce Circadia's Mica backdrop and separate content surface. Returning success without painting also does not establish that newly exposed pixels are ready.
+- The `DwmFlush` example owns its swap chain, draws during `WM_SIZE`, and flushes after presenting. Reactor's WinUI window owns rendering and presentation; adding a flush to Circadia's size callback would not reproduce that ordering. The example's author later reported remaining flicker.
+- The October example obtains a UWP `CoreWindow` and an `InteropCompositor` through an extra XAML island, then uses private synchronization APIs. It is not a verified WinUI 3/Reactor integration and is not adopted. The supported direction to recheck is general availability of the System Composition Engine, currently documented as a Limited Access Feature.
+
 ### Reference pin `6d88349`
 
 On 2026-10-30, source inspection of the [changes since `3b6bea5`](https://github.com/microsoft/windows-rs/compare/3b6bea553787d9419b3fdd29e2c5436666d7325b...6d88349841f193536a73b63cece7f7e8fcf25953) identified four Reactor changes relevant to Circadia:
