@@ -41,6 +41,7 @@ These conventions adapt [Windows responsive layout](https://learn.microsoft.com/
 
 ## Documentation
 
+- Use `Night light` (with the official Windows translation in localized text) or `display color temperature` in UI text, documentation, and code comments; do not use `display warmth` or `warmth overrides`. Keep `warming` and `cooling` for transition direction, and use `suppression` without defining it in introductory or UI copy. For example, write "Suppress Night light while this app is focused."
 - Keep the spec to intended observable behavior and its guarantees, with functional requirements, nonfunctional requirements, and non-goals before mechanics. Describe visuals, their measurements, and the design language in [docs/design](docs/design/README.md); mechanisms and measured results in research; and file names, control types, and crates that the spec does not require in implementation plans. For example, the spec says "a navigation pane lists the settings pages", while the design document gives its width.
 - Amend requirements and their scenarios together when behavior changes. Preserve requirement IDs when their meaning is refined; remove obsolete references when a requirement is retired.
 - Keep unresolved behavior explicit and the spec status accurate. Do not mark a draft approved or start implementation planning without the user's authorization for that step.

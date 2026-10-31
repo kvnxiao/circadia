@@ -7,12 +7,12 @@ Circadia is a **Windows 11 x64 application in development**. Unsigned preview in
 ## Features
 
 - **Daily temperature schedule**
-  - Set Wake and Bedtime schedules with three different color temperature levels and gradual transitions. The schedule supports one daily waking period and one overnight sleep period, including bedtimes after midnight.
+  - Set Wake and Bedtime schedules with different color temperature levels that support gradual transitions. The schedule supports one daily waking period and one overnight sleep period, including bedtimes after midnight.
 - **Optional sunrise and sunset timing**
-  - Follow solar events using coordinates you enter or a location supplied by Windows. Times are calculated locally, and unavailable events are skipped while the remaining schedule continues.
-- **Automatic and manual warmth overrides**
-  - Temporarily remove warmth with a 6500 K override, called **suppression**, whenever a chosen app has focus in any window mode. Rules support executable filenames or full paths, optional window-title conditions, and exclusions for apps or windows that should keep the normal schedule.
-  - Start or stop a separate one-hour override from Settings or the tray, which also offers toggles for recently focused apps. Automatic fullscreen detection is not included.
+  - Follow solar events using explicit latitude and longitude coordinates or a location supplied by the Windows location service. Timings are calculated locally, and invalid events are skipped to keep the schedule running.
+- **Automatic and manual Night light suppression**
+  - Suppress Night light whenever a chosen app has focus, in any window mode. Rules support executable filenames or full paths, optional window-title conditions, and exclusions for apps or windows that should keep the normal schedule.
+  - Start or stop a separate one-hour suppression from Settings or the tray, which also offers toggles for recently focused apps. Automatic fullscreen detection is not included.
 - **Schedule graph and display preview**
   - See the daily temperature curve, event times, current target, and next change. Preview plays the coming day on your display in seconds, temporarily taking precedence over suppression and disabling settings edits.
 - **Automatic saving and Windows preferences**
