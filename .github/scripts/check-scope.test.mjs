@@ -31,7 +31,7 @@ test('Python configuration selects Python checks', () => {
   assert.deepEqual(selectChecks(['tools/pyproject.toml']), { ...none, python: true });
 });
 test('unknown files and shared configuration conservatively select everything', () => {
-  for (const path of ['Cargo.toml', 'Cargo.lock', '.github/workflows/checks.yml', '.github/workflows/preview.yml', 'new-package/main.rs']) {
+  for (const path of ['Cargo.toml', 'Cargo.lock', '.github/workflows/ci.yml', '.github/workflows/preview.yml', 'new-package/main.rs']) {
     assert.deepEqual(selectChecks([path]), all);
   }
 });

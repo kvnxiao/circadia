@@ -48,7 +48,7 @@ Set the application version in `Cargo.toml`. The executable, About page, and ins
 
 The main packaging workflow sets `CIRCADIA_CHANNEL=preview`. These packages display `-preview`, and their artifact names include the exact packaged source commit. Update checks inspect available artifacts from successful builds and compare their source commits with the installed commit. Only a descendant source is offered, so rerunning CI for older source does not offer a downgrade. Among available descendants, the check selects the one furthest ahead in commit history. Checks inspect up to 20 recent successful packaging runs and stop after a shared 30-second network deadline.
 
-To publish a stable version, update Cargo's version, commit the change, and create a GitHub release with a matching `v` tag, such as `v0.1.0`. Publishing a non-prerelease starts the [Release workflow](.github/workflows/windows-release.yml), which builds that tag with `CIRCADIA_CHANNEL=stable` and attaches the installer and checksum. Saving a draft does not start packaging. About offers the release only after its installer and checksum are present. Matching symbols remain in the workflow artifacts.
+To publish a stable version, update Cargo's version, commit the change, and create a GitHub release with a matching `v` tag, such as `v0.1.0`. Publishing a non-prerelease starts the [Release workflow](.github/workflows/release.yml), which builds that tag with `CIRCADIA_CHANNEL=stable` and attaches the installer and checksum. Saving a draft does not start packaging. About offers the release only after its installer and checksum are present. Matching symbols remain in the workflow artifacts.
 
 Automatic update checks default on, run at startup and daily, and save their preference through the same configuration path as other settings. They query public GitHub metadata without a token. Downloads open in the user's browser; preview artifact downloads require GitHub sign-in. The application does not install updates itself.
 
@@ -76,7 +76,7 @@ Read a native check's instructions before running it. Some send mouse and keyboa
 
 ## Continuous integration
 
-The [CI workflow](.github/workflows/checks.yml) and [Tools workflow](.github/workflows/tools.yml) run independently on pull requests, pushes to `main`, merge queues, and manual dispatch.
+The [CI workflow](.github/workflows/ci.yml) and [Tools workflow](.github/workflows/tools.yml) run independently on pull requests, pushes to `main`, merge queues, and manual dispatch.
 
 Application CI checks:
 
