@@ -76,15 +76,15 @@ toggle-state =
 
 tooltip = { -brand-name }: { $status }
 
-status-starting = Starting { -brand-name }.
-status-configuration-error = Settings could not be read; { -night-light } is not managed.
-status-not-managing = Not managing { -night-light }.
-status-control-unavailable = Control is unavailable; starting suppression is disabled.
-status-output-unavailable = Output is unavailable.
-status-output-unavailable-suppressed = Output is unavailable; suppression is requested, not applied.
-status-schedule-retained = The schedule is unavailable; using its last temperature, { $kelvin }.
-status-backup-restored = Settings were restored from a backup.
-status-observation-failed = Control continues without change observation.
+status-starting = Starting { -brand-name }
+status-configuration-error = Settings unreadable · { -night-light } not managed
+status-not-managing = Not managing { -night-light }
+status-control-unavailable = Control unavailable · Starting suppression disabled
+status-output-unavailable = Output unavailable
+status-output-unavailable-suppressed = Output unavailable · Suppression requested, not applied
+status-schedule-retained = Schedule unavailable · Using last temperature, { $kelvin }
+status-backup-restored = Settings restored from backup
+status-observation-failed = Managing without change observation
 status-managing =
     { $state ->
         [preview] Previewing · { $kelvin }
@@ -94,7 +94,15 @@ status-managing =
         [fallback] {" "}· Wake and Bedtime only
        *[available] {""}
     }
-status-calculating = Calculating the schedule.
+status-calculating = Calculating schedule
+
+announcement-configuration-error = Settings could not be read; { -night-light } is not managed.
+announcement-control-unavailable = Control is unavailable; starting suppression is disabled.
+announcement-output-unavailable = Output is unavailable.
+announcement-backup-restored = Settings were restored from a backup.
+announcement-observation-failed = Control continues without change observation.
+announcement-saving-paused = Some settings are invalid; changes are not saved until they are fixed.
+announcement-write-failed = Changes are running but not saved.
 
 announcement = { -brand-name }. { $status }
 announcement-management =
@@ -150,6 +158,7 @@ event-fallback = Wake and Bedtime only
 event-pending = Calculating…
 output-off = { -label-off }
 output-unknown = —
+sentence-calculating = Calculating the schedule.
 sentence-not-managing = { -windows } controls { -night-light }. Turn on management to follow this schedule.
 sentence-preview =
     Previewing { $time }. { $resumes ->
@@ -339,7 +348,7 @@ fixed-locked = Locked
 exclusions-empty = No exclusions added yet.
 section-timing = Timing
 focus-delay-title = { -label-switch-delay }
-focus-delay-description = How long an app must stay focused before suppression starts or ends. Stops flicker when you alt-tab.
+focus-delay-description = How long an app must stay focused before suppression starts or ends.
 dialog-add-title = Add apps to suppress
 dialog-add-description = Pick from apps you used recently, or browse for any .exe file.
 dialog-exclude-title = Exclude apps from suppression
@@ -606,8 +615,8 @@ action-retry = Retry
 action-go-to = Go to { $page }
 action-quit = { -label-quit }
 
-status-saving-paused = Some settings are invalid; changes are not saved until they are fixed.
-status-write-failed = Changes are running but not saved.
+status-saving-paused = Invalid settings · Saving paused
+status-write-failed = Unsaved changes in use
 entry-path-invalid = Choose an absolute executable path with valid folder and file names.
 entry-path-filename = The selected executable must have the same file name as this rule.
 installation-only = Only this installation

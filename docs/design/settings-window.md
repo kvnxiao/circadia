@@ -272,7 +272,7 @@ The App suppression page has, in order:
    - "ApplicationFrameHost.exe": "Windows app host. Hosted apps are matched by their own executable instead. Built in."
 
    User exclusions follow, each with the same condition-editor button, optional folder line, and remove button. With no user exclusions, a final row reads "No exclusions added yet." in Caption and secondary text.
-5. **Timing:** a Switch delay card with a timer glyph, the description "How long an app must stay focused before suppression starts or ends. Stops flicker when you alt-tab.", a number field, and "ms".
+5. **Timing:** a Switch delay card with a timer glyph, the description "How long an app must stay focused before suppression starts or ends.", a number field, and "ms".
 
 ## Transitions page
 

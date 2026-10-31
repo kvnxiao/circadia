@@ -417,6 +417,9 @@ impl Application for Desktop {
     type Message = Message;
 
     fn create(input: &Input, context: &ApplicationContext<Self>) -> Self {
+        if let Err(error) = settings::configure_background() {
+            tracing::warn!(%error, "configuring the settings background");
+        }
         let startup = input.startup.borrow_mut().take();
         // Reactor creates the tray icon in the render that follows `create` and
         // only then drains this message, so a failed icon creation aborts

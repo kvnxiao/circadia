@@ -18,7 +18,7 @@ using System.Runtime.InteropServices;
 public static class ScreenshotWindow {
     [StructLayout(LayoutKind.Sequential)]
     public struct Rect { public int Left, Top, Right, Bottom; }
-    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect bounds);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
@@ -27,8 +27,8 @@ public static class ScreenshotWindow {
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out Rect bounds, int size);
 }
 '@
-if (-not [ScreenshotWindow]::SetProcessDpiAwarenessContext([IntPtr](-4))) {
-    throw 'Cannot enable per-monitor DPI awareness. Run this script in a fresh PowerShell process.'
+if ([ScreenshotWindow]::SetThreadDpiAwarenessContext([IntPtr](-4)) -eq [IntPtr]::Zero) {
+    throw 'Cannot enable per-monitor DPI awareness for the capture thread.'
 }
 
 function Wait-For([string]$Description, [scriptblock]$Read) {
