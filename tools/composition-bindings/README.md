@@ -1,6 +1,6 @@
 # Composition bindings
 
-This workspace package generates Circadia's private bindings for selected public Windows composition APIs. It builds independently of the application's UI and Night light dependencies.
+This workspace package generates Circadia's private bindings for selected public Windows composition and XAML resource APIs. It builds independently of the application's UI and Night light dependencies.
 
 Use stable Rust with rustfmt, Git, `jq`, and `just`. From the repository root, run:
 

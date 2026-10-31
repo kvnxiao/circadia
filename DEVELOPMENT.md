@@ -139,7 +139,7 @@ Keep the previous pin when validation fails until the application or upstream de
 
 ### Generated composition bindings
 
-Circadia generates bindings for public composition APIs absent from Reactor's wrapper. After changing the selected APIs or the Windows pin, use the matching windows-rs checkout:
+Circadia generates bindings for public composition and XAML resource APIs absent from Reactor's wrapper. After changing the selected APIs or the Windows pin, use the matching windows-rs checkout:
 
 ```bash
 just composition-bindings /path/to/windows-rs

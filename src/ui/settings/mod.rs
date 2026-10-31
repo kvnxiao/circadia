@@ -1547,5 +1547,31 @@ impl Drop for Settings {
     }
 }
 
+pub(super) fn configure_background() -> windows_core::Result<()> {
+    use super::composition::bindings as api;
+    use windows_core::Interface;
+
+    let resources = api::XamlReader::Load(
+        r#"<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+                    <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>"#,
+    )?
+    .cast::<api::ResourceDictionary>()?;
+    api::Application::Current()?
+        .Resources()?
+        .MergedDictionaries()?
+        .Append(&resources)
+}
+
 #[cfg(test)]
 mod tests;

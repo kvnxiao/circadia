@@ -30,3 +30,10 @@ Microsoft.UI.Composition.LinearEasingFunction
 Windows.UI.Color
 Microsoft.UI.Xaml.Media.CompositionTarget
 Microsoft.UI.Xaml.Media.ICompositionTargetStatics::{add_Rendering, remove_Rendering}
+Microsoft.UI.Xaml.Application
+Microsoft.UI.Xaml.IApplicationStatics::{get_Current}
+Microsoft.UI.Xaml.IApplication::{get_Resources}
+Microsoft.UI.Xaml.ResourceDictionary
+Microsoft.UI.Xaml.IResourceDictionary::{get_MergedDictionaries}
+Microsoft.UI.Xaml.Markup.XamlReader
+Microsoft.UI.Xaml.Markup.IXamlReaderStatics::{Load}

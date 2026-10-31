@@ -1,3 +1,49 @@
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Application(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    Application,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl Application {
+    pub fn Current() -> windows_core::Result<Self> {
+        Self::IApplicationStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).Current)(
+                windows_core::Interface::as_raw(this),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    fn IApplicationStatics<R, F: FnOnce(&IApplicationStatics) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<Application, IApplicationStatics> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
+impl windows_core::RuntimeType for Application {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IApplication>();
+}
+unsafe impl windows_core::Interface for Application {
+    type Vtable = <IApplication as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IApplication as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for Application {
+    type Target = IApplication;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for Application {
+    const NAME: &'static str = "Microsoft.UI.Xaml.Application";
+}
+unsafe impl Send for Application {}
+unsafe impl Sync for Application {}
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Color {
@@ -497,6 +543,33 @@ unsafe impl Send for ContainerVisual {}
 unsafe impl Sync for ContainerVisual {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DependencyObject(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    DependencyObject,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for DependencyObject {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IDependencyObject>();
+}
+unsafe impl windows_core::Interface for DependencyObject {
+    type Vtable = <IDependencyObject as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IDependencyObject as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for DependencyObject {
+    type Target = IDependencyObject;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for DependencyObject {
+    const NAME: &'static str = "Microsoft.UI.Xaml.DependencyObject";
+}
+unsafe impl Send for DependencyObject {}
+unsafe impl Sync for DependencyObject {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EventHandler<T>(windows_core::IUnknown, core::marker::PhantomData<T>)
 where
     T: windows_core::RuntimeType + 'static;
@@ -560,6 +633,52 @@ impl<
             windows_core::HRESULT(0)
         }
     }
+}
+windows_core::imp::define_interface!(
+    IApplication,
+    IApplication_Vtbl,
+    0x06a8f4e7_1146_55af_820d_ebd55643b021
+);
+impl windows_core::RuntimeType for IApplication {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IApplication {
+    pub fn Resources(&self) -> windows_core::Result<ResourceDictionary> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Resources)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
+#[repr(C)]
+pub struct IApplication_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub Resources: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IApplicationStatics,
+    IApplicationStatics_Vtbl,
+    0x4e0d09f5_4358_512c_a987_503b52848e95
+);
+impl windows_core::RuntimeType for IApplicationStatics {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IApplicationStatics_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub Current: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
     IColorKeyFrameAnimation,
@@ -1222,6 +1341,19 @@ pub struct IContainerVisual_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(
+    IDependencyObject,
+    IDependencyObject_Vtbl,
+    0xe7beaee7_160e_50f7_8789_d63463f979fa
+);
+impl windows_core::RuntimeType for IDependencyObject {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IDependencyObject_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
     IKeyFrameAnimation,
     IKeyFrameAnimation_Vtbl,
     0x5a8f57f0_f059_5b47_b308_c4c80fc71248
@@ -1264,6 +1396,39 @@ impl windows_core::RuntimeType for ILinearEasingFunction {
 #[repr(C)]
 pub struct ILinearEasingFunction_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    IResourceDictionary,
+    IResourceDictionary_Vtbl,
+    0x1b690975_a710_5783_a6e1_15836f6186c2
+);
+impl windows_core::RuntimeType for IResourceDictionary {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IResourceDictionary {
+    pub fn MergedDictionaries(
+        &self,
+    ) -> windows_core::Result<windows_collections::IVector<ResourceDictionary>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).MergedDictionaries)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
+#[repr(C)]
+pub struct IResourceDictionary_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    Source: usize,
+    SetSource: usize,
+    pub MergedDictionaries: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
     IScalarKeyFrameAnimation,
@@ -1348,6 +1513,37 @@ impl windows_core::RuntimeType for IVisual {
 pub struct IVisual_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
+windows_core::imp::define_interface!(
+    IXamlReader,
+    IXamlReader_Vtbl,
+    0x54ce54c8_38c6_50d9_ac98_4b03eddbde9f
+);
+impl windows_core::RuntimeType for IXamlReader {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IXamlReader_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    IXamlReaderStatics,
+    IXamlReaderStatics_Vtbl,
+    0x82a4cd9e_435e_5aeb_8c4f_300cece45cae
+);
+impl windows_core::RuntimeType for IXamlReaderStatics {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IXamlReaderStatics_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub Load: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeyFrameAnimation(windows_core::IUnknown);
@@ -1408,6 +1604,34 @@ impl windows_core::RuntimeName for LinearEasingFunction {
 }
 unsafe impl Send for LinearEasingFunction {}
 unsafe impl Sync for LinearEasingFunction {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourceDictionary(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    ResourceDictionary,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+windows_core::imp::required_hierarchy!(ResourceDictionary, DependencyObject);
+impl windows_core::RuntimeType for ResourceDictionary {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IResourceDictionary>();
+}
+unsafe impl windows_core::Interface for ResourceDictionary {
+    type Vtable = <IResourceDictionary as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IResourceDictionary as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for ResourceDictionary {
+    type Target = IResourceDictionary;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for ResourceDictionary {
+    const NAME: &'static str = "Microsoft.UI.Xaml.ResourceDictionary";
+}
+unsafe impl Send for ResourceDictionary {}
+unsafe impl Sync for ResourceDictionary {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScalarKeyFrameAnimation(windows_core::IUnknown);
@@ -1493,3 +1717,50 @@ impl windows_core::RuntimeName for Visual {
 }
 unsafe impl Send for Visual {}
 unsafe impl Sync for Visual {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XamlReader(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    XamlReader,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl XamlReader {
+    pub fn Load(xaml: &str) -> windows_core::Result<windows_core::IInspectable> {
+        Self::IXamlReaderStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).Load)(
+                windows_core::Interface::as_raw(this),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(xaml)),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    fn IXamlReaderStatics<R, F: FnOnce(&IXamlReaderStatics) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<XamlReader, IXamlReaderStatics> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
+impl windows_core::RuntimeType for XamlReader {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IXamlReader>();
+}
+unsafe impl windows_core::Interface for XamlReader {
+    type Vtable = <IXamlReader as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IXamlReader as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for XamlReader {
+    type Target = IXamlReader;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for XamlReader {
+    const NAME: &'static str = "Microsoft.UI.Xaml.Markup.XamlReader";
+}
+unsafe impl Send for XamlReader {}
+unsafe impl Sync for XamlReader {}
