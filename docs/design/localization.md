@@ -24,6 +24,8 @@ A standalone event label such as Bedtime can differ from the form needed inside 
 
 Write enough context for ambiguous labels: what the control does, which state the message describes, and what each inserted value represents. Use the same terminology in visible text and accessible descriptions, while giving a screen reader enough context to explain an icon-only action or graph value.
 
+Use concise phrases without trailing periods for navigation status labels and tray tooltips. Keep sentence punctuation in screen-reader announcements and explanatory descriptions.
+
 ## Complete messages and values
 
 A message states a complete action, condition, or result. Placeholders identify the values inserted into that message, such as an application name or a time; they do not determine sentence order.

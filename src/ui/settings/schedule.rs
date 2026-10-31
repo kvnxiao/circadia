@@ -730,7 +730,7 @@ pub(super) fn status_sentence(
         return sentence;
     }
     let Some(schedule) = control.schedule else {
-        return fl!("status-calculating");
+        return fl!("sentence-calculating");
     };
     if let Some(status::Position::Shifting {
         event,
@@ -748,7 +748,7 @@ pub(super) fn status_sentence(
     }
     let Some(next) = status::next_change(schedule, current) else {
         return status::scheduled_kelvin(schedule, current).map_or_else(
-            || fl!("status-calculating"),
+            || fl!("sentence-calculating"),
             |value| fl!("sentence-schedule-at", kelvin = kelvin(value)),
         );
     };

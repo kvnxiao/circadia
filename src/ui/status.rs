@@ -508,7 +508,10 @@ pub(super) fn announcement(
 ) -> String {
     bind_text!(fl, text);
     if stored.error {
-        return fl!("announcement", status = fl!("status-configuration-error"));
+        return fl!(
+            "announcement",
+            status = fl!("announcement-configuration-error")
+        );
     }
     let mode = match control.management {
         ManagementState::Off => "off",
@@ -545,28 +548,28 @@ pub(super) fn announcement(
         }
         parts.push(match control.scheduling {
             SchedulingState::Waiting | SchedulingState::Evaluating => {
-                fl!("status-calculating")
+                fl!("sentence-calculating")
             }
             SchedulingState::Available => fl!("announcement-schedule-available"),
             SchedulingState::SolarFallback => fl!("announcement-solar-fallback"),
             SchedulingState::Retained => fl!("announcement-schedule-retained"),
-            SchedulingState::Stopped => fl!("status-control-unavailable"),
+            SchedulingState::Stopped => fl!("announcement-control-unavailable"),
         });
         if control.output_failed {
-            parts.push(fl!("status-output-unavailable"));
+            parts.push(fl!("announcement-output-unavailable"));
         }
         if control.observation_failed {
-            parts.push(fl!("status-observation-failed"));
+            parts.push(fl!("announcement-observation-failed"));
         }
     }
     if stored.paused {
-        parts.push(fl!("status-saving-paused"));
+        parts.push(fl!("announcement-saving-paused"));
     }
     if stored.failed {
-        parts.push(fl!("status-write-failed"));
+        parts.push(fl!("announcement-write-failed"));
     }
     if stored.restored {
-        parts.push(fl!("status-backup-restored"));
+        parts.push(fl!("announcement-backup-restored"));
     }
     fl!("announcement", status = parts.join(" "))
 }

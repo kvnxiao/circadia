@@ -424,11 +424,11 @@ fn a_configuration_error_outranks_management_off() {
     };
     assert_eq!(
         line(&control, error, "2026-10-27T13:00:00Z"),
-        "Settings could not be read; Night light is not managed."
+        "Settings unreadable · Night light not managed"
     );
     assert_eq!(
         line(&control, Stored::default(), "2026-10-27T13:00:00Z"),
-        "Not managing Night light."
+        "Not managing Night light"
     );
 }
 
@@ -443,7 +443,7 @@ fn paused_saving_outranks_a_write_failure() {
     };
     assert_eq!(
         line(&control(&schedule), stored, "2026-10-27T13:00:00Z"),
-        "Some settings are invalid; changes are not saved until they are fixed."
+        "Invalid settings · Saving paused"
     );
 }
 
@@ -457,7 +457,7 @@ fn a_write_failure_shows_only_when_no_earlier_condition_applies() {
     };
     assert_eq!(
         line(&control(&schedule), failed, "2026-10-27T13:00:00Z"),
-        "Changes are running but not saved."
+        "Unsaved changes in use"
     );
     let output = Control {
         output_failed: true,
@@ -465,7 +465,7 @@ fn a_write_failure_shows_only_when_no_earlier_condition_applies() {
     };
     assert_eq!(
         line(&output, failed, "2026-10-27T13:00:00Z"),
-        "Output is unavailable."
+        "Output unavailable"
     );
 }
 
@@ -482,7 +482,7 @@ fn a_restored_backup_shows_its_line_until_its_banner_is_dismissed() {
             Stored::new(&configuration),
             "2026-10-27T13:00:00Z"
         ),
-        "Settings were restored from a backup."
+        "Settings restored from backup"
     );
     let observation = Control {
         observation_failed: true,
@@ -494,7 +494,7 @@ fn a_restored_backup_shows_its_line_until_its_banner_is_dismissed() {
             Stored::new(&configuration),
             "2026-10-27T13:00:00Z"
         ),
-        "Settings were restored from a backup."
+        "Settings restored from backup"
     );
     configuration.dismiss_restore();
     assert_eq!(
@@ -560,7 +560,7 @@ fn a_retained_temperature_outranks_failed_observation() {
     };
     assert_eq!(
         line(&retained, Stored::default(), "2026-10-27T13:00:00Z"),
-        "The schedule is unavailable; using its last temperature, 3400 K."
+        "Schedule unavailable · Using last temperature, 3400 K"
     );
     let observing = Control {
         observation_failed: true,
@@ -568,7 +568,7 @@ fn a_retained_temperature_outranks_failed_observation() {
     };
     assert_eq!(
         line(&observing, Stored::default(), "2026-10-27T13:00:00Z"),
-        "Control continues without change observation."
+        "Managing without change observation"
     );
 }
 
@@ -584,7 +584,7 @@ fn observation_failure_does_not_claim_control_is_running(state: SchedulingState)
     };
     assert_ne!(
         line(&control, Stored::default(), "2026-10-27T13:00:00Z"),
-        "Control continues without change observation."
+        "Managing without change observation"
     );
 }
 
@@ -602,7 +602,7 @@ fn a_failed_off_attempt_after_management_turned_off_does_not_report_unavailable_
     assert!(!control.output_failed);
     assert_eq!(
         line(&control, Stored::default(), "2026-10-27T13:00:00Z"),
-        "Not managing Night light."
+        "Not managing Night light"
     );
 }
 
