@@ -34,8 +34,8 @@ Circadia combines native Windows 11 controls with scheduling and app rules for W
 | Uses native Windows Night light | ✓ | ✓ | ✗ |
 | Sunrise and sunset scheduling | ✓ | ✓ | ✓ |
 | Separate daytime, evening, and bedtime temperatures | ✓ | ✗ | ✓ |
-| Automatically pauses for selected apps | ✓ | ✗ | ✓ |
-| Automatically pauses for specifically fullscreen apps | ✗ | ✗ | ✓ |
+| User-defined suppression list: pause color adjustment when a listed app has focus | ✓ | ✗ | ✓ |
+| Fullscreen suppression toggle: pause color adjustment for all fullscreen apps | ✗ | ✗ | ✓ |
 | Included with Windows | ✗ | ✓ | ✗ |
 
 **Calibration profiles:** Circadia does not directly write GPU gamma ramps or modify `.icc`/`.icm` profiles; it delegates color changes to Windows Night light. Whereas [f.lux is known to conflict](https://justgetflux.com/faq.html?q=vcgt) with some custom display calibration settings and display profile loaders.
