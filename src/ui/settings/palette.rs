@@ -22,7 +22,7 @@ impl Theme {
 }
 
 // Reactor's theme brushes do not cover these WinUI resources, so the light and
-// dark values are WinUI's and the contrast values are the system colors.
+// dark values follow WinUI, and contrast values use the system colors.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Palette {
     pub(super) theme: Theme,
@@ -31,6 +31,7 @@ pub(super) struct Palette {
     pub(super) divider: Color,
     pub(super) plot_fill: Color,
     pub(super) chip_fill: Color,
+    pub(super) status_fill: Color,
     pub(super) on_accent: Color,
     pub(super) base: Color,
     pub(super) sun_detail: Color,
@@ -47,6 +48,7 @@ impl Palette {
                 divider: Color::argb(0x15, 0xFF, 0xFF, 0xFF),
                 plot_fill: Color::argb(0x33, 0, 0, 0),
                 chip_fill: Color::rgb(0x33, 0x33, 0x33),
+                status_fill: Color::argb(0x20, 0xFF, 0xFF, 0xFF),
                 on_accent: Color::rgb(0, 0, 0),
                 base: Color::rgb(0x20, 0x20, 0x20),
                 sun_detail: Color::rgb(0xFF, 0xAE, 0x2E),
@@ -59,6 +61,7 @@ impl Palette {
                 divider: Color::argb(0x0F, 0, 0, 0),
                 plot_fill: Color::argb(0x09, 0, 0, 0),
                 chip_fill: Color::rgb(0xFD, 0xFD, 0xFD),
+                status_fill: Color::argb(0x0F, 0, 0, 0),
                 on_accent: Color::rgb(0xFF, 0xFF, 0xFF),
                 base: Color::rgb(0xF3, 0xF3, 0xF3),
                 sun_detail: Color::rgb(0xB8, 0x6E, 0x00),
@@ -71,6 +74,7 @@ impl Palette {
                 divider: colors.window_text,
                 plot_fill: colors.window,
                 chip_fill: colors.window,
+                status_fill: colors.window,
                 on_accent: colors.highlight_text,
                 base: colors.window,
                 sun_detail: colors.window_text,

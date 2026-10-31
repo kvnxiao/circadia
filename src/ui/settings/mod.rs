@@ -1512,11 +1512,11 @@ impl Component for Settings {
         let marked = problems::marked_pages(&self.input.model);
         let column = Border::new()
             .max_width(1000.0)
-            .horizontal_alignment(HorizontalAlignment::Left)
-            .padding(Thickness::new(
-                layout::CONTENT_LEFT,
+            .horizontal_alignment(HorizontalAlignment::Stretch)
+            .margin(Thickness::new(
+                layout::CONTENT_INSET,
                 0.0,
-                layout::CONTENT_RIGHT,
+                layout::CONTENT_INSET,
                 40.0,
             ))
             .content(StackPanel::new().children(children));
@@ -1547,7 +1547,7 @@ impl Component for Settings {
             .content(
                 ScrollViewer::new()
                     .automation_id(automation_id::SCROLL)
-                    .content(column),
+                    .content(Grid::new().children((column,))),
             );
         Grid::new()
             .rows([GridLength::Auto, GridLength::STAR])

@@ -873,7 +873,11 @@ fn status_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
                                 .automation_id(automation_id::STATUS_TEMPERATURE),
                             Border::new()
                                 .vertical_alignment(VerticalAlignment::Center)
-                                .content(widgets::pill(phase.label(text))),
+                                .content(widgets::pill(
+                                    phase.label(text),
+                                    model.management.is_on(),
+                                    &palette,
+                                )),
                         )),
                     widgets::body(status_sentence(model, text, region, &control, current))
                         .foreground(palette.secondary)
@@ -1051,7 +1055,7 @@ fn temperature_card(
     };
     let mut heading: Vec<View> = vec![widgets::body(&title).into()];
     if unused(config, field) {
-        heading.push(widgets::pill(fl!("not-used")));
+        heading.push(widgets::pill(fl!("not-used"), false, &settings.palette()));
     }
     widgets::card(
         Border::new()

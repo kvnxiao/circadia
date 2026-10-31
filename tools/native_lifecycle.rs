@@ -26,6 +26,9 @@ mod graph;
 #[path = "native/identity.rs"]
 mod identity;
 #[cfg(windows)]
+#[path = "native/layout.rs"]
+mod layout;
+#[cfg(windows)]
 #[path = "native/lifecycle.rs"]
 mod lifecycle;
 #[cfg(windows)]
@@ -73,6 +76,7 @@ fn main() -> std::io::Result<()> {
     let arguments = lifecycle::arguments(std::env::args_os().skip(1))?;
     let mode = arguments.first().and_then(|mode| mode.to_str());
     match mode {
+        Some("--layout") => layout::run(&arguments),
         Some("--about") => about::run(&arguments),
         Some("--deployment") => deployment::run(&arguments),
         #[cfg(feature = "graph-measurement")]

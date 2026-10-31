@@ -8,6 +8,12 @@ The `native-lifecycle`, `native-settings`, `native-explorer`, `native-startup`, 
 
 Each recipe that changes Night light starts Circadia with `manage_night_light = true` in its configuration file, which Circadia reads at startup, so Circadia controls Night light without first asking the user to allow it. The startup and picker recipes start with management off and do not change Night light. Circadia reads its configuration file only at startup, so the checks change settings through the settings controls and read the file to confirm each write.
 
+## Page width and centering without Night light changes
+
+Run `just native-layout` with Circadia closed and the desktop available at 100% scaling. The check uses isolated configuration with Night light management and automatic update checks off. It opens and resizes settings, invokes navigation and expansion controls through UI Automation, and scrolls each page. It does not move the pointer or send keyboard input.
+
+The Schedule page is checked at client widths of 640, 799, 800, 1120, 1280, 1366, and 1620 epx. The check requires a centered content column that fills the page between 40 epx side margins up to a 1000 epx limit. It captures Schedule with solar options collapsed and expanded, and checks the other four pages at 640 and 1620 epx. Captures at the top, middle, and bottom of each page are saved under `target/layout-*.png`; inspect them for complete glyphs, wrapping, and reachable actions. The monitor work area must be at least 1676×848 physical pixels. These static captures do not verify interactive resize smoothness.
+
 ## About page without Night light changes
 
 Run `just native-about` or `just native-about --language qps-Ploc` with Circadia closed. The check opens an isolated configuration with management and automatic update checks off. It resizes the window to 1000, 800, and 640 effective pixels, saves screenshots under `target/about-*`, invokes a manual check, and exits through Settings. It does not click external links, move the cursor, or send keyboard input. The windows can take focus. Inspect the screenshots for wrapping, complete glyphs, and reachable actions at 100% scaling. A development build reports that it has no distribution channel; a packaged-channel build makes a public GitHub metadata request.

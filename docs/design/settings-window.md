@@ -54,7 +54,7 @@ The status line summarizes the state and wraps to a second line instead of trunc
 
 ### Content column
 
-- The content column has 20 epx of padding on the left, 40 epx on the right, 40 epx at the bottom, and none at the top. Its maximum width is 1000 epx. It scrolls vertically; the title bar and navigation pane stay in place.
+- The content column fills the available page width up to 1000 epx and is centered beside the navigation pane. Cards use that full width; the 40 epx margins on each side are outside the width limit. The bottom margin is 40 epx, with none at the top. The column scrolls vertically; the title bar and navigation pane stay in place.
 - The page title repeats the navigation label in the Title style, with 4 epx above it and 20 epx below it.
 - Banners, when present, sit between the page title and the first card, with 12 epx below each banner. See [Error presentation](#error-presentation).
 - Section headers use BodyStrong with 28 epx above and 8 epx below. A section header that starts the page has no space above it.
@@ -90,7 +90,7 @@ A disabled setting shows its controls' disabled state, and its description says 
 | Number field | 32 epx tall and 96 epx wide (120 epx for coordinates), with tabular numerals. Its unit, such as "K", "min", "ms", "s", or "Hz", follows it in secondary text. |
 | Slider | Up to 220 epx wide; shrinks to reserve the number field and the unit's measured width. |
 | Time picker | 224 by 32 epx. See [Time picker](#time-picker). |
-| Phase pill | 22 epx tall, fully rounded, 8 epx horizontal padding, Caption text in the primary text color on a subtle neutral fill. |
+| Phase pill | At least 22 epx tall, 11 epx corners, 8 epx horizontal and 2 epx vertical padding, and Caption text using the [on/off colors](#phase-pill). It fits its label and grows vertically when text wraps. |
 | App icon | The app's own icon at 32 epx (28 epx in the Add app dialog), drawn without a plate or border. See [App icons](#app-icons). |
 
 ## Schedule page
@@ -131,6 +131,8 @@ Example status sentences:
 | Not managing | "Windows controls Night light. Turn on management to follow this schedule." |
 
 #### Phase pill
+
+Text pills are informational on/off labels. While management is on, the current phase and management labels use the Windows accent fill and its paired accent text color. "Not managing", "Turning off", and "Not used" use primary text on a neutral fill: white at 12.5% opacity in dark mode and black at 5.9% in light mode. Light and dark themes do not use a pill border. In contrast themes, on labels use the system highlight and highlight-text pair, off labels use the window and window-text pair, and both have a 1 epx window-text outline. Labels remain readable without color and have no button behavior or hover treatment. Follow [Windows color guidance](https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/color), the [4.5:1 text-contrast recommendation](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/accessible-text-requirements), and [system color pairs in contrast themes](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/high-contrast-themes).
 
 The pill names the current state. The first matching row applies:
 
