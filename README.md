@@ -1,4 +1,4 @@
-<h1>Circadia <img src="assets/icon/circadia.svg" width="48" alt="Circadia icon"></h1>
+<h1>Circadia <img src="assets/icon/circadia.svg" width="32" alt="Circadia icon"></h1>
 
 Circadia is a powerful manager for [Windows Night light](https://support.microsoft.com/en-us/windows/hardware/display-graphics/change-display-brightness-and-color-in-windows#bkmk_night_light). It adjusts your display’s color temperature through Windows’ native functionality, without directly writing GPU gamma ramps or modifying display calibration profiles. Set your preferred color temperatures, choose how gradually they change, and build a schedule around your waking and sleeping hours (with support for additional sunrise and sunset timings). Apps can be added to a suppression list to automatically pause Night light when focused.
 
