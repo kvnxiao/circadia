@@ -36,7 +36,7 @@ pub struct NativeCycle {
     pub scheduled: Option<u16>,
     /// Calculation failure discovered after fresh reads or slow cleanup.
     pub control_error: Option<ControlError>,
-    /// Cleanup and off attempts that ended Night Light access after
+    /// Cleanup and off attempts that ended Night light access after
     /// management turned off.
     pub released: Option<NativeExit>,
 }
@@ -74,7 +74,7 @@ pub struct NativeDriver {
 }
 
 impl NativeDriver {
-    /// Transfer sole ownership of the runtime and lifetime Night Light handle.
+    /// Transfer sole ownership of the runtime and lifetime Night light handle.
     pub fn new(runtime: ControlRuntime, native: Native) -> Self {
         Self {
             runtime,
@@ -368,7 +368,7 @@ impl NativeDriver {
             if !runtime.controlling() {
                 return None;
             }
-            // Fading out must not turn Night Light on to fade it out again.
+            // Fading out must not turn Night light on to fade it out again.
             if (runtime.exiting() || !runtime.managing()) && !fresh.active {
                 runtime.output().stop();
                 return None;
@@ -416,7 +416,7 @@ impl NativeDriver {
     /// off has a remaining step that native access permits.
     ///
     /// - A pending output or observation failure, including a failed fade step,
-    ///   ends the fade, and so does Night Light access that never began.
+    ///   ends the fade, and so does Night light access that never began.
     pub fn fading_out(&self, now: RuntimeTime) -> bool {
         self.native.access_begun()
             && !self.recovery.blocks_output()
@@ -429,7 +429,7 @@ impl NativeDriver {
     /// - Turning on ends once startup completes or control waits under native
     ///   recovery or a schedule-evaluation failure; it does not resume after a
     ///   later recovery restarts startup.
-    /// - Turning off lasts until the cleanup and off attempts end Night Light
+    /// - Turning off lasts until the cleanup and off attempts end Night light
     ///   access.
     pub fn management(&self, previous: ManagementState) -> ManagementState {
         if self.runtime.exiting() {

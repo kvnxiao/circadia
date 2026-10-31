@@ -230,7 +230,7 @@ pub struct ControllerSnapshot {
     pub accepted: Option<ConfigLayer>,
     /// Active layer's schedule availability.
     pub scheduling: SchedulingState,
-    /// Whether Circadia manages Night Light or is changing that state.
+    /// Whether Circadia manages Night light or is changing that state.
     pub management: ManagementState,
     /// Captured playback timeline, independent of native latency.
     pub preview: Option<RunningPreview>,
@@ -515,9 +515,9 @@ impl ControllerWorker {
     /// ownership.
     ///
     /// - `config` is the startup selection, or none during a configuration
-    ///   error; without it the worker does not access Night Light.
+    ///   error; without it the worker does not access Night light.
     /// - Keep `notify` nonblocking, thread-safe, and free of panics.
-    /// - Normal startup can change live Night Light after prerequisites pass.
+    /// - Normal startup can change live Night light after prerequisites pass.
     ///
     /// # Errors
     /// Report invalid executable identity or worker creation failure.

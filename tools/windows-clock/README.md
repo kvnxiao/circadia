@@ -26,7 +26,7 @@ just --justfile tools/justfile python-test
 uv run --project tools --locked python -B tools/windows-clock/windows_clock.py --diagnostics
 ```
 
-`uv` can download the requested Python version and tools if absent and needs cache access. The tests read installed time-zone rules through Windows APIs. They do not open windows or change the clock, host settings, registry, or Night Light. The diagnostics command prints selected API limitations separately from the assertions. `-B` prevents bytecode output.
+`uv` can download the requested Python version and tools if absent and needs cache access. The tests read installed time-zone rules through Windows APIs. They do not open windows or change the clock, host settings, registry, or Night light. The diagnostics command prints selected API limitations separately from the assertions. `-B` prevents bytecode output.
 
 ## Manual host settings exercise
 

@@ -522,7 +522,7 @@ fn summarize(samples: &[(String, Duration)]) -> io::Result<()> {
         "graph update exceeded 100 ms",
     )?;
     report(
-        "PASS: graph latency, solar fallback and recovery, and Preview animation while output is blocked. Simulated native operations did not change Night Light.",
+        "PASS: graph latency, solar fallback and recovery, and Preview animation while output is blocked. Simulated native operations did not change Night light.",
     );
     Ok(())
 }

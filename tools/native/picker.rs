@@ -57,7 +57,7 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
         crate::lifecycle::quit(&automation, &settings, process)?;
         application.wait_exit()?;
         report(
-            "PASS: picker checks completed without mouse or keyboard input; Night Light was not managed",
+            "PASS: picker checks completed without mouse or keyboard input; Night light was not managed",
         );
         Ok(())
     })();

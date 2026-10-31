@@ -114,7 +114,7 @@ fn a_configuration_error_offers_reset_and_open_folder_on_every_page_and_disables
             banner.message,
             "config.toml \u{2068}has a syntax error on line \u{2068}1\u{2069}\u{2069}, and \
              config.backup.toml \u{2068}has a different format version\u{2069}. Circadia isn't \
-             managing Night Light until you reset to the default settings."
+             managing Night light until you reset to the default settings."
         );
         assert_eq!(
             banner.actions,
@@ -469,10 +469,10 @@ fn the_native_banner_lists_each_outstanding_failure_once_with_retry() {
     let banner = native_banner(&fixture, &model);
     assert_eq!(banner.id, "banner-native");
     assert_eq!(banner.severity, InfoBarSeverity::Error);
-    assert_eq!(banner.title, "Circadia can't control Night Light");
+    assert_eq!(banner.title, "Circadia can't control Night light");
     assert_eq!(
         banner.message,
-        "\u{2068}Watching Night Light for changes\u{2069} failed: \u{2068}access was denied.\u{2069} \
+        "\u{2068}Watching Night light for changes\u{2069} failed: \u{2068}access was denied.\u{2069} \
          Error \u{2068}0x00000005\u{2069}\n\
          \u{2068}Setting the color temperature\u{2069} failed: \u{2068}access was denied.\u{2069} \
          Error \u{2068}0x00000005\u{2069}"
@@ -492,7 +492,7 @@ fn only_an_observation_failure_names_observation_in_the_title() {
     );
     assert_eq!(
         native_banner(&fixture, &model).title,
-        "Circadia can't watch Night Light for changes"
+        "Circadia can't watch Night light for changes"
     );
 }
 
@@ -507,12 +507,12 @@ fn with_management_off_a_turn_off_failure_disables_retry_and_says_why() {
     let banner = native_banner(&fixture, &model);
     assert_eq!(
         banner.title,
-        "Circadia couldn't finish turning Night Light off"
+        "Circadia couldn't finish turning Night light off"
     );
     assert!(
         banner
             .message
-            .ends_with("\nRetry is available while Circadia manages Night Light."),
+            .ends_with("\nRetry is available while Circadia manages Night light."),
         "{}",
         banner.message
     );

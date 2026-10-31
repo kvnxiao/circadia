@@ -14,15 +14,15 @@ pub enum DiagnosticOperation {
     ScheduleCalculation,
     /// Calculate local solar crossings.
     SolarCalculation,
-    /// Observe changes to native Night Light records.
+    /// Observe changes to native Night light records.
     Observation,
-    /// Read native Night Light settings.
+    /// Read native Night light settings.
     NativeSettingsRead,
-    /// Read native Night Light activation state.
+    /// Read native Night light activation state.
     NativeStateRead,
-    /// Disable the native Night Light schedule.
+    /// Disable the native Night light schedule.
     NativeScheduleWrite,
-    /// Change native Night Light activation.
+    /// Change native Night light activation.
     NativeActivationWrite,
     /// Store or apply a temperature.
     TemperatureWrite,

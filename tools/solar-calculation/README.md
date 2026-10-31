@@ -32,10 +32,10 @@ just report
 just check-msrv
 ```
 
-`just fmt` formats the Rust source; `just fix` applies Clippy fixes and formatting. First builds can download locked dependencies, and the advisory check can update its database. Tests only calculate times and read embedded fixtures. They do not open windows, change the host clock, request location, or write Night Light state. Generated output is stored in the ignored `target/` directory.
+`just fmt` formats the Rust source; `just fix` applies Clippy fixes and formatting. First builds can download locked dependencies, and the advisory check can update its database. Tests only calculate times and read embedded fixtures. They do not open windows, change the host clock, request location, or write Night light state. Generated output is stored in the ignored `target/` directory.
 
 ## Limits and interval executable
 
-The calculator fixtures do not establish Windows date discovery, application integration, UI latency, or visible Night Light output.
+The calculator fixtures do not establish Windows date discovery, application integration, UI latency, or visible Night light output.
 
 `just build-events` builds `solar-events`, which reads a JSON array of UTC intervals and coordinates from stdin and returns rise/set timestamps as Unix seconds. It performs no network or registry access. The [timing experiment](../solar-timing/README.md) reuses this project's calculation function and locked dependencies in a temporary copy.

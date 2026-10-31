@@ -1,8 +1,6 @@
-<img src="assets/icon/circadia.svg" width="64" alt="Circadia icon">
+<h1>Circadia <img src="assets/icon/circadia.svg" width="48" alt="Circadia icon"></h1>
 
-# Circadia
-
-Circadia schedules Windows Night Light around your waking and sleeping hours. Set your preferred daytime and bedtime color temperatures, then let the screen warm gradually before bed and cool again before you wake.
+Circadia is a powerful manager for [Windows Night light](https://support.microsoft.com/en-us/windows/hardware/display-graphics/change-display-brightness-and-color-in-windows#bkmk_night_light). It uses Windows’ native display warmth and adds schedules built around your waking and sleeping hours, three temperature levels, gradual transitions, and automatic warmth overrides for apps you choose.
 
 Circadia is a **Windows 11 x64 application in development**. Unsigned preview installers are built on every push to `main`, alongside automated checks.
 
@@ -33,11 +31,11 @@ Valid edits apply and save automatically. The five pages group scheduling, app r
 
 ### Run from the tray
 
-Closing Settings keeps Circadia running. Reopen it from the tray or by launching the app again, and optionally enable startup at sign-in. Quit ends control and requests Night Light off.
+Closing Settings keeps Circadia running. Reopen it from the tray or by launching the app again, and optionally enable startup at sign-in. Quit ends control and requests Night light off.
 
 ## Getting started
 
-Circadia requires Windows 11 x64 with working native Night Light. The intended minimum is build 22000; execution on that minimum build remains unverified. Recorded desktop checks used build 26300.9711 at 100% scaling. See the [compatibility evidence](docs/research/windows-compatibility.md) for the tested scope.
+Circadia requires Windows 11 x64 with working native Night light. The intended minimum is build 22000; execution on that minimum build remains unverified. Recorded desktop checks used build 26300.9711 at 100% scaling. See the [compatibility evidence](docs/research/windows-compatibility.md) for the tested scope.
 
 ### Install the latest development build
 
@@ -59,10 +57,10 @@ To update, quit Circadia and run the newer installer. To uninstall, quit Circadi
 ### Set up your schedule
 
 1. Set Wake, Bedtime, and your temperature levels on the Schedule page.
-2. Turn on Night Light management and read the consent prompt.
+2. Turn on Night light management and read the consent prompt.
 3. Use Preview to check the schedule, then close Settings to continue from the tray.
 
-While management is on, Circadia keeps Night Light enabled, disables Windows' own Night Light schedule, and corrects changes made in Windows Settings or Quick Settings. Turning management off or quitting requests Night Light off; **it does not restore Windows' schedule**. Re-enable that schedule in Windows Settings if you want it afterward.
+While management is on, Circadia keeps Night light enabled, disables Windows' own Night light schedule, and corrects changes made in Windows Settings or Quick Settings. Turning management off or quitting requests Night light off; **it does not restore Windows' schedule**. Re-enable that schedule in Windows Settings if you want it afterward.
 
 ## Help and development
 

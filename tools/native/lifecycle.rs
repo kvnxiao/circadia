@@ -212,7 +212,7 @@ fn exercise(
     )?;
     require(
         native_revision(native)? == before_activation,
-        "second launch modified native Night Light records",
+        "second launch modified native Night light records",
     )?;
     report("PASS: second invocations activate one window in the original process");
 
@@ -235,7 +235,7 @@ fn exercise(
     )?;
     application.wait_exit()?;
     verify_off(native)?;
-    report("PASS: process exited, native preview cleared, and Night Light off");
+    report("PASS: process exited, native preview cleared, and Night light off");
     Ok(())
 }
 
@@ -504,7 +504,7 @@ pub(super) fn verify_off(native: &Nightlight) -> io::Result<()> {
     let state = native.read_state().map_err(io::Error::other)?;
     require(
         !settings.is_previewing() && !state.is_active(),
-        "exit did not clear native preview and request Night Light off",
+        "exit did not clear native preview and request Night light off",
     )
 }
 

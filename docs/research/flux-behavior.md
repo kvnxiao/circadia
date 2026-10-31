@@ -18,7 +18,7 @@ f.lux provides a documented reference for solar and wake-time scheduling, three 
 
 ## Decision context and evidence limits
 
-Circadia is a Windows desktop app that aims to provide familiar f.lux scheduling and suppression controls through Windows Night Light. The design favors low background resource use and simple implementation. This research distinguishes observable interaction patterns worth adopting from implementation details that Circadia needs to define independently.
+Circadia is a Windows desktop app that aims to provide familiar f.lux scheduling and suppression controls through Windows Night light. The design favors low background resource use and simple implementation. This research distinguishes observable interaction patterns worth adopting from implementation details that Circadia needs to define independently.
 
 **Observed in documentation retrieved 2026-10-16:** The official Windows release history lists version 4.141, dated April 2026, as its newest entry. That entry includes fixes to app suppression. Earlier entries and forum replies establish features and design intent, but do not prove that every older detail remains unchanged in 4.141. No f.lux installation, executable inspection, or runtime measurement was performed. [Windows release notes](https://justgetflux.com/news/pages/v4/readme/).
 

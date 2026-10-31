@@ -419,7 +419,7 @@ fn preview_cannot_start_while_management_is_off_and_says_why() {
         preview_reason(&model),
         (
             false,
-            "Turn on Night Light management on the Schedule page to preview.".to_owned()
+            "Turn on Night light management on the Schedule page to preview.".to_owned()
         )
     );
 }
@@ -1193,7 +1193,7 @@ fn a_solar_failure_marks_sunrise_and_sunset_unavailable_and_the_status_line_name
     );
     assert_eq!(
         plain(&line).replace('\u{a0}', " "),
-        "Managing Night Light · 6500 K · Wake and Bedtime only"
+        "Managing Night light · 6500 K · Wake and Bedtime only"
     );
 }
 
@@ -1423,6 +1423,6 @@ fn suppression_and_management_off_explain_the_output() {
     model.management = ManagementState::Off;
     assert_eq!(
         sentence(&model, "2026-10-27T21:00:00Z"),
-        "Windows controls Night Light. Turn on management to follow this schedule."
+        "Windows controls Night light. Turn on management to follow this schedule."
     );
 }

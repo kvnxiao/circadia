@@ -5,7 +5,7 @@
 ## Use the target locale's official Windows terminology from the translation
 ## dictionary. Feature and settings names are not invariant English text.
 -windows = Windows
--night-light = Night Light
+-night-light = Night light
 -windows-settings = { -windows } Settings
 -quick-settings = Quick Settings
 -windows-apps = Apps
@@ -435,7 +435,7 @@ open-folder-name = { $name }: Open folder
 section-about = About
 about-version = { $version } | { $commit } | { $architecture }
 section-application = Application
-quit-description = Close Circadia and stop managing Night Light.
+quit-description = Close Circadia and stop managing Night light.
 section-updates = Update settings
 updates-automatic = Check for updates automatically
 updates-automatic-description = Check at startup and once a day. Updates are downloaded and installed manually.

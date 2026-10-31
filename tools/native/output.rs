@@ -42,7 +42,7 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     }
     crate::environment::report(&std::env::current_exe()?, "Output measurement")?;
     report(
-        "Method: original output deadlines, unclamped attempt-rate eligibility, prior native completion, and actual public-call start/end timestamps. Live Night Light; UI Automation does not move the cursor or send keys.",
+        "Method: original output deadlines, unclamped attempt-rate eligibility, prior native completion, and actual public-call start/end timestamps. Live Night light; UI Automation does not move the cursor or send keys.",
     );
     let directory = tempfile::Builder::new()
         .prefix("circadia-output-")
@@ -117,7 +117,7 @@ fn run_application(directory: &Path) -> io::Result<()> {
     )?;
     require(
         !native.read_state().map_err(io::Error::other)?.is_active(),
-        "exit left Night Light on",
+        "exit left Night light on",
     )?;
     let log = read_log(directory)?;
     let errors = error_records(&log);
@@ -130,7 +130,7 @@ fn run_application(directory: &Path) -> io::Result<()> {
     )?;
     require(passed, "output timing or endpoint acceptance failed")?;
     report(
-        "PASS: output timing, final temperatures, Preview restoration, and graceful cleanup; Night Light is off.",
+        "PASS: output timing, final temperatures, Preview restoration, and graceful cleanup; Night light is off.",
     );
     Ok(())
 }

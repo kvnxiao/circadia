@@ -236,9 +236,9 @@ pub struct InterfaceText {
     pub tray_quit: String,
     /// Text that every tray tooltip starts with.
     pub tooltip_prefix: String,
-    /// Status line while Night Light change observation fails.
+    /// Status line while Night light change observation fails.
     pub observation_failed: String,
-    /// Status line while Night Light output fails.
+    /// Status line while Night light output fails.
     pub output_unavailable: String,
     /// Title of the file picker that Browse opens.
     pub picker_title: String,

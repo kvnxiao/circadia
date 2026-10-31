@@ -95,7 +95,7 @@ impl Drop for Client {
             self.shared.1.notify_one();
         }
         // An in-flight read has a deadline and cannot modify application data.
-        // Process exit must not wait for the network before Night Light
+        // Process exit must not wait for the network before Night light
         // cleanup.
     }
 }

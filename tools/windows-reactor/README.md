@@ -25,7 +25,7 @@ just build
 just build-self-contained
 ```
 
-These commands use default debug builds and do not open probe windows or write Night Light. `check` runs formatting verification, Clippy, 18 graph/curve unit tests, rustdoc, the dependency advisory scan, and unused-dependency checks. Unit tests exercise pure geometry and editor state. The build stages runtime files without starting the application.
+These commands use default debug builds and do not open probe windows or write Night light. `check` runs formatting verification, Clippy, 18 graph/curve unit tests, rustdoc, the dependency advisory scan, and unused-dependency checks. Unit tests exercise pure geometry and editor state. The build stages runtime files without starting the application.
 
 ## Manual desktop checks
 
@@ -43,7 +43,7 @@ powershell.exe -NoProfile -File verify-native.ps1
 - `verify-lifecycle.ps1` starts tray-only, posts a synthetic activation callback, checks settings close/reopen and preserved application state, and invokes Exit. It does not exercise actual Shell input.
 - `verify-native.ps1` opens settings, inspects foreground identity, opens and cancels an owned executable dialog, selects the prefilled probe executable, edits the graph, and exits. Selection does not execute the chosen file. It writes a diagnostic log under `target/`.
 
-Each script terminates its own probe process in `finally` if necessary, closing that process's remaining windows. The scripts can change foreground focus; none changes Night Light or host time settings. For manual exploration, `just run-self-contained` starts tray-only; use the tray's Exit action when finished.
+Each script terminates its own probe process in `finally` if necessary, closing that process's remaining windows. The scripts can change foreground focus; none changes Night light or host time settings. For manual exploration, `just run-self-contained` starts tray-only; use the tray's Exit action when finished.
 
 ## Results and limits
 

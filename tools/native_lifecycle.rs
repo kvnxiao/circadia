@@ -1,4 +1,4 @@
-//! Exercise the complete application with live Night Light and isolated
+//! Exercise the complete application with live Night light and isolated
 //! settings.
 
 #[cfg(windows)]

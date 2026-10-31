@@ -7,43 +7,43 @@ depends-on: [schedule.md, suppression.md, native-access.md]
 
 Read [SPEC.md](SPEC.md), [schedule calculation](schedule.md), [suppression](suppression.md), and [native access](native-access.md) before this area.
 
-## Night Light management
+## Night light management
 
-### REQ-manage-night-light — Opt in to managing Night Light
+### REQ-manage-night-light — Opt in to managing Night light
 
-Circadia controls Night Light only while its saved management setting is on. Turning the setting on requires the user to accept a consent prompt in settings that explains what management does; [REQ-takeover-consent](interface.md#req-takeover-consent--ask-before-managing-night-light) defines the prompt. Accepting turns the setting on and saves it, and control then starts under REQ-startup-temperature. Declining leaves the setting off. Startup with the setting off does not begin Night Light access.
+Circadia controls Night light only while its saved management setting is on. Turning the setting on requires the user to accept a consent prompt in settings that explains what management does; [REQ-takeover-consent](interface.md#req-takeover-consent--ask-before-managing-night-light) defines the prompt. Accepting turns the setting on and saves it, and control then starts under REQ-startup-temperature. Declining leaves the setting off. Startup with the setting off does not begin Night light access.
 
-Turning the setting off ends control while the process, tray icon, settings, and editing remain available. Circadia stops Preview, ends manual suppression, and stops applying automatic suppression. If Night Light access has begun, it then fades toward 6500 K with an ordinary fade and makes the independent preview-cleanup and off attempts of REQ-exit-night-light-off. Afterwards it releases observation and does not read or write Night Light until the setting is turned on again. It does not restore the Windows Night Light schedule.
+Turning the setting off ends control while the process, tray icon, settings, and editing remain available. Circadia stops Preview, ends manual suppression, and stops applying automatic suppression. If Night light access has begun, it then fades toward 6500 K with an ordinary fade and makes the independent preview-cleanup and off attempts of REQ-exit-night-light-off. Afterwards it releases observation and does not read or write Night light until the setting is turned on again. It does not restore the Windows Night light schedule.
 
 While the setting is off, Preview, starting manual suppression, and Retry of native access are unavailable. Settings edits, tray toggles, and the recent-app history remain available.
 
-**Intent:** Take over Night Light only with the user's agreement, and hand it back on request.
+**Intent:** Take over Night light only with the user's agreement, and hand it back on request.
 
 **Failure behavior:** If a fade step fails, cleanup and off still run. A failed cleanup or off attempt is reported in settings and is not retried automatically; the setting stays off. If time-zone evaluation fails without a last scheduled temperature when the setting turns on, control waits under REQ-schedule-evaluation-failure.
 
 **Scenarios:**
 
-- Management is off at 22:00 with Night Light off, and the schedule's 22:00 target is 3400 K; the user turns it on and accepts the prompt: Circadia saves the setting, prepares 6500 K, turns Night Light on, and fades to the 3400 K target.
-- The user declines the consent prompt: the setting stays off and Circadia does not access Night Light.
-- Management is on at 2400 K and the user turns it off: output fades to 6500 K, native preview is cleared, Night Light turns off, and the Windows schedule stays off.
-- After management is off, the user turns Night Light on in Windows Settings: Circadia does not change it.
+- Management is off at 22:00 with Night light off, and the schedule's 22:00 target is 3400 K; the user turns it on and accepts the prompt: Circadia saves the setting, prepares 6500 K, turns Night light on, and fades to the 3400 K target.
+- The user declines the consent prompt: the setting stays off and Circadia does not access Night light.
+- Management is on at 2400 K and the user turns it off: output fades to 6500 K, native preview is cleared, Night light turns off, and the Windows schedule stays off.
+- After management is off, the user turns Night light on in Windows Settings: Circadia does not change it.
 - Preview is playing when the user turns management off: playback stops and the fade starts from the last Preview value.
 - Manual suppression has 20 minutes left when management turns off: the interval ends, and turning management on later does not restore it.
-- Circadia starts with management off: it does not register watchers or read Night Light, and the tray and settings work normally.
+- Circadia starts with management off: it does not register watchers or read Night light, and the tray and settings work normally.
 
 ## Startup and temperature changes
 
 ### REQ-startup-temperature — Apply the current temperature at startup
 
-Startup obtains the accepted configuration (the configuration file, a restored backup, or bundled defaults) and evaluates its current schedule before beginning Night Light access. Without an accepted configuration, or with management off, Night Light access does not begin. Solar failure permits the Wake/Bedtime-only fallback; time-zone failure follows REQ-schedule-evaluation-failure. Current focus does not defer calculation. Once prerequisites pass, automatic suppression initializes from current focus without the focus delay.
+Startup obtains the accepted configuration (the configuration file, a restored backup, or bundled defaults) and evaluates its current schedule before beginning Night light access. Without an accepted configuration, or with management off, Night light access does not begin. Solar failure permits the Wake/Bedtime-only fallback; time-zone failure follows REQ-schedule-evaluation-failure. Current focus does not defer calculation. Once prerequisites pass, automatic suppression initializes from current focus without the focus delay.
 
-Night Light access begins immediately before watcher registration and initial reads. Both watchers are attempted before those reads. Registration failure follows native recovery without preventing otherwise usable control. This milestone remains true even if later operations fail.
+Night light access begins immediately before watcher registration and initial reads. Both watchers are attempted before those reads. Registration failure follows native recovery without preventing otherwise usable control. This milestone remains true even if later operations fail.
 
 Successful fresh reads select the startup origin:
 
-- If Night Light is off, inactive preparation writes 6500 K with the native preview flag off, then Circadia requests on and fades toward the current target.
-- If Night Light is on with a valid stored temperature, the fade starts from that temperature.
-- If Night Light is on but the decodable settings record has an absent or unsupported temperature, the origin is 6500 K.
+- If Night light is off, inactive preparation writes 6500 K with the native preview flag off, then Circadia requests on and fades toward the current target.
+- If Night light is on with a valid stored temperature, the fade starts from that temperature.
+- If Night light is on but the decodable settings record has an absent or unsupported temperature, the origin is 6500 K.
 
 The startup fade is an ordinary fade: it lasts the configured fade duration from its actual start and reaches the target at completion. Missing or undecodable records remain read failures. Equal origin and target require application but no artificial delay. A failed inactive preparation prevents activation. A Preview request during startup replaces it with Preview's immediate target after the same access checks pass.
 
@@ -56,14 +56,14 @@ flowchart TD
   C{"Accepted configuration available?"} -->|"No: configuration error"| Wait["Report error; wait for reset to defaults"]
   C -->|"Yes: file, restored backup, or bundled defaults"| M{"Management on?"}
   Wait -->|"Reset to defaults"| M
-  M -->|No| Idle["No Night Light access; wait for management on"]
+  M -->|No| Idle["No Night light access; wait for management on"]
   Idle -->|"User turns management on"| S["Evaluate accepted configuration"]
   M -->|Yes| S
   S --> T{"Schedule evaluable?"}
   T -->|No| Error["Keep settings available; wait for evaluation to succeed"]
   Error -->|"Retry or recompute event"| S
   T -->|Yes| R["Initialize focus; register watchers; read native records"]
-  R --> A{"Night Light active?"}
+  R --> A{"Night light active?"}
   A -->|No| P["Prepare 6500 K and clear preview; then enable"]
   P --> F["Ordinary fade to current target"]
   A -->|Yes| F
@@ -71,14 +71,14 @@ flowchart TD
 
 **Scenarios:**
 
-- Management is on, the configuration loads, and Night Light is off at night: 6500 K is prepared before activation, and the startup fade approaches the current scheduled value.
+- Management is on, the configuration loads, and Night light is off at night: 6500 K is prepared before activation, and the startup fade approaches the current scheduled value.
 - Inactive preparation fails: the attempt does not request on.
-- Night Light is active at 2200 K and the target is 6500 K: startup fades over the configured fade duration, 250 ms by default.
+- Night light is active at 2200 K and the target is 6500 K: startup fades over the configured fade duration, 250 ms by default.
 - Origin already equals the target: startup applies it without waiting for the fade duration solely to mark completion.
 - Initial reads fail and retry reads active 3000 K: the fresh origin is 3000 K, not a cached default.
 - A listed game is focused with a 5000 ms focus delay: startup initializes suppression immediately after prerequisites pass.
 - A suppression fade replaces startup and succeeds: later native errors use ordinary recovery.
-- Time-zone acquisition fails before Night Light access begins: settings and Retry remain available, and Quit skips native cleanup.
+- Time-zone acquisition fails before Night light access begins: settings and Retry remain available, and Quit skips native cleanup.
 
 ### REQ-transition-fade — Fade between ordinary target changes
 
@@ -102,7 +102,7 @@ A final matching successful output does not require duplicate temperature storag
 - Duration is 100 or 10,000 ms: it is valid. Typing 50 gives 100 ms, 10,001 gives 10,000 ms, and 250.4 rounds to 250 ms when the field commits.
 - External interference occurs during a constant segment: correction fades from its fresh origin; further interference does not restart the deadline.
 - Preview ends while suppression is inactive: output returns immediately to the current schedule.
-- Quit at 2400 K with the default duration: output fades to 6500 K over 250 ms before Night Light turns off.
+- Quit at 2400 K with the default duration: output fades to 6500 K over 250 ms before Night light turns off.
 - Recovery restores only a watcher while output continues: the existing fade retains its original deadline.
 
 ### REQ-temperature-cadence — Request only due temperature changes
@@ -258,7 +258,7 @@ The first new native output after resume satisfies these conditions:
 - Manual suppression reflects expiry, and automatic suppression reflects current foreground identity. A pending focus delay from before sleep is discarded. Once automatic suppression has been initialized, a changed matching state starts a fresh full delay. Startup and recovery without a last scheduled temperature retain immediate focus initialization.
 - The configured output rate remains in effect. The first native attempt reads settings and state afresh, even when cached owned values already match.
 
-The curve advances through the entire suspended interval. Resume does not replay missed temperatures, focus changes, or retries, and does not extend a scheduled transition. After the first complete target application succeeds, a changed target uses the ordinary fade from the last written temperature toward the curve at fade completion. A resume during incomplete startup retains startup rules. Fresh reads that find Night Light off use inactive preparation before activation.
+The curve advances through the entire suspended interval. Resume does not replay missed temperatures, focus changes, or retries, and does not extend a scheduled transition. After the first complete target application succeeds, a changed target uses the ordinary fade from the last written temperature toward the curve at fade completion. A resume during incomplete startup retains startup rules. Fresh reads that find Night light off use inactive preparation before activation.
 
 Resume requires an application refresh even when the intended and stored temperatures match. An application refresh or short transition performed by the resumed fade, activation, or recovery satisfies this obligation; it does not require an additional identical operation. If the target is unchanged and no fade is needed, Circadia requests one application refresh directly. Later output then follows REQ-temperature-cadence. Repeated notifications for the same resume do not repeat this obligation or restart a fade solely because another notification arrived. Changed inputs still follow their own recomputation rules.
 
@@ -286,13 +286,13 @@ Resume requires an application refresh even when the intended and stored tempera
 
 ## Exit
 
-### REQ-exit-night-light-off — Clear native preview and turn Night Light off on graceful exit
+### REQ-exit-night-light-off — Clear native preview and turn Night light off on graceful exit
 
-Once Night Light access has begun, Quit fades toward 6500 K with an ordinary fade, then initiates best-effort native-preview cleanup followed by an independent off attempt. Confirmed Windows session end initiates the same cleanup and off attempt immediately, without a fade. Confirmed session end includes sign-out, shutdown, restart, and closure for servicing. Closing settings keeps control running. Suspension and session lock do not initiate exit cleanup. Once management is off and its turn-off sequence has finished, exit does not access Night Light.
+Once Night light access has begun, Quit fades toward 6500 K with an ordinary fade, then initiates best-effort native-preview cleanup followed by an independent off attempt. Confirmed Windows session end initiates the same cleanup and off attempt immediately, without a fade. Confirmed session end includes sign-out, shutdown, restart, and closure for servicing. Closing settings keeps control running. Suspension and session lock do not initiate exit cleanup. Once management is off and its turn-off sequence has finished, exit does not access Night light.
 
 Exit writes any pending configuration change, discards input that is still invalid, and cancels future control, focus delays, manual suppression, Preview, and recovery. An executing synchronous library call finishes before the exit fade or cleanup begins. Its completion does not authorize another queued output step. The exit fade starts from the last written temperature, including a Preview value. When a fade step fails, or native access has a pending failure, exit skips the rest of the fade and proceeds to cleanup.
 
-The cleanup attempt uses a fresh settings-record read to end native preview. Whether it succeeds or fails, the off attempt uses its own fresh state-record read and requests off if needed. Neither depends on both records being readable. Exit does not restore the native schedule. Each public cleanup/off call is attempted once; failure is recorded and exit continues without an added retry loop or grace period. If Night Light access never began, exit skips the fade and both attempts.
+The cleanup attempt uses a fresh settings-record read to end native preview. Whether it succeeds or fails, the off attempt uses its own fresh state-record read and requests off if needed. Neither depends on both records being readable. Exit does not restore the native schedule. Each public cleanup/off call is attempted once; failure is recorded and exit continues without an added retry loop or grace period. If Night light access never began, exit skips the fade and both attempts.
 
 Quit while management is turning off joins that sequence instead of starting another: its fade keeps its original deadline, the cleanup and off attempts each run at most once across the sequence and exit, and the process then exits. Confirmed session end during the sequence skips the rest of its fade and makes whichever of the cleanup and off attempts have not yet started.
 
@@ -300,7 +300,7 @@ Windows' initial session-end query returns without waiting for native work, clea
 
 **Scenarios:**
 
-- Night Light is active at 2200 K: Quit fades to 6500 K over the configured duration, clears native preview, and requests off.
+- Night light is active at 2200 K: Quit fades to 6500 K over the configured duration, clears native preview, and requests off.
 - Confirmed shutdown occurs at 2200 K: cleanup and off run immediately without a fade.
 - Quit occurs 50 ms after a valid settings edit: the edit is in the configuration file before the process ends, and input that is still invalid is not saved.
 - Quit occurs during Preview at 3000 K: playback stops and the exit fade starts from 3000 K.
@@ -308,16 +308,16 @@ Windows' initial session-end query returns without waiting for native work, clea
 - The settings record is unreadable but the state record is readable: cleanup reports failure, and the independent off attempt still runs.
 - The state record is unreadable but the settings record is readable: preview is cleared even though off fails.
 - Either attempt fails: its error is recorded and exit continues without retrying that public call.
-- Night Light is already off: the off operation does not need another state write, but preview cleanup is still attempted.
-- Night Light access began but normal reads always failed: exit skips the fade, and both independently guarded exit attempts still run.
+- Night light is already off: the off operation does not need another state write, but preview cleanup is still attempted.
+- Night light access began but normal reads always failed: exit skips the fade, and both independently guarded exit attempts still run.
 - Windows queries session end and then cancels it: cleanup has not started and control continues.
-- A configuration error prevented Night Light access, or management is off and its turn-off sequence has finished: Quit does not access Night Light.
+- A configuration error prevented Night light access, or management is off and its turn-off sequence has finished: Quit does not access Night light.
 - Quit occurs 2 seconds into a 5-second fade of turning management off: output reaches 6500 K at the fade's original 5-second deadline, preview cleanup and the off request each run once, and the process exits.
 - Confirmed shutdown occurs during the fade of turning management off: the fade stops, and preview cleanup and the off request each run once.
 
-### REQ-panic-cleanup — Turn Night Light off after an internal error
+### REQ-panic-cleanup — Turn Night light off after an internal error
 
-When an unrecoverable internal error (a Rust panic) outside the controller is about to end Circadia while management is on or its turn-off sequence is running, and after Night Light access has begun, the controller makes the cleanup and off attempts of REQ-exit-night-light-off without a fade, and the process waits at most 2 seconds for them before it ends. [REQ-crash-records](diagnostics.md#req-crash-records--record-crashes) records the error.
+When an unrecoverable internal error (a Rust panic) outside the controller is about to end Circadia while management is on or its turn-off sequence is running, and after Night light access has begun, the controller makes the cleanup and off attempts of REQ-exit-night-light-off without a fade, and the process waits at most 2 seconds for them before it ends. [REQ-crash-records](diagnostics.md#req-crash-records--record-crashes) records the error.
 
 **Intent:** Leave the screen untinted when an internal failure ends the process.
 
@@ -325,8 +325,8 @@ When an unrecoverable internal error (a Rust panic) outside the controller is ab
 
 **Scenarios:**
 
-- An internal error in the settings window ends the process while Night Light is at 2400 K: preview cleanup and the off request complete before the process ends.
+- An internal error in the settings window ends the process while Night light is at 2400 K: preview cleanup and the off request complete before the process ends.
 - The controller is executing a 120 ms library call when the error occurs: cleanup runs after the call returns, within the 2-second limit.
 - An internal error occurs during the fade of turning management off: preview cleanup and the off request complete within the 2-second limit before the process ends.
-- Management is off and its turn-off sequence has finished when the error occurs: Circadia does not access Night Light.
-- The error occurs in the controller: the process ends without waiting for cleanup, and Night Light can remain at its last temperature.
+- Management is off and its turn-off sequence has finished when the error occurs: Circadia does not access Night light.
+- The error occurs in the controller: the process ends without waiting for cleanup, and Night light can remain at its last temperature.

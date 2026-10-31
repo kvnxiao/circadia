@@ -312,7 +312,7 @@ pub struct ConfigInput {
     pub start_minimized: bool,
     /// Whether startup and daily checks look for application updates.
     pub check_updates_automatically: bool,
-    /// Whether Circadia controls Night Light; the user turns it on after
+    /// Whether Circadia controls Night light; the user turns it on after
     /// accepting the consent prompt.
     pub manage_night_light: bool,
     /// `windows` to follow the Windows display language, or a shipped
@@ -426,7 +426,7 @@ pub enum Field {
     StartMinimized,
     /// Automatic application update checks.
     CheckUpdatesAutomatically,
-    /// Night Light management.
+    /// Night light management.
     ManageNightLight,
     /// The interface language.
     InterfaceLanguage,

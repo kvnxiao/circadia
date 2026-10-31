@@ -75,7 +75,7 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     result?;
     require(
         !native.read_state().map_err(io::Error::other)?.is_active(),
-        "exit left Night Light on",
+        "exit left Night light on",
     )?;
     require(
         !native
@@ -204,7 +204,7 @@ fn primary_shortcut(
     })();
     if let Err(error) = &cleanup {
         report(&format!(
-            "Shortcut cleanup failed: {error}; terminating the owned child does not perform Night Light cleanup"
+            "Shortcut cleanup failed: {error}; terminating the owned child does not perform Night light cleanup"
         ));
         if let Err(error) = handle.TerminateProcess(1) {
             report(&format!(

@@ -129,10 +129,10 @@ impl Check<'_> {
         )?;
         require(
             !saved(self.directory)?.manage_night_light,
-            "path checks enabled Night Light management",
+            "path checks enabled Night light management",
         )?;
         report(
-            "PASS: same-name installations retain action identity; global and restricted rules coexist; exclusions, Cancel, Browse replacement and moved-file matching pass; Night Light was not managed",
+            "PASS: same-name installations retain action identity; global and restricted rules coexist; exclusions, Cancel, Browse replacement and moved-file matching pass; Night light was not managed",
         );
         Ok(())
     }

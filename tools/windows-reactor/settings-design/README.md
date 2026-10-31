@@ -1,6 +1,6 @@
 # Settings design rendering probe
 
-Circadia is a Windows tray application that sets Windows Night Light's color temperature on a daily schedule. This probe renders every page and dialog of Circadia's redesigned settings window, and its tray menu, with fixture data and the controls selected in [Settings design support](../../../docs/research/settings-design-support.md). It answers the questions that reading the library source left open: whether Accept and Cancel can close the time picker's flyout, how three ways of drawing the schedule graph compare, how the title bar and phase art render, and how Project Fluent messages, Windows regional formats, and WinUI's built-in text behave in a running window. The [interface spec](../../../docs/specs/interface.md) defines application behavior; this probe's fixture state, such as a 22:15 clock, does not.
+Circadia is a Windows tray application that sets Windows Night light's color temperature on a daily schedule. This probe renders every page and dialog of Circadia's redesigned settings window, and its tray menu, with fixture data and the controls selected in [Settings design support](../../../docs/research/settings-design-support.md). It answers the questions that reading the library source left open: whether Accept and Cancel can close the time picker's flyout, how three ways of drawing the schedule graph compare, how the title bar and phase art render, and how Project Fluent messages, Windows regional formats, and WinUI's built-in text behave in a running window. The [interface spec](../../../docs/specs/interface.md) defines application behavior; this probe's fixture state, such as a 22:15 clock, does not.
 
 This README uses these terms:
 
@@ -9,7 +9,7 @@ This README uses these terms:
 - **Schedule graph:** a plot of the scheduled temperature over one day, with a dashed vertical line at each of the Wake, sunrise, sunset, and Bedtime events, a chip (a small round badge with the event's glyph) on each line, and a line and dot at the current time.
 - **Phase art:** the round picture of the current part of the day (morning, daytime, evening, or bedtime) in the status card and the navigation pane. A badge on it marks suppression, and a progress ring around it shows progress through a scheduled transition (a ramp).
 - **Suppression:** a temporary 6500 K override, started manually for one hour or automatically while an app on the user's suppression list is in the foreground. An excluded app does not start automatic suppression.
-- **Preview:** a user-started playback of the schedule through Night Light, compressed into a few seconds.
+- **Preview:** a user-started playback of the schedule through Night light, compressed into a few seconds.
 - **Time picker:** Circadia's replacement for WinUI's `TimePicker`: a button divided into hour, minute, and, in regions with a 12-hour clock, AM/PM segments. It opens a flyout with one list per segment and Accept and Cancel buttons.
 - **Design export:** the HTML file of design mockups that preceded [`docs/design/`](../../../docs/design/README.md); it is not stored in the repository.
 
@@ -39,8 +39,8 @@ Command-line options select the fixture state:
 | `--close` | Time-picker closing strategy for the Schedule page: `detach`, `replace`, `replace-focus`, `focus`, `disable`, `nothing` | `detach` |
 | `--order` | `centered` rotates the hour, minute, and AM/PM lists so that the current value is the fourth visible row; `natural` keeps 0–23 order | `centered` |
 | `--page` | `schedule`, `apps`, `transitions`, `general`, `lab` | `schedule` |
-| `--dialog` | Opens a dialog: `consent` (the confirmation before Circadia takes over Night Light) or `add` (adding apps to the suppression list) | None |
-| `--status` | The control state shown: `managing` (following the schedule), `preview` (Preview playing), `manual` and `automatic` (the two suppression sources), `not-managing` (Windows controls Night Light) | `managing` |
+| `--dialog` | Opens a dialog: `consent` (the confirmation before Circadia takes over Night light) or `add` (adding apps to the suppression list) | None |
+| `--status` | The control state shown: `managing` (following the schedule), `preview` (Preview playing), `manual` and `automatic` (the two suppression sources), `not-managing` (Windows controls Night light) | `managing` |
 | `--now` | `HH:MM` fixture clock | `22:15` |
 | `--banners`, `--invalid` | Show the error banners at the top of every page; start with the Morning and evening level at an invalid 1900 K | Off |
 | `--glyph` | How the badge glyph's `currentColor` is colored: `substituted` (replaced before loading) or `raw` (left to the SVG renderer) | `substituted` |
@@ -65,7 +65,7 @@ These commands use default debug builds and do not open windows. The first build
 
 ## Desktop verification
 
-Run this script only when nobody is using the desktop, after the person responsible for it agrees. It launches the probe about 40 times, takes focus, sends keystrokes into probe windows, captures the screen, and opens the tray menu with a synthetic notification-area message. It deletes the previous `<exe>.log` when it starts. It does not move the cursor, change Night Light, or change Windows theme, language, regional, or display settings. Avoid desktop input while it runs. From this directory:
+Run this script only when nobody is using the desktop, after the person responsible for it agrees. It launches the probe about 40 times, takes focus, sends keystrokes into probe windows, captures the screen, and opens the tray menu with a synthetic notification-area message. It deletes the previous `<exe>.log` when it starts. It does not move the cursor, change Night light, or change Windows theme, language, regional, or display settings. Avoid desktop input while it runs. From this directory:
 
 ```bash
 just build
@@ -101,7 +101,7 @@ After `just build-self-contained`, run the desktop check from this directory:
 powershell.exe -NoProfile -File verify-design.ps1 -Part motion -Results "$(cygpath -w "$PWD/results/motion")"
 ```
 
-The check focuses the probe window, invokes its controls, and captures screen pixels. It records dot positions, process CPU and resource samples, and animation completion notifications in `design-results.json` and `probe.log`. It closes the window afterward and does not change Night Light or Windows settings. Run it only while nobody uses the desktop. Inspect any `motion-error` in the JSON even when PowerShell exits successfully.
+The check focuses the probe window, invokes its controls, and captures screen pixels. It records dot positions, process CPU and resource samples, and animation completion notifications in `design-results.json` and `probe.log`. It closes the window afterward and does not change Night light or Windows settings. Run it only while nobody uses the desktop. Inspect any `motion-error` in the JSON even when PowerShell exits successfully.
 
 On 2026-10-29, `results/motion-visible/` recorded forward and reverse motion, a bend, disappearance after removal, and a stable finite endpoint. Replacement and removal completed their tracked animations at 3.929 and 3.952 seconds from each animation's setup timestamp, before its configured 20-second endpoint. The four-second animation's completion notification arrived at 4.172 seconds from setup. Completed batch subscriptions were released, and the window closed automatically.
 
@@ -119,7 +119,7 @@ After `just build-self-contained`, run from this directory while nobody uses the
 powershell.exe -NoProfile -File verify-design.ps1 -Part progress -Results "$(cygpath -w "$PWD/results/progress")"
 ```
 
-The script captures intermediate pixels, checks native range values, verifies finite completion and removal, and closes the probe. It does not change Night Light or Windows settings. Inspect the report's `progress.verified` field and any `progress-error` even when PowerShell exits successfully.
+The script captures intermediate pixels, checks native range values, verifies finite completion and removal, and closes the probe. It does not change Night light or Windows settings. Inspect the report's `progress.verified` field and any `progress-error` even when PowerShell exits successfully.
 
 **Measured on 2026-10-29 at `5cfe2c9`:** `results/progress-first/` passed on Windows 11 build 26300.9711 at 100% scaling, using a debug build with bundled runtime 2.6.4. Captures at approximately 0.50, 1.53, 3.04, and 6.55 seconds recorded:
 

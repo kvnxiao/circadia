@@ -117,7 +117,7 @@ impl GraphMeasurement {
     pub fn fail_solar(&self, failed: bool) {
         self.0.solar_failure.store(failed, Ordering::Relaxed);
     }
-    /// Run the complete desktop application using simulated Night Light.
+    /// Run the complete desktop application using simulated Night light.
     ///
     /// # Errors
     /// Report duplicate measurement initialization or desktop failures.
@@ -249,7 +249,7 @@ impl GraphMeasurement {
         Ok(gate.held && gate.entered)
     }
 
-    /// Replace the injected native failures without changing live Night Light.
+    /// Replace the injected native failures without changing live Night light.
     ///
     /// # Errors
     /// Report poisoned simulation synchronization.

@@ -13,10 +13,10 @@ nav-transitions = Transitions
 nav-general = General
 nav-invalid = { $page }, has an invalid value
 
-status-managing = Managing Night Light · { $kelvin } K
+status-managing = Managing Night light · { $kelvin } K
 status-previewing = Previewing · { $kelvin } K
 status-suppressed = Suppressed · { $kelvin } K
-status-not-managing = Not managing Night Light
+status-not-managing = Not managing Night light
 
 phase-morning = Morning
 phase-daytime = Daytime
@@ -42,8 +42,8 @@ phase-art-shifting =
 phase-art-manual = Suppressed for 1 hour
 phase-art-automatic = Suppressed while an app is focused
 
-manage-title = Let Circadia manage Night Light
-manage-description = While on, Circadia fully controls Windows Night Light and reverts changes made in Windows Settings or Quick Settings.
+manage-title = Let Circadia manage Night light
+manage-description = While on, Circadia fully controls Windows Night light and reverts changes made in Windows Settings or Quick Settings.
 
 output-off = Off
 status-next = Next: { $kelvin } K by { $time } { $event ->
@@ -64,7 +64,7 @@ status-reaching = Reaches { $kelvin } K by { $time } ({ $event ->
     }).
 status-manual = Showing 6500 K until { $time }. Your schedule is at { $kelvin } K.
 status-automatic = Showing 6500 K while { $app } is focused. Your schedule is at { $kelvin } K.
-status-windows = Windows controls Night Light. Turn on management to follow this schedule.
+status-windows = Windows controls Night light. Turn on management to follow this schedule.
 suppress-hour = Suppress for 1 hour
 suppress-stop = Stop suppressing
 
@@ -198,9 +198,9 @@ sign-in-title = Start Circadia when I sign in to Windows
 sign-in-description = Runs in the notification area. No administrator rights needed.
 minimized-title = Start minimized
 minimized-description = Open to the notification area instead of this window.
-section-night-light = Windows Night Light
-night-light-title = How Circadia uses Night Light
-night-light-description = While managing, Circadia keeps Night Light on, turns the Windows Night Light schedule off, and undoes outside changes. Turning management off or quitting fades to 6500 K, turns Night Light off, and hands control back to Windows.
+section-night-light = Windows Night light
+night-light-title = How Circadia uses Night light
+night-light-description = While managing, Circadia keeps Night light on, turns the Windows Night light schedule off, and undoes outside changes. Turning management off or quitting fades to 6500 K, turns Night light off, and hands control back to Windows.
 pill-managing = Managing
 pill-not-managing = Not managing
 section-troubleshooting = Troubleshooting
@@ -211,7 +211,7 @@ logs-description = Log files for troubleshooting. They stay on this PC and are n
 section-about = About
 version = Version { $version }
 
-banner-output-title = Night Light output is unavailable
+banner-output-title = Night light output is unavailable
 banner-output-message = Circadia couldn't set the screen color. It keeps trying and shows your schedule here. Error { $code }
 retry = Retry
 banner-crash-title = Circadia closed unexpectedly
@@ -226,12 +226,12 @@ banner-invalid-title =
 banner-go-to = Go to { $page }
 banner-invalid-note = Circadia keeps using your last valid settings until this is fixed. Everything else is saved automatically.
 
-consent-title = Let Circadia manage Night Light?
-consent-body = While Circadia is running, it fully controls Windows Night Light:
-consent-schedule = Night Light stays on and follows Circadia's schedule.
-consent-native = The Windows Night Light schedule is turned off.
+consent-title = Let Circadia manage Night light?
+consent-body = While Circadia is running, it fully controls Windows Night light:
+consent-schedule = Night light stays on and follows Circadia's schedule.
+consent-native = The Windows Night light schedule is turned off.
 consent-undo = Changes you make in Windows Settings or Quick Settings are undone.
-consent-closing = To give control back, turn this off or quit Circadia from the notification area. Quitting fades out and turns Night Light off.
+consent-closing = To give control back, turn this off or quit Circadia from the notification area. Quitting fades out and turns Night light off.
 consent-turn-on = Turn on
 
 add-title = Add apps to suppress

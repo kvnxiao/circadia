@@ -71,7 +71,7 @@ The App suppression page has:
 
 The Transitions page has the scheduled transition duration, labeled Transition length, with a slider and number field and a worked example of a transition that reaches the evening temperature at sunset; Fade duration, the ordinary fade; Preview length; and Maximum update rate, the output-rate ceiling.
 
-The Settings page has the interface language of REQ-interface-language; Start at sign-in and Start minimized; an explanation of how Circadia manages Night Light with the current management state; Open folder commands for the configuration file and the log; and a Quit Circadia card.
+The Settings page has the interface language of REQ-interface-language; Start at sign-in and Start minimized; an explanation of how Circadia manages Night light with the current management state; Open folder commands for the configuration file and the log; and a Quit Circadia card.
 
 The About page shows Circadia's icon, name, version, source commit, architecture, and Check for updates. Its Update settings section has only Check for updates automatically. Its Feedback section has only Report a bug. Other links opens the GitHub repository, contribution guidelines, and license in the browser. About does not have a Quit command, feature-request link, Discussions link, or FAQ link. Update behavior follows REQ-application-updates.
 
@@ -92,7 +92,7 @@ The About page shows Circadia's icon, name, version, source commit, architecture
 
 The status section shows a phase name and phase art for the first of these states that applies:
 
-- Circadia is not managing Night Light: Not managing, with the not-managing art.
+- Circadia is not managing Night light: Not managing, with the not-managing art.
 - Preview is playing: Preview, with the art for the playback instant. Suppression does not change the name or art while Preview plays.
 - Manual suppression: Suppressed, with the daytime art and a timer badge.
 - Automatic suppression: Suppressed, with the daytime art and an app-window badge.
@@ -103,8 +103,8 @@ The phase art has light, dark, and contrast-theme variants and follows theme cha
 
 | Condition | Status |
 | :-- | :-- |
-| A configuration error applies | Settings could not be read; Night Light is not managed. |
-| Management is off | Not managing Night Light. |
+| A configuration error applies | Settings could not be read; Night light is not managed. |
+| Management is off | Not managing Night light. |
 | Time-zone evaluation fails without a last scheduled temperature | Control is unavailable; starting suppression is disabled. |
 | A native read or write failure prevents output | Output is unavailable; active suppression is shown as requested, not applied. |
 | Time-zone evaluation fails with a last scheduled temperature | The schedule is unavailable and its last scheduled temperature is used. |
@@ -156,7 +156,7 @@ Settings displays the curve generated from the accepted configuration, with a ma
 
 Each daily display boundary is four local clock hours before the configured Wake clock, independently of any adjustment to that date's Wake occurrence. A nonexistent boundary advances to the first valid local instant after the gap; a repeated boundary uses its first occurrence. The view spans the most recent boundary through the next boundary. On an ordinary day it spans 24 hours and places Wake one-sixth of the way across; its elapsed duration can vary on clock-change days. Display boundaries do not change target-occurrence conversion.
 
-Vertical gridlines mark the local clock times inside the view that are multiples of three hours, each labeled with its time in the regional format. The graph has no temperature axis, point labels, or calendar-date selector; temperature and timing controls outside it provide precise editing. Illustrative colors under the curve or beside a temperature, where shown, follow the scheduled or configured temperature and do not match Night Light output. Each Wake, Sunrise, Sunset, and Bedtime target in view has a vertical event line and a marker that identifies its event. A line and dot mark the current instant, or the playback instant during Preview.
+Vertical gridlines mark the local clock times inside the view that are multiples of three hours, each labeled with its time in the regional format. The graph has no temperature axis, point labels, or calendar-date selector; temperature and timing controls outside it provide precise editing. Illustrative colors under the curve or beside a temperature, where shown, follow the scheduled or configured temperature and do not match Night light output. Each Wake, Sunrise, Sunset, and Bedtime target in view has a vertical event line and a marker that identifies its event. A line and dot mark the current instant, or the playback instant during Preview.
 
 On the declared reference machine, a valid schedule-setting edit updates the graph within 100 ms of the input event when Windows time-zone evaluation succeeds. Solar calculation failure displays the Wake/Bedtime-only fallback with its error; that rendering counts as a successful update and follows the same latency bound. Invalid input or failed time-zone evaluation preserves the last valid graph and displays the error; preserving an old graph does not count as a successful update. The measurement records the machine, Windows build, build profile, and input cases, including solar-enabled edits. Graph calculation does not block UI message handling.
 
@@ -185,20 +185,20 @@ Wake and Bedtime each use one control that shows the time as separate hour and m
 - The user changes the lists and chooses Cancel: Bedtime is unchanged.
 - The user accepts a Wake time equal to Bedtime: the Wake control shows the error, and the accepted Wake is unchanged.
 
-### REQ-takeover-consent — Ask before managing Night Light
+### REQ-takeover-consent — Ask before managing Night light
 
-Turning the management setting on opens a consent prompt titled "Let Circadia manage Night Light?". It states that while Circadia runs, Night Light stays on and follows Circadia's schedule, the Windows Night Light schedule is turned off, and changes made in Windows Settings or Quick Settings are undone. It then states how to give control back: turn the setting off, or quit Circadia, which fades out and turns Night Light off. Its commands are Turn on, the default, and Cancel. Turn on accepts under REQ-manage-night-light; Cancel, Escape, or closing the prompt leaves the setting off. The prompt appears each time the user turns the setting on.
+Turning the management setting on opens a consent prompt titled "Let Circadia manage Night light?". It states that while Circadia runs, Night light stays on and follows Circadia's schedule, the Windows Night light schedule is turned off, and changes made in Windows Settings or Quick Settings are undone. It then states how to give control back: turn the setting off, or quit Circadia, which fades out and turns Night light off. Its commands are Turn on, the default, and Cancel. Turn on accepts under REQ-manage-night-light; Cancel, Escape, or closing the prompt leaves the setting off. The prompt appears each time the user turns the setting on.
 
 **Scenarios:**
 
 - The user turns management on: the prompt opens, and the setting stays off until the user chooses Turn on.
-- The user chooses Cancel: the setting stays off, and Circadia does not access Night Light.
+- The user chooses Cancel: the setting stays off, and Circadia does not access Night light.
 - The user chooses Turn on: the setting turns on, and control starts.
 - The user turns management off and on again later: the prompt appears again.
 
 ### REQ-management-change-lock — Lock the management setting during a change
 
-While management turns on or off, the management setting is unavailable in settings, and settings shows which change is in progress. Turning on lasts from accepting the consent prompt, or from a launch with management on, until startup completes under [REQ-startup-temperature](control.md#req-startup-temperature--apply-the-current-temperature-at-startup), or until control instead waits under native recovery or [REQ-schedule-evaluation-failure](control.md#req-schedule-evaluation-failure--retain-the-active-schedules-output-or-stop-control). Turning off lasts until the preview-cleanup and off attempts of [REQ-manage-night-light](control.md#req-manage-night-light--opt-in-to-managing-night-light) finish, whether they succeed or fail; when Night Light access has not begun, turning off finishes at once.
+While management turns on or off, the management setting is unavailable in settings, and settings shows which change is in progress. Turning on lasts from accepting the consent prompt, or from a launch with management on, until startup completes under [REQ-startup-temperature](control.md#req-startup-temperature--apply-the-current-temperature-at-startup), or until control instead waits under native recovery or [REQ-schedule-evaluation-failure](control.md#req-schedule-evaluation-failure--retain-the-active-schedules-output-or-stop-control). Turning off lasts until the preview-cleanup and off attempts of [REQ-manage-night-light](control.md#req-manage-night-light--opt-in-to-managing-night-light) finish, whether they succeed or fail; when Night light access has not begun, turning off finishes at once.
 
 **Intent:** Finish each management change before the user can request the opposite one, so the controller never reverses a change partway.
 
@@ -207,8 +207,8 @@ While management turns on or off, the management setting is unavailable in setti
 - The fade duration is 5 seconds and the user turns management off: settings shows that management is turning off, and the setting cannot be changed until the off attempt finishes; then the user can turn it on again.
 - The user accepts the consent prompt: the setting cannot be changed until startup completes.
 - Circadia launches with management on and a 5-second fade duration, and the user opens settings during the startup fade: the setting cannot be changed until startup completes.
-- The first Night Light read fails after the user accepts the consent prompt: the setting becomes available again, management stays on, and native recovery continues.
-- Time-zone evaluation fails before Night Light access begins, and the user turns management off: the setting becomes available at once.
+- The first Night light read fails after the user accepts the consent prompt: the setting becomes available again, management stays on, and native recovery continues.
+- Time-zone evaluation fails before Night light access begins, and the user turns management off: the setting becomes available at once.
 
 ## Tray
 

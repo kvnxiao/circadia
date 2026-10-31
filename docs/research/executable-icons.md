@@ -95,7 +95,7 @@ A Store application's logo is stored in its package assets, not in its executabl
 
 ## Recommendation
 
-Read icons with `SHDefExtractIconW` from the executable path, at the pixel size the display needs, on a thread that neither drives Night Light nor runs the UI. Read display names on the same thread, because a first file open can take hundreds of milliseconds. Cache the resulting images persistently under Circadia's data folder, keyed by path, size, and last-write time, and delete cached images for apps that are no longer listed or recently focused. Persist metadata-source paths separately from optional matching restrictions. Use a cached image only for its own executable path; use the generic icon when no such image exists or the file has no icon resource. Leave package logos for Store applications to a later decision.
+Read icons with `SHDefExtractIconW` from the executable path, at the pixel size the display needs, on a thread that neither drives Night light nor runs the UI. Read display names on the same thread, because a first file open can take hundreds of milliseconds. Cache the resulting images persistently under Circadia's data folder, keyed by path, size, and last-write time, and delete cached images for apps that are no longer listed or recently focused. Persist metadata-source paths separately from optional matching restrictions. Use a cached image only for its own executable path; use the generic icon when no such image exists or the file has no icon resource. Leave package logos for Store applications to a later decision.
 
 ## Gaps
 

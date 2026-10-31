@@ -100,10 +100,10 @@ pub struct RunningPreview {
     pub end: Duration,
 }
 
-/// Report whether Circadia manages Night Light or is changing that state.
+/// Report whether Circadia manages Night light or is changing that state.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ManagementState {
-    /// Management is off and Night Light access has ended or never began.
+    /// Management is off and Night light access has ended or never began.
     #[default]
     Off,
     /// Management is on and startup has not yet completed or waited.

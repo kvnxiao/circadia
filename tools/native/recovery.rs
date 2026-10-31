@@ -84,7 +84,7 @@ fn exercise(measurement: &GraphMeasurement, directory: &Path) -> io::Result<()> 
         "simulated public operations overlapped",
     )?;
     report(&format!(
-        "PASS: {} serialized simulated native calls; no live Night Light changes or desktop input",
+        "PASS: {} serialized simulated native calls; no live Night light changes or desktop input",
         calls.len()
     ));
     Ok(())
@@ -426,7 +426,7 @@ fn partial_write_failure(
     ])?;
     let started = Instant::now();
     sleep(automation, settings, 2300)?;
-    wait_automation("Night Light failure banner", || {
+    wait_automation("Night light failure banner", || {
         automation.text(settings, std::process::id(), automation_id::BANNER_NATIVE)
     })?;
     wait("repeated partial write failure", || {
@@ -511,7 +511,7 @@ fn retry(automation: &Automation, settings: &HWND) -> io::Result<()> {
 }
 
 fn recovered(automation: &Automation, settings: &HWND) -> io::Result<()> {
-    wait_automation("Night Light failure banner cleared", || {
+    wait_automation("Night light failure banner cleared", || {
         Ok(automation
             .text(settings, std::process::id(), automation_id::BANNER_NATIVE)?
             .is_none()

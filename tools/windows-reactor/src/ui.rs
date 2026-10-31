@@ -132,7 +132,7 @@ impl Component for Probe {
                 TextBox::new().text("07:00").width(100.0).automation_name("Wake time control sample"),
                 ToggleSwitch::new().automation_name("Startup control sample"),
             )),
-            InfoBar::new().is_open(true).title("Probe only").message("No configuration, startup registration, or Night Light changes."),
+            InfoBar::new().is_open(true).title("Probe only").message("No configuration, startup registration, or Night light changes."),
         ))).into()
     }
 }

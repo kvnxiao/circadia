@@ -72,7 +72,7 @@ use windows_reactor::NotifyIcon;
 ///   for this process only.
 /// - A second invocation only activates settings in the existing process and
 ///   does not log or validate `language`.
-/// - Normal startup can change live Night Light; graceful exit requests off.
+/// - Normal startup can change live Night light; graceful exit requests off.
 ///
 /// # Errors
 /// Report argument, startup, message-loop, worker, or exit-cleanup failures.
@@ -421,7 +421,7 @@ impl Application for Desktop {
         let startup = input.startup.borrow_mut().take();
         // Reactor creates the tray icon in the render that follows `create` and
         // only then drains this message, so a failed icon creation aborts
-        // before the controller can write Night Light.
+        // before the controller can write Night light.
         if !context.sender().send(Message::Start) {
             if let Some(startup) = &startup {
                 *startup.result.borrow_mut() =
@@ -1293,7 +1293,7 @@ impl Desktop {
             self.configuration.borrow_mut().exit();
         }
         // Dropping the client does not join its worker, so a slow file read
-        // cannot delay Night Light cleanup, and later names change nothing.
+        // cannot delay Night light cleanup, and later names change nothing.
         self.file_info = None;
         self.exiting = true;
         self.pending.clear();

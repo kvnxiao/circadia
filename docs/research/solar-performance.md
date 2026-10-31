@@ -40,6 +40,6 @@ Thirty empty-request process executions took a median 7.918 ms, with a range of 
 
 **Design inference:** Calculating the few dates needed for a current schedule, graph, or Preview is proportionate to these measured costs. Circadia can calculate when the required dates or location/time-zone inputs change, then evaluate the generated temperature curve. This does not require calculating solar events on each temperature update or maintaining a persistent multi-location cache.
 
-The samples cover four dates on one desktop. They are not a universal latency bound or a release-build estimate. First call means the first calculator call in that process; it does not mean an operating-system-cache-cold launch. Location acquisition, Windows time-zone conversion, rendering, and Night Light operations were not timed.
+The samples cover four dates on one desktop. They are not a universal latency bound or a release-build estimate. First call means the first calculator call in that process; it does not mean an operating-system-cache-cold launch. Location acquisition, Windows time-zone conversion, rendering, and Night light operations were not timed.
 
 The [solar correctness research](solar-calculation.md) records independent reference comparisons and their accuracy limits. The timing probe passed the six solar comparison tests and its four event-count expectations. Matching counts alone do not establish astronomical accuracy, and measured performance does not define Circadia's solar-selection or transition rules.

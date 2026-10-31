@@ -32,11 +32,11 @@ Evaluated directions that affected Circadia's behavior or feasibility. The [spec
 
 **Disposition:** Not selected
 
-**Requirement impact:** Windows Night Light behavior after Circadia stops managing it.
+**Requirement impact:** Windows Night light behavior after Circadia stops managing it.
 
 **Reason:** Restoration would require saving the native schedule at takeover and deciding whether later user changes supersede that saved state. A stale snapshot could overwrite a deliberate change in Windows Settings.
 
-**Basis:** Night Light records can be changed by other programs, and reads and writes are not atomic across writers; see [native access evidence](research/nightlight-transition-control.md).
+**Basis:** Night light records can be changed by other programs, and reads and writes are not atomic across writers; see [native access evidence](research/nightlight-transition-control.md).
 
 **Reevaluate when:** A takeover-and-restoration contract can distinguish later user intent reliably, or the product explicitly offers a user-selected restoration policy.
 
