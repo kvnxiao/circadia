@@ -34,7 +34,7 @@ Circadia combines native Windows 11 controls with scheduling and app rules for W
 | Uses native Windows Night light | ✓ | ✓ | ✗ |
 | Sunrise and sunset scheduling | ✓ | ✓ | ✓ |
 | Separate daytime, evening, and bedtime temperatures | ✓ | ✗ | ✓ |
-| Pause for apps in a suppression list | ✓ | ✗ | ✓ |
+| Pause for apps in a user-defined suppression list | ✓ | ✗ | ✓ |
 | Pause for all fullscreen apps | ✗ | ✗ | ✓ |
 | Included with Windows | ✗ | ✓ | ✗ |
 
