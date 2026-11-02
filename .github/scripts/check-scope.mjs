@@ -2,15 +2,19 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+const unreadDirectories = ['docs/', 'assets/screenshots/', '.agents/', '.github/ISSUE_TEMPLATE/', 'packaging/'];
+const unreadFiles = ['LICENSE', 'circadia-harness/README.md', 'circadia-bindings/README.md'];
+
 export function selectChecks(paths, full = false) {
-  let application = full;
+  let rust = full;
   for (const path of paths) {
-    if (path.startsWith('docs/') || path.startsWith('assets/screenshots/') || ['README.md', 'DEVELOPMENT.md', 'AGENTS.md', 'LICENSE'].includes(path)) {
+    const topLevelGuide = !path.includes('/') && path.endsWith('.md');
+    if (topLevelGuide || unreadFiles.includes(path) || unreadDirectories.some((directory) => path.startsWith(directory))) {
       continue;
     }
-    application = true;
+    rust = true;
   }
-  return { application };
+  return { rust };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

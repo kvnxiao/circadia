@@ -98,12 +98,12 @@ Run `just capture readme` to refresh `assets/screenshots/schedule.png` from a pr
 
 The [CI workflow](.github/workflows/ci.yml) runs on pull requests, pushes to `main`, merge queues, and manual dispatch. It checks:
 
-- Unit tests and release-text tests on Windows.
-- Clippy, rustdoc, and generated composition bindings on Windows.
+- Workspace unit tests and release-text tests on Windows.
+- Workspace Clippy, rustdoc, and generated composition bindings on Windows.
 - Rust formatting, workflow syntax, workflow-selection tests, and the installer shell script on Linux.
 - Rust dependency advisories and unused dependencies on Linux.
 
-Pull requests select the Windows Rust checks from changed paths. A pull request that only changes documentation, the README screenshot, or the top-level guides skips them: those jobs run a success step without installing tools, restoring caches, or compiling code, and their job names remain present with a passing status. Any other path selects the checks. Pushes to `main`, merge queues, and manual runs always run the full suite.
+Pull requests select the Windows Rust checks from changed paths. A pull request that only changes files that no build or test reads skips them: documentation, agent skills, the issue template, packaging files, the README screenshot, top-level guides, the license, and the harness and bindings READMEs. Those jobs run a success step without installing tools, restoring caches, or compiling code, and their job names remain present with a passing status. Any other path selects the checks. Pushes to `main`, merge queues, and manual runs always run the full suite.
 
 Use **All required checks** as the branch-protection status. It fails if a job fails, is cancelled, or is unexpectedly skipped. Formatting and dependency audits always run. The selector compares the complete pull-request diff, including deleted and renamed paths.
 
@@ -119,7 +119,7 @@ Superseded runs are cancelled, and a failed Rust matrix job does not cancel the 
 
 CI runs unit tests, including tests of harness helpers, but does not launch the desktop application. Desktop automation, screenshots, live Night light checks, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
 
-The [Preview workflow](.github/workflows/preview.yml) packages every push to `main` independently of CI. Both workflows use the same Cargo Git source cache key and fetch locked dependencies on a cache miss; a cold cache can cause concurrent downloads. Compiled installer outputs use a separate cache from tests and lint. CI's **All required checks** covers its checks; Preview reports **Build Windows x64 installer** separately. Preview update checks offer artifacts from successful Preview runs, regardless of CI's result.
+The [Preview workflow](.github/workflows/preview.yml) packages each push to `main` independently of CI. It skips a push that only changes files the installer build does not read: top-level Markdown guides, documentation, the README screenshot, agent skills, the issue template, CI and release configuration, the harness, and the bindings generator. Both workflows use the same Cargo Git source cache key and fetch locked dependencies on a cache miss; a cold cache can cause concurrent downloads. Compiled installer outputs use a separate cache from tests and lint. CI's **All required checks** covers its checks; Preview reports **Build Windows x64 installer** separately. Preview update checks offer artifacts from successful Preview runs, regardless of CI's result.
 
 The installer job uploads `Circadia-windows-x64-unsigned-<commit>`, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual CI dispatch do not build a preview installer.
 

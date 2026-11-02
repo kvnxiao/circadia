@@ -3,6 +3,17 @@ name: Preview
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '*.md'
+      - docs/**
+      - assets/screenshots/**
+      - .agents/**
+      - .github/ISSUE_TEMPLATE/**
+      - .github/scripts/**
+      - .github/workflows/ci.yml
+      - .github/workflows/release.yml
+      - circadia-harness/**
+      - circadia-bindings/**
 
 permissions:
   contents: read
