@@ -16,7 +16,9 @@ The installer includes the required runtime and installs for your Windows accoun
 
 About shows the installed version and offers Check for updates. Automatic checks are enabled by default and run at startup and daily; their results appear in About. Stable installations check GitHub releases, and preview installations check successful main builds. The download link opens the matching page in your browser.
 
-To update, quit Circadia and run the newer installer. To uninstall, quit Circadia and use **Settings → Apps → Installed apps → Circadia → Uninstall**. Your saved settings remain available for a later installation.
+To update, run the newer installer. If Circadia is running from the installation being updated, setup offers to close it automatically before replacing its files. Allow setup to close the app, then launch Circadia after installation finishes.
+
+To uninstall, quit Circadia and use **Settings → Apps → Installed apps → Circadia → Uninstall**. Your saved settings remain available for a later installation.
 
 ## Night light management
 
