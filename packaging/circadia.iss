@@ -24,8 +24,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 MinVersion=10.0.22000
-AppMutex=Local\Circadia.Instance.v1
-CloseApplications=no
+CloseApplications=yes
 RestartApplications=no
 SetupIconFile={#PayloadDir}\circadia.ico
 UninstallDisplayIcon={app}\circadia.exe
@@ -42,10 +41,21 @@ Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Name: "{userprograms}\Circadia"; Filename: "{app}\circadia.exe"; WorkingDir: "{app}"
 
 [Messages]
-SetupAppRunningError=Circadia is running. Choose Quit from its tray menu, then click OK to continue, or Cancel to exit.
 UninstallAppRunningError=Circadia is running. Choose Quit from its tray menu, then click OK to continue, or Cancel to exit.
 
 [Code]
+function InitializeUninstall(): Boolean;
+begin
+  Result := False;
+  while CheckForMutexes('Local\Circadia.Instance.v1') do
+  begin
+    if SuppressibleMsgBox(SetupMessage(msgUninstallAppRunningError),
+      mbError, MB_OKCANCEL, IDCANCEL) <> IDOK then
+      Exit;
+  end;
+  Result := True;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Command: String;
