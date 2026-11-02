@@ -1,5 +1,5 @@
 ---
-date: 2026-10-29
+date: 2026-11-02
 questions:
   - How does windows-reactor at windows-rs ebc5a99 support each element of Circadia's settings window, tray menu, and icon design?
   - Which elements have no direct Reactor equivalent, and which approach was selected for each gap?
@@ -7,6 +7,7 @@ questions:
   - Can finite compositor keyframes move the Preview marker independently of UI timers, and does detaching and dropping the visuals end their animations?
   - Can public composition APIs interpolate a bar, phase arc, and dot color while native controls retain accessible range values?
 observed-in:
+  - The settings-design renderer and native-control captures at microsoft/windows-rs 8786f59 on Windows 11 x64 build 26300.9711 at 100% scaling, Rust 1.99.0, debug build with bundled Windows App SDK 2.6.4, 2026-10-29
   - The settings-design progress probe at microsoft/windows-rs 5cfe2c96ea029b119d5e07fca2a92d7628c22aeb on Windows 11 x64 build 26300.9711 at 100% scaling, debug build with bundled Windows App SDK 2.6.4, 2026-10-29
   - The settings-design motion probe at microsoft/windows-rs 8786f59d1f6bc216324b202ec17d3de696d3b843 on Windows 11 x64 build 26300.9711 at 100% scaling, Rust 1.99.0, debug build with bundled Windows App SDK 2.6.4, 2026-10-29
   - Microsoft Learn CompositionScopedBatch and CompositionObject.Close documentation retrieved 2026-10-29
@@ -97,25 +98,35 @@ The rendering experiment establishes several constraints at `0496ec1`:
 - Badge SVGs need `currentColor` replaced before loading.
 - Expander brush overrides work, but overriding `ExpanderHeaderBorderThickness` terminates the tested process.
 
-Recheck these constraints when upgrading Reactor. Later dependency checks are recorded in the [probe's dependency validation](../../tools/windows-reactor/settings-design/README.md#dependency-validation-on-2026-10-29).
+Recheck these constraints when upgrading Reactor. Later dependency findings are recorded in [Reactor research](windows-reactor-ui.md#versions-and-evidence-boundaries).
 
 ## Rendering probe results
 
-The [settings-design rendering probe](../../tools/windows-reactor/settings-design/README.md) renders each page, dialog, and the tray menu with fixture data. Its README records every result; this section summarizes those that bear on the selected approaches. The design export's mockups and the probe's screenshots stay out of version control.
+The [settings-design rendering probe](../../tools/windows-reactor/settings-design/README.md) renders each page, dialog, and the tray menu with fixture data. Its README describes invocation and fixtures; this section records findings that bear on the selected approaches. The design export's mockups and the probe's screenshots stay out of version control.
 
 ### Graph renderers
 
+Effective pixels (epx) are layout units that Windows converts to physical pixels according to display scaling.
+
 The probe drew the Schedule page's graph and its three slider strips three ways and sampled the process tray-only, 3 s after settings opened, and after 10 more idle seconds:
 
-| Renderer | Working set added on open | Private bytes added | CPU during 10 idle seconds | Edit-to-drawn latency |
-| :-- | --: | --: | --: | :-- |
-| XAML: sampled rectangles and lines | 74.7 MB | 69.6 MB | 0 ms | Not measured at draw time |
-| `windows-canvas` drawing into composition surfaces with one shared device | 85.3 MB | 97.5 MB | 16 ms | 1.4 to 2.1 ms |
-| `windows-canvas` swap-chain views, one device each | 112.6 MB | 172.5 MB | 31 ms | 20.9 to 71.9 ms |
+| Renderer | Working set added on open | Private bytes added | Threads while open | CPU during 10 idle seconds | Edit-to-drawn latency |
+| :-- | --: | --: | --: | --: | :-- |
+| XAML: sampled rectangles and lines | 74.7 MB | 69.6 MB | 66 | 0 ms | Not measured at draw time |
+| `windows-canvas` drawing into composition surfaces with one shared device | 85.3 MB | 97.5 MB | 118 | 16 ms | 1.4 to 2.1 ms |
+| `windows-canvas` swap-chain views, one device each | 112.6 MB | 172.5 MB | 285 | 31 ms | 20.9 to 71.9 ms |
 
 Latency runs from the message that changes Bedtime to the end of the drawing callback, not to a displayed frame. The measured spans are below the 100 ms bound of [REQ-display-generated-curve](../specs/interface.md#req-display-generated-curve--display-the-schedule-without-point-editing); the XAML renderer's drawing time and the display latency were not measured. The CPU values are zero, one, and two scheduler ticks, so they do not show how often the process woke. The composition surface redrew after edits, resizing to 900 and 1500 epx widths, and a runtime theme switch, and the XAML overlay stayed aligned. The XAML rectangles leave visible gaps in the gradient.
 
 **Observed in windows-rs `0496ec1` source:** Reactor subscribes every swap-chain panel to `CompositionTarget::Rendering` for the panel's lifetime and checks for invalidation on each frame, even for a `windows-canvas` view created with an `Invalidator` (the `windows-canvas` handle that requests a redraw). A composition surface does not need a frame subscription.
+
+At `0496ec1`, closing settings did not return any renderer to its initial tray-only memory level. Closing samples followed a Lab visit, two resizes, and two theme switches, so they cannot be compared directly with opening samples. Under the same recorded environment, using another component as a component's root view triggered Reactor's "a component view cannot be another component" panic. Wrapping that root in a `Grid` avoided it.
+
+### Bundled-runtime renderer and native-control observations
+
+On 2026-10-29 at `8786f59`, a debug build on Windows 11 build 26300.9711 at 100% scaling used bundled Windows App SDK runtime 2.6.4. The composition renderer recorded zero additional process CPU time during ten idle seconds; the swap-chain renderer recorded 1.109375 CPU seconds. This coarse measurement does not count wakeups or establish battery use.
+
+Built-in toggle-text captures were empty, so they do not establish whether WinUI text follows the language override. The title-bar measurement reported 32 px and identified title-content elements as caption buttons; it does not establish caption-button geometry.
 
 ### Finite compositor motion and removal
 
@@ -159,7 +170,15 @@ The generator rejects a checkout at a different commit. [`tools/composition-bind
 
 **Measured on 2026-10-29:** the [progress experiment](../../tools/windows-reactor/settings-design/README.md#progress-ring-and-color-animation-experiment) captured intermediate bar widths, ring arcs, and dot colors over six seconds. Native ProgressBar and ProgressRing controls at zero opacity retained their UI Automation range patterns, including updated values, and were reported as on-screen. The finite batch completed after 6.256 seconds. Explicit stop and removal ended a separate 20-second batch after 0.514 seconds; all rendered pixels disappeared and batch subscriptions returned to zero.
 
-The run passed at 100% scaling on Windows 11 build 26300.9711 with bundled runtime 2.6.4. It establishes the public API route and accessible range exposure for the tested arrangement. It does not establish Narrator delivery, monitor presentation cadence, or behavior at other scales. It does not establish application clock synchronization, cancellation while hidden, or Preview completion during a blocked Night light call. Those are separate application acceptance conditions.
+The debug-build captures at `5cfe2c9` recorded these intermediate states:
+
+| Measurement | At about 0.50 s | At about 1.53 s | At about 3.04 s | At about 6.55 s |
+| :-- | --: | --: | --: | --: |
+| Filled bar fraction | 0.0817 | 0.2433 | 0.4850 | 1.0000 |
+| Yellow ring pixels | 151 | 407 | 787 | 1576 |
+| Dot RGB | 213, 42, 0 | 130, 125, 0 | 7, 248, 0 | 0, 0, 255 |
+
+Both native controls exposed a 0–100 range and accepted values of 25 and 75. The run used 100% scaling on Windows 11 build 26300.9711 with bundled runtime 2.6.4. It establishes the public API route and accessible range exposure for the tested arrangement. It does not establish Narrator delivery, monitor presentation cadence, or behavior at other scales. It does not establish application clock synchronization, cancellation while hidden, or Preview completion during a blocked Night light call. Those are separate application acceptance conditions.
 
 ### Other results
 

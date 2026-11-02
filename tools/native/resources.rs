@@ -154,6 +154,10 @@ fn editable(automation: &Automation, process: u32) -> io::Result<HWND> {
             .enabled(&settings, process, automation_id::WAKE)?
             .filter(|value| *value))
     })?;
+    automation.focus(&settings, process)?;
+    wait("resource settings foreground", || {
+        Ok((HWND::GetForegroundWindow().as_ref() == Some(&settings)).then_some(()))
+    })?;
     let rectangle = settings.GetWindowRect().map_err(io::Error::other)?;
     report(&format!(
         "Settings DPI: {}; window: {} x {}",

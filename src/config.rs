@@ -2,6 +2,7 @@ use crate::ExecutablePath;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use thiserror::Error;
 
 const SCHEMA_VERSION: u32 = 3;
@@ -356,28 +357,68 @@ impl Default for ConfigInput {
 ///   derive from them.
 #[derive(Clone, Debug)]
 pub struct Config {
-    input: ConfigInput,
+    input: Arc<ConfigInput>,
     wake_minutes: u16,
     bedtime_minutes: u16,
-    suppression_titles: Vec<TitleMatcher>,
-    exclusion_titles: Vec<TitleMatcher>,
+    suppression_rules: Arc<AppRules>,
+    exclusion_rules: Arc<AppRules>,
+}
+
+#[derive(Debug, Default)]
+struct AppRules {
+    titles: Vec<TitleMatcher>,
+    problems: Vec<Option<EntryProblem>>,
+}
+
+impl AppRules {
+    fn new(entries: &[AppEntry]) -> Self {
+        let titles: Vec<_> = entries.iter().map(TitleMatcher::for_entry).collect();
+        let scopes: Vec<_> = entries.iter().map(AppEntry::scope).collect();
+        let mut counts = BTreeMap::new();
+        for scope in scopes.iter().flatten() {
+            *counts.entry(scope).or_insert(0_usize) += 1;
+        }
+        let problems = entries
+            .iter()
+            .zip(&titles)
+            .zip(&scopes)
+            .map(|((entry, matcher), scope)| {
+                if entry.file_name().is_none() {
+                    Some(EntryProblem::Invalid)
+                } else if let Err(problem) = entry.restriction() {
+                    Some(problem)
+                } else if matches!(matcher, TitleMatcher::Invalid) {
+                    Some(EntryProblem::Expression)
+                } else if scope
+                    .as_ref()
+                    .and_then(|scope| counts.get(scope))
+                    .is_some_and(|count| *count > 1)
+                {
+                    Some(EntryProblem::Duplicate)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Self { titles, problems }
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            input: ConfigInput::default(),
+            input: Arc::new(ConfigInput::default()),
             wake_minutes: 7 * 60,
             bedtime_minutes: 23 * 60,
-            suppression_titles: Vec::new(),
-            exclusion_titles: Vec::new(),
+            suppression_rules: Arc::default(),
+            exclusion_rules: Arc::default(),
         }
     }
 }
 
 impl PartialEq for Config {
     fn eq(&self, other: &Self) -> bool {
-        self.input == other.input
+        (Arc::ptr_eq(&self.input, &other.input) || self.input == other.input)
             && self.wake_minutes == other.wake_minutes
             && self.bedtime_minutes == other.bedtime_minutes
     }
@@ -712,12 +753,12 @@ pub fn apply_inputs(
 }
 
 fn candidate(current: &Config, field: Field, value: &FieldValue) -> Result<Config, FieldErrorKind> {
-    let mut input = current.input.clone();
+    let mut input = current.input().clone();
     input.set(field, value.clone())?;
     check_alone(field, &input)?;
     input.normalize_temperatures();
     consistency(field, &input)?;
-    input.validate().map_err(|error| {
+    input.validate_with(Some(current)).map_err(|error| {
         error
             .issues
             .first()
@@ -738,7 +779,11 @@ impl ConfigInput {
     ///
     /// Return field errors for invalid clocks, ranges, ordering, coordinates,
     /// or filenames.
-    pub fn validate(mut self) -> Result<Config, ValidationError> {
+    pub fn validate(self) -> Result<Config, ValidationError> {
+        self.validate_with(None)
+    }
+
+    fn validate_with(mut self, previous: Option<&Config>) -> Result<Config, ValidationError> {
         self.schema_version = SCHEMA_VERSION;
         let mut issues: Vec<FieldError> = Field::ALL
             .into_iter()
@@ -771,11 +816,18 @@ impl ConfigInput {
         let bedtime_minutes = clock(&self.bedtime)?;
         self.suppression.iter_mut().for_each(AppEntry::normalize);
         self.exclusions.iter_mut().for_each(AppEntry::normalize);
-        let titles = |entries: &[AppEntry]| entries.iter().map(TitleMatcher::for_entry).collect();
+        let rules = |entries: &[AppEntry], list| {
+            previous
+                .filter(|previous| previous.entries(list) == entries)
+                .map_or_else(
+                    || Arc::new(AppRules::new(entries)),
+                    |previous| Arc::clone(previous.rules(list)),
+                )
+        };
         Ok(Config {
-            suppression_titles: titles(&self.suppression),
-            exclusion_titles: titles(&self.exclusions),
-            input: self,
+            suppression_rules: rules(&self.suppression, Field::Suppression),
+            exclusion_rules: rules(&self.exclusions, Field::Exclusions),
+            input: Arc::new(self),
             wake_minutes,
             bedtime_minutes,
         })
@@ -1084,9 +1136,13 @@ impl Config {
     }
 
     fn titles(&self, list: Field) -> &[TitleMatcher] {
+        &self.rules(list).titles
+    }
+
+    fn rules(&self, list: Field) -> &Arc<AppRules> {
         match list {
-            Field::Exclusions => &self.exclusion_titles,
-            _ => &self.suppression_titles,
+            Field::Exclusions => &self.exclusion_rules,
+            _ => &self.suppression_rules,
         }
     }
 
@@ -1094,36 +1150,14 @@ impl Config {
     /// expression that does not compile, or that shares its filename and
     /// installation restriction with another entry.
     pub fn entry_problems(&self, list: Field) -> Vec<Option<EntryProblem>> {
-        let entries = self.entries(list);
-        entries
-            .iter()
-            .zip(self.titles(list))
-            .map(|(entry, matcher)| {
-                if entry.file_name().is_none() {
-                    Some(EntryProblem::Invalid)
-                } else if let Err(problem) = entry.restriction() {
-                    Some(problem)
-                } else if matches!(matcher, TitleMatcher::Invalid) {
-                    Some(EntryProblem::Expression)
-                } else if entries
-                    .iter()
-                    .filter(|other| other.scope() == entry.scope())
-                    .nth(1)
-                    .is_some()
-                {
-                    Some(EntryProblem::Duplicate)
-                } else {
-                    None
-                }
-            })
-            .collect()
+        self.rules(list).problems.clone()
     }
 
     /// Report whether either list has an entry that loading marks.
     pub fn has_entry_problems(&self) -> bool {
         [Field::Suppression, Field::Exclusions]
             .into_iter()
-            .any(|list| self.entry_problems(list).iter().any(Option::is_some))
+            .any(|list| self.rules(list).problems.iter().any(Option::is_some))
     }
 
     /// Return a list with `added` appended in order, each with its normalized

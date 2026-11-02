@@ -28,8 +28,8 @@ Each run writes an isolated configuration under `target/readme-capture/<id>/` an
 
 If an existing Circadia process is detected, the script stops before building or launching. Cleanup requests Quit through the settings page. If graceful cleanup fails, the script terminates only its launched process and reports that Night light may still be active. A failed run does not replace the destination screenshot. Temporary configuration, captures, and logs remain under the ignored capture directory for diagnosis.
 
-## Validation
+## Implementation and limitations
 
-The script uses Windows UI Automation, DWM, GDI screen capture through .NET, and the repository's pinned application dependencies. The current reference is windows-rs `ff933fe45cbfdf4a638256181aae26a60932e84e`, with Windows App SDK runtime 2.6.4. The [native checks](../native/README.md) and [Reactor research](../../docs/research/windows-reactor-ui.md) describe the existing capture and layout evidence.
+The script uses Windows UI Automation, DWM, GDI screen capture through .NET, and the application dependencies pinned in the repository manifests. The [native checks](../native/README.md) describe broader desktop acceptance procedures; the [Reactor research](../../docs/research/windows-reactor-ui.md) records capture and layout evidence.
 
-Validated on 2026-10-31 with PowerShell 7 on Windows 11 build 26300.9711 at 100% scaling: preview identity, active management, both solar times, exact capture dimensions, clean background edges, absence of focus rings, and successful graceful exit. The existing-process guard also rejected a capture while Circadia was running. Multi-monitor capture, other display scales, other themes, and optical calibration behavior are not established by this command.
+This command does not establish multi-monitor behavior, other display scales, other themes, or optical calibration behavior.

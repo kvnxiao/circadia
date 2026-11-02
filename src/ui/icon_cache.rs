@@ -19,6 +19,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+mod persistence;
+
+use persistence::Pending;
+use persistence::Writer;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Entry {
     path: String,
@@ -64,11 +69,14 @@ pub(super) fn source(
 
 pub(super) struct IconCache {
     folder: PathBuf,
-    icons: BTreeMap<ExecutablePath, (Entry, IconImages)>,
+    icons: BTreeMap<ExecutablePath, (Entry, Option<IconImages>)>,
     sources: BTreeMap<ExecutableName, ExecutablePath>,
+    source_revision: u64,
     last_image: u32,
     generic: Option<IconImages>,
     view: Rc<AppIcons>,
+    pending: Pending,
+    writer: Option<Writer>,
 }
 
 pub(super) fn latest_path<'a>(
@@ -95,18 +103,20 @@ impl IconCache {
             .and_then(valid_index);
         let (entries, sources) = loaded.unwrap_or_default();
         let last_image = entries.values().map(|entry| entry.image).max().unwrap_or(0);
-        let icons = entries.into_iter().filter_map(|(path, entry)| {
-            let images = read_images(&folder, entry.image)
-                .inspect_err(|error| tracing::debug!(%error, path = path.as_str(), "cached icon unavailable")).ok()?;
-            Some((path, (entry, images)))
-        }).collect();
+        let icons = entries
+            .into_iter()
+            .map(|(path, entry)| (path, (entry, None)))
+            .collect();
         let mut cache = Self {
             folder,
             icons,
             sources,
+            source_revision: 0,
             last_image,
             generic: None,
             view: Rc::default(),
+            pending: Pending::default(),
+            writer: None,
         };
         cache.update_view();
         cache
@@ -116,12 +126,16 @@ impl IconCache {
         Rc::clone(&self.view)
     }
 
+    pub(super) fn source_revision(&self) -> u64 {
+        self.source_revision
+    }
+
     fn update_view(&mut self) {
         self.view = Rc::new(AppIcons {
             apps: self
                 .icons
                 .iter()
-                .map(|(path, (_, images))| (path.clone(), images.clone()))
+                .filter_map(|(path, (_, images))| Some((path.clone(), images.clone()?)))
                 .collect(),
             sources: self.sources.clone(),
             generic: self.generic.clone(),
@@ -139,6 +153,7 @@ impl IconCache {
             return;
         }
         self.sources.insert(name, path);
+        self.source_revision = self.source_revision.wrapping_add(1);
         self.write_index();
         self.update_view();
     }
@@ -163,12 +178,23 @@ impl IconCache {
                 path: path.as_path().to_path_buf(),
             },
             recorded: entry.map(Entry::stamp),
+            cached: self
+                .icons
+                .get(&path)
+                .filter(|(_, images)| images.is_none())
+                .map(|(entry, _)| (self.folder.clone(), entry.image)),
         })
     }
 
     pub(super) fn apply(&mut self, path: &ExecutablePath, read: IconRead) {
         match read {
             IconRead::Unchanged | IconRead::Failed => {}
+            IconRead::Cached(images) => {
+                if let Some((_, loaded)) = self.icons.get_mut(path) {
+                    *loaded = Some(images);
+                    self.update_view();
+                }
+            }
             IconRead::Icon {
                 path: read_path,
                 stamp,
@@ -199,12 +225,8 @@ impl IconCache {
                     size: stamp.size,
                     modified: stamp.modified,
                 };
-                // A partial write cannot be reused with the new file stamp.
-                if let Err(error) = write_images(&self.folder, image, &images) {
-                    tracing::warn!(%error, path = path.as_str(), "writing a cached icon");
-                    self.delete_images(image);
-                }
-                self.icons.insert(path.clone(), (entry, images));
+                self.pending.images.insert(image, images.clone());
+                self.icons.insert(path.clone(), (entry, Some(images)));
                 self.write_index();
                 self.update_view();
             }
@@ -226,6 +248,9 @@ impl IconCache {
                 .any(|global| crate::same_executable(name.as_str(), global))
                 || keep.contains(path)
         });
+        if before != self.sources.len() {
+            self.source_revision = self.source_revision.wrapping_add(1);
+        }
         let referenced: BTreeSet<&ExecutablePath> =
             keep.iter().chain(self.sources.values()).collect();
         let removed: Vec<ExecutablePath> = self
@@ -245,17 +270,27 @@ impl IconCache {
         }
     }
 
-    fn delete_images(&self, image: u32) {
-        for pixels in ICON_PIXELS {
-            if let Err(error) = fs_err::remove_file(image_path(&self.folder, image, pixels))
-                && error.kind() != io::ErrorKind::NotFound
-            {
-                tracing::warn!(%error, "deleting a cached icon");
-            }
-        }
+    fn delete_images(&mut self, image: u32) {
+        self.pending.images.remove(&image);
     }
 
-    fn write_index(&self) {
+    fn write_index(&mut self) {
+        self.pending.dirty = true;
+    }
+
+    pub(super) fn flush(&mut self) {
+        if !self.pending.dirty {
+            return;
+        }
+        if self.writer.is_none() {
+            match Writer::start(self.folder.clone()) {
+                Ok(writer) => self.writer = Some(writer),
+                Err(error) => {
+                    tracing::warn!(%error, "starting the icon cache writer");
+                    return;
+                }
+            }
+        }
         let index = Index {
             version: 1,
             apps: self
@@ -269,18 +304,15 @@ impl IconCache {
                 .map(|(name, path)| (name.as_str().to_owned(), path.as_str().to_owned()))
                 .collect(),
         };
-        // Renaming a complete index avoids exposing a partial write.
-        let written = toml::to_string(&index)
-            .map_err(io::Error::other)
-            .and_then(|text| {
-                fs_err::create_dir_all(&self.folder)?;
-                let partial = self.folder.join("index.toml.tmp");
-                fs_err::write(&partial, text)?;
-                fs_err::rename(partial, self.folder.join("index.toml"))
-            });
-        if let Err(error) = written {
-            tracing::warn!(%error, "writing the icon cache index");
+        if let Some(writer) = &self.writer {
+            writer.submit(index, std::mem::take(&mut self.pending));
         }
+    }
+}
+
+impl Drop for IconCache {
+    fn drop(&mut self) {
+        self.flush();
     }
 }
 
@@ -320,7 +352,7 @@ fn valid_index(
 fn image_path(folder: &Path, image: u32, pixels: u16) -> PathBuf {
     folder.join(format!("{image}-{pixels}.png"))
 }
-fn read_images(folder: &Path, image: u32) -> io::Result<IconImages> {
+pub(super) fn read_images(folder: &Path, image: u32) -> io::Result<IconImages> {
     let [small, medium, large] = ICON_PIXELS
         .map(|pixels| fs_err::read(image_path(folder, image, pixels)).map(Arc::<[u8]>::from));
     Ok(IconImages([small?, medium?, large?]))

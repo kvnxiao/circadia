@@ -328,9 +328,10 @@ impl file_info::FileReader for GatedIcons {
     }
 }
 
-#[test]
-fn an_unchanged_reply_after_pruning_triggers_a_fresh_icon_read() {
-    let (_directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+#[test_case::test_case(false; "in_memory")]
+#[test_case::test_case(true; "on_disk")]
+fn a_reused_icon_reply_after_pruning_triggers_a_fresh_icon_read(reload: bool) {
+    let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
     let (notify, replies) = std::sync::mpsc::channel();
     let (started, reading) = std::sync::mpsc::channel();
     let (release, gate) = std::sync::mpsc::channel();
@@ -354,7 +355,8 @@ fn an_unchanged_reply_after_pruning_triggers_a_fresh_icon_read() {
     let file = game();
     let path = file.identity().expect("path");
     let images = file_info::IconImages(std::array::from_fn(|_| Arc::from(vec![1])));
-    desktop.icons.apply(
+    let mut icons = IconCache::load(directory.path());
+    icons.apply(
         &path,
         file_info::IconRead::Icon {
             path: file.path.clone(),
@@ -362,6 +364,12 @@ fn an_unchanged_reply_after_pruning_triggers_a_fresh_icon_read() {
             images: images.clone(),
         },
     );
+    desktop.icons = if reload {
+        drop(icons);
+        IconCache::load(directory.path())
+    } else {
+        icons
+    };
     desktop.set_settings_open(true);
     desktop.command(settings::Command::Browsed(file.clone()));
     desktop.request_icons(std::slice::from_ref(&path));
@@ -880,6 +888,76 @@ fn an_entry_added_before_its_name_arrives_records_the_name_with_one_configure() 
     assert_eq!(configured, [vec![crate::AppEntry::new("game.exe", "Game")]]);
     let renamed = saved(&directory).expect("a display name writes at once");
     assert!(renamed.contains("name = \"Game\""), "{renamed}");
+}
+
+#[test]
+fn cached_names_follow_source_changes_and_new_rules_without_another_reply() {
+    let (_directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+    let (notify, replies) = std::sync::mpsc::channel();
+    let mut client = FileInfoClient::spawn(
+        file_info::Names(|path: &Path| Some(path.parent()?.file_name()?.to_str()?.to_owned())),
+        move || {
+            let _sent = notify.send(());
+        },
+    )
+    .expect("file worker");
+    let a = AppFile {
+        executable: "game.exe".into(),
+        path: r"C:\A\game.exe".into(),
+    };
+    let b = AppFile {
+        executable: "game.exe".into(),
+        path: r"C:\B\game.exe".into(),
+    };
+    client.request(&a.executable, &a.path);
+    client.request(&b.executable, &b.path);
+    for _ in 0..3 {
+        replies
+            .recv_timeout(Duration::from_secs(5))
+            .expect("generic or name reply");
+        client.receive();
+    }
+    desktop.file_info = Some(client);
+    desktop.set_settings_open(true);
+    desktop.command(settings::Command::Browsed(a.clone()));
+    desktop.command(settings::Command::Browsed(b));
+    desktop.command(settings::Command::Add(
+        Field::Suppression,
+        vec![a.clone().into()],
+    ));
+    desktop.record_names();
+    assert_eq!(
+        suppression_list(&desktop),
+        [crate::AppEntry::new("game.exe", "B")]
+    );
+    desktop.command(settings::Command::Browsed(a));
+    desktop.record_names();
+    assert_eq!(
+        suppression_list(&desktop),
+        [crate::AppEntry::new("game.exe", "A")]
+    );
+    let changed = desktop.configuration.borrow_mut().edit(vec![(
+        Field::Exclusions,
+        FieldValue::Apps(vec![crate::AppEntry::new("game.exe", "old name")]),
+    )]);
+    desktop.configure(changed);
+    desktop.record_names();
+    assert_eq!(
+        desktop
+            .configuration
+            .borrow()
+            .accepted()
+            .expect("config")
+            .entries(Field::Exclusions),
+        [crate::AppEntry::new("game.exe", "A")]
+    );
+    let revision = desktop.configuration.borrow().revision();
+    desktop.pending.clear();
+    for _ in 0..100 {
+        desktop.record_names();
+    }
+    assert_eq!(desktop.configuration.borrow().revision(), revision);
+    assert!(desktop.pending.is_empty());
 }
 
 #[test]

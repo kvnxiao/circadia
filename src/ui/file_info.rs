@@ -70,11 +70,13 @@ impl IconImages {
 pub(super) struct IconRequest {
     pub(super) file: AppFile,
     pub(super) recorded: Option<FileStamp>,
+    pub(super) cached: Option<(PathBuf, u32)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum IconRead {
     Unchanged,
+    Cached(IconImages),
     Icon {
         path: PathBuf,
         stamp: FileStamp,
@@ -113,15 +115,24 @@ impl FileReader for WindowsFiles {
 
 pub(super) fn read_icons(request: &IconRequest, reader: &dyn FileReader) -> IconRead {
     let path = &request.file.path;
+    let cached = request.cached.as_ref().and_then(|(folder, image)| {
+        super::icon_cache::read_images(folder, *image)
+            .inspect_err(|error| tracing::debug!(%error, "cached icon unavailable"))
+            .ok()
+    });
+    let recorded = request
+        .recorded
+        .filter(|_| request.cached.is_none() || cached.is_some());
+    let fallback = || cached.clone().map_or(IconRead::Failed, IconRead::Cached);
     let stamp = match reader.stamp(path) {
         Ok(stamp) => stamp,
         Err(error) => {
             tracing::debug!(%error, path = %path.display(), "icon file unavailable");
-            return IconRead::Failed;
+            return fallback();
         }
     };
-    if request.recorded == Some(stamp) {
-        return IconRead::Unchanged;
+    if recorded == Some(stamp) {
+        return cached.map_or(IconRead::Unchanged, IconRead::Cached);
     }
     let mut images = Vec::with_capacity(ICON_PIXELS.len());
     for pixels in ICON_PIXELS {
@@ -130,7 +141,7 @@ pub(super) fn read_icons(request: &IconRequest, reader: &dyn FileReader) -> Icon
             Ok(None) => return IconRead::NoIcon,
             Err(error) => {
                 tracing::debug!(%error, path = %path.display(), pixels, "icon read failed");
-                return IconRead::Failed;
+                return fallback();
             }
         }
     }
@@ -181,6 +192,7 @@ pub(super) struct FileInfoClient {
     requested: BTreeSet<ExecutablePath>,
     reading_icons: BTreeSet<ExecutablePath>,
     names: BTreeMap<ExecutablePath, String>,
+    revision: u64,
 }
 
 impl FileInfoClient {
@@ -206,6 +218,7 @@ impl FileInfoClient {
             requested: BTreeSet::new(),
             reading_icons: BTreeSet::new(),
             names: BTreeMap::new(),
+            revision: 0,
         })
     }
 
@@ -252,7 +265,10 @@ impl FileInfoClient {
                 Reply::Generic(images) => received.generic = images,
             }
         }
-        self.names.extend(received.names.iter().cloned());
+        if !received.names.is_empty() {
+            self.names.extend(received.names.iter().cloned());
+            self.revision = self.revision.wrapping_add(1);
+        }
         self.dispatch_next();
         received
     }
@@ -260,7 +276,11 @@ impl FileInfoClient {
     pub(super) fn retain(&mut self, paths: &BTreeSet<ExecutablePath>) {
         self.requested.retain(|path| paths.contains(path));
         self.reading_icons.retain(|path| paths.contains(path));
+        let before = self.names.len();
         self.names.retain(|path, _| paths.contains(path));
+        if before != self.names.len() {
+            self.revision = self.revision.wrapping_add(1);
+        }
         self.pending.retain(|request| match request {
             Request::Name(path) | Request::Icon(path, _) => paths.contains(path),
             Request::Generic => true,
@@ -282,6 +302,10 @@ impl FileInfoClient {
 
     pub(super) fn names(&self) -> &BTreeMap<ExecutablePath, String> {
         &self.names
+    }
+
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
     }
 }
 
@@ -309,6 +333,7 @@ fn serve(
                     path = %request.file.path.display(),
                     read = match &read {
                         IconRead::Unchanged => "unchanged",
+                        IconRead::Cached(_) => "cached",
                         IconRead::Icon { .. } => "icon",
                         IconRead::NoIcon => "no icon",
                         IconRead::Failed => "failed",
@@ -360,6 +385,7 @@ mod tests {
                 path: path.as_path().to_owned(),
             },
             recorded: None,
+            cached: None,
         });
     }
 

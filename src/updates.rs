@@ -70,7 +70,9 @@ impl Client {
     }
 
     pub(crate) fn configure(&self, automatic: bool) {
-        if let Ok(mut shared) = self.shared.0.lock() {
+        if let Ok(mut shared) = self.shared.0.lock()
+            && shared.automatic != automatic
+        {
             shared.automatic = automatic;
             self.shared.1.notify_one();
         }

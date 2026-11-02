@@ -161,7 +161,7 @@ The recipe runs five application instances in sequence with isolated configurati
 - Confirmed session end with the file picker open.
 - Confirmed session end with the Wake time flyout open.
 
-Each case requires that the child process exits successfully and that native readback shows the preview flag cleared and Night light off. Each other case also requires that the configuration file has the Sleep edit. The recipe runs every case and then reports the failed ones. The startup case exercises early shutdown but does not force every ordering of Windows events. The recipe does not check Quit with the file picker open, because the tray menu did not open while the picker was open.
+Each case requires that the child process exits successfully and that native readback shows the preview flag cleared and Night light off. Each other case also requires that the configuration file has the Sleep edit. The recipe runs every case and then reports the failed ones. The startup case exercises early shutdown but does not force every ordering of Windows events. The recipe does not check Quit with the file picker open.
 
 Session end uses synthetic messages; the recipe does not sign out or shut down Windows. The tray case sends keyboard and mouse input to open the tray menu and choose Quit Circadia; the other cases use UI Automation without input. Its windows can take focus, and it changes live Night light with the same cleanup behavior as the lifecycle checks. On failure, it prints the retained temporary configuration directory.
 
@@ -230,7 +230,7 @@ Observation registration subscribes to changes in Windows Night light settings a
 
 Wake and Bedtime are configured relative to the current local clock so Preview moves from a 2200 K Sleep period to 6500 K Daytime. A separate live edit to 2300 K exercises partial storage. The tool prints each completed operation's start, duration, request, failure, and resulting simulated state. Capture is bounded; overflow fails the check. On failure, the tool retains and prints the temporary configuration directory.
 
-These checks establish application behavior after controlled failures at the native adapter boundary. They do not establish Windows access permissions, delivery of actual Night light subscription failures, or displayed color. UI Automation verifies accessible names and live-region properties; actual Narrator delivery has not been exercised. The existing live native recipes exercise successful Windows operations separately.
+These checks establish application behavior after controlled failures at the native adapter boundary. They do not establish Windows access permissions, delivery of actual Night light subscription failures, or displayed color. UI Automation verifies accessible names and live-region properties; it does not establish Narrator delivery. The existing live native recipes exercise successful Windows operations separately.
 
 ## Native output timing
 
@@ -254,8 +254,6 @@ Each temperature-call record includes the attempt start, public-call start, and 
 The tool requires at least 95% of temperature calls in each scenario to start within 20 ms of eligibility. It also checks final temperatures and Preview restoration, rejects native errors or incomplete traces, and verifies cleanup through native readback. The raw trace and scenario summaries print after the application exits. Ordinary builds exclude the instrumentation; measured call timings include its overhead and do not establish displayed color or smoothness.
 
 This recipe changes live Night light without moving the cursor or sending keyboard input. Settings can take focus. Graceful exit clears native preview and requests Night light off without restoring the previous native schedule or temperature. Failure retains the temporary configuration directory. The tool prints the source revision, executable, build profile, hardware, Windows build, display modes, and settings window dimensions; preserve those details with the raw results.
-
-On 2026-10-29, the live run passed all scenarios and endpoint checks. Every measured temperature call started within 17.172 ms of eligibility; the longest public call took 50.694 ms. The release build ran on an AMD Ryzen 7 9800X3D with 16 logical processors, Windows 11 build 26300.9711, and a 2560 × 1440 display at 480 Hz. Settings used 96 DPI and a 1216 × 1008 window. The build used windows-rs `8786f59` and working-tree changes based on `c453c2f`. Cleanup cleared native preview and left Night light off.
 
 ## Worker activity and idle behavior
 
@@ -376,8 +374,8 @@ Windows' caption buttons, the system menu, and WinUI's popup hosts show Windows'
 
 UI Automation reports a text element's rectangle clipped to its layout slot, so it cannot establish that a glyph or text fits inside that slot. The recipe scrolls through content and records PNG captures in a fresh ignored `target/translation-100-*` directory with an ordered `manifest.tsv`. Unexpected automation failures fail the run. Automated success still requires visual inspection of the complete screenshot set; `result.txt` records that distinction. This acceptance recipe requires 100% scaling. Checks at 150% and 200% are [post-MVP work](../../docs/specs/SPEC.md#future-work). Failure retains the temporary configuration directory.
 
-## Recorded results
+## Research and limitations
 
-Application checks were recorded on Windows 11 x64 build 26300.9711 at 100% scaling with the stated source and dependency revisions. The [Reactor findings](../../docs/research/windows-reactor-ui.md#responsive-layout-and-native-control-identity) record responsive layout and control identity. [Resource and rendering measurements](../../docs/research/resource-measurement.md) record CPU, memory, graph latency, and Preview pixels. [Location](../../docs/research/background-location.md) and [startup registration](../../docs/research/sign-in-startup.md) describe their separate tested scopes.
+The [Reactor research](../../docs/research/windows-reactor-ui.md#responsive-layout-and-native-control-identity) describes responsive layout and control identity. [Resource and rendering research](../../docs/research/resource-measurement.md) records CPU, memory, graph latency, Preview pixels, and native output timing. [Location](../../docs/research/background-location.md) and [startup registration](../../docs/research/sign-in-startup.md) have separate evidence and limitations.
 
-The 2026-10-29 responsive run at windows-rs `3b6bea5` and runtime 2.6.4 included full scrolling and screenshot inspection at 100%, including smaller desktop work areas. Higher scales, actual Narrator delivery, clean-machine minimum-build deployment, hardware power transitions, and optical Night light behavior remain outside that result. A newer source tree requires its own relevant validation; routine test counts and execution logs remain in local implementation records.
+Synthetic lifecycle messages do not establish delivery during hardware power or session transitions. UI Automation and screen captures do not establish Narrator delivery or optical Night light behavior. Clean-machine deployment and higher display scales need their own validation.

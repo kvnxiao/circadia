@@ -1,5 +1,5 @@
 ---
-date: 2026-10-31
+date: 2026-11-02
 questions:
   - Which published windows-rs and Reactor versions support Circadia's settings and tray requirements?
   - Can Rust code draw and edit a temperature curve with native WinUI 3 controls?
@@ -8,7 +8,8 @@ questions:
   - Can the graph support point insertion, reanchoring (changing the reference time that a point's signed offset is measured from), 10 K point increments, and a temperature background?
   - Which Reactor changes at the current reference pin affect Circadia, how does its failure policy end the process, and when do its text inputs report edits?
 observed-in:
-  - microsoft/windows-rs master ff933fe45cbfdf4a638256181aae26a60932e84e (2026-10-31), current reference pin; upstream diff inspection, automated checks of both Reactor probes, and Reactor UI Automation smoke test
+  - microsoft/windows-rs master 73c74c0d79282e1295af1856e6c8987c51b7ccdd (2026-11-01), current reference pin; source inspection, application and both Reactor probe checks, and Reactor UI Automation smoke test on 2026-11-02
+  - microsoft/windows-rs master ff933fe45cbfdf4a638256181aae26a60932e84e (2026-10-31), previous reference pin; upstream diff inspection, automated checks of both Reactor probes, and Reactor UI Automation smoke test
   - microsoft/windows-rs master 6d88349841f193536a73b63cece7f7e8fcf25953 (2026-10-30), previous reference pin; upstream diff inspection, automated checks of both Reactor probes, and Circadia About UI inspection
   - windows 0.62.2 from the Cargo registry
   - windows-reactor and windows-reactor-setup 0.100.0, source revision a57cc321bfdbac6bb98c488ba49f399da8fcb98a
@@ -30,11 +31,15 @@ recheck-when: Each bump of the reference windows-rs commit, and when Microsoft p
 
 The inspected Git versions of Reactor support an application-owned tray icon and settings windows that can close and reopen without ending the process. Published 0.100.0 ends its window runner when the last window closes. Version numbers alone do not distinguish the published crate from Git revisions that still declare 0.100.0.
 
-Circadia's reference pin is `ff933fe45cbfdf4a638256181aae26a60932e84e`, with Windows App SDK runtime 2.6.4. Desktop observations below apply to their stated revisions on Windows 11 build 26300.9711. The [compatibility assessment](windows-compatibility.md) supports an intended build 22000 floor; execution on that minimum is unverified.
+Circadia's reference pin is `73c74c0d79282e1295af1856e6c8987c51b7ccdd`, with Windows App SDK runtime 2.6.4. Desktop observations below apply to their stated revisions on Windows 11 build 26300.9711. The [compatibility assessment](windows-compatibility.md) supports an intended build 22000 floor; execution on that minimum is unverified.
 
-The retained graph experiment uses fixed anchor fixtures and arbitrary point editing. It verifies controls and pointer behavior, not Circadia's generated schedule, automatic saving, or Preview contract. [Settings design support](settings-design-support.md) covers the four-page design, segmented time entry, composition drawing, and finite animations. The [spec](../specs/SPEC.md) defines product behavior.
+The retained graph experiment uses fixed Sunrise 06:00, Sunset 18:00, and Wake 07:00 fixtures with arbitrary point editing. Its scope is controls and pointer behavior. Circadia's generated schedule, automatic saving, and Preview require application checks. Preview plays the daily schedule through Night light and animates its graph. [Settings design support](settings-design-support.md) covers the four-page design, segmented time entry, composition drawing, and finite animations. The [spec](../specs/SPEC.md) defines product behavior.
 
 ## Versions and evidence boundaries
+
+### Reference pin `73c74c0`
+
+On 2026-11-02, inspection of the [five commits since `ff933fe`](https://github.com/microsoft/windows-rs/compare/ff933fe45cbfdf4a638256181aae26a60932e84e...73c74c0d79282e1295af1856e6c8987c51b7ccdd) found changes to Windows binding generation, metadata, and Clang test fixtures. Reactor, its window implementation, and its setup helper are unchanged; the bundled runtime remains 2.6.4. Application checks and the automated checks of both retained probes, [graph/lifecycle](../../tools/windows-reactor/README.md) and [settings design](../../tools/windows-reactor/settings-design/README.md), passed. The graph/lifecycle probe's bundled build and UI Automation smoke test also passed. The smoke test verified native controls, curve validation, and tray-process survival after graph closure. These checks do not establish a performance improvement from the dependency update.
 
 ### Reference pin `ff933fe`
 
