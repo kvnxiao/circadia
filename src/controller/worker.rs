@@ -198,7 +198,7 @@ impl ControllerCommand {
 }
 
 /// Report a processed command independently of native health.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandOutcome {
     /// Apply the command to runtime or accepted configuration.
     Applied,
@@ -1035,9 +1035,50 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         }
     }
 
+    fn unchanged(&self, previous: &ControllerSnapshot, deadline: Option<Duration>) -> bool {
+        let runtime = self.driver.runtime();
+        let preview =
+            |preview: &RunningPreview| (Arc::as_ptr(&preview.playback), preview.start, preview.end);
+        previous.accepted == self.accepted
+            && previous.scheduling == runtime.state()
+            && previous.management == self.management
+            && previous.preview.as_ref().map(preview) == runtime.preview().map(preview)
+            && previous.origin == self.origin
+            && previous.calculation.as_ref().map(Arc::as_ptr)
+                == runtime.calculation().map(Arc::as_ptr)
+            && previous.preview_active == runtime.preview_active()
+            && previous.preview_deadline == deadline
+            && previous.suppression == runtime.suppression()
+            && previous.recent == runtime.recent_entries()
+            && previous.command == self.command
+            && previous
+                .native_errors
+                .iter()
+                .map(|(operation, failure)| (operation, Arc::as_ptr(failure)))
+                .eq(self
+                    .native_errors
+                    .iter()
+                    .map(|(operation, failure)| (operation, Arc::as_ptr(failure))))
+            && previous.configured_revision == self.configured_revision
+            && previous.control_error.as_ref().map(Arc::as_ptr)
+                == self.control_error.as_ref().map(Arc::as_ptr)
+            && previous.stopped == self.shared.stopping.load(Ordering::Acquire)
+    }
+
     fn publish(&mut self) -> io::Result<()> {
         self.management = self.driver.management(self.management);
         let runtime = self.driver.runtime();
+        let deadline = runtime.preview_deadline().map_err(io::Error::other)?;
+        if self
+            .shared
+            .latest
+            .lock()
+            .map_err(|_error| io::Error::other("controller snapshot lock failed"))?
+            .as_ref()
+            .is_some_and(|previous| self.unchanged(previous, deadline))
+        {
+            return Ok(());
+        }
         let snapshot = ControllerSnapshot {
             accepted: self.accepted.clone(),
             scheduling: runtime.state(),
@@ -1046,7 +1087,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             origin: self.origin,
             calculation: runtime.calculation().cloned(),
             preview_active: runtime.preview_active(),
-            preview_deadline: runtime.preview_deadline().map_err(io::Error::other)?,
+            preview_deadline: deadline,
             suppression: runtime.suppression(),
             recent: runtime.recent(),
             command: self.command.clone(),

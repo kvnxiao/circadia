@@ -99,6 +99,74 @@ fn show(cache: &mut IconCache, files: &FakeFiles, executable: &str, known: Optio
         let read = read_icons(&request, files);
         cache.apply(&request.file.identity().expect("valid fixture path"), read);
     }
+    flush(cache);
+}
+
+fn flush(cache: &mut IconCache) {
+    cache.flush();
+    drop(cache.writer.take());
+}
+
+fn load_shown(directory: &Path) -> IconCache {
+    let mut cache = IconCache::load(directory);
+    let paths: Vec<_> = cache.icons.keys().cloned().collect();
+    let files = FakeFiles::new(Icon::Unreadable);
+    for path in paths {
+        let request = cache
+            .request(path.file_name(), Some(path.as_path()))
+            .expect("known cache path");
+        cache.apply(&path, read_icons(&request, &files));
+    }
+    cache
+}
+
+#[test]
+fn startup_loads_only_metadata_and_requested_rows_keep_their_missing_executable_icon() {
+    let directory = tempfile::tempdir().expect("temporary cache");
+    let files = FakeFiles::new(Icon::Drawn(1));
+    cached_cs2(directory.path(), &files);
+    let mut initial = load_shown(directory.path());
+    files.file(r"C:\Apps\other.exe", 200);
+    show(
+        &mut initial,
+        &files,
+        "other.exe",
+        Some(r"C:\Apps\other.exe"),
+    );
+    drop(initial);
+    files.delete(CS2);
+    let reads = files.reads();
+    let mut cache = IconCache::load(directory.path());
+    assert_eq!(cache.icons.len(), 2);
+    assert!(cache.view().apps.is_empty());
+    assert!(cache.writer.is_none());
+    show(&mut cache, &files, "cs2.exe", None);
+    assert_eq!(shown(&cache, "cs2.exe"), Some(vec![1, 32]));
+    assert_eq!(shown(&cache, "other.exe"), None);
+    assert_eq!(cache.view().apps.len(), 1);
+    assert_eq!(files.reads(), reads);
+}
+
+#[test]
+fn dropping_the_cache_persists_pending_images_and_associations() {
+    let directory = tempfile::tempdir().expect("temporary cache");
+    let files = FakeFiles::new(Icon::Drawn(4));
+    files.file(CS2, 100);
+    let mut cache = IconCache::load(directory.path());
+    let request = cache
+        .request("cs2.exe", Some(Path::new(CS2)))
+        .expect("known path");
+    cache.observe(&request.file);
+    cache.apply(
+        &request.file.identity().expect("identity"),
+        read_icons(&request, &files),
+    );
+    assert!(!directory.path().join("icons/index.toml").exists());
+    drop(cache);
+    assert_eq!(
+        shown(&load_shown(directory.path()), "cs2.exe"),
+        Some(vec![4, 32])
+    );
 }
 
 fn shown(cache: &IconCache, executable: &str) -> Option<Vec<u8>> {
@@ -116,19 +184,20 @@ const CS2: &str = "C:\\Games\\cs2.exe";
 fn failed_index_writes_never_reassign_an_old_image_identifier(reload: bool) {
     let directory = tempfile::tempdir().expect("temporary cache");
     let files = FakeFiles::new(Icon::Drawn(1));
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     files.file(r"C:\A\browser.exe", 100);
     files.file(r"C:\B\browser.exe", 200);
     show(&mut cache, &files, "browser.exe", Some(r"C:\A\browser.exe"));
     let partial = directory.path().join("icons/index.toml.tmp");
     fs_err::create_dir(&partial).expect("block index replacement");
     cache.prune(&BTreeSet::new(), &BTreeSet::new());
+    flush(&mut cache);
     if reload {
-        cache = IconCache::load(directory.path());
+        cache = load_shown(directory.path());
     }
     files.draw(Icon::Drawn(2));
     show(&mut cache, &files, "browser.exe", Some(r"C:\B\browser.exe"));
-    let restarted = IconCache::load(directory.path());
+    let restarted = load_shown(directory.path());
     assert_eq!(shown(&restarted, "browser.exe"), None);
 }
 
@@ -136,12 +205,12 @@ fn failed_index_writes_never_reassign_an_old_image_identifier(reload: bool) {
 fn metadata_sources_use_ordinal_filename_identity() {
     let directory = tempfile::tempdir().expect("temporary cache");
     let files = FakeFiles::new(Icon::Drawn(1));
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     files.file(r"C:\Apps\Σ.exe", 100);
     show(&mut cache, &files, "σ.exe", Some(r"C:\Apps\Σ.exe"));
     assert_eq!(shown(&cache, "σ.exe"), Some(vec![1, 32]));
     assert_eq!(
-        shown(&IconCache::load(directory.path()), "Σ.exe"),
+        shown(&load_shown(directory.path()), "Σ.exe"),
         Some(vec![1, 32])
     );
     assert_eq!(shown(&cache, "ς.exe"), None);
@@ -154,7 +223,7 @@ fn metadata_sources_use_ordinal_filename_identity() {
 fn same_name_installations_keep_independent_cached_stamps() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let files = FakeFiles::new(Icon::Drawn(1));
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     files.file(r"C:\A\browser.exe", 100);
     files.file(r"C:\B\browser.exe", 200);
     show(&mut cache, &files, "browser.exe", Some(r"C:\A\browser.exe"));
@@ -176,7 +245,7 @@ fn same_name_installations_keep_independent_cached_stamps() {
 fn paths_reload_independently_and_a_late_reply_does_not_change_the_global_source() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let files = FakeFiles::new(Icon::Drawn(1));
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     let a = ExecutablePath::new(r"C:\A\browser.exe").expect("A");
     let b = ExecutablePath::new(r"C:\B\browser.exe").expect("B");
     files.file(a.as_str(), 100);
@@ -188,8 +257,9 @@ fn paths_reload_independently_and_a_late_reply_does_not_change_the_global_source
     files.draw(Icon::Drawn(2));
     show(&mut cache, &files, "browser.exe", Some(b.as_str()));
     cache.apply(&a, read_a);
+    flush(&mut cache);
     assert_eq!(shown(&cache, "browser.exe"), Some(vec![2, 32]));
-    let mut restarted = IconCache::load(directory.path());
+    let mut restarted = load_shown(directory.path());
     assert_eq!(
         restarted
             .view()
@@ -233,13 +303,13 @@ fn malformed_cache_ids_and_legacy_indexes_are_cache_misses_without_external_file
             "version = 1\nsources = {{}}\n[[apps]]\npath = 'C:\\A\\app.exe'\nimage = {image}\nsize = 1\nmodified = 1\n"
         );
         fs_err::write(folder.join("index.toml"), text).expect("invalid index");
-        let mut cache = IconCache::load(directory.path());
+        let mut cache = load_shown(directory.path());
         assert_eq!(cache.view().apps.len(), 0);
         cache.prune(&BTreeSet::new(), &BTreeSet::new());
         assert_eq!(fs_err::read(&outside).expect("sentinel survives"), [7]);
     }
     fs_err::write(folder.join("index.toml"), "[apps]\n").expect("legacy index");
-    assert_eq!(IconCache::load(directory.path()).view().apps.len(), 0);
+    assert_eq!(load_shown(directory.path()).view().apps.len(), 0);
 }
 
 #[test]
@@ -247,7 +317,7 @@ fn a_known_restriction_is_read_after_the_cache_is_deleted() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let files = FakeFiles::new(Icon::Drawn(3));
     files.file(CS2, 100);
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     let request = cache
         .request("cs2.exe", Some(Path::new(CS2)))
         .expect("restricted source");
@@ -261,7 +331,7 @@ fn a_known_restriction_is_read_after_the_cache_is_deleted() {
 }
 
 fn cached_cs2(directory: &Path, files: &FakeFiles) {
-    let mut cache = IconCache::load(directory);
+    let mut cache = load_shown(directory);
     files.file(CS2, 100);
     show(&mut cache, files, "cs2.exe", Some(CS2));
     assert_eq!(shown(&cache, "cs2.exe"), Some(vec![1, 32]));
@@ -274,7 +344,7 @@ fn a_cached_icon_with_equal_path_size_and_time_shows_after_a_restart_without_a_r
     cached_cs2(directory.path(), &files);
     let reads = files.reads();
     files.draw(Icon::Drawn(2));
-    let mut restarted = IconCache::load(directory.path());
+    let mut restarted = load_shown(directory.path());
     assert_eq!(shown(&restarted, "cs2.exe"), Some(vec![1, 32]));
     show(&mut restarted, &files, "cs2.exe", Some(CS2));
     assert_eq!(files.reads(), reads);
@@ -286,12 +356,12 @@ fn a_changed_size_reads_the_icon_again_and_replaces_the_cached_one() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let files = FakeFiles::new(Icon::Drawn(1));
     cached_cs2(directory.path(), &files);
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     files.file(CS2, 200);
     files.draw(Icon::Drawn(2));
     show(&mut cache, &files, "cs2.exe", None);
     assert_eq!(shown(&cache, "cs2.exe"), Some(vec![2, 32]));
-    let restarted = IconCache::load(directory.path());
+    let restarted = load_shown(directory.path());
     assert_eq!(
         restarted
             .view()
@@ -306,7 +376,7 @@ fn a_changed_size_reads_the_icon_again_and_replaces_the_cached_one() {
 fn a_deleted_old_folder_keeps_the_cached_icon_until_the_app_is_seen_in_a_new_folder() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let files = FakeFiles::new(Icon::Drawn(1));
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     let old = "C:\\Discord\\app-1.0\\Discord.exe";
     let new = "C:\\Discord\\app-1.1\\Discord.exe";
     files.file(old, 100);
@@ -331,13 +401,13 @@ fn a_changed_file_without_an_icon_removes_the_cached_icon_and_its_files() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let files = FakeFiles::new(Icon::Drawn(1));
     cached_cs2(directory.path(), &files);
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     files.file(CS2, 300);
     files.draw(Icon::Missing);
     show(&mut cache, &files, "cs2.exe", None);
     assert_eq!(shown(&cache, "cs2.exe"), None);
     assert!(!directory.path().join("icons").join("1-32.png").exists());
-    assert_eq!(shown(&IconCache::load(directory.path()), "cs2.exe"), None);
+    assert_eq!(shown(&load_shown(directory.path()), "cs2.exe"), None);
 }
 
 #[test]
@@ -345,13 +415,13 @@ fn a_failed_read_keeps_the_cached_icon() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let files = FakeFiles::new(Icon::Drawn(1));
     cached_cs2(directory.path(), &files);
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     files.file(CS2, 400);
     files.draw(Icon::Unreadable);
     show(&mut cache, &files, "cs2.exe", None);
     assert_eq!(shown(&cache, "cs2.exe"), Some(vec![1, 32]));
     assert_eq!(
-        shown(&IconCache::load(directory.path()), "cs2.exe"),
+        shown(&load_shown(directory.path()), "cs2.exe"),
         Some(vec![1, 32])
     );
 }
@@ -360,18 +430,19 @@ fn a_failed_read_keeps_the_cached_icon() {
 fn an_app_that_is_neither_listed_nor_recent_loses_its_entry_and_files() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let files = FakeFiles::new(Icon::Drawn(1));
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     files.file(CS2, 100);
     files.file("C:\\Apps\\game.exe", 100);
     show(&mut cache, &files, "cs2.exe", Some(CS2));
     show(&mut cache, &files, "game.exe", Some("C:\\Apps\\game.exe"));
     cache.prune(&BTreeSet::new(), &BTreeSet::from(["game.exe".to_owned()]));
+    flush(&mut cache);
     assert_eq!(shown(&cache, "cs2.exe"), None);
     assert_eq!(shown(&cache, "game.exe"), Some(vec![1, 32]));
     let icons = directory.path().join("icons");
     assert!(!icons.join("1-32.png").exists());
     assert!(icons.join("2-32.png").exists());
-    let restarted = IconCache::load(directory.path());
+    let restarted = load_shown(directory.path());
     assert_eq!(shown(&restarted, "cs2.exe"), None);
     assert_eq!(shown(&restarted, "game.exe"), Some(vec![1, 32]));
 }
@@ -382,7 +453,7 @@ fn a_deleted_icons_folder_shows_no_cached_icon_until_the_app_is_seen_again() {
     let files = FakeFiles::new(Icon::Drawn(1));
     cached_cs2(directory.path(), &files);
     fs_err::remove_dir_all(directory.path().join("icons")).expect("deleted cache");
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     assert_eq!(shown(&cache, "cs2.exe"), None);
     assert_eq!(cache.request("cs2.exe", None), None);
     show(&mut cache, &files, "cs2.exe", Some(CS2));
@@ -392,10 +463,7 @@ fn a_deleted_icons_folder_shows_no_cached_icon_until_the_app_is_seen_again() {
 #[test]
 fn an_unknown_app_without_a_path_is_not_read() {
     let directory = tempfile::tempdir().expect("temporary data folder");
-    assert_eq!(
-        IconCache::load(directory.path()).request("game.exe", None),
-        None
-    );
+    assert_eq!(load_shown(directory.path()).request("game.exe", None), None);
 }
 
 fn recent(path: &str, focus_ended: Option<Duration>) -> crate::RecentApp {
@@ -446,20 +514,23 @@ fn a_partly_written_icon_shows_this_run_and_is_read_again_after_a_restart() {
         .permissions();
     permissions.set_readonly(true);
     fs_err::set_permissions(&blocked, permissions).expect("block the 48 px image");
-    let mut cache = IconCache::load(directory.path());
+    let mut cache = load_shown(directory.path());
     files.file(CS2, 200);
     files.draw(Icon::Drawn(2));
     show(&mut cache, &files, "cs2.exe", Some(CS2));
     assert_eq!(shown(&cache, "cs2.exe"), Some(vec![2, 32]));
     assert!(!blocked.exists());
-    let restarted = IconCache::load(directory.path());
+    let restarted = load_shown(directory.path());
     assert_eq!(shown(&restarted, "cs2.exe"), None);
-    assert!(
-        restarted
-            .request("cs2.exe", Some(Path::new(CS2)))
-            .is_some_and(|request| request.recorded.is_none()),
-        "the restarted cache has no recorded stamp, so the icon is read again"
-    );
+    let request = restarted
+        .request("cs2.exe", Some(Path::new(CS2)))
+        .expect("known path");
+    let reads = files.reads();
+    assert!(matches!(
+        read_icons(&request, &files),
+        IconRead::Icon { .. }
+    ));
+    assert_eq!(files.reads(), reads + 3);
 }
 
 #[test]

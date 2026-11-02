@@ -15,6 +15,78 @@ use tempfile::TempDir;
 use test_case::test_case;
 use win_nightlight_lib::ColorTemperature;
 
+#[test]
+fn unchanged_publication_reuses_the_snapshot_and_command_changes_still_notify() {
+    let calculation = CalculationWorker::start(|| Ok(())).expect("calculation worker");
+    let (notify, notifications) = mpsc::channel();
+    let shared = Arc::new(Shared {
+        origin: Instant::now(),
+        queue: Mutex::new(Queue::default()),
+        latest: Mutex::new(None),
+        generation: AtomicU64::new(0),
+        stopping: AtomicBool::new(false),
+        exit: Mutex::new(None),
+        finished: AtomicBool::new(false),
+        wake: Arc::new(NativeWake::new().expect("wake event")),
+        calculation: calculation.client(),
+        notify: Arc::new(move || notify.send(()).map_err(io::Error::other)),
+    });
+    let mut worker = Worker::new(
+        None,
+        ControlRuntime::new("circadia.exe").expect("runtime"),
+        Arc::clone(&shared),
+        Native::with_backend(Backend(Arc::default())),
+        || Foreground::Unknown,
+    );
+    worker.publish().expect("initial publication");
+    notifications.try_recv().expect("initial notification");
+    let initial = shared
+        .latest
+        .lock()
+        .expect("snapshot lock")
+        .clone()
+        .expect("initial snapshot");
+    for _ in 0..100 {
+        worker.publish().expect("unchanged publication");
+    }
+    assert!(notifications.try_recv().is_err());
+    assert!(Arc::ptr_eq(
+        &initial,
+        shared
+            .latest
+            .lock()
+            .expect("snapshot lock")
+            .as_ref()
+            .expect("snapshot")
+    ));
+    worker.command = Some((1, CommandOutcome::Applied));
+    worker.publish().expect("command acknowledgement");
+    notifications.try_recv().expect("command notification");
+    assert_eq!(
+        shared
+            .latest
+            .lock()
+            .expect("snapshot lock")
+            .as_ref()
+            .expect("snapshot")
+            .command,
+        Some((1, CommandOutcome::Applied))
+    );
+    shared.stopping.store(true, Ordering::Release);
+    worker.publish().expect("shutdown publication");
+    notifications.try_recv().expect("shutdown notification");
+    assert!(
+        shared
+            .latest
+            .lock()
+            .expect("snapshot lock")
+            .as_ref()
+            .expect("snapshot")
+            .stopped
+    );
+    calculation.shutdown().expect("calculation shutdown");
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Call {
     Register,
@@ -31,6 +103,7 @@ struct Records {
     settings: NativeSettings,
     active: bool,
     calls: Vec<Call>,
+    temperature_changed: Option<mpsc::SyncSender<()>>,
     blocked: Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>,
     off_fails: bool,
 }
@@ -45,6 +118,7 @@ impl Default for Records {
             },
             active: true,
             calls: Vec::new(),
+            temperature_changed: None,
             blocked: None,
             off_fails: false,
         }
@@ -117,6 +191,9 @@ impl NativeBackend for Backend {
         state.settings.temperature = Some(temperature.kelvin().cast_signed());
         state.settings.previewing =
             matches!(mode, TemperatureMode::Hold | TemperatureMode::ApplyHeld);
+        if let Some(notify) = &state.temperature_changed {
+            let _sent = notify.try_send(());
+        }
         Ok(())
     }
 
@@ -173,6 +250,7 @@ fn start_with_foreground(
     foreground: impl FnMut() -> Foreground + Send + 'static,
 ) -> (ControllerWorker, mpsc::Receiver<()>) {
     let (notify, notified) = mpsc::sync_channel(1);
+    records.lock().expect("records").temperature_changed = Some(notify.clone());
     let worker = ControllerWorker::with_native(
         "circadia.exe",
         startup(directory),

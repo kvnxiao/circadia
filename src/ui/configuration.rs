@@ -346,6 +346,9 @@ impl Configuration {
     }
 
     pub(crate) fn field_errors(&self) -> BTreeMap<Field, FieldErrorKind> {
+        if self.inputs.is_empty() {
+            return BTreeMap::new();
+        }
         self.accepted
             .as_ref()
             .map(|accepted| apply_inputs(accepted, &self.inputs).1)

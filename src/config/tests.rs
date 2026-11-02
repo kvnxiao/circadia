@@ -1,4 +1,45 @@
 use super::*;
+
+#[test]
+fn configuration_clones_share_validated_inputs() {
+    let config = ConfigInput {
+        suppression: vec![AppEntry::new("game.exe", "Game").with_title("game.*", true)],
+        ..ConfigInput::default()
+    }
+    .validate()
+    .expect("valid configuration");
+    let cloned = config.clone();
+    assert!(std::ptr::eq(config.input(), cloned.input()));
+}
+
+#[test]
+fn temperature_edits_reuse_title_matchers_without_changing_matching() {
+    let config = ConfigInput {
+        suppression: vec![AppEntry::new("game.exe", "Game").with_title("game.*", true)],
+        ..ConfigInput::default()
+    }
+    .validate()
+    .expect("valid configuration");
+    let mut inputs = FieldInputs::default();
+    inputs.insert(Field::SleepKelvin, FieldValue::Number(2200));
+    let (edited, errors) = apply_inputs(&config, &inputs);
+    assert!(errors.is_empty());
+    assert_eq!(edited.input().sleep_kelvin, 2200);
+    assert!(std::ptr::eq(
+        config.titles(Field::Suppression),
+        edited.titles(Field::Suppression)
+    ));
+    assert!(
+        edited
+            .classify("game.exe", Some("Game window"), "circadia.exe")
+            .matches
+    );
+    assert!(
+        !edited
+            .classify("game.exe", Some("Other window"), "circadia.exe")
+            .matches
+    );
+}
 use test_case::test_case;
 
 fn config(input: ConfigInput) -> Config {

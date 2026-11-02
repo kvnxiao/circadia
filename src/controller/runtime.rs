@@ -21,6 +21,7 @@ use crate::RecentApp;
 use crate::Suppression;
 use crate::SuppressionState;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Duration;
 use win_nightlight_lib::ColorTemperature;
 
@@ -144,6 +145,7 @@ pub struct ControlRuntime {
     focus_initialized: bool,
     suppression: Suppression,
     foreground: ForegroundApps,
+    recent: OnceLock<Vec<RecentApp>>,
     lifecycle: Lifecycle,
     resume_epoch: Option<u64>,
     output: TemperatureOutput,
@@ -167,6 +169,7 @@ impl ControlRuntime {
             focus_initialized: false,
             suppression: Suppression::default(),
             foreground: ForegroundApps::new(running_executable)?,
+            recent: OnceLock::new(),
             lifecycle: Lifecycle::Running,
             resume_epoch: None,
             output: TemperatureOutput::default(),
@@ -184,6 +187,7 @@ impl ControlRuntime {
         update: OutputUpdate,
         now: RuntimeTime,
     ) -> Result<Option<CalculationRequest>, ControlError> {
+        self.recent.take();
         let Some(layer) = layer else {
             self.config = None;
             self.last_scheduled = None;
@@ -436,6 +440,7 @@ impl ControlRuntime {
         now: RuntimeTime,
     ) -> Result<(), ControlError> {
         self.foreground.observe(foreground, previous, now.uptime);
+        self.recent.take();
         let Some(config) = &self.config else {
             record_foreground(foreground, None);
             return Ok(());
@@ -597,6 +602,7 @@ impl ControlRuntime {
         self.output.stop();
         self.output.request_refresh();
         self.foreground.observe(foreground, None, now.uptime);
+        self.recent.take();
         let Some(config) = &self.config else {
             record_foreground(foreground, None);
             return Ok(None);
@@ -781,9 +787,15 @@ impl ControlRuntime {
 
     /// Return current recent applications and validated list membership.
     pub fn recent(&self) -> Vec<RecentApp> {
-        self.config
-            .as_ref()
-            .map_or_else(Vec::new, |config| self.foreground.recent(config))
+        self.recent_entries().to_vec()
+    }
+
+    pub(super) fn recent_entries(&self) -> &[RecentApp] {
+        self.recent.get_or_init(|| {
+            self.config
+                .as_ref()
+                .map_or_else(Vec::new, |config| self.foreground.recent(config))
+        })
     }
 
     /// Return output state for the sole native worker.

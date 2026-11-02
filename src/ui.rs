@@ -383,6 +383,7 @@ fn finish_runtime(
 struct Desktop {
     session: Option<Session>,
     file_info: Option<FileInfoClient>,
+    named: Option<(u64, u64, u64)>,
     icons: IconCache,
     browsed: BTreeMap<crate::ExecutablePath, (PathBuf, Duration)>,
     configuration: Rc<RefCell<Configuration>>,
@@ -476,10 +477,12 @@ impl Application for Desktop {
         }
         if !self.exiting {
             self.release_location();
+            self.record_names();
             self.flush();
         } else if self.exit_ready() {
             context.exit();
         }
+        self.icons.flush();
     }
 
     fn view(&self, input: &Input, context: &ApplicationViewContext<Self>) -> ApplicationView {
@@ -565,6 +568,7 @@ impl Desktop {
         Self {
             session: None,
             file_info: None,
+            named: None,
             icons: IconCache::load(&directory),
             browsed: BTreeMap::new(),
             configuration,
@@ -879,21 +883,36 @@ impl Desktop {
         }
         let icons_received = !received.icons.is_empty();
         for (executable, read) in received.icons {
-            if matches!(read, file_info::IconRead::Unchanged)
-                && !self.icons.view().apps.contains_key(&executable)
-            {
+            let reused = matches!(
+                read,
+                file_info::IconRead::Unchanged | file_info::IconRead::Cached(_)
+            );
+            self.icons.apply(&executable, read);
+            if reused && !self.icons.view().apps.contains_key(&executable) {
                 self.request_icons(std::slice::from_ref(&executable));
             }
-            self.icons.apply(&executable, read);
         }
         if icons_received {
             self.prune_icons();
         }
+        self.record_names();
+    }
+
+    fn record_names(&mut self) {
         if let Some(client) = &self.file_info {
+            let current = (
+                self.configuration.borrow().revision(),
+                self.icons.source_revision(),
+                client.revision(),
+            );
+            if self.named == Some(current) {
+                return;
+            }
             let changed = self
                 .configuration
                 .borrow_mut()
                 .record_names(client.names(), &self.icons.view().sources);
+            self.named = Some((self.configuration.borrow().revision(), current.1, current.2));
             self.configure(changed);
         }
     }
@@ -1272,7 +1291,11 @@ impl Desktop {
                 previous,
             });
         }
-        self.request_names();
+        if previous.as_ref().map(|snapshot| &snapshot.recent)
+            != self.snapshot.as_ref().map(|snapshot| &snapshot.recent)
+        {
+            self.request_names();
+        }
         if !recent_executables(previous.as_deref()).eq(recent_executables(self.snapshot.as_deref()))
         {
             self.prune_icons();
