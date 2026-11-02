@@ -49,8 +49,8 @@ Sources: [Windows Night light settings](https://support.microsoft.com/en-us/wind
 Requires Windows 11 x64 with working native Night light. See [tested compatibility](docs/research/windows-compatibility.md).
 
 1. Sign in to GitHub and open the [Preview runs](https://github.com/kvnxiao/circadia/actions/workflows/preview.yml?query=event%3Apush+branch%3Amain).
-2. Select the latest successful run, then download `Circadia-windows-x64-unsigned-<commit>` under **Artifacts**.
-3. Extract the ZIP. Quit Circadia from its tray menu if it is running. Run the extracted `*-setup.exe`.
+2. Select the latest successful run, then download the `*-setup.exe` installer and its matching `.sha256` file under **Artifacts**.
+3. Quit Circadia from its tray menu if it is running. Run the downloaded `*-setup.exe`.
 4. Finish installation and open **Circadia** from the Start menu.
 
 Preview builds are unsigned, so Windows may show a SmartScreen warning. See the [user guide](docs/user-guide.md#installation-and-updates) for installation help, updates, and schedule setup.
