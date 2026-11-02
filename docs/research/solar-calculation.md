@@ -16,7 +16,7 @@ recheck-when: The solar dependency, event convention, date adapter, or delta-T e
 
 The tested `solar-positioning` 0.7.1 SPA interval API matches every sunrise and sunset count in 36 independent United States Naval Observatory (USNO) cases, including missing and repeated events. The `sunrise` 3.0.0 candidate misses events near polar transitions. These results support the application's local event calculation; they do not establish its selection of events between Wake and Bedtime.
 
-The [solar comparison tool](../../tools/solar-calculation/README.md) retains the calculator, independent fixtures, and locked dependencies. Its recorded measurements keep their original dates and environment.
+An experimental comparison calculator tested both candidates against independent USNO fixtures with locked dependencies. Its recorded measurements keep their original dates and environment.
 
 ## Event convention and API fit
 
@@ -32,7 +32,7 @@ The API represents time as a Julian date, a continuous astronomical day count. I
 
 ## Independent reference comparison
 
-The [reproducible probe](../../tools/solar-calculation/README.md) stores full USNO responses and request URLs. Tests do not call a live solar service. Expected results come from USNO, not from either Rust candidate. The API returns a list of phenomena for the requested civil date and clock offset, including zero or multiple events of one type. [USNO API documentation](https://aa.usno.navy.mil/data/api).
+The comparison probe stored full USNO responses and request URLs. Its tests did not call a live solar service. Expected results come from USNO, not from either Rust candidate. The API returns a list of phenomena for the requested civil date and clock offset, including zero or multiple events of one type. [USNO API documentation](https://aa.usno.navy.mil/data/api).
 
 **Measured on 2026-10-16:** Six Rust tests pass. The reference test covers 36 cases and 48 individual rise/set times. Additional tests distinguish invalid coordinates and invalid search inputs from legitimate missing events. All reference event counts match.
 
@@ -61,7 +61,7 @@ The error review informs whether startup needs an ordinary solar fallback mode. 
 | Nonfinite computed position | The event wrapper reports a computation error. No recorded reference case triggers this guard with the built-in SPA provider. |
 | Windows clock or time-zone conversion failure | A separate date-acquisition or conversion failure, not a failed solar crossing calculation. The [Windows conversion research](windows-clock-conversion.md) records that adapter's evidence and limits. |
 
-These findings come from `delta_t.rs`, `events.rs`, `spa/mod.rs`, and `tests/events_numeric.rs` in the published 0.7.1 crate. The [active timing probe](../../tools/solar-timing/README.md) also calls `estimate_from_date`; the date restriction applies before its interval search. [Versioned crate source](https://docs.rs/crate/solar-positioning/0.7.1/source/).
+These findings come from `delta_t.rs`, `events.rs`, `spa/mod.rs`, and `tests/events_numeric.rs` in the published 0.7.1 crate. The [timing measurement](solar-performance.md) also called `estimate_from_date`; the date restriction applies before its interval search. [Versioned crate source](https://docs.rs/crate/solar-positioning/0.7.1/source/).
 
 The evidence supports validating the dates and intervals required by an operation and reporting an unexpected failure as a defect. It does not justify several user-configurable solar fallback modes or a persistent cache for expected calculation outages. Retrying identical inputs does not inherently repair a deterministic rejection. The recorded fixtures do not prove that every finite coordinate and supported date succeeds. Host behavior with an unsupported system date has not been tested.
 

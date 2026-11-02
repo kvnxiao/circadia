@@ -41,7 +41,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          version=$(cargo +stable metadata --no-deps --format-version 1 --locked | jq -er '.packages[] | select(.name == "circadia") | .version')
+          version=$(cargo +stable metadata --no-deps --format-version 1 --locked | jq -er '.packages[] | select(.name == "circadia-app") | .version')
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$RELEASE_TAG" == "v$version" ]]
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

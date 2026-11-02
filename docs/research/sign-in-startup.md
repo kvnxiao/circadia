@@ -46,7 +46,7 @@ The read-only approval lookup uses the `Circadia` value under `HKCU\Software\Mic
 
 ## Measured integration checks
 
-**Observed on Windows 11 x64 build 26300.9711, 2026-10-22, with the earlier Save/Discard settings model:** `just native-startup` passed with a debug application and isolated configuration. The check verified:
+**Observed on Windows 11 x64 build 26300.9711, 2026-10-22, with the earlier Save/Discard settings model:** the application harness startup check passed with a debug application and isolated configuration. The check verified:
 
 - Save registers the current executable and data directory; editing and Discard do not.
 - Injected disabled approval survives unrelated Save and explicit Retry.
@@ -55,7 +55,7 @@ The read-only approval lookup uses the `Circadia` value under `HKCU\Software\Mic
 - A command exceeding 260 characters fails registration while preserving the saved daily Bedtime clock and startup preference, with settings still open after close-with-Save.
 - The harness removes its owned temporary registration and approval values.
 
-Unit tests cover quoted paths, trailing backslashes, the command with and without `--data-dir`, the 259-character limit, approval decoding, registry-error classification, explicit retry, and preservation of Windows' effective state after a failed removal. The [native tool instructions](../../tools/native/README.md#sign-in-startup) describe prerequisites and side effects.
+Unit tests cover quoted paths, trailing backslashes, the command with and without `--data-dir`, the 259-character limit, approval decoding, registry-error classification, explicit retry, and preservation of Windows' effective state after a failed removal. The [application harness instructions](../../circadia-harness/README.md#sign-in-startup-accept-startup) describe prerequisites and side effects.
 
 ## Verification limits
 

@@ -9,9 +9,9 @@ if [[ ! -f "$compiler" ]]; then
 fi
 command -v cargo-bundle-licenses >/dev/null
 
-RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static" cargo +stable build --release --bin circadia --features self-contained --locked --target x86_64-pc-windows-msvc
-metadata=$(cargo +stable metadata --format-version 1 --features self-contained --locked)
-version=$(jq -er '.packages[] | select(.name == "circadia") | .version' <<< "$metadata")
+RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static" cargo +stable build --release --package circadia-app --bin circadia --features self-contained --locked --target x86_64-pc-windows-msvc
+metadata=$(cargo +stable metadata --format-version 1 --features circadia-app/self-contained --locked)
+version=$(jq -er '.packages[] | select(.name == "circadia-app") | .version' <<< "$metadata")
 base_version=$version
 case ${CIRCADIA_CHANNEL:-development} in
     stable) ;;
@@ -40,7 +40,7 @@ done
 mkdir "$payload/licenses"
 cp packaging/licenses/windows-app-sdk-"$runtime_version"-*.txt "$payload/licenses/"
 cp packaging/licenses/webview2-"$webview_version"-*.txt "$payload/licenses/"
-cargo bundle-licenses --format json --features self-contained --previous packaging/licenses/rust-overrides.json --output "$payload/licenses/rust.json"
+(cd circadia-app && cargo bundle-licenses --format json --features self-contained --previous ../packaging/licenses/rust-overrides.json --output "$payload/licenses/rust.json")
 jq -e 'all(.third_party_libraries[]; any(.licenses[]; .text != "NOT FOUND" and (.text | length > 0)))' "$payload/licenses/rust.json" >/dev/null
 printf 'Circadia %s\nCommit: %s\nChannel: %s\nUnsigned build\n' "$version" "$(git rev-parse HEAD)" "${CIRCADIA_CHANNEL:-development}" > "$payload/BUILD.txt"
 

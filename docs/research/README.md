@@ -38,6 +38,6 @@ These documents record evidence for Circadia's design and implementation. Each t
 | [Executable icons and names](executable-icons.md) | File-read cost, icon resources, cache validity, and generic-icon fallbacks. |
 | [f.lux interaction references](flux-behavior.md) | Documented and observed comparison behavior; not a definition of Circadia's product rules. |
 
-## Reproducible sources
+## Application checks
 
-The [tools index](../../tools/README.md) lists retained runnable experiments and application checks with their prerequisites and side effects. The [solar reference tool](../../tools/solar-calculation/README.md) preserves the independent astronomical fixtures. Moving a tool or updating this index does not revalidate older observations.
+The [application harness](../../circadia-harness/README.md) lists Circadia's application checks with their prerequisites and side effects. Each research document records the method, versions, environment, and limits of the experiments it cites. Moving a check or updating this index does not revalidate older observations.

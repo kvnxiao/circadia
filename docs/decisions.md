@@ -103,3 +103,36 @@ Evaluated directions that affected Circadia's behavior or feasibility. The [spec
 **Basis:** The [application matching research](research/flux-behavior.md#app-identity-and-matching) records the identity problem; the [process-isolation requirement](specs/SPEC.md#req-game-process-isolation--restrict-access-to-other-processes) excludes memory reads.
 
 **Reevaluate when:** A documented, limited-access identity API distinguishes these applications without reading process memory or exposing command-line credentials.
+
+## Native code ownership
+
+### DEC-first-party-wrappers-for-maintained-crates — Wrap Windows operations that maintained crates already provide
+
+**Disposition:** Not selected
+
+**Requirement impact:** Where Circadia's `unsafe` Windows calls are written and audited.
+
+**Reason:** A first-party wrapper duplicates maintained code and adds `unsafe` code that Circadia must audit. Circadia calls a maintained public crate's safe API whenever one provides the operation with the results the caller needs, and writes a wrapper in [circadia-winsafe](../circadia-winsafe/README.md) only when none does.
+
+**Basis:** The harness first moved all six of its `unsafe` sites into `circadia-winsafe` unchanged. Of those operations:
+
+- `xcap` 0.9.8 captured pixel-identical screen regions, so it replaced the `GetDIBits` wrapper.
+- winsafe 0.0.29's safe `ShellExecuteEx`, `EnumWindows`, and `OpenProcess` replaced the shortcut launch wrapper, which had kept the launched process handle.
+
+**Reevaluate when:** A maintained crate fails to provide an operation the caller needs, or its defects affect harness results.
+
+### DEC-wmi-thread-counters — Read thread context-switch counts through WMI or winprocinfo
+
+**Disposition:** Not selected
+
+**Requirement impact:** The resource sampler's 1 s interval and its raw per-thread context-switch counts.
+
+**Reason:** These crates do not provide the samples the harness needs, so `circadia-winsafe` wraps `NtQuerySystemInformation` instead:
+
+- A persistent `wmi` 0.18.4 connection returned exact counts but took about 1.9 s per query, which is longer than the sampling interval.
+- `typeperf` reports rates under localized counter names instead of raw counts.
+- `winprocinfo` passes the allocation size to `VirtualFree` with `MEM_RELEASE`, which [requires zero](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualfree), so it leaks its buffer on every call.
+
+**Basis:** Scratch experiments and source inspection in November 2026.
+
+**Reevaluate when:** A maintained crate returns per-thread context-switch counts within the sampling interval without leaking memory.

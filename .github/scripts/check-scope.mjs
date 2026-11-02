@@ -2,35 +2,19 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+const unreadDirectories = ['docs/', 'assets/screenshots/', '.agents/', '.github/ISSUE_TEMPLATE/', 'packaging/'];
+const unreadFiles = ['LICENSE', 'circadia-harness/README.md', 'circadia-bindings/README.md'];
+
 export function selectChecks(paths, full = false) {
-  const selected = { application: full, solar: full, reactor: full, settings: full, python: full };
+  let rust = full;
   for (const path of paths) {
-    if (path.startsWith('docs/') || ['README.md', 'DEVELOPMENT.md', 'AGENTS.md', 'LICENSE'].includes(path)) {
+    const topLevelGuide = !path.includes('/') && path.endsWith('.md');
+    if (topLevelGuide || unreadFiles.includes(path) || unreadDirectories.some((directory) => path.startsWith(directory))) {
       continue;
     }
-    if (path.startsWith('src/') || path.startsWith('assets/')) {
-      selected.application = true;
-      if (path.startsWith('src/ui/composition/') || path.startsWith('assets/')) selected.settings = true;
-    } else if (path.startsWith('i18n/') || path.startsWith('tests/') || path === 'build.rs' || path.startsWith('tools/native') || path.startsWith('tools/composition-bindings')) {
-      selected.application = true;
-    } else if (path.startsWith('tools/windows-reactor/settings-design/')) {
-      selected.settings = true;
-    } else if (path.startsWith('tools/windows-reactor/')) {
-      selected.reactor = true;
-      selected.settings = true;
-    } else if (path.startsWith('tools/solar-calculation/')) {
-      selected.solar = true;
-    } else if (path.startsWith('tools/solar-timing/')) {
-      selected.solar = true;
-      selected.python = true;
-    } else if (path.startsWith('tools/windows-clock/') || ['tools/pyproject.toml', 'tools/uv.lock', 'tools/justfile'].includes(path)) {
-      selected.python = true;
-    } else {
-      for (const name of Object.keys(selected)) selected[name] = true;
-    }
-    if (path.endsWith('.py')) selected.python = true;
+    rust = true;
   }
-  return { ...selected, git: selected.application || selected.reactor || selected.settings };
+  return { rust };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -8,7 +8,7 @@ observed-in:
   - windows-reactor and windows-reactor-setup revision 8786f59d1f6bc216324b202ec17d3de696d3b843
   - Microsoft.WindowsAppSDK.Runtime 2.6.4 x64 package and extracted AppxManifest.xml, inspected 2026-10-29
   - Microsoft Windows App SDK and Mica documentation retrieved 2026-10-16
-  - Existing Reactor probe validation on Windows 11 x64 build 26300.9711
+  - Experimental Reactor probe validation on Windows 11 x64 build 26300.9711
 recheck-when: Reactor or the bundled runtime changes, required APIs change, or the minimum-build release test fails.
 ---
 
@@ -29,7 +29,7 @@ rg 'Identity Name=|TargetDeviceFamily' "$LOCALAPPDATA/windows-reactor-setup/temp
 sha256sum "$LOCALAPPDATA/windows-reactor-setup/temp/v1/Microsoft.WindowsAppSDK.Runtime-2.6.4/.msix_extract-x64/AppxManifest.xml"
 ```
 
-The application, Windows Reactor lifecycle probe, and settings-design rendering probe compile with Rust 1.95 and stage the new runtime successfully. Minimum-build execution remains a release check.
+The application and two experimental Reactor probes, one for application lifecycle and one for settings-design rendering, compile with Rust 1.95 and stage the new runtime successfully. Minimum-build execution remains a release check.
 
 ## Runtime 2.5.1 evidence
 

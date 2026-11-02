@@ -240,4 +240,4 @@ Menu labels change only when the state they show changes. Explorer recreation re
 
 | Design decision or requirement | Evidence |
 | :-- | :-- |
-| Settings window structure, graph drawing, time entry, and tray menu under Reactor's limits | [Settings design support](../research/settings-design-support.md) and its [rendering probe](../../tools/windows-reactor/settings-design/README.md); the probe covered forced dark and light window themes at 100% scaling; following the Windows theme, contrast themes, other scaling, and screen-reader use remain unverified. |
+| Settings window structure, graph drawing, time entry, and tray menu under Reactor's limits | [Settings design support](../research/settings-design-support.md), including an experimental rendering probe that covered forced dark and light window themes at 100% scaling; following the Windows theme, contrast themes, other scaling, and screen-reader use remain unverified. |

@@ -1,0 +1,20 @@
+[package]
+name = "circadia-winsafe"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "Safe wrappers for the Windows operations that Circadia calls without a safe dependency API"
+repository.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["ntstatus", "winternl", "winuser"] }
+winsafe.workspace = true
+
+[dev-dependencies]
+proc-macro2 = "1"
+syn = { version = "2", features = ["full", "visit"] }
+
+[lints]
+workspace = true

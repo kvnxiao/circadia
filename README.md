@@ -1,4 +1,4 @@
-<h1>Circadia <img src="assets/icon/circadia.svg" width="32" alt="Circadia icon"></h1>
+<h1>Circadia <img src="circadia-app/assets/icon/circadia.svg" width="32" alt="Circadia icon"></h1>
 
 Circadia is a powerful manager for [Windows Night light](https://support.microsoft.com/en-us/windows/hardware/display-graphics/change-display-brightness-and-color-in-windows#bkmk_night_light). It adjusts your display’s color temperature through Windows’ native functionality, without directly writing GPU gamma ramps or modifying display calibration profiles. Set your preferred color temperatures, choose how gradually they change, and build a schedule around your waking and sleeping hours (with support for additional sunrise and sunset timings). Apps can be added to a suppression list to automatically pause Night light when focused.
 
@@ -59,7 +59,7 @@ Preview builds are unsigned, so Windows may show a SmartScreen warning. See the 
 
 - [User guide](docs/user-guide.md): settings, app rules, location, configuration recovery, and logs.
 - [Development guide](DEVELOPMENT.md): source builds, checks, dependency updates, and implementation boundaries.
-- [Tools and experiments](tools/README.md): application checks and dependency experiments, with their prerequisites and system effects.
+- [Application harness](circadia-harness/README.md): end-to-end acceptance checks, screenshot capture, and performance measurements, with their prerequisites and system effects.
 - [Specification](docs/specs/SPEC.md), [visual design](docs/design/README.md), and [research](docs/research/README.md): intended behavior, interface design, and supporting evidence.
 
 [Report a problem](https://github.com/kvnxiao/circadia/issues/new?template=bug_report.md) with the relevant log from **Settings → Logs → Open folder**. Logs can include coordinates, executable names, paths, and window titles; remove personal information before sharing them. Circadia does not upload logs automatically.

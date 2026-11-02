@@ -38,7 +38,7 @@ This supports a single-process design: the process continues to handle tray acti
 
 **Development revision `722f2021`:** `App::run_application` accepts an `Application` whose view declares windows and notification icons. A declared but closed window does not keep the application running; a live notification icon does. `show_window` opens, restores, or activates the named settings window. Closing it drops component state but preserves application state. `context.exit()` ends the application. The lower-level `App::run_with` selects explicit dispatcher shutdown, and `AppContext::open_component_window` disables automatic last-window exit for that path.
 
-These are different entry points with different lifetime rules. The [pinned probe](../../tools/windows-reactor/src/main.rs) uses the application declaration API and a tray icon. It keeps a counter in application state so closing and reopening settings can test ownership directly. See the [probe results and commands](../../tools/windows-reactor/README.md) for the exact validation level.
+These are different entry points with different lifetime rules. An experimental probe tested Reactor's application lifetime at the development revision then pinned with the application declaration API and a tray icon. It kept a counter in application state so closing and reopening settings could test ownership directly.
 
 **Measured on Windows build 26300.9711:** the development probe stayed in one process after settings closed, reopened with its application counter preserved, and exited through its explicit action. Activation used a synthetic notification callback addressed to that process. These results verify that lifetime path, not actual Shell input or a complete Circadia controller.
 

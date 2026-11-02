@@ -130,7 +130,7 @@ Do not use masks, filters, text, `pathLength`, style sheets, or CSS custom prope
 
 ### App icon
 
-The app icon is a blue crescent moon with an amber sun in its opening. The source is `assets/icon/circadia.svg`.
+The app icon is a blue crescent moon with an amber sun in its opening. The source is `circadia-app/assets/icon/circadia.svg`.
 
 #### Construction
 
@@ -216,7 +216,7 @@ The `hc` pictures show the intended contrast-theme drawing: a black plate with a
 
 ### Badge glyphs
 
-Badge glyphs identify the suppression source inside the badge that overlaps the phase art. The sources are `assets/badge/timer.svg` and `assets/badge/app-window.svg`.
+Badge glyphs identify the suppression source inside the badge that overlaps the phase art. The sources are `circadia-app/assets/badge/timer.svg` and `circadia-app/assets/badge/app-window.svg`.
 
 - **Grid.** 16 units square, view box (0, 0, 16, 16). Keep strokes at least about 1.75 units from the edges.
 - **Stroke.** 1.5-unit lines with round caps and round joins, and no fills.

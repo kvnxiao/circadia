@@ -335,7 +335,7 @@ The first matching row applies:
 | A scheduled transition is in progress | The phase the transition ends in | Progress ring showing how much of the transition has elapsed |
 | Otherwise | The current phase: `morning` from Wake to Sunrise; `day` from Sunrise, or Wake when Sunrise is not used, to Sunset, or Bedtime when Sunset is not used; `evening` from Sunset to Bedtime; `bedtime` from Bedtime to Wake | None |
 
-The picture comes from the folder for the current theme: `assets/phase/dark/`, `assets/phase/light/`, or, in contrast themes, `assets/phase/hc/` drawn in the system colors.
+The picture comes from the folder for the current theme: `circadia-app/assets/phase/dark/`, `circadia-app/assets/phase/light/`, or, in contrast themes, `circadia-app/assets/phase/hc/` drawn in the system colors.
 
 ### Progress ring and badge
 

@@ -53,7 +53,7 @@ The requirement summaries below are navigation to the authoritative blocks in th
 - Prefer direct code and existing library capabilities. Introduce additional components or general abstractions only for a demonstrated requirement or measured limitation.
 - Executable size is not a resource target; memory use and CPU time while running are.
 
-**Dependencies:** Circadia uses `win-nightlight-lib` and `win-nightlight-watch` 0.5.0, plus `windows-reactor`, `windows-window`, and `windows-reactor-setup` from the `windows-rs` repository. While Reactor is in preview, these three follow the repository's `master` branch through one reference commit that the application manifest records for all three. Circadia adopts a new commit only after the application's automated checks and the Windows Reactor UI probe pass on it. Supporting evidence links the capability assessments, API contracts, and deployment research.
+**Dependencies:** Circadia uses `win-nightlight-lib` and `win-nightlight-watch` 0.5.0, plus `windows-reactor`, `windows-window`, and `windows-reactor-setup` from the `windows-rs` repository. While Reactor is in preview, these three follow the repository's `master` branch through one reference commit that the workspace manifest records for all three. Circadia adopts a new commit only after the application's automated checks pass on it. Supporting evidence links the capability assessments, API contracts, and deployment research.
 
 Circadia does not write GPU gamma ramps or monitor calibration profiles. Successful library operations and decoded registry readback verify native requests. Preview lets the user assess visible output at the configured rate. Registry success alone does not verify smoothness or displayed color. Instrumented optical measurements, calibration preservation by Windows, and optical equivalence between 6500 K and Night light off are outside the acceptance criteria.
 
@@ -279,8 +279,6 @@ Implementation conformance requires the requirement scenarios throughout this sp
 
 Verify graph latency, due output deadlines, configured rate limits, serialized writes, cleanup, and retry delays against their requirements. Resource measurements have no numerical pass threshold; REQ-event-driven-idle is an invariant. The release maintainer declares and records each reference machine's hardware, Windows build, display modes, and build profile before collecting acceptance results.
 
-**Note:** The Windows Reactor UI probe uses predefined target times; it does not verify the complete application.
-
 Release acceptance requires clean-machine deployment on the minimum and a current serviced Windows 11 build, resource use, accessibility, the settings window's native controls, theme following, and translated layout at 100% scaling under [interface.md](interface.md) and [localization.md](localization.md) in light, dark, and contrast themes, and foreground matching across representative applications, window modes, and elevation levels. Checks above 100% scaling are deferred to the post-MVP work above.
 
 Release evidence also covers the conditions below and those in the area specifications:
@@ -291,7 +289,7 @@ Release evidence also covers the conditions below and those in the area specific
 
 ## Supporting evidence
 
-The [research index](../research/README.md) records feasibility findings, versions, API details, measurements, and limitations. The [probe index](../../tools/README.md) links reproducible experiments and their run instructions. They support the design without adding requirements or proving complete application conformance. Area files list the evidence specific to their area. [Historical decisions](../decisions.md) explain consequential evaluated directions without adding requirements.
+The [research index](../research/README.md) records feasibility findings, versions, API details, measurements, and limitations. This research supports the design without adding requirements or proving complete application conformance. Area files list the evidence specific to their area. [Historical decisions](../decisions.md) explain consequential evaluated directions without adding requirements.
 
 | Design decision or requirement | Evidence |
 | :-- | :-- |
