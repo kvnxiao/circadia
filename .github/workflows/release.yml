@@ -33,6 +33,8 @@ jobs:
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: just,cargo-bundle-licenses@4.2.0
+      - name: Install pinned Inno Setup
+        run: bash packaging/install-inno-setup.sh
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
       - name: Validate release version

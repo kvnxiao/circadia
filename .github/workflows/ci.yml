@@ -61,8 +61,8 @@ jobs:
         with:
           version: '1.7.12'
           pyflakes: false
-      - name: Check installer shell script
-        run: shellcheck packaging/build-installer.sh
+      - name: Check installer shell scripts
+        run: shellcheck packaging/*.sh
 
   cargo-git:
     name: Cargo Git sources

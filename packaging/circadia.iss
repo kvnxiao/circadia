@@ -1,3 +1,7 @@
+#if Ver < EncodeVer(7, 1, 1)
+  #error Inno Setup 7.1.1 or later is required
+#endif
+
 #ifndef PayloadDir
   #error PayloadDir must name the staged application directory
 #endif
@@ -21,6 +25,7 @@ DefaultDirName={localappdata}\Programs\Circadia
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+SetupArchitecture=x64
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 MinVersion=10.0.22000
@@ -32,6 +37,8 @@ OutputBaseFilename=Circadia-{#AppVersion}-{#BuildRevision}-windows-x64-unsigned-
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+WizardImageFile=images\wizard.bmp
+WizardSmallImageFile=images\wizard-small.bmp
 SignedUninstaller=no
 
 [Files]
@@ -39,6 +46,9 @@ Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{userprograms}\Circadia"; Filename: "{app}\circadia.exe"; WorkingDir: "{app}"
+
+[Run]
+Filename: "{app}\circadia.exe"; Description: "Launch Circadia"; WorkingDir: "{app}"; Flags: postinstall nowait skipifsilent
 
 [Messages]
 UninstallAppRunningError=Circadia is running. Choose Quit from its tray menu, then click OK to continue, or Cancel to exit.
