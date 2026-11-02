@@ -94,6 +94,7 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
         for (width, height) in [(1620, 800), (640, 480)] {
             crate::responsive::resize_client(&window, width, height)?;
             check_column(&automation, &window, process)?;
+            check_external_cards(&automation, &window, process, page)?;
             capture_page(&automation, &window, process, &format!("{page}-{width}"))?;
         }
     }
@@ -124,6 +125,53 @@ fn check_column(automation: &Automation, window: &winsafe::HWND, process: u32) -
             title.left, title.right, page.left, page.right
         ),
     )
+}
+
+fn check_external_cards(
+    automation: &Automation,
+    window: &winsafe::HWND,
+    process: u32,
+    page: &str,
+) -> io::Result<()> {
+    let ids: &[&str] = match page {
+        automation_id::NAV_GENERAL => &[
+            automation_id::OPEN_SETTINGS_FOLDER,
+            automation_id::OPEN_LOGS_FOLDER,
+        ],
+        automation_id::NAV_ABOUT => &[automation_id::REPORT_BUG],
+        _ => &[],
+    };
+    if ids.is_empty() {
+        return Ok(());
+    }
+    for scroll in automation.scrolls(window, process)? {
+        if scroll.id == automation_id::SCROLL {
+            scroll.set(100.0)?;
+        }
+    }
+    std::thread::sleep(Duration::from_millis(250));
+    for id in ids {
+        let card = automation.bounds(window, process, id)?;
+        let viewport = automation.bounds(window, process, automation_id::SCROLL)?;
+        let expected_width = (viewport.right - viewport.left - 80).min(1000);
+        require(
+            (card.right - card.left - expected_width).abs() <= 2
+                && (card.left + card.right - viewport.left - viewport.right).abs() <= 2
+                && card.bottom - card.top >= 68,
+            &format!(
+                "external action {id} must cover its full card: expected width {expected_width}, got {}x{}",
+                card.right - card.left,
+                card.bottom - card.top,
+            ),
+        )?;
+        if expected_width == 1000 {
+            require(
+                card.bottom - card.top == 70,
+                &format!("external action {id} must match the standard 70 epx card height"),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn capture_page(

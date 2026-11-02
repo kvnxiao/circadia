@@ -357,18 +357,12 @@ fn folder_card(
     let text = &settings.input.text;
     bind_text!(fl, text);
     let name = fl!("open-folder-name", name = title.as_str());
-    widgets::card(
-        Row::new(glyph, title, description)
-            .controls(vec![
-                Button::new()
-                    .automation_id(id)
-                    .automation_name(name)
-                    .on_click(context.message(Message::Command(Command::OpenFolder(folder))))
-                    .content(fl!("action-open-folder"))
-                    .into(),
-            ])
-            .view(settings.stacked()),
-    )
+    Row::new(glyph, title, description)
+        .external_button()
+        .automation_id(id)
+        .automation_name(name)
+        .on_click(context.message(Message::Command(Command::OpenFolder(folder))))
+        .into()
 }
 
 fn quit_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
