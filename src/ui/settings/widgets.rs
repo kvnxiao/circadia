@@ -35,14 +35,17 @@ pub(super) const CONTENT_INSET: f64 = 16.0;
 pub(super) const COMPACT_ACTION_INSET: f64 = CONTENT_INSET - (ICON_ACTION_SIZE - 16.0) / 2.0;
 
 pub(super) fn pending_indicator(active: bool, name: &str, id: &str) -> Grid {
+    let size = 20.0;
     Grid::new()
-        .width(20.0)
-        .height(20.0)
+        .width(size)
+        .height(size)
         .vertical_alignment(VerticalAlignment::Center)
         .children(
             active
                 .then(|| {
                     ProgressRing::new()
+                        .width(size)
+                        .height(size)
                         .is_active(true)
                         .automation_id(id)
                         .automation_name(name)
