@@ -18,7 +18,6 @@ use windows_reactor::HyperlinkButton;
 use windows_reactor::InfoBar;
 use windows_reactor::InfoBarSeverity;
 use windows_reactor::Orientation;
-use windows_reactor::ProgressRing;
 use windows_reactor::StackPanel;
 use windows_reactor::Thickness;
 use windows_reactor::VerticalAlignment;
@@ -62,16 +61,26 @@ fn identity(text: &Text) -> View {
 pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vec<View> {
     let text = &settings.input.text;
     bind_text!(fl, text);
-    let checking = settings.input.updates == Status::Checking;
+    let checking = settings.input.updates.status == Status::Checking;
     let mut result = vec![
         identity(text),
-        Button::new()
-            .style(ButtonStyle::Accent)
-            .horizontal_alignment(HorizontalAlignment::Left)
-            .automation_id(automation_id::CHECK_UPDATES)
-            .is_enabled(!checking)
-            .on_click(context.message(Message::Command(Command::CheckUpdates)))
-            .content(widgets::body(fl!("updates-check")))
+        StackPanel::new()
+            .orientation(Orientation::Horizontal)
+            .spacing(12.0)
+            .children((
+                Button::new()
+                    .style(ButtonStyle::Accent)
+                    .horizontal_alignment(HorizontalAlignment::Left)
+                    .automation_id(automation_id::CHECK_UPDATES)
+                    .is_enabled(settings.input.updates.can_check())
+                    .on_click(context.message(Message::Command(Command::CheckUpdates)))
+                    .content(widgets::body(fl!("updates-check"))),
+                widgets::pending_indicator(
+                    checking && settings.visibility == super::Visibility::Shown,
+                    &fl!("updates-checking"),
+                    automation_id::UPDATE_PROGRESS,
+                ),
+            ))
             .into(),
     ];
     result.push(banner(settings, context).unwrap_or_else(|| windows_reactor::Border::new().into()));
@@ -167,13 +176,19 @@ fn links(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
 fn banner(settings: &Settings, context: &ViewContext<'_, Settings>) -> Option<View> {
     let text = &settings.input.text;
     bind_text!(fl, text);
-    let (title, severity) = match &settings.input.updates {
+    if settings.input.updates.dismissed {
+        return None;
+    }
+    let checking = settings.input.updates.status == Status::Checking;
+    let (title, severity) = match &settings.input.updates.status {
         Status::Idle => return None,
         Status::Checking => (fl!("updates-checking"), InfoBarSeverity::Informational),
         Status::Current => (fl!("updates-current"), InfoBarSeverity::Success),
         Status::Available(_) => (fl!("updates-available"), InfoBarSeverity::Informational),
         Status::Unpublished => (fl!("updates-unpublished"), InfoBarSeverity::Informational),
         Status::Development => (fl!("updates-development"), InfoBarSeverity::Informational),
+        Status::RateLimited(_) => (fl!("updates-rate-limited"), InfoBarSeverity::Warning),
+        Status::ConnectionFailed => (fl!("updates-connection-failed"), InfoBarSeverity::Error),
         Status::Failed => (fl!("updates-failed"), InfoBarSeverity::Error),
     };
     let mut children: Vec<View> = vec![
@@ -181,21 +196,13 @@ fn banner(settings: &Settings, context: &ViewContext<'_, Settings>) -> Option<Vi
             .automation_id(automation_id::UPDATE_STATUS)
             .automation_live_setting(AutomationLiveSetting::Polite)
             .is_open(true)
-            .is_closable(false)
+            .is_closable(!checking)
+            .on_closed(context.message(Message::Command(Command::DismissUpdate)))
             .severity(severity)
             .title(title)
             .into(),
     ];
-    if settings.input.updates == Status::Checking {
-        children.push(
-            ProgressRing::new()
-                .width(20.0)
-                .height(20.0)
-                .is_active(settings.visibility == super::Visibility::Shown)
-                .into(),
-        );
-    }
-    if let Status::Available(url) = &settings.input.updates {
+    if let Status::Available(url) = &settings.input.updates.status {
         if env!("CIRCADIA_CHANNEL") == "preview" {
             children.push(widgets::caption(fl!("updates-preview-download")).into());
         }

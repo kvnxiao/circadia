@@ -26,7 +26,6 @@ use crate::l10n::bind_text;
 use crate::platform::nls::RegionalFormat;
 use std::rc::Rc;
 use std::time::Instant;
-use windows_reactor::AutomationLiveSetting;
 use windows_reactor::Border;
 use windows_reactor::CheckBox;
 use windows_reactor::FocusEventInfo;
@@ -462,7 +461,7 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
     bind_text!(fl, text);
     let title = fl!("location-title");
     let on = switch(model, Field::UseWindowsLocation);
-    let mut lines: Vec<View> = vec![
+    let lines: Vec<View> = vec![
         widgets::body(&title).into(),
         widgets::caption(if on {
             fl!("location-on")
@@ -471,14 +470,6 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
         })
         .into(),
     ];
-    if settings.input.location.requesting {
-        lines.push(
-            widgets::caption(fl!("location-requesting"))
-                .automation_id(automation_id::LOCATION_REQUESTING)
-                .automation_live_setting(AutomationLiveSetting::Polite)
-                .into(),
-        );
-    }
     widgets::nested(&automation_id::row(automation_id::USE_WINDOWS_LOCATION))
         .padding(Thickness::new(
             52.0,
@@ -497,15 +488,25 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
                         .spacing(2.0)
                         .vertical_alignment(VerticalAlignment::Center)
                         .children(lines),
-                    widgets::toggle(
-                        text,
-                        on,
-                        ToggleSwitch::new()
-                            .is_enabled(solar_options_enabled(model))
-                            .automation_id(automation_id::USE_WINDOWS_LOCATION)
-                            .automation_name(title)
-                            .on_toggled(context.callback(Message::WindowsLocation)),
-                    )
+                    widgets::action_group(vec![
+                        widgets::pending_indicator(
+                            settings.input.location.requesting
+                                && settings.visibility == super::super::Visibility::Shown,
+                            &fl!("location-requesting"),
+                            automation_id::LOCATION_REQUESTING,
+                        )
+                        .into(),
+                        widgets::toggle(
+                            text,
+                            on,
+                            ToggleSwitch::new()
+                                .is_enabled(solar_options_enabled(model))
+                                .automation_id(automation_id::USE_WINDOWS_LOCATION)
+                                .automation_name(title)
+                                .on_toggled(context.callback(Message::WindowsLocation)),
+                        )
+                        .into(),
+                    ])
                     .grid_column(1),
                 ))
                 .into(),

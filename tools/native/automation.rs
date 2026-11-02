@@ -774,7 +774,7 @@ pub(super) enum DialogButton {
 
 impl DialogButton {
     // WinUI names the buttons of every ContentDialog with these identifiers.
-    fn id(self) -> &'static str {
+    pub(super) fn id(self) -> &'static str {
         match self {
             Self::Primary => "PrimaryButton",
             Self::Close => "CloseButton",

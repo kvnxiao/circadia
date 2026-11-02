@@ -17,6 +17,7 @@ use windows_reactor::GridLength;
 use windows_reactor::HorizontalAlignment;
 use windows_reactor::Image;
 use windows_reactor::Orientation;
+use windows_reactor::ProgressRing;
 use windows_reactor::StackPanel;
 use windows_reactor::Stretch;
 use windows_reactor::TextBlock;
@@ -24,6 +25,7 @@ use windows_reactor::TextWrapping;
 use windows_reactor::ThemeBrush;
 use windows_reactor::Thickness;
 use windows_reactor::ToggleSwitch;
+use windows_reactor::TooltipExt;
 use windows_reactor::VerticalAlignment;
 use windows_reactor::View;
 
@@ -31,6 +33,29 @@ pub(super) const APP_GLYPH: &str = "\u{ECAA}";
 pub(super) const ICON_ACTION_SIZE: f64 = 40.0;
 pub(super) const CONTENT_INSET: f64 = 16.0;
 pub(super) const COMPACT_ACTION_INSET: f64 = CONTENT_INSET - (ICON_ACTION_SIZE - 16.0) / 2.0;
+
+pub(super) fn pending_indicator(active: bool, name: &str, id: &str) -> Grid {
+    let size = 20.0;
+    Grid::new()
+        .width(size)
+        .height(size)
+        .vertical_alignment(VerticalAlignment::Center)
+        .children(
+            active
+                .then(|| {
+                    ProgressRing::new()
+                        .width(size)
+                        .height(size)
+                        .is_active(true)
+                        .automation_id(id)
+                        .automation_name(name)
+                        .automation_live_setting(AutomationLiveSetting::Polite)
+                        .tooltip(name)
+                })
+                .into_iter()
+                .collect::<Vec<View>>(),
+        )
+}
 
 pub(super) fn toggle(text: &Text, on: bool, control: ToggleSwitch) -> StackPanel {
     bind_text!(fl, text);

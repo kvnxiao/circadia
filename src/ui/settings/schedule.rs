@@ -445,11 +445,7 @@ fn preview_progress(settings: &Settings, progress: f64) -> View {
             settings.accents,
         ));
     }
-    Grid::new()
-        .height(3.0)
-        .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
-        .children(layers)
-        .into()
+    Grid::new().children(layers).into()
 }
 
 fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
@@ -484,9 +480,19 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
             .children(line)
             .into(),
     ];
-    if let Some(progress) = preview.progress {
-        state.push(preview_progress(settings, progress));
-    }
+    state.push(
+        Grid::new()
+            .height(3.0)
+            .margin(Thickness::new(0.0, 8.0, 0.0, 0.0))
+            .children(
+                preview
+                    .progress
+                    .map(|progress| preview_progress(settings, progress))
+                    .into_iter()
+                    .collect::<Vec<View>>(),
+            )
+            .into(),
+    );
     Border::new()
         .border_brush(ThemeBrush::CardStroke)
         .border_thickness(Thickness::new(0.0, 1.0, 0.0, 0.0))
