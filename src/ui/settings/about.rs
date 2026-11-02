@@ -104,30 +104,18 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
             .view(settings.stacked()),
         ),
         widgets::section(fl!("section-feedback"), false),
-        widgets::card(
-            widgets::Row::new(
-                "\u{EBE8}",
-                fl!("about-report"),
-                fl!("about-report-description"),
-            )
-            .controls(vec![
-                HyperlinkButton::new()
-                    .automation_id(automation_id::REPORT_BUG)
-                    .automation_name(fl!("about-report"))
-                    .on_click(context.message(Message::Command(Command::Report(format!(
-                        "{}/issues/new?template=bug_report.md",
-                        updates::REPOSITORY
-                    )))))
-                    .content(
-                        windows_reactor::FontIcon::new()
-                            .glyph("\u{E8A7}")
-                            .font_size(14.0),
-                    )
-                    .into(),
-            ])
-            .compact_actions()
-            .view(settings.stacked()),
-        ),
+        widgets::Row::new(
+            "\u{EBE8}",
+            fl!("about-report"),
+            fl!("about-report-description"),
+        )
+        .external_button()
+        .automation_id(automation_id::REPORT_BUG)
+        .on_click(context.message(Message::Command(Command::Report(format!(
+            "{}/issues/new?template=bug_report.md",
+            updates::REPOSITORY
+        )))))
+        .into(),
         widgets::section(fl!("section-other-links"), false),
         links(settings, context),
     ]);

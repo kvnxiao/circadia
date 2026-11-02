@@ -300,8 +300,8 @@ The Settings page has, in order:
    - "Start minimized", with the description "Open to the notification area instead of this window." and a toggle switch.
 3. **Windows Night light:** an explanation card with a shield glyph, the title "How Circadia uses Night light", the description "While managing, Circadia keeps Night light on, turns the Windows Night light schedule off, and undoes outside changes. Turning management off or quitting fades to 6500 K, turns Night light off, and hands control back to Windows.", and a phase-pill-style label that reads "Managing" or "Not managing".
 4. **Troubleshooting:**
-   - "Settings file", with a folder glyph, the description "Changes are saved here as you make them, with a backup of the last good copy.", and an "Open folder" button.
-   - "Logs", with a document glyph, the description "Log files for troubleshooting. They stay on this PC and are never uploaded automatically.", and an "Open folder" button.
+   - "Settings file", with a folder glyph and the description "Changes are saved here as you make them, with a backup of the last good copy." The whole card opens its folder in Explorer and has an external-link glyph on the right.
+   - "Logs", with a document glyph and the description "Log files for troubleshooting. They stay on this PC and are never uploaded automatically." The whole card opens its folder in Explorer and has an external-link glyph on the right.
 5. **Application:** a Quit Circadia card with a power glyph, an explanation that quitting stops Night light management, and a Quit Circadia button.
 
 ### Language drop-down and restart prompt
@@ -318,7 +318,7 @@ The page starts with a 64 epx app icon beside the name Circadia in 24 epx type. 
 
 An accent Check for updates button sits below the identity block. The result banner appears directly below it: neutral with a progress indicator while checking, green when current, informational with a download-page link when an update is available, or an error on failure. Each state has readable text and a screen-reader announcement. The progress indicator stops when the window is hidden or another page is selected.
 
-Update settings has one card, Check for updates automatically. Feedback has one card, Report a bug, with a bug glyph and an external-link action. Other links lists GitHub repository, Contribution guidelines, and License. Links appear in a row at wider widths and stack at narrow widths. The page uses the shared card surfaces, section spacing, and system theme colors.
+Update settings has one card, Check for updates automatically. Feedback has one card, Report a bug, with a bug glyph and an external-link glyph on the right. The whole card opens the bug report page. External-link cards use one keyboard focus target and native hover, pressed, and focus feedback across the card. They use the shared card-row padding and minimum height, and grow when text wraps without a maximum height. Other links lists GitHub repository, Contribution guidelines, and License. Links appear in a row at wider widths and stack at narrow widths. The page uses the shared card surfaces, section spacing, and system theme colors.
 
 ## Phase art in the window
 

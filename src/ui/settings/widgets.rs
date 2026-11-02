@@ -351,6 +351,20 @@ pub(super) struct Row {
 }
 
 impl Row {
+    pub(super) fn external_button(self) -> Button {
+        Button::new()
+            .horizontal_alignment(HorizontalAlignment::Stretch)
+            .horizontal_content_alignment(HorizontalAlignment::Stretch)
+            .automation_name(&self.title)
+            .content(
+                self.controls(vec![
+                    FontIcon::new().glyph("\u{E8A7}").font_size(14.0).into(),
+                ])
+                // WinUI resolves ButtonPadding statically before per-control resources apply.
+                .view_with_outer_padding(false, Thickness::new(11.0, 5.0, 11.0, 6.0)),
+            )
+    }
+
     pub(super) fn new(
         glyph: &'static str,
         title: impl Into<String>,
@@ -389,6 +403,10 @@ impl Row {
     }
 
     pub(super) fn view(self, stacked: bool) -> View {
+        self.view_with_outer_padding(stacked, Thickness::uniform(0.0))
+    }
+
+    fn view_with_outer_padding(self, stacked: bool, outer: Thickness) -> View {
         let top = self.controls.len() > 1;
         let stacked = stacked && (!self.compact || top);
         let alignment = if top {
@@ -398,8 +416,13 @@ impl Row {
         };
         let offset = if top { 6.0 } else { 0.0 };
         Border::new()
-            .min_height(68.0)
-            .padding(Thickness::new(CONTENT_INSET, 12.0, self.action_inset, 12.0))
+            .min_height(68.0 - outer.top - outer.bottom)
+            .padding(Thickness::new(
+                CONTENT_INSET - outer.left,
+                12.0 - outer.top,
+                self.action_inset - outer.right,
+                12.0 - outer.bottom,
+            ))
             .content(
                 Grid::new()
                     .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
