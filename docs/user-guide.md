@@ -8,7 +8,7 @@ Circadia requires Windows 11 x64 with working native Night light. The intended m
 
 Download the latest preview installer using the [README instructions](../README.md#getting-started).
 
-If an older preview build cannot find new builds, update manually using the [README download steps](../README.md#getting-started). Some older update checkers search previous workflows and cannot find current packages.
+If an older preview build cannot find new builds, update manually using the [README download steps](../README.md#getting-started). Some older update checkers search previous workflows or artifact names and cannot find current packages.
 
 The installer includes the required runtime and installs for your Windows account without requesting administrator access. Downloads appear after the first successful installer build on `main` and expire after 90 days. If no download is available, you can [build from source](../DEVELOPMENT.md#build-and-run).
 

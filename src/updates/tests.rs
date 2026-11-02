@@ -111,6 +111,69 @@ fn artifact(id: u64, expired: bool) -> Artifacts {
     }
 }
 
+#[test_case("abcdef012345", false, 64, &Status::Available("https://github.com/kvnxiao/circadia/actions/runs/120".into()); "complete pair")]
+#[test_case("abcdef0123456789", false, 64, &Status::Available("https://github.com/kvnxiao/circadia/actions/runs/120".into()); "longer abbreviated commit")]
+#[test_case("abcdef012345", true, 64, &Status::Unpublished; "expired checksum")]
+#[test_case("abcdef012345", false, 0, &Status::Unpublished; "empty checksum")]
+#[test_case("main", false, 64, &Status::Unpublished; "invalid commit")]
+fn preview_recognizes_separate_installer_and_checksum(
+    source: &str,
+    expired: bool,
+    checksum_size: u64,
+    expected: &Status,
+) {
+    let name = format!("Circadia-0.1.0-preview-{source}-windows-x64-unsigned-setup.exe");
+    let result = preview_packages(
+        runs(),
+        |_| {
+            Ok(Some(Artifacts {
+                artifacts: vec![
+                    Artifact {
+                        name: name.clone(),
+                        expired: false,
+                        size_in_bytes: 100,
+                    },
+                    Artifact {
+                        name: format!("{name}.sha256"),
+                        expired,
+                        size_in_bytes: checksum_size,
+                    },
+                ],
+            }))
+        },
+        |commit| {
+            assert!(
+                matches!(expected, Status::Available(_)),
+                "incomplete or malformed package must not be compared"
+            );
+            assert_eq!(commit, source);
+            ahead(commit)
+        },
+    )
+    .expect("preview metadata");
+    assert_eq!(result, *expected);
+}
+
+#[test_case("Circadia-0.1.0-preview-abcdef012345-windows-x64-unsigned-setup.exe"; "missing checksum")]
+#[test_case("Circadia-0.1.0-preview-abcdef012345-windows-x64-unsigned-setup.exe.sha256"; "missing installer")]
+fn preview_rejects_an_incomplete_separate_download(name: &str) {
+    let result = preview_packages(
+        runs(),
+        |_| {
+            Ok(Some(Artifacts {
+                artifacts: vec![Artifact {
+                    name: name.into(),
+                    expired: false,
+                    size_in_bytes: 100,
+                }],
+            }))
+        },
+        |_| panic!("incomplete package must not be compared"),
+    )
+    .expect("preview metadata");
+    assert_eq!(result, Status::Unpublished);
+}
+
 #[expect(
     clippy::unnecessary_wraps,
     reason = "fixture implements the fallible comparison contract"

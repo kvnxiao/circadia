@@ -338,18 +338,33 @@ fn preview_packages(
         {
             continue;
         }
-        for artifact in artifacts(run.id)?
+        let packages: Vec<_> = artifacts(run.id)?
             .into_iter()
             .flat_map(|list| list.artifacts)
-        {
-            if artifact.expired || artifact.size_in_bytes == 0 {
-                continue;
-            }
-            let Some(source) = artifact.name.strip_prefix("Circadia-windows-x64-unsigned-") else {
+            .filter(|artifact| !artifact.expired && artifact.size_in_bytes > 0)
+            .collect();
+        for artifact in &packages {
+            let legacy = artifact
+                .name
+                .strip_prefix("Circadia-windows-x64-unsigned-")
+                .filter(|source| source.len() == 40);
+            let separate = artifact
+                .name
+                .strip_prefix("Circadia-")
+                .and_then(|name| name.strip_suffix("-windows-x64-unsigned-setup.exe"))
+                .and_then(|name| name.rsplit_once("-preview-"))
+                .filter(|(version, source)| {
+                    semver::Version::parse(version).is_ok()
+                        && (12..=40).contains(&source.len())
+                        && packages
+                            .iter()
+                            .any(|checksum| checksum.name == format!("{}.sha256", artifact.name))
+                })
+                .map(|(_, source)| source);
+            let Some(source) = legacy.or(separate) else {
                 continue;
             };
-            if source.len() != 40
-                || !source.bytes().all(|byte| byte.is_ascii_hexdigit())
+            if !source.bytes().all(|byte| byte.is_ascii_hexdigit())
                 || !inspected.insert(source.to_owned())
             {
                 continue;
