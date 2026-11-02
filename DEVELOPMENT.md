@@ -26,15 +26,26 @@ cargo +stable build --release --bin circadia --features self-contained --locked
 
 ### Build an unsigned installer
 
-Use Inno Setup 6.7.1, `cargo-bundle-licenses` 4.2.0, and `jq` alongside the Windows build prerequisites above. Install the x64 MSVC target with `rustup target add --toolchain stable x86_64-pc-windows-msvc`, then run:
+Use Inno Setup 7.1.1 (x64 edition), `cargo-bundle-licenses` 4.2.0, and `jq` alongside the Windows build prerequisites above. Install the x64 MSVC target with `rustup target add --toolchain stable x86_64-pc-windows-msvc`, then run:
 
 ```bash
 just installer
 ```
 
-The recipe uses `C:/Program Files (x86)/Inno Setup 6/ISCC.exe` by default. Set `ISCC` to the compiler executable's path for another installation. It builds the self-contained release binary for x64 with a statically linked C runtime, stages the runtime files selected by the pinned Reactor setup helper, and compiles [the Inno Setup definition](packaging/circadia.iss). `target/installer/` receives an unsigned `*-setup.exe` and its SHA-256 checksum. The package includes its source commit in the filename and `BUILD.txt`; PDBs, native-check executables, and Cargo build directories are excluded.
+The recipe uses `C:/Program Files/Inno Setup 7/ISCC.exe` by default. Set `ISCC` to the compiler executable's path for another installation. It builds the self-contained x64 release binary with a statically linked C runtime, stages the runtime files selected by the pinned Reactor setup helper, and compiles a native x64 installer from [the Inno Setup definition](packaging/circadia.iss). `target/installer/` receives an unsigned `*-setup.exe` and its SHA-256 checksum. The package includes its source commit in the filename and `BUILD.txt`; PDBs, native-check executables, and Cargo build directories are excluded.
 
-The installer uses a stable application ID and installs under `%LOCALAPPDATA%\Programs\Circadia` for the current user. Its Start menu shortcut launches the app normally. Setup and uninstall require the app's session mutex to be absent; the dialog directs users to Quit from the tray so normal shutdown can finish. Setup does not launch Circadia, enable management, or register startup at sign-in.
+Preview and release workflows use `packaging/install-inno-setup.sh` to download Inno Setup 7.1.1, verify its pinned SHA-256 checksum, and extract it in portable mode under `target/inno-setup/`. The script sets `ISCC` for later workflow steps. To use the same compiler locally, run the script and then `ISCC="target/inno-setup/ISCC.exe" just installer`. Portable mode does not add shortcuts, file associations, or an uninstall registration.
+
+The installer uses a stable application ID and installs under `%LOCALAPPDATA%\Programs\Circadia` for the current user. Its Start menu shortcut launches the app normally. Setup offers to close a running installed copy before replacing its files. Uninstall asks the user to Quit from the tray while the app's session mutex is present. The final setup page offers a checked **Launch Circadia** option for both installs and updates; clicking **Finish** launches the app if selected. Silent installations skip this launch. Setup does not change saved management or sign-in startup preferences.
+
+Wizard artwork is rendered from [the application logo](assets/icon/circadia.svg). After changing the logo, regenerate the committed bitmaps with ImageMagick 7 from the repository root:
+
+```bash
+magick -background white assets/icon/circadia.svg -resize 384x384 -gravity center -background white -extent 492x942 -alpha off -type TrueColor BMP3:packaging/images/wizard.bmp
+magick -background white assets/icon/circadia.svg -resize 144x144 -gravity center -background white -extent 174x174 -alpha off -type TrueColor BMP3:packaging/images/wizard-small.bmp
+```
+
+The large bitmap preserves Inno Setup's 164:314 sidebar proportions; the small bitmap is square. Packaging uses these files directly and does not require ImageMagick.
 
 Uninstall removes the startup Run value only when its command exactly matches the installed executable. A registration for another copy or a custom data directory is preserved. Configuration, backups, logs, and icon caches under `%LOCALAPPDATA%\Circadia` are preserved.
 

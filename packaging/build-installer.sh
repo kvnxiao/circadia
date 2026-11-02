@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-compiler=${ISCC:-'/c/Program Files (x86)/Inno Setup 6/ISCC.exe'}
+compiler=${ISCC:-'/c/Program Files/Inno Setup 7/ISCC.exe'}
 if [[ ! -f "$compiler" ]]; then
     printf 'Inno Setup compiler not found: %s. Set ISCC to ISCC.exe.\n' "$compiler" >&2
     exit 1
