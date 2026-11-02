@@ -101,7 +101,7 @@ Read icons with `SHDefExtractIconW` from the executable path, at the pixel size 
 
 Effective pixels (epx) are layout units that Windows converts to physical pixels according to display scaling.
 
-On 2026-10-27 at `0496ec1`, the [runtime icon experiment](../../tools/windows-reactor/settings-design/README.md#runtime-icon-experiment) displayed `notepad.exe` icons on Windows 11 Pro x64 build 26300 at 100% scaling (96 DPI), in a dark window theme. It used Rust 1.99.0, a default debug build, and the installed Windows App SDK runtime.
+On 2026-10-27 at `0496ec1`, an experimental probe of runtime icon rendering in Reactor displayed `notepad.exe` icons on Windows 11 Pro x64 build 26300 at 100% scaling (96 DPI), in a dark window theme. It used Rust 1.99.0, a default debug build, and the installed Windows App SDK runtime.
 
 A 32 px PNG extracted with `SHDefExtractIconW` matched all 1,024 pixels of a 32 epx `Image` through both in-memory and file sources. A 64 px extraction scaled to 32 epx matched 336 pixels, with a maximum channel difference of 169. Each source was compared with the 32 px PNG composited over the same black background. The separately drawn 32 px icon resource is the inferred cause of the difference; each display scale needs its own extraction.
 

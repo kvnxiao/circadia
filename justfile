@@ -2,85 +2,85 @@ set windows-shell := ["C:/msys64/usr/bin/bash.exe", "-cu"]
 
 clippy_scope := "--workspace --all-targets --all-features --locked"
 
+harness := "cargo +stable run --package circadia-harness --locked"
+release_harness := "cargo +stable run --release --package circadia-harness --locked"
+
 fmt:
     cargo +nightly fmt --all
 
 build:
-    cargo +stable build --bin circadia --locked
-
-[positional-arguments]
-screenshot output="assets/screenshots/schedule.png":
-    pwsh.exe -NoProfile -STA -File tools/screenshots/capture-schedule.ps1 -Output "$1"
+    cargo +stable build --package circadia-app --bin circadia --locked
 
 build-self-contained:
-    cargo +stable build --bin circadia --features self-contained --locked
+    cargo +stable build --package circadia-app --bin circadia --features self-contained --locked
 
 composition-bindings checkout:
-    cargo +stable run --package composition-bindings --locked -- "{{checkout}}"
+    cargo +stable run --package circadia-bindings --locked -- "{{checkout}}"
 
 check-composition-bindings:
     #!/usr/bin/env bash
     set -euo pipefail
-    metadata=$(cargo +stable metadata --manifest-path tools/composition-bindings/Cargo.toml --format-version 1 --locked)
+    metadata=$(cargo +stable metadata --manifest-path circadia-bindings/Cargo.toml --format-version 1 --locked)
     manifest=$(jq -er '.packages[] | select(.name == "windows-bindgen") | .manifest_path' <<< "$metadata")
     manifest=${manifest//\\//}
     checkout=${manifest%/crates/libs/bindgen/Cargo.toml}
-    cargo +stable run --package composition-bindings --locked -- "$checkout" --check
+    cargo +stable run --package circadia-bindings --locked -- "$checkout" --check
 
-native-lifecycle *args: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} target/debug/circadia.exe
+# Run an acceptance scenario against the built application; `just accept --list` lists them.
+[positional-arguments]
+accept scenario *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$1" in
+        recovery|location)
+            {{release_harness}} --features self-contained,graph-measurement -- accept "$@" ;;
+        deployment|--list)
+            {{harness}} -- accept "$@" ;;
+        paths)
+            just build-self-contained
+            {{harness}} -- accept paths --language qps-Ploc "${@:2}" target/debug/circadia.exe ;;
+        *)
+            just build-self-contained
+            {{harness}} -- accept "$1" "${@:2}" target/debug/circadia.exe ;;
+    esac
 
-native-explorer *args: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --restart-explorer target/debug/circadia.exe
+# Capture screenshots for visual review; `just capture --list` lists them.
+[positional-arguments]
+capture scenario *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$1" in
+        --list)
+            {{harness}} -- capture --list ;;
+        readme)
+            CIRCADIA_CHANNEL=preview just build-self-contained
+            {{harness}} -- capture readme target/debug/circadia.exe "${@:2}" ;;
+        translation)
+            just build-self-contained
+            {{harness}} -- capture translation --language qps-Ploc "${@:2}" target/debug/circadia.exe ;;
+        *)
+            just build-self-contained
+            {{harness}} -- capture "$1" "${@:2}" target/debug/circadia.exe ;;
+    esac
 
-native-settings *args: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --settings target/debug/circadia.exe
-
-native-about *args: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --about target/debug/circadia.exe
-
-native-layout: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --layout target/debug/circadia.exe
-
-native-startup *args: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --startup target/debug/circadia.exe
-
-native-shutdown *args: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --modal-shutdown target/debug/circadia.exe
-
-native-picker *args: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- {{args}} --picker target/debug/circadia.exe
-
-native-identity *args: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --identity target/debug/circadia.exe {{args}}
-
-native-translation: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --language qps-Ploc --translation target/debug/circadia.exe
-
-native-paths: build-self-contained
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --language qps-Ploc --paths target/debug/circadia.exe
-
-native-deployment executable:
-    cargo +stable run --bin native-lifecycle --features native-tests --locked -- --deployment "{{executable}}"
-
-measure-graph *args:
-    cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-graph {{args}}
-
-measure-activity args="":
-    cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --measure-activity {{args}}
-
-native-recovery:
-    cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --native-recovery
-
-native-location:
-    cargo +stable run --release --bin native-lifecycle --features self-contained,graph-measurement --locked -- --native-location
-
-measure-output:
-    cargo +stable run --release --bin native-lifecycle --features self-contained,output-measurement --locked -- --measure-output
-
-measure-resources args="":
-    cargo +stable build --release --bin circadia --features self-contained --locked
-    cargo +stable run --release --bin native-lifecycle --features native-tests --locked -- --measure-resources target/release/circadia.exe {{args}}
+# Record performance measurements; `just measure --list` lists them.
+[positional-arguments]
+measure scenario *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$1" in
+        --list)
+            {{harness}} -- measure --list ;;
+        resources)
+            cargo +stable build --release --package circadia-app --bin circadia --features self-contained --locked
+            {{release_harness}} -- measure resources target/release/circadia.exe "${@:2}" ;;
+        output)
+            {{release_harness}} --features self-contained,output-measurement -- measure "$@" ;;
+        activity|graph)
+            {{release_harness}} --features self-contained,graph-measurement -- measure "$@" ;;
+        *)
+            {{release_harness}} -- measure "$@" ;;
+    esac
 
 fmt-check:
     cargo +nightly fmt --all --check
@@ -99,8 +99,8 @@ test:
     cargo +stable test --workspace --all-features --locked
 
 test-release-text:
-    cargo +stable test --profile testrelease --lib l10n::tests --locked
-    cargo +stable test --profile testrelease --bin circadia --locked
+    cargo +stable test --profile testrelease --package circadia-app --lib l10n::tests --locked
+    cargo +stable test --profile testrelease --package circadia-app --bin circadia --locked
 
 doc:
     RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -D warnings" cargo +stable doc --workspace --all-features --no-deps --locked
@@ -117,7 +117,7 @@ dependencies:
 check: lint test test-release-text doc dependencies check-composition-bindings
 
 [positional-arguments]
-check-msrv package="circadia":
+check-msrv package="circadia-app":
     #!/usr/bin/env bash
     set -euo pipefail
     metadata=$(cargo +stable metadata --no-deps --format-version 1 --locked)

@@ -1,0 +1,43 @@
+[package]
+name = "circadia-harness"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "Run Circadia's end-to-end acceptance, capture, and measurement scenarios on a Windows desktop"
+repository.workspace = true
+
+[features]
+self-contained = ["circadia-app/self-contained", "dep:windows-reactor-setup"]
+graph-measurement = ["circadia-app/graph-measurement"]
+output-measurement = ["circadia-app/output-measurement"]
+
+[dependencies]
+circadia-app.workspace = true
+fs-err.workspace = true
+jiff.workspace = true
+png.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+circadia-winsafe.workspace = true
+uiautomation = "0.25.1"
+win-nightlight-lib.workspace = true
+windows = { workspace = true, features = ["Foundation", "Security_Authorization_AppCapabilityAccess", "uiautomationcoreapi"] }
+windows-sys = { workspace = true, features = ["processthreadsapi", "winbase", "winerror", "winnt", "winternl", "winuser"] }
+windows-window.workspace = true
+winsafe = { workspace = true, features = ["dwm", "ole", "psapi"] }
+
+[target.'cfg(windows)'.build-dependencies]
+windows-reactor-setup = { workspace = true, optional = true }
+
+[dev-dependencies]
+test-case = "3"
+
+[lints]
+workspace = true

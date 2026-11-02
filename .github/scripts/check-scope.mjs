@@ -3,34 +3,14 @@ import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export function selectChecks(paths, full = false) {
-  const selected = { application: full, solar: full, reactor: full, settings: full, python: full };
+  let application = full;
   for (const path of paths) {
-    if (path.startsWith('docs/') || ['README.md', 'DEVELOPMENT.md', 'AGENTS.md', 'LICENSE'].includes(path)) {
+    if (path.startsWith('docs/') || path.startsWith('assets/screenshots/') || ['README.md', 'DEVELOPMENT.md', 'AGENTS.md', 'LICENSE'].includes(path)) {
       continue;
     }
-    if (path.startsWith('src/') || path.startsWith('assets/')) {
-      selected.application = true;
-      if (path.startsWith('src/ui/composition/') || path.startsWith('assets/')) selected.settings = true;
-    } else if (path.startsWith('i18n/') || path.startsWith('tests/') || path === 'build.rs' || path.startsWith('tools/native') || path.startsWith('tools/composition-bindings')) {
-      selected.application = true;
-    } else if (path.startsWith('tools/windows-reactor/settings-design/')) {
-      selected.settings = true;
-    } else if (path.startsWith('tools/windows-reactor/')) {
-      selected.reactor = true;
-      selected.settings = true;
-    } else if (path.startsWith('tools/solar-calculation/')) {
-      selected.solar = true;
-    } else if (path.startsWith('tools/solar-timing/')) {
-      selected.solar = true;
-      selected.python = true;
-    } else if (path.startsWith('tools/windows-clock/') || ['tools/pyproject.toml', 'tools/uv.lock', 'tools/justfile'].includes(path)) {
-      selected.python = true;
-    } else {
-      for (const name of Object.keys(selected)) selected[name] = true;
-    }
-    if (path.endsWith('.py')) selected.python = true;
+    application = true;
   }
-  return { ...selected, git: selected.application || selected.reactor || selected.settings };
+  return { application };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

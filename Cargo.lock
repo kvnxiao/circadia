@@ -143,7 +143,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "circadia"
+name = "circadia-app"
 version = "0.1.0"
 dependencies = [
  "embed-resource",
@@ -169,7 +169,6 @@ dependencies = [
  "toml 1.1.8+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
- "uiautomation",
  "ureq",
  "win-nightlight-lib",
  "win-nightlight-watch",
@@ -191,13 +190,48 @@ dependencies = [
 ]
 
 [[package]]
-name = "composition-bindings"
+name = "circadia-bindings"
 version = "0.1.0"
 dependencies = [
  "fs-err",
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
  "windows-bindgen",
+]
+
+[[package]]
+name = "circadia-harness"
+version = "0.1.0"
+dependencies = [
+ "circadia-app",
+ "circadia-winsafe",
+ "fs-err",
+ "jiff",
+ "png",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "test-case",
+ "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
+ "uiautomation",
+ "win-nightlight-lib",
+ "windows 0.100.0",
+ "windows-reactor-setup",
+ "windows-sys 0.100.0",
+ "windows-window",
+ "winsafe",
+]
+
+[[package]]
+name = "circadia-winsafe"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.119",
+ "test-case",
+ "windows-sys 0.100.0",
+ "winsafe",
 ]
 
 [[package]]

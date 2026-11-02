@@ -103,3 +103,22 @@ Evaluated directions that affected Circadia's behavior or feasibility. The [spec
 **Basis:** The [application matching research](research/flux-behavior.md#app-identity-and-matching) records the identity problem; the [process-isolation requirement](specs/SPEC.md#req-game-process-isolation--restrict-access-to-other-processes) excludes memory reads.
 
 **Reevaluate when:** A documented, limited-access identity API distinguishes these applications without reading process memory or exposing command-line credentials.
+
+## Native code ownership
+
+### DEC-third-party-native-replacements — Replace the harness's unsafe calls with third-party crates
+
+**Disposition:** Not selected
+
+**Requirement impact:** Where Circadia's `unsafe` Windows calls are written and audited, and whether the harness's screen capture, resource counters, window messages, and shortcut launches keep their measured behavior.
+
+**Reason:** Each candidate either changed what the harness measures or kept the same `unsafe` call inside code that Circadia does not audit. Circadia instead puts its `unsafe` code in one first-party crate, [circadia-winsafe](../circadia-winsafe/README.md), behind safe functions whose signatures enforce each call's preconditions, and no other crate may contain `unsafe` code. Reviewed safe wrappers that a crate already uses, such as `winsafe`, remain the first choice when they cover an operation.
+
+**Basis:** Scratch experiments and source inspection in November 2026 against winsafe 0.0.29 found:
+
+- `xcap` captured pixel-identical screen regions, but its inspected GDI path calls `GetDIBits` while the bitmap is still selected into a device context, which Windows prohibits.
+- A persistent `wmi` connection returned exact thread context-switch counts but took about 1.9 s per query. `typeperf` samples rates about once per second under localized counter names instead of the raw counts that the resource sampler compares.
+- `windows-win` exposes `SendMessageTimeoutW` through a safe signature that accepts any message, so a caller can still pass a pointer parameter.
+- winsafe 0.0.29 and its `master` branch on 2026-11-02 mark `SendMessageTimeout` and `GetDIBits` unsafe, return no process handle from `ShellExecuteEx`, and have no `NtQuerySystemInformation` wrapper.
+
+**Reevaluate when:** A dependency that Circadia already uses gains a safe API for one of these operations with the same results, or a candidate crate fixes the defects above and has a smaller audit cost than the first-party wrapper.

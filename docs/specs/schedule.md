@@ -188,6 +188,6 @@ Solar events remain their actual instants. Clock changes do not move them or rem
 
 | Design decision or requirement | Evidence |
 | :-- | :-- |
-| Local dates and clock times mapped to actual instants | [Clock conversion fixtures](../research/windows-clock-conversion.md), [host-setting checks](../research/windows-clock-conversion.md#host-setting-exercise), and [elapsed-interval reasoning](../research/clock-change-intervals.md); the target-adjustment policy is not exercised by the existing probe. |
+| Local dates and clock times mapped to actual instants | [Clock conversion fixtures](../research/windows-clock-conversion.md), [host-setting checks](../research/windows-clock-conversion.md#host-setting-exercise), and [elapsed-interval reasoning](../research/clock-change-intervals.md); the target-adjustment policy is not exercised by the recorded clock conversion probe. |
 | Optional solar timing and coordinate acquisition | [Local solar calculation](../research/solar-calculation.md) and [tray-only location requests](../research/background-location.md); desktop permission outcomes remain implementation and release checks. |
 | Local calculation without persistent solar caches | [Measured per-date calculation cost](../research/solar-performance.md); four dates on one desktop do not establish a universal latency bound. |

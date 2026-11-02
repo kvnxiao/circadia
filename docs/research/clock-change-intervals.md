@@ -37,4 +37,4 @@ The selected policy preserves the interval affected by the offset change, then r
 
 ## Validation limits
 
-The elapsed-interval target policy has not been exercised by the existing clock probe. Implementation needs fixed scenarios for both clock-change directions, a target in the second occurrence of a repeated clock interval, half-hour changes, closely spaced targets, disabled automatic adjustment, and evaluation in different orders or after restart. Existing conversion results remain evidence about their recorded fixtures rather than proof of this policy.
+The elapsed-interval target policy has not been exercised by the recorded clock conversion probe. Implementation needs fixed scenarios for both clock-change directions, a target in the second occurrence of a repeated clock interval, half-hour changes, closely spaced targets, disabled automatic adjustment, and evaluation in different orders or after restart. Existing conversion results remain evidence about their recorded fixtures rather than proof of this policy.

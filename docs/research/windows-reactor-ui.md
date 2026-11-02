@@ -33,17 +33,17 @@ The inspected Git versions of Reactor support an application-owned tray icon and
 
 Circadia's reference pin is `73c74c0d79282e1295af1856e6c8987c51b7ccdd`, with Windows App SDK runtime 2.6.4. Desktop observations below apply to their stated revisions on Windows 11 build 26300.9711. The [compatibility assessment](windows-compatibility.md) supports an intended build 22000 floor; execution on that minimum is unverified.
 
-The retained graph experiment uses fixed Sunrise 06:00, Sunset 18:00, and Wake 07:00 fixtures with arbitrary point editing. Its scope is controls and pointer behavior. Circadia's generated schedule, automatic saving, and Preview require application checks. Preview plays the daily schedule through Night light and animates its graph. [Settings design support](settings-design-support.md) covers the four-page design, segmented time entry, composition drawing, and finite animations. The [spec](../specs/SPEC.md) defines product behavior.
+An experimental probe tested Reactor graph editing with fixed Sunrise 06:00, Sunset 18:00, and Wake 07:00 fixtures and arbitrary point editing. Its scope is controls and pointer behavior. Circadia's generated schedule, automatic saving, and Preview require application checks. Preview plays the daily schedule through Night light and animates its graph. [Settings design support](settings-design-support.md) covers the four-page design, segmented time entry, composition drawing, and finite animations. The [spec](../specs/SPEC.md) defines product behavior.
 
 ## Versions and evidence boundaries
 
 ### Reference pin `73c74c0`
 
-On 2026-11-02, inspection of the [five commits since `ff933fe`](https://github.com/microsoft/windows-rs/compare/ff933fe45cbfdf4a638256181aae26a60932e84e...73c74c0d79282e1295af1856e6c8987c51b7ccdd) found changes to Windows binding generation, metadata, and Clang test fixtures. Reactor, its window implementation, and its setup helper are unchanged; the bundled runtime remains 2.6.4. Application checks and the automated checks of both retained probes, [graph/lifecycle](../../tools/windows-reactor/README.md) and [settings design](../../tools/windows-reactor/settings-design/README.md), passed. The graph/lifecycle probe's bundled build and UI Automation smoke test also passed. The smoke test verified native controls, curve validation, and tray-process survival after graph closure. These checks do not establish a performance improvement from the dependency update.
+On 2026-11-02, inspection of the [five commits since `ff933fe`](https://github.com/microsoft/windows-rs/compare/ff933fe45cbfdf4a638256181aae26a60932e84e...73c74c0d79282e1295af1856e6c8987c51b7ccdd) found changes to Windows binding generation, metadata, and Clang test fixtures. Reactor, its window implementation, and its setup helper are unchanged; the bundled runtime remains 2.6.4. Application checks and the automated checks of two experimental Reactor probes, one for graph editing and application lifecycle and one for the settings design, passed. The graph/lifecycle probe's bundled build and UI Automation smoke test also passed. The smoke test verified native controls, curve validation, and tray-process survival after graph closure. These checks do not establish a performance improvement from the dependency update.
 
 ### Reference pin `ff933fe`
 
-On 2026-10-31, the [single commit since `6d88349`](https://github.com/microsoft/windows-rs/compare/6d88349841f193536a73b63cece7f7e8fcf25953...ff933fe45cbfdf4a638256181aae26a60932e84e) projects `must_use` annotations in generated Windows bindings. It does not change Reactor's window or menu implementation or its bundled runtime version. Both retained Reactor probes pass their automated checks. The Reactor probe's bundled build and UI Automation smoke test also pass on the recorded host at 100% scaling.
+On 2026-10-31, the [single commit since `6d88349`](https://github.com/microsoft/windows-rs/compare/6d88349841f193536a73b63cece7f7e8fcf25953...ff933fe45cbfdf4a638256181aae26a60932e84e) projects `must_use` annotations in generated Windows bindings. It does not change Reactor's window or menu implementation or its bundled runtime version. Both experimental Reactor probes pass their automated checks. The Reactor probe's bundled build and UI Automation smoke test also pass on the recorded host at 100% scaling.
 
 ### Window resizing and tray menu animation
 
@@ -75,7 +75,7 @@ On 2026-10-30, source inspection of the [changes since `3b6bea5`](https://github
 - [Native events use an enum](https://github.com/microsoft/windows-rs/pull/5273), separating callback dispatch, observations, recorded writes, retirement, and realization. Circadia does not construct these internal event records.
 - [Attachment reconciliation is consolidated](https://github.com/microsoft/windows-rs/pull/5275) for dialogs, flyouts, menus, and tooltips. The application can keep its declarative control construction.
 
-Both retained Reactor probes pass their automated checks at this pin. The Reactor UI Automation script passed native control invocation, curve validation, and tray-process survival after graph closure. Circadia's About page was rendered at desktop and narrow widths with management off. These observations do not establish a performance improvement or replace the broader desktop, accessibility, and deployment acceptance checks. No new control API in this range requires an application redesign.
+Both experimental Reactor probes pass their automated checks at this pin. The Reactor UI Automation script passed native control invocation, curve validation, and tray-process survival after graph closure. Circadia's About page was rendered at desktop and narrow widths with management off. These observations do not establish a performance improvement or replace the broader desktop, accessibility, and deployment acceptance checks. No new control API in this range requires an application redesign.
 
 | Package or source | Observed version | Implication |
 | :-- | :-- | :-- |
@@ -90,7 +90,7 @@ Both retained Reactor probes pass their automated checks at this pin. The Reacto
 | `windows-rs` previous reference pin | `5cfe2c96ea029b119d5e07fca2a92d7628c22aeb`, committed 2026-10-29 | Declares Reactor version 0.100.0 and stages runtime 2.6.4. See [Reference pin `5cfe2c9`](#api-and-runtime-changes). |
 | `windows-rs` previous reference pin | `3b6bea553787d9419b3fdd29e2c5436666d7325b`, retrieved 2026-10-29 | Inspected `master` on that date; Reactor 0.100.0 with runtime 2.6.4. See [Reference pin `3b6bea5`](#api-and-runtime-changes). |
 
-The published package's `.cargo_vcs_info.json` identifies release source `a57cc321bfdbac6bb98c488ba49f399da8fcb98a`. A manifest version alone does not distinguish that release from development source. The active probe has one manifest and lockfile for the reference pin. Spec approval and production integration remain separate from the recorded probe results.
+The published package's `.cargo_vcs_info.json` identifies release source `a57cc321bfdbac6bb98c488ba49f399da8fcb98a`. A manifest version alone does not distinguish that release from development source. Spec approval and production integration remain separate from the recorded probe results.
 
 In the inspected published versions, `windows` depends on `windows-core` 0.62.2 and Reactor depends on 0.100.0. Both compile in the same program, but their Rust COM wrappers, strings, and error types are distinct. Circadia now declares the Git versions together so its own COM bindings share one core version. Older published dependencies can still require separate raw Win32 bindings; the tracking policy below describes that boundary.
 
@@ -98,7 +98,7 @@ Source inspection establishes API availability. Compilation establishes that the
 
 ## Tracking policy
 
-The application and both Reactor experiments use one explicit Git pin while Reactor is in preview. [Dependency update instructions](../../DEVELOPMENT.md#updating-reactor) define when to update it and which checks to run. These research observations retain their original revisions after a later bump.
+The application uses one explicit Git pin while Reactor is in preview. [Dependency update instructions](../../DEVELOPMENT.md#updating-reactor) define when to update it and which checks to run. These research observations retain their original revisions after a later bump.
 
 ## API and runtime changes
 
@@ -168,7 +168,7 @@ The [panic-cleanup contract](../specs/control.md#req-panic-cleanup--turn-night-l
 
 ## Responsive layout and native control identity
 
-**Observed on 2026-10-29 at `3b6bea5`, Windows 11 build 26300.9711, and 100% scale:** Circadia passed navigation checks at client widths of 799 and 800 effective pixels, including overlay dismissal, page selection, and keyboard-focus restoration. Full scrolling captures covered 640×480, 700×600, and 800×600 client sizes and the initial 1200×1000 outer window. Additional window sizes reproduced the available work areas of 1280×720 and 1366×768 desktops; the actual monitor resolution stayed unchanged. Visual inspection and targeted recaptures verified complete action glyphs, aligned delete and lock icons, wrapping descriptions, sliders, transition labels, and dialogs. [Recorded harness results](../../tools/native/README.md#recorded-results) distinguish automated checks from visual inspection and list the remaining limits.
+**Observed on 2026-10-29 at `3b6bea5`, Windows 11 build 26300.9711, and 100% scale:** Circadia passed navigation checks at client widths of 799 and 800 effective pixels, including overlay dismissal, page selection, and keyboard-focus restoration. Full scrolling captures covered 640×480, 700×600, and 800×600 client sizes and the initial 1200×1000 outer window. Additional window sizes reproduced the available work areas of 1280×720 and 1366×768 desktops; the actual monitor resolution stayed unchanged. Visual inspection and targeted recaptures verified complete action glyphs, aligned delete and lock icons, wrapping descriptions, sliders, transition labels, and dialogs. The [application harness instructions](../../circadia-harness/README.md) describe these checks.
 
 `MaxWidth` alone did not give a slider a useful desired width inside a content-sized action group. A zero-height, 220 epx-wide sibling in the same Grid cell supplies that measurement while the slider stretches within the available width. The surrounding Grid reserves content-sized columns for the number field and unit. Captures verified a complete slider in the initial window and a shortened slider with a readable unit at 800 epx client width.
 
@@ -225,7 +225,7 @@ The selected visual direction is Windows 11 Fluent Design, with the Windows Sett
 
 Microsoft recommends Mica for long-lived windows and settings. It derives a subtle, opaque tint from the wallpaper and system theme. Acrylic provides translucency for temporary surfaces. Mica Alt has stronger wallpaper tinting and is useful for tabbed window designs; ordinary Mica is the selected target here. These material distinctions follow [Microsoft's Mica guidance](https://learn.microsoft.com/en-us/windows/apps/design/style/mica) and [Acrylic guidance](https://learn.microsoft.com/en-us/windows/apps/design/style/acrylic).
 
-Both inspected Reactor versions expose the following configuration, used by the retained pinned probe and the archived published comparison:
+Both inspected Reactor versions expose the following configuration, used by the pinned experimental probe and the archived published comparison:
 
 ```rust
 context.window_visuals(

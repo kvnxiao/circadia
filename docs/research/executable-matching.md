@@ -62,7 +62,7 @@ Retain the path in foreground history and asynchronous metadata replies. Read an
 
 Cache failure checks retain an old index while preventing its replacement and permitting PNG writes. Pruning an installation, loading another, and restarting cannot assign the second installation's icon to the first. The checks also cover an index whose PNGs are missing. Name checks use the filename while a new installation's result is unavailable, preserve this fallback after restart, and discard the old label when a restriction changes to a different path.
 
-**Observed through `just native-paths`:** two copies of one executable in separate temporary folders received actual foreground focus. A selected installation retained its native control and keyboard focus while recent history reordered; invoking Add then saved that installation's path. The run also checked:
+**Observed through the application harness check of executable paths:** two copies of one executable in separate temporary folders received actual foreground focus. A selected installation retained its native control and keyboard focus while recent history reordered; invoking Add then saved that installation's path. The run also checked:
 
 - Filename-only and two distinct path-restricted rules coexisting on the suppression list, whose foreground matches request a temporary 6500 K override when management is on.
 - A path-restricted exclusion overriding the matching installation without disabling the other installation.
@@ -74,7 +74,7 @@ These checks used a debug build with bundled Windows App SDK 2.6.4 and Windows R
 
 The native run captured 65 screenshots at 640×480, 799×600, 800×600, and 1184×992 client sizes. The debug pseudo-locale uses accented, bracketed text expanded by at least 40% to test layout; release builds exclude its generator. Automated checks reported no untranslated application text or overflowing text bounds. Visual inspection confirmed wrapping recent-app explanations and complete actions at all four sizes. Both lists' Add dialogs and condition editors retain complete controls through scrolling, including long paths and a long window-title suggestion. Fixture processes and the test application exited after each completed run.
 
-The [native-check instructions](../../tools/native/README.md#installation-restrictions) describe reproduction and desktop-input effects. Higher display scales, other themes, representative third-party applications, and actual Narrator delivery remain separate validation. f.lux's current matching algorithm remains undocumented in the inspected sources and is not an implementation dependency.
+The [application harness instructions](../../circadia-harness/README.md#installation-restrictions-accept-paths) describe reproduction and desktop-input effects. Higher display scales, other themes, representative third-party applications, and actual Narrator delivery remain separate validation. f.lux's current matching algorithm remains undocumented in the inspected sources and is not an implementation dependency.
 
 ## Sources
 
@@ -82,5 +82,5 @@ The [native-check instructions](../../tools/native/README.md#installation-restri
 - [f.lux developer discussion of overly broad executable matching](https://forum.justgetflux.com/topic/8666/f-lux-excluded-apps-file-detection-should-be-stricter), retrieved 2026-10-29.
 - [Microsoft file names, paths, and namespaces](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file), retrieved 2026-10-30.
 - [Microsoft ordinal string comparison](https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-comparestringordinal), retrieved 2026-10-30.
-- [Circadia foreground lookup](../../src/platform/foreground.rs), [foreground history](../../src/suppression.rs), and [configuration parsing and matching](../../src/config.rs), inspected 2026-10-29.
-- [Metadata requests](../../src/ui/file_info.rs) and [icon cache](../../src/ui/icon_cache.rs), inspected 2026-10-29.
+- [Circadia foreground lookup](../../circadia-app/src/platform/foreground.rs), [foreground history](../../circadia-app/src/suppression.rs), and [configuration parsing and matching](../../circadia-app/src/config.rs), inspected 2026-10-29.
+- [Metadata requests](../../circadia-app/src/ui/file_info.rs) and [icon cache](../../circadia-app/src/ui/icon_cache.rs), inspected 2026-10-29.

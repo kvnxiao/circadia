@@ -17,7 +17,7 @@ observed-in:
   - Windows 11 Pro build 26300.9711, display language en-US, regional format en-US with a user short-date override (yyyy-MM-dd) and the default 12-hour clock
   - Rust 1.99.0, x86_64-pc-windows-msvc, Cargo default release profile for size measurements
   - fluent-bundle 0.16.0, fluent-templates 0.15.1, i18n-embed 0.16.0, i18n-embed-fl 0.10.1, rust-i18n 4.2.4, gettext 0.4.0, gettext-rs 0.8.0 (metadata only), icu 2.4.0, intl_pluralrules 7.0.2, windows 0.62.2, windows-sys 0.61.2
-recheck-when: Circadia adds a shipped language or brings right-to-left languages into scope; Reactor adds FlowDirection, Language, or TimePicker selected-time properties; windows-reactor-setup stages a Windows App SDK runtime other than 2.5.1; microsoft-ui-xaml issue 10430 closes; i18n-embed, fluent-bundle, or ICU4X publish a major release; or a probe runs the self-contained build under another display language, regional format, or pseudo-locale.
+recheck-when: Circadia adds a shipped language or brings right-to-left languages into scope; Reactor adds FlowDirection, Language, or TimePicker selected-time properties; windows-reactor-setup stages a Windows App SDK runtime other than 2.5.1; microsoft-ui-xaml issue 10430 closes; i18n-embed, fluent-bundle, or ICU4X publish a major release; or the self-contained build is tested under another display language, regional format, or pseudo-locale.
 ---
 
 # Localizing Circadia's interface
@@ -175,7 +175,7 @@ Under `FlowDirection.RightToLeft`, a `Canvas` places `(0, 0)` at the top-right c
 
 ## Selected approach
 
-The evidence supports Fluent for messages with plural forms and reorderable named values, and NLS for the user's regional formats. The current implementation uses these mechanisms in [localization](../../src/l10n.rs) and [regional formatting](../../src/platform/nls.rs). Coordinate input uses a strict parser with the locale's decimal separator; the configuration format remains locale-independent.
+The evidence supports Fluent for messages with plural forms and reorderable named values, and NLS for the user's regional formats. The current implementation uses these mechanisms in [localization](../../circadia-app/src/l10n.rs) and [regional formatting](../../circadia-app/src/platform/nls.rs). Coordinate input uses a strict parser with the locale's decimal separator; the configuration format remains locale-independent.
 
 Three limits matter when extending this implementation:
 
@@ -187,7 +187,7 @@ The segmented Wake and Bedtime picker avoids the tested Reactor `TimePicker` lim
 
 ## Rendering probe results
 
-**Measured with the [settings-design rendering probe](../../tools/windows-reactor/settings-design/README.md) on 2026-10-24:** windows-rs `0496ec1`, Windows 11 build 26300.9711 with an en-US display language and regional format, 100% scaling, and a default debug build using the installed Windows App SDK runtime 2.5.1. The probe embeds an English catalog, a partial German catalog, and a pseudo-locale generated with `fluent-pseudo` 0.3.3 as Fluent's bundle transform, and formats with NLS for the user default or an explicit locale name.
+**Measured with an experimental settings-design rendering probe on 2026-10-24:** windows-rs `0496ec1`, Windows 11 build 26300.9711 with an en-US display language and regional format, 100% scaling, and a default debug build using the installed Windows App SDK runtime 2.5.1. The probe embeds an English catalog, a partial German catalog, and a pseudo-locale generated with `fluent-pseudo` 0.3.3 as Fluent's bundle transform, and formats with NLS for the user default or an explicit locale name.
 
 - **Regional formats:** `en-US` produced "11:05 PM", the hour label "11 PM", "-74.0060", and "6,500"; `de-DE` produced "23:05", "23", "-74,0060", and "6.500". The 12-hour layout of the time picker has an AM/PM list; the 24-hour layout does not. Unit tests cover the probe's reading of 12-hour, 24-hour, AM/PM-first, and quoted-literal clock patterns.
 - **Coordinate entry:** with `de-DE` formats, the latitude field showed "40,7128", Circadia's parser rejected "40.5", and accepted "40,5".
@@ -200,10 +200,10 @@ The segmented Wake and Bedtime picker avoids the tested Reactor `TimePicker` lim
 
 ### Uncertainty that could change the design
 
-- Whether the text WinUI loads from Windows Multilingual User Interface (MUI) resources follows the preferred UI languages in the self-contained build, as it does in the framework-dependent build above. The same probe run with `just build-self-contained` and `--ui-language` would settle it.
+- Whether the text WinUI loads from Windows Multilingual User Interface (MUI) resources follows the preferred UI languages in the self-contained build, as it does in the framework-dependent build above. The same check against the self-contained build with a preferred UI language would settle it.
 - Whether the Windows App SDK `PrimaryLanguageOverride`, set before the first control loads, changes the MRT-based control text (InfoBar, NumberBox, NavigationView names), given that WinUI reads the runtime's `resources.pri`. The probe does not set it; generated bindings from the runtime's `Microsoft.Windows.Globalization.winmd` would be needed.
 - Whether `WS_EX_LAYOUTRTL` on Reactor's host window mirrors WinUI content and input consistently. This matters only if right-to-left support returns to scope before Reactor adds `FlowDirection`.
-- Whether NLS returns new regional values in a running process after a regional-format change, and whether the `"intl"` broadcast reaches Circadia's lifecycle window. The next-launch decision does not depend on it; an immediate-update option would. A separately invoked test that changes the host's short-time pattern while a probe runs would settle it.
+- Whether NLS returns new regional values in a running process after a regional-format change, and whether the `"intl"` broadcast reaches Circadia's lifecycle window. The next-launch decision does not depend on it; an immediate-update option would. A separately invoked test that changes the host's short-time pattern while the tested process runs would settle it.
 
 ### Validation limits
 

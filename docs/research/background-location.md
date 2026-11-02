@@ -38,7 +38,7 @@ The application must own pending requests independently of the settings window. 
 
 ## Measured results and remaining validation
 
-On 2026-10-29, `just native-location` passed on Windows 11 build 26300.9711 with windows-rs `8786f59` and Windows App SDK runtime 2.6.4. The account's silent permission check returned Allowed. Circadia started with only its tray icon, obtained one real position, and saved it without opening its settings window or printing coordinates. The test did not change Windows privacy settings or accept a Windows prompt.
+On 2026-10-29, the application harness location check passed on Windows 11 build 26300.9711 with windows-rs `8786f59` and Windows App SDK runtime 2.6.4. The account's silent permission check returned Allowed. Circadia started with only its tray icon, obtained one real position, and saved it without opening its settings window or printing coordinates. The test did not change Windows privacy settings or accept a Windows prompt.
 
 Four simulated desktop runs also verified these application behaviors:
 
@@ -46,7 +46,7 @@ Four simulated desktop runs also verified these application behaviors:
 - Opening settings during a pending request reuses it, and a request can complete after that window closes.
 - A previous permission failure stays visible while another consent request and position acquisition are pending, then clears on success.
 
-Unit tests covered revocation and cancellation. Cancellation discards positions already received and waiting for Preview to end, and rejects callbacks that arrive afterward. `just native-translation` inspected Circadia's location explanation dialog at 96 DPI. Remaining host checks are:
+Unit tests covered revocation and cancellation. Cancellation discards positions already received and waiting for Preview to end, and rejects callbacks that arrive afterward. The application harness translation capture inspected Circadia's location explanation dialog at 96 DPI. Remaining host checks are:
 
 - The same lifecycle on other supported Windows builds, including the minimum build 22000.
 - Actual denied or undetermined Windows permission, without changing privacy settings as part of routine validation.

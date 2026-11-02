@@ -17,7 +17,7 @@ Calculating one New York date took a median 1.012 ms in the measured debug build
 
 ## Method
 
-The [reproducible timing probe](../../tools/solar-timing/README.md) uses the retained comparison calculator's unchanged calculation function and locked dependencies. Each call constructs `SolarEvents` and searches the complete supplied 24-hour interval. It estimates delta T, the difference between astronomical model time and Earth-rotation time. Returned event times use Julian dates, continuous astronomical day counts, which the function converts to Unix seconds. No event result is reused.
+An experimental timing probe used the comparison calculator's unchanged calculation function and locked dependencies. Each call constructs `SolarEvents` and searches the complete supplied 24-hour interval. It estimates delta T, the difference between astronomical model time and Earth-rotation time. Returned event times use Julian dates, continuous astronomical day counts, which the function converts to Unix seconds. No event result is reused.
 
 Each case runs in a fresh process. Its first calculator call is measured separately, followed by 1,000 timed repetitions. The Rust monotonic clock measures calculation and result construction; JSON parsing, output serialization, process startup, and Python orchestration are outside those intervals. Expected event counts are specified independently of the calculator, and the runner rejects a mismatch.
 
