@@ -9,13 +9,12 @@ description = "Safe wrappers for the Windows operations that Circadia calls with
 repository.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["ntstatus", "shellapi", "winternl", "winuser"] }
+windows-sys = { workspace = true, features = ["ntstatus", "winternl", "winuser"] }
 winsafe.workspace = true
 
 [dev-dependencies]
 proc-macro2 = "1"
 syn = { version = "2", features = ["full", "visit"] }
-test-case = "3"
 
 [lints]
 workspace = true

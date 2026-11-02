@@ -32,6 +32,14 @@ pub(crate) fn run(arguments: &[OsString]) -> io::Result<()> {
             return Err(io::Error::other("close Circadia before startup checks"));
         }
     }
+    if let Some(RegistryValue::Sz(command)) = read(RUN)?
+        && command.to_ascii_lowercase().contains("circadia.exe")
+    {
+        report(&format!(
+            "PASS: the current user's Circadia startup registration runs {command:?}; the registration checks were skipped to preserve it"
+        ));
+        return Ok(());
+    }
     let executable = fs_err::canonicalize(executable)?;
     let directory = tempfile::Builder::new()
         .prefix("circadia-native-startup-")

@@ -2,6 +2,8 @@ use crate::support::app::require;
 use crate::support::automation::Automation;
 use circadia_app::InterfaceText;
 use std::io;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use uiautomation::UIElement;
 use uiautomation::types::ControlType;
 use winsafe::AtomStr;
@@ -15,6 +17,8 @@ const OVERFLOW_WINDOWS: [&str; 2] = [
     "TopLevelWindowForOverflowXamlIsland",
     "NotifyIconOverflowWindow",
 ];
+
+static OVERFLOW_OPENED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn icon(automation: &Automation, tooltip_prefix: &str) -> io::Result<Option<UIElement>> {
     let shell = HWND::GetShellWindow()
@@ -56,25 +60,14 @@ fn is_icon(element: &UIElement, tooltip_prefix: &str) -> io::Result<bool> {
 }
 
 pub(crate) fn show_overflow(automation: &Automation) -> io::Result<()> {
-    let window = find_window("Shell_TrayWnd")?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Windows taskbar is unavailable"))?;
-    let process = HWND::GetShellWindow()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Windows Shell is unavailable"))?
-        .GetWindowThreadProcessId()
-        .1;
-    for class in OVERFLOW_WINDOWS {
-        if let Some(window) = find_window(class)?
-            && window.IsWindowVisible()
-            && window.GetWindowThreadProcessId().1 == process
-        {
-            return Ok(());
-        }
+    let process = shell_process()?;
+    if overflow_visible(process)? {
+        return Ok(());
     }
-    for element in automation.elements(&window, process)? {
-        let name = element.get_name().map_err(io::Error::other)?;
-        if name.eq_ignore_ascii_case("Show hidden icons") || name == "Hidden icon menu" {
-            return click(&element);
-        }
+    if let Some(button) = overflow_button(automation, process)? {
+        click(&button)?;
+        OVERFLOW_OPENED.store(true, Ordering::Relaxed);
+        return Ok(());
     }
     if icon(automation, &crate::support::app::text()?.tooltip_prefix)?.is_some() {
         return Ok(());
@@ -83,6 +76,54 @@ pub(crate) fn show_overflow(automation: &Automation) -> io::Result<()> {
         io::ErrorKind::NotFound,
         "hidden-icons button is absent; the harness currently requires an English Windows Shell",
     ))
+}
+
+pub(crate) fn close_overflow() -> io::Result<()> {
+    if !OVERFLOW_OPENED.swap(false, Ordering::Relaxed) {
+        return Ok(());
+    }
+    let process = shell_process()?;
+    if !overflow_visible(process)? {
+        return Ok(());
+    }
+    let automation = Automation::new()?;
+    let button = overflow_button(&automation, process)?
+        .ok_or_else(|| io::Error::other("hidden-icons button is absent"))?;
+    click(&button)?;
+    crate::support::app::wait("hidden-icons flyout closes", || {
+        Ok((!overflow_visible(process)?).then_some(()))
+    })
+}
+
+fn shell_process() -> io::Result<u32> {
+    Ok(HWND::GetShellWindow()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Windows Shell is unavailable"))?
+        .GetWindowThreadProcessId()
+        .1)
+}
+
+fn overflow_visible(process: u32) -> io::Result<bool> {
+    for class in OVERFLOW_WINDOWS {
+        if let Some(window) = find_window(class)?
+            && window.IsWindowVisible()
+            && window.GetWindowThreadProcessId().1 == process
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn overflow_button(automation: &Automation, process: u32) -> io::Result<Option<UIElement>> {
+    let window = find_window("Shell_TrayWnd")?
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Windows taskbar is unavailable"))?;
+    for element in automation.elements(&window, process)? {
+        let name = element.get_name().map_err(io::Error::other)?;
+        if name.eq_ignore_ascii_case("Show hidden icons") || name == "Hidden icon menu" {
+            return Ok(Some(element));
+        }
+    }
+    Ok(None)
 }
 
 pub(crate) fn click(element: &UIElement) -> io::Result<()> {

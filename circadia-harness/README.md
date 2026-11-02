@@ -30,6 +30,7 @@ Scenarios differ in what they change on the desktop:
 - `accept lifecycle`, `accept explorer`, `accept settings`, `accept shutdown`, `accept identity`, `accept paths`, `capture translation`, and `capture readme` send mouse or keyboard input; avoid desktop input while they run.
 - `accept picker`, `accept startup`, `accept deployment`, `accept recovery`, `accept location`, `capture layout`, `capture about`, and the measurement scenarios use UI Automation without moving the cursor or sending keys. Their windows can still take focus.
 - Scenarios that change live Night light say so in their sections below. Temporary configuration directories do not isolate Windows Night light state.
+- When a scenario opens the taskbar's hidden-icons flyout to reach the Circadia tray icon, the harness clicks the hidden-icons button again when the scenario ends, whether it passed or failed, and waits until the flyout closes. The run's report records a failure to close it without changing the scenario's result.
 
 The checks find the settings window by its title and every settings control by the automation identifiers that `circadia_app::automation_id` lists, so they do not depend on the interface language. A unit test of the harness fails when a check names an identifier that the list does not have. UI Automation exposes a panel or border only when it has an accessible name, so the checks use the controls and text inside a settings row, the panel with one setting's label and controls, rather than the row's own identifier. The tray menu's items expose only their text, so the checks find each item by its position (Open Circadia settings, manual suppression, the recent-apps caption, the recent apps, Quit Circadia) and compare its label with the catalog text of the language under test, which is the message in that language's Fluent `.ftl` file; they find the tray icon by the text that every tooltip starts with, `Circadia:` in English. The checks find the Windows file picker by its title, which is catalog text, and its filename box and Open button by their control identifiers, because Circadia shows the picker in the interface language. The Shell's hidden-icons button lookup requires an English Windows Shell.
 
@@ -166,7 +167,7 @@ Close any running Circadia instance, then run:
 just accept startup
 ```
 
-This recipe builds the application and uses isolated configuration with management off to test startup registration. The Windows Run registry value stores the command to launch at sign-in; a separate StartupApproved registry value records whether Windows permits that startup entry to run. The recipe refuses to run if either Circadia value already exists under the current Windows user. Existing user registration is preserved.
+This recipe builds the application and uses isolated configuration with management off to test startup registration. The Windows Run registry value stores the command to launch at sign-in; a separate StartupApproved registry value records whether Windows permits that startup entry to run. If the current user's Circadia Run value already starts a `circadia.exe`, the recipe reports that command, passes, and skips the registration checks so that registration is preserved. Any other existing Circadia Run or approval value fails the precondition.
 
 The test checks:
 
@@ -208,7 +209,7 @@ Build the bundled runtime with `just build-self-contained`. From `target/debug`,
 just accept deployment "path/to/copied/Circadia/circadia.exe"
 ```
 
-The recipe uses isolated configuration at constant 3400 K with Start minimized and management on. It runs English only. It checks direct launch, shortcut activation of settings in the existing process, and a launch through a shortcut while Circadia is not running. The shortcut's working directory differs from the runtime directory. The tool verifies the launched executable, editable settings, native temperature, successful process exit, preview cleanup, and Night light off.
+The recipe uses isolated configuration at constant 3400 K with Start minimized and management on. It runs English only. It checks direct launch, shortcut activation of settings in the existing process, and a launch through a shortcut while Circadia is not running. The shortcut's working directory differs from the runtime directory. The tool verifies the launched executable, editable settings, native temperature, successful process exit, preview cleanup, and Night light off. It finds the process that a shortcut launches by its event receiver window and executable path, so a process that exits before creating that window is reported as a missing receiver instead of by its exit code.
 
 This recipe uses UI Automation without mouse or keyboard input. Settings can take focus. It changes live Night light and uses the lifecycle harness's cleanup behavior, including forced termination if graceful exit fails. It does not restore the prior native schedule or temperature. Failures during the direct or shortcut application checks retain the temporary configuration directory.
 
@@ -442,10 +443,12 @@ The `graph-measurement` and `output-measurement` features enable the application
 
 ## Unsafe code
 
-The harness forbids `unsafe` code. It calls the Windows operations that have no safe API in `winsafe`, `windows-window`, or `uiautomation` through [circadia-winsafe](../circadia-winsafe/README.md): screen capture, lifecycle and close messages, process and thread records, and shortcut launches that return the started process. That crate's README lists its `unsafe` sites.
+The harness forbids `unsafe` code. It captures screen pixels with `xcap` and launches shortcuts and opens processes with `winsafe`. It sends lifecycle and close messages and reads process and thread records through [circadia-winsafe](../circadia-winsafe/README.md), because no maintained crate provides those operations through a safe API; that crate's README lists its `unsafe` sites.
 
 ## Research and limitations
 
 The [Reactor research](../docs/research/windows-reactor-ui.md#responsive-layout-and-native-control-identity) describes responsive layout and control identity. [Resource and rendering research](../docs/research/resource-measurement.md) records CPU, memory, graph latency, Preview pixels, and native output timing. [Location](../docs/research/background-location.md) and [startup registration](../docs/research/sign-in-startup.md) have separate evidence and limitations.
+
+Screen captures are clipped to the monitor that contains the captured window's center, so a menu or shadow that extends past the screen edge is cut at that edge. They use `xcap` 0.9.8's GDI backend, which calls `GetDIBits` while the bitmap is still selected into a memory device context; the [GetDIBits documentation](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-getdibits) prohibits that. In a November 2026 comparison, its captures matched the earlier direct `GetDIBits` implementation pixel for pixel.
 
 Synthetic lifecycle messages do not establish delivery during hardware power or session transitions. UI Automation and screen captures do not establish Narrator delivery or optical Night light behavior. Clean-machine deployment and higher display scales need their own validation.

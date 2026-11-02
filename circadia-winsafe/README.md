@@ -1,13 +1,13 @@
 # circadia-winsafe
 
-This crate is the only crate in Circadia's workspace that may contain `unsafe` code, and every other crate declares `#![forbid(unsafe_code)]`. It wraps each Windows operation that has no safe API in Circadia's dependencies in one safe function whose signature prevents misuse.
+This crate is the only crate in Circadia's workspace that may contain `unsafe` code, and every other crate declares `#![forbid(unsafe_code)]`. It wraps each Windows operation that no maintained public crate provides through a safe API in one safe function whose signature prevents misuse.
 
 ## Rules for wrappers
 
-- Use a safe API from an existing dependency, such as `winsafe`, `windows-window`, or `uiautomation`, before adding a wrapper here.
+- Add a wrapper only when no maintained public crate provides the operation through a safe API with the results the caller needs. Check crates the workspace does not use yet as well as `winsafe`, `windows-window`, and `uiautomation`; for example, the harness captures screen pixels with `xcap`.
 - Wrap one Windows operation per function and keep the caller's logic in the calling crate. For example, `process::system_processes` returns the raw records, and the harness parses them.
 - Make the signature enforce the safety precondition. For example, `message::send` accepts only `Message` variants whose parameters are integers, so a caller cannot pass a pointer to another window.
-- Take and return `winsafe` and windows-rs types, such as `HWND`, `RECT`, and `CloseHandleGuard<HPROCESS>`.
+- Take and return `winsafe` and windows-rs types, such as `HWND`.
 - Put each block under `#[expect(unsafe_code, reason = "...")]` with a `SAFETY` comment that states why the call meets the API's requirements.
 
 ## Unsafe inventory
@@ -16,16 +16,12 @@ The table counts every `unsafe` keyword in the crate's Rust files: blocks, funct
 
 | File | Unsafe sites |
 | --- | ---: |
-| `src/gdi.rs` | 1 |
 | `src/message.rs` | 1 |
 | `src/process.rs` | 1 |
-| `src/shell.rs` | 3 |
 
 ## Modules
 
-| Module | Windows operation | Caller |
-| --- | --- | --- |
-| `gdi` | Copy screen pixels with `GetDIBits` | Harness screenshots |
-| `message` | Send integer-parameter window messages with `SendMessageTimeoutW` | Harness lifecycle and cleanup messages |
-| `process` | Read process and thread records with `NtQuerySystemInformation` | Harness resource measurement |
-| `shell` | Open a file with `ShellExecuteExW` and keep the started process handle | Harness shortcut deployment check |
+| Module | Windows operation | Caller | Why no maintained crate covers it |
+| --- | --- | --- | --- |
+| `message` | Send integer-parameter window messages with `SendMessageTimeoutW` | Harness lifecycle and cleanup messages | `winsafe` marks `SendMessageTimeout` unsafe, and `windows-win` accepts any message parameter, including pointers. |
+| `process` | Read process and thread records with `NtQuerySystemInformation` | Harness resource measurement | A `wmi` query takes about 1.9 s, longer than the sampler's 1 s interval, and `winprocinfo` leaks its buffer on every call. |

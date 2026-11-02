@@ -214,6 +214,9 @@ fn main() -> io::Result<()> {
     let arguments = support::app::arguments(arguments)?;
     let run = support::run::Run::start(group, scenario.name, &arguments)?;
     let outcome = check(&arguments);
+    if let Err(error) = support::tray::close_overflow() {
+        support::app::report(&format!("Closing the hidden-icons flyout failed: {error}"));
+    }
     if let Err(error) = run.finish(&outcome) {
         support::app::report(&format!("Writing the run results failed: {error}"));
         outcome?;

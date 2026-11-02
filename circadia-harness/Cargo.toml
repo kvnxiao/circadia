@@ -32,6 +32,7 @@ windows = { workspace = true, features = ["Foundation", "Security_Authorization_
 windows-sys = { workspace = true, features = ["processthreadsapi", "winbase", "winerror", "winnt", "winternl", "winuser"] }
 windows-window.workspace = true
 winsafe = { workspace = true, features = ["dwm", "ole", "psapi"] }
+xcap = "0.9.8"
 
 [target.'cfg(windows)'.build-dependencies]
 windows-reactor-setup = { workspace = true, optional = true }

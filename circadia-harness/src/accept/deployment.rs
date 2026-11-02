@@ -15,6 +15,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use win_nightlight_lib::Nightlight;
+use winsafe::HPROCESS;
 use winsafe::HWND;
 use winsafe::co;
 use winsafe::prelude::*;
@@ -113,6 +114,41 @@ fn launch_shortcut(shortcut: &Path) -> io::Result<()> {
         .map_err(io::Error::other)
 }
 
+fn launched(executable: &Path) -> io::Result<Option<winsafe::guard::CloseHandleGuard<HPROCESS>>> {
+    let expected = fs_err::canonicalize(executable)?;
+    let mut receivers = Vec::new();
+    winsafe::EnumWindows(|window| {
+        if !window.IsWindowVisible()
+            && window
+                .GetWindowText()
+                .is_ok_and(|title| title == "Circadia event receiver")
+        {
+            receivers.push(window.GetWindowThreadProcessId().1);
+        }
+        true
+    })
+    .map_err(io::Error::other)?;
+    // A receiver's process can exit between enumeration and opening, so a
+    // process that cannot be opened or resolved is not the launched one.
+    for process in receivers {
+        let Ok(handle) = HPROCESS::OpenProcess(
+            co::PROCESS::QUERY_LIMITED_INFORMATION | co::PROCESS::TERMINATE,
+            false,
+            process,
+        ) else {
+            continue;
+        };
+        let image = handle
+            .QueryFullProcessImageName(co::PROCESS_NAME::WIN32)
+            .ok()
+            .and_then(|image| fs_err::canonicalize(image).ok());
+        if image.as_ref() == Some(&expected) {
+            return Ok(Some(handle));
+        }
+    }
+    Ok(None)
+}
+
 fn editable(automation: &Automation, process: u32) -> io::Result<()> {
     let settings = wait("deployed settings window", || settings_window(process))?;
     crate::support::automation::wait("deployed settings editing", || {
@@ -157,19 +193,10 @@ fn primary_shortcut(
     automation: &Automation,
     native: &Nightlight,
 ) -> io::Result<()> {
-    let handle = circadia_winsafe::shell::execute_owned(shortcut)?;
+    launch_shortcut(shortcut)?;
+    let handle = wait("deployed shortcut receiver", || launched(executable))?;
     let result = (|| {
         let process = handle.GetProcessId().map_err(io::Error::other)?;
-        let actual = handle
-            .QueryFullProcessImageName(co::PROCESS_NAME::WIN32)
-            .map_err(io::Error::other)?;
-        require(
-            fs_err::canonicalize(actual)? == fs_err::canonicalize(executable)?,
-            "shortcut launched a different executable",
-        )?;
-        wait("deployed shortcut receiver", || {
-            window(process, "Circadia event receiver", false)
-        })?;
         wait_temperature(native, 3400)?;
         launch_shortcut(shortcut)?;
         editable(automation, process)?;

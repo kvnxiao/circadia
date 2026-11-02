@@ -38,14 +38,14 @@ impl Capture {
         })
     }
 
-    pub(crate) fn colored_pixels(&mut self, [red, green, blue]: [u8; 3]) -> io::Result<usize> {
+    pub(crate) fn colored_pixels(&mut self, color: [u8; 3]) -> io::Result<usize> {
         self.previous = self.screen.read()?;
         Ok(self
             .previous
             .as_chunks::<4>()
             .0
             .iter()
-            .filter(|pixel| distance(&pixel[..3], &[blue, green, red]) < 30)
+            .filter(|pixel| distance(&pixel[..3], &color) < 30)
             .count())
     }
 
@@ -58,7 +58,7 @@ impl Capture {
         let (_, x, y) = self.position?;
         let x = (x * f64::from(u32::try_from(self.width).ok()?)).round() as usize;
         let y = (y * f64::from(u32::try_from(self.height).ok()?)).round() as usize;
-        let [blue, green, red] = pixel(&self.previous, self.width, x, y) else {
+        let [red, green, blue] = pixel(&self.previous, self.width, x, y) else {
             return None;
         };
         Some([*red, *green, *blue])

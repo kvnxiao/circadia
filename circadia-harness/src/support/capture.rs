@@ -48,6 +48,27 @@ impl Capture {
     }
 
     pub(crate) fn from_bounds(bounds: RECT) -> io::Result<Self> {
+        // xcap captures only inside one monitor, and window shadows and menus
+        // can extend past its edge.
+        let monitor = xcap::Monitor::from_point(
+            bounds.left + (bounds.right - bounds.left) / 2,
+            bounds.top + (bounds.bottom - bounds.top) / 2,
+        )
+        .map_err(io::Error::other)?;
+        let left = monitor.x().map_err(io::Error::other)?;
+        let top = monitor.y().map_err(io::Error::other)?;
+        let right = left
+            + i32::try_from(monitor.width().map_err(io::Error::other)?)
+                .map_err(io::Error::other)?;
+        let bottom = top
+            + i32::try_from(monitor.height().map_err(io::Error::other)?)
+                .map_err(io::Error::other)?;
+        let bounds = RECT {
+            left: bounds.left.max(left),
+            top: bounds.top.max(top),
+            right: bounds.right.min(right),
+            bottom: bounds.bottom.min(bottom),
+        };
         let width = usize::try_from(bounds.right - bounds.left).map_err(io::Error::other)?;
         let height = usize::try_from(bounds.bottom - bounds.top).map_err(io::Error::other)?;
         if !(1..=8192).contains(&width) || !(1..=8192).contains(&height) {
@@ -63,7 +84,19 @@ impl Capture {
     }
 
     pub(crate) fn read(&self) -> io::Result<Vec<u8>> {
-        circadia_winsafe::gdi::screen_pixels(self.bounds)
+        let monitor = xcap::Monitor::from_point(self.bounds.left, self.bounds.top)
+            .map_err(io::Error::other)?;
+        let left = self.bounds.left - monitor.x().map_err(io::Error::other)?;
+        let top = self.bounds.top - monitor.y().map_err(io::Error::other)?;
+        let image = monitor
+            .capture_region(
+                u32::try_from(left).map_err(io::Error::other)?,
+                u32::try_from(top).map_err(io::Error::other)?,
+                u32::try_from(self.width).map_err(io::Error::other)?,
+                u32::try_from(self.height).map_err(io::Error::other)?,
+            )
+            .map_err(io::Error::other)?;
+        Ok(image.into_raw())
     }
 
     pub(crate) fn snapshot(&self, path: &Path) -> io::Result<()> {
@@ -80,7 +113,7 @@ impl Capture {
             .as_chunks::<4>()
             .0
             .iter()
-            .flat_map(|[blue, green, red, _]| [*red, *green, *blue])
+            .flat_map(|[red, green, blue, _]| [*red, *green, *blue])
             .collect();
         let mut encoder = png::Encoder::new(
             fs_err::File::create(path)?,

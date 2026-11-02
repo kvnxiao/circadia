@@ -386,7 +386,7 @@ fn fill_extent(pixels: &[u8], width: usize, accents: &[[u8; 3]]) -> usize {
         .map(|row| {
             let mut run = 0;
             row.iter()
-                .map(|[blue, green, red, _]| {
+                .map(|[red, green, blue, _]| {
                     run = if accents.iter().any(|[r, g, b]| {
                         u32::from(red.abs_diff(*r))
                             + u32::from(green.abs_diff(*g))
@@ -643,7 +643,7 @@ mod tests {
 
     #[test]
     fn fill_extent_requires_a_contiguous_run_on_one_row() {
-        let accent = [30, 20, 10, 255];
+        let accent = [10, 20, 30, 255];
         let background = [0, 0, 0, 255];
         let pixels = [
             accent, accent, background, background, background, background, accent, accent,
