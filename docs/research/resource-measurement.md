@@ -1,5 +1,5 @@
 ---
-date: 2026-10-30
+date: 2026-11-02
 questions:
   - How can a separate harness measure the release application's CPU, memory, and context switches?
   - What limits apply to sampled thread counters and the Windows metadata layout?
@@ -8,6 +8,7 @@ questions:
   - Does the compositor move the rendered Preview marker between native calls and stop animation in inactive views?
   - Do Preview progress pixels follow the captured clock continuously through completion?
 observed-in:
+  - Circadia measure-output on Windows 11 x64 build 26300.9711, 2026-10-29, windows-rs 8786f59, working tree based on c453c2f
   - Microsoft Windows API and MS-TSTS documentation retrieved 2026-10-22
   - windows-sys 0.61.2 WindowsProgramming and Wdk SystemInformation bindings
   - Circadia measure-resources quick check on Windows 11 x64 build 26300.9711
@@ -130,3 +131,9 @@ An earlier full run on the same build completed every scenario but failed its lo
 `just measure-activity` ran the same source with the `graph-measurement` instrumentation and the simulated Night light backend. Its 600-second idle observation with settings closed recorded zero foreground events, foreground queries, schedule recalculations at date boundaries, native calls, settings timer ticks, and settings view updates. This established a ten-minute interval without focus changes or date boundaries. With manual suppression active, the open settings window on the Schedule page recorded exactly 1 timer tick and 1 view update during 60.03 seconds that crossed one minute boundary; the tick is the graph's current-time marker. After settings closed, 59.93 seconds across the next minute boundary recorded zero ticks and view updates. The controlled transition, automatic suppression, manual-expiry, and native-recovery phases also passed. The `graph-measurement` build also registers a XAML `CompositionTarget.Rendering` callback for its graph samples while settings is open, so that build runs a callback on every frame; the activity trace records settings timer ticks and view updates, not those callbacks.
 
 **Inference:** in the ordinary build, the open window does not wake Circadia's UI code on every frame. That build registers no rendering callback, and its open window had 16,995 sampled context switches per minute, about 283 per second over 118 threads, which is below the display's 480 Hz frame rate. That rate exceeds the closed-again rate of about 189 per second; the activity trace attributes none of the difference to Circadia's settings timers or view updates, so the remainder comes from Windows App SDK, XAML, and graphics threads in the process. These counters do not identify those threads. Closing settings released about 25 MiB of private memory from the open-window median, and 36 more threads remained than before settings first opened; one open and close cycle does not establish whether memory grows over repeated cycles.
+
+## Native output timing
+
+The [output-timing harness](../../tools/native/README.md#native-output-timing) measures temperature-call start delay and public-call duration separately. Eligibility is the latest of the scheduled time, the next permitted attempt under the rate limit, and completion of the preceding native call. The instrumented release workload includes a scheduled transition, manual-suppression fades at several rate limits, and schedule Preview. The measurements include instrumentation overhead and do not establish displayed color or optical smoothness.
+
+On 2026-10-29, the live run passed all scenarios and endpoint checks. Every measured temperature call started within 17.172 ms of eligibility; the longest public call took 50.694 ms. The release build ran on an AMD Ryzen 7 9800X3D with 16 logical processors, Windows 11 build 26300.9711, and a 2560 × 1440 display at 480 Hz. Settings used 96 DPI and a 1216 × 1008 window. The build used windows-rs `8786f59` and working-tree changes based on `c453c2f`. Cleanup cleared native preview and left Night light off.

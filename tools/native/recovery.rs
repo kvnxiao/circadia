@@ -98,6 +98,7 @@ fn observation_failure(
 ) -> io::Result<()> {
     let failure = text()?.observation_failed.as_str();
     status(automation, settings, failure)?;
+    let announcement = "Control continues without change observation.";
     wait_automation("observation failure announcement", || {
         Ok(automation
             .text(
@@ -105,7 +106,7 @@ fn observation_failure(
                 std::process::id(),
                 automation_id::STATUS_ANNOUNCEMENT,
             )?
-            .filter(|name| name.contains(failure)))
+            .filter(|name| name.contains(announcement)))
     })?;
     written(measurement, 2200, None)?;
     let edited = Instant::now();
@@ -130,7 +131,7 @@ fn observation_failure(
                 std::process::id(),
                 automation_id::STATUS_ANNOUNCEMENT,
             )?
-            .filter(|name| !name.contains(failure)))
+            .filter(|name| !name.contains(announcement)))
     })?;
     diagnostics(directory, "observation", &["failure", "recovered"])?;
     report(

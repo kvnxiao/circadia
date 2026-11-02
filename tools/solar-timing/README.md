@@ -1,14 +1,14 @@
 # Local solar calculation timing
 
-This probe measures the cost of calculating sunrise and sunset for one date with `solar-positioning` 0.7.1. It supports calculating required dates locally without a persistent solar cache. The [performance research](../../docs/research/solar-performance.md) records results and limits.
+This probe measures the cost of calculating sunrise and sunset for one date with `solar-positioning` 0.7.1. The [performance research](../../docs/research/solar-performance.md) records results and limits.
 
 The timing binary uses the solar comparison tool's unchanged calculation function. The runner supplies four fixed ordinary and polar cases, verifies independently specified event counts, and records one initial call plus 1,000 timed repetitions per case. It validates the output structure, nonnegative integer event counts, exact sample count, and finite nonnegative durations before calculating statistics. Thirty empty-input process launches measure process overhead separately. Calculations do not reuse event results.
 
-## Dependencies and validation
+## Dependencies and scope
 
-Validated on 2026-10-17 with Rust 1.99.0, CPython 3.15.0a2, Windows 11 x64 build 26300.9711, and an AMD Ryzen 7 9800X3D. Builds use Cargo's default debug profile. The [solar comparison tool](../solar-calculation/README.md) supplies the exact Cargo manifest, lockfile, Rust configuration, reference tests, and fixtures. This directory supplies the additional timing binary and runner; it does not define a separate dependency set.
+Builds use Cargo's default debug profile. The [solar comparison tool](../solar-calculation/README.md) supplies the exact Cargo manifest, lockfile, Rust configuration, reference tests, and fixtures. This directory supplies the additional timing binary and runner; it does not define a separate dependency set.
 
-Rust formatting, strict Clippy, pinned Ruff 0.17.1 and ty 0.0.89, and all six solar comparison tests passed. The four timing cases produced their expected event counts. Invalid repetition counts, malformed JSON, and invalid coordinates failed as expected. These results do not measure Windows location requests, time-zone conversion, UI work, Night light writes, or release-build performance.
+This probe does not measure Windows location requests, time-zone conversion, UI work, Night light writes, or release-build performance.
 
 ## Run
 

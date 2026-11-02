@@ -1,5 +1,5 @@
 ---
-date: 2026-10-24
+date: 2026-11-02
 questions:
   - Can Circadia read an application's icon and display name from its executable file, including while the application runs, without opening the running process for more than limited query?
   - What does each read cost, and can a key taken from file metadata let Circadia skip repeated reads across launches?
@@ -8,7 +8,7 @@ observed-in:
   - Windows 11 Pro build 26300.9711, x64, standard (non-elevated) user session, 2026-10-24
   - Python 3.15.0 ctypes calls to kernel32, psapi, version, user32, and shell32 from a temporary script outside the repository, single runs
   - Microsoft Learn pages for PrivateExtractIconsW, SHDefExtractIconW, SHGetStockIconInfo, and GetFileAttributesExW, retrieved 2026-10-24
-  - Settings-design probe display of an extracted icon through Reactor's Image at windows-rs 0496ec1, Windows 11 Pro build 26300, 100% scaling, 2026-10-27
+  - Settings-design probe display of an extracted icon through Reactor's Image at windows-rs 0496ec1, Windows 11 Pro x64 build 26300, 100% scaling, dark theme, Rust 1.99.0, debug build with installed Windows App SDK runtime, 2026-10-27
 recheck-when: Circadia changes how it identifies or reads executables; Windows documents a change to icon extraction; or users report generic icons for a category of applications, such as games protected by an anti-cheat product that was not running in these measurements.
 ---
 
@@ -18,7 +18,7 @@ Circadia can show an application's own icon in settings by reading the icon reso
 
 ## Scope and applicability
 
-The experiment starts from an identified executable path. [Hosted application identity](hosted-application-identity.md) covers limited-query resolution of that path. The [icon contract](../specs/suppression.md#req-app-icons--show-app-icons-in-settings) defines cache lifetime and identity: each normalized executable path has its own entry, and a missing file can retain its own cached image. Filename-only rules use a metadata source without narrowing matching.
+The experiment starts from an identified executable path. [Hosted application identity](hosted-application-identity.md) covers limited-query resolution of that path. The [icon contract](../specs/suppression.md#req-app-icons--show-app-icons-in-settings) defines cache lifetime and identity: each normalized executable path has its own entry, and a missing file can retain its own cached image. For a filename-only rule, one executable path supplies its icon and display name; the rule still matches executables with that name in other folders.
 
 ## Evidence boundaries
 
@@ -97,11 +97,21 @@ A Store application's logo is stored in its package assets, not in its executabl
 
 Read icons with `SHDefExtractIconW` from the executable path, at the pixel size the display needs, on a thread that neither drives Night light nor runs the UI. Read display names on the same thread, because a first file open can take hundreds of milliseconds. Cache the resulting images persistently under Circadia's data folder, keyed by path, size, and last-write time, and delete cached images for apps that are no longer listed or recently focused. Persist metadata-source paths separately from optional matching restrictions. Use a cached image only for its own executable path; use the generic icon when no such image exists or the file has no icon resource. Leave package logos for Store applications to a later decision.
 
+## Runtime icon rendering
+
+Effective pixels (epx) are layout units that Windows converts to physical pixels according to display scaling.
+
+On 2026-10-27 at `0496ec1`, the [runtime icon experiment](../../tools/windows-reactor/settings-design/README.md#runtime-icon-experiment) displayed `notepad.exe` icons on Windows 11 Pro x64 build 26300 at 100% scaling (96 DPI), in a dark window theme. It used Rust 1.99.0, a default debug build, and the installed Windows App SDK runtime.
+
+A 32 px PNG extracted with `SHDefExtractIconW` matched all 1,024 pixels of a 32 epx `Image` through both in-memory and file sources. A 64 px extraction scaled to 32 epx matched 336 pixels, with a maximum channel difference of 169. Each source was compared with the 32 px PNG composited over the same black background. The separately drawn 32 px icon resource is the inferred cause of the difference; each display scale needs its own extraction.
+
+File sources kept the original image after file deletion or replacement and recreation of the image elements under new keys. The experiment did not distinguish Reactor's reuse of an image source with the same URI from WinUI's URI cache. Circadia uses in-memory sources and retains 32, 48, and 64 px extractions. These observations do not establish rendering at 150% or 200% scaling.
+
 ## Gaps
 
 The measurements leave these boundaries unverified:
 
-- Display of an extracted icon through Reactor's `Image` at 200% scaling. **Observed on 2026-10-27 at 100% scaling (96 DPI)** in the [settings-design probe](../../tools/windows-reactor/settings-design/README.md#runtime-icons-on-2026-10-27): `notepad.exe`'s icon, extracted with `SHDefExtractIconW` at 32 pixels and encoded as PNG, rendered pixel for pixel in a 32 epx `Image` through both the in-memory data source and the file source. The 64-pixel extraction scaled down to 32 epx matched only 336 of 1,024 pixels, so each display scale needs its own extraction. A file source kept showing the original image after its file was deleted or replaced and the element was recreated, so the application uses the in-memory source. The 200% run did not take place.
+- Display of extracted icons at 150% and 200% scaling; the [rendering observation above](#runtime-icon-rendering) covers 100%.
 - Whether an anti-cheat product denies reading its game's executable file. A protected game that was not running in these measurements could deny it; the result would then be the generic icon, not a failure.
 - First-open latency on a cold disk and under antivirus scanning, measured from the application's reader thread.
 - Legibility of application icons in contrast themes, where Circadia shows them without recoloring.

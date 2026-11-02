@@ -212,7 +212,12 @@ fn exercise(
         native_revision(native)? == before_activation,
         "second launch modified native Night light records",
     )?;
-    report("PASS: second invocations activate one window in the original process");
+    report("PASS: second invocations open or restore one window in the original process");
+
+    automation.focus(&settings, process)?;
+    wait("restored settings foreground for interaction", || {
+        Ok((HWND::GetForegroundWindow().as_ref() == Some(&settings)).then_some(()))
+    })?;
 
     check_cancelled_session(automation, native, &settings, &receiver, process)?;
 

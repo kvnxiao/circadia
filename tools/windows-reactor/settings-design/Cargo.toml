@@ -10,7 +10,7 @@ publish = false
 ignored = ["windows-collections", "windows-numerics", "windows-time"]
 
 [dependencies]
-windows = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e", features = ["UI_ViewManagement"] }
+windows = { git = "https://github.com/microsoft/windows-rs", rev = "73c74c0d79282e1295af1856e6c8987c51b7ccdd", features = ["UI_ViewManagement"] }
 winsafe = { version = "0.0.29", features = ["user", "gdi"] }
 anyhow = "1"
 fluent-pseudo = "0.3"
@@ -20,18 +20,18 @@ i18n-embed-fl = "0.10"
 num-traits = "0.2"
 png = "0.18"
 rust-embed = "8"
-windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e", features = ["composition", "reactor"] }
-windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e", default-features = false, features = ["reactor"] }
-windows-core = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
-windows-collections = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
-windows-numerics = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
-windows-time = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
-windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e" }
-windows-sys = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e", features = ["datetimeapi", "errhandlingapi", "minwinbase", "shellapi", "shlobj_core", "windef", "winerror", "wingdi", "winnls", "winuser"] }
+windows-canvas = { git = "https://github.com/microsoft/windows-rs", rev = "73c74c0d79282e1295af1856e6c8987c51b7ccdd", features = ["composition", "reactor"] }
+windows-composition = { git = "https://github.com/microsoft/windows-rs", rev = "73c74c0d79282e1295af1856e6c8987c51b7ccdd", default-features = false, features = ["reactor"] }
+windows-core = { git = "https://github.com/microsoft/windows-rs", rev = "73c74c0d79282e1295af1856e6c8987c51b7ccdd" }
+windows-collections = { git = "https://github.com/microsoft/windows-rs", rev = "73c74c0d79282e1295af1856e6c8987c51b7ccdd" }
+windows-numerics = { git = "https://github.com/microsoft/windows-rs", rev = "73c74c0d79282e1295af1856e6c8987c51b7ccdd" }
+windows-time = { git = "https://github.com/microsoft/windows-rs", rev = "73c74c0d79282e1295af1856e6c8987c51b7ccdd" }
+windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "73c74c0d79282e1295af1856e6c8987c51b7ccdd" }
+windows-sys = { git = "https://github.com/microsoft/windows-rs", rev = "73c74c0d79282e1295af1856e6c8987c51b7ccdd", features = ["datetimeapi", "errhandlingapi", "minwinbase", "shellapi", "shlobj_core", "windef", "winerror", "wingdi", "winnls", "winuser"] }
 
 [build-dependencies]
 anyhow = "1"
-windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "ff933fe45cbfdf4a638256181aae26a60932e84e", optional = true }
+windows-reactor-setup = { git = "https://github.com/microsoft/windows-rs", rev = "73c74c0d79282e1295af1856e6c8987c51b7ccdd", optional = true }
 
 [dev-dependencies]
 fluent-syntax = "0.12"

@@ -1404,13 +1404,16 @@ impl Component for Settings {
                     self.pane_open = false;
                 }
             }
-            Message::Placed => {
-                if !self.placed {
-                    self.placed = true;
-                    let _queued = context.sender().send(Message::Opened);
-                }
+            Message::Placed if !self.placed => {
+                self.placed = true;
+                let _queued = context.run_window(|window| {
+                    let _activated = crate::platform::settings_window::native_window(&window)
+                        .map(|window| window.SetForegroundWindow());
+                    Message::Opened
+                });
                 Self::read_dpi(context);
             }
+            Message::Placed => Self::read_dpi(context),
             Message::Dpi(dpi) => self.dpi = dpi,
             Message::Edit(edits) => self.edit(edits, context),
             Message::Number(field, value) => {

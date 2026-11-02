@@ -456,11 +456,17 @@ impl Check<'_> {
             .automation
             .controls_with_parents(&menu.window, self.process)?;
         for path in [first, second] {
+            let (_, suffix) = path.folder().rsplit_once(' ').ok_or_else(|| {
+                io::Error::other("installation fixture folder lacks its unique suffix")
+            })?;
             let label = menu
                 .labels()
-                .find(|label| label.contains(path.folder()))
+                .find(|label| label.contains(suffix))
                 .ok_or_else(|| {
-                    io::Error::other(format!("tray lacks installation folder {}", path.folder()))
+                    io::Error::other(format!(
+                        "tray lacks installation folder suffix {suffix}; labels: {:?}",
+                        menu.labels().collect::<Vec<_>>()
+                    ))
                 })?;
             require(
                 controls

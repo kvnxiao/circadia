@@ -4,7 +4,7 @@ This isolated Rust probe compares `solar-positioning` 0.7.1 and `sunrise` 3.0.0 
 
 ## Environment and dependencies
 
-Validated on 2026-10-16 with Windows 11 x64 build 26300.9711 and Rust 1.99.0, using default debug builds. `Cargo.lock` records exact versions. The manifest declares Rust 1.95 as its minimum.
+Use Cargo's default debug profile. `Cargo.lock` records exact versions. The manifest declares Rust 1.95 as its minimum.
 
 - `solar-positioning` 0.7.1 uses the default Solar Position Algorithm (SPA) event calculator, the standard -50/60 degree horizon, sea level, and its date-based estimate of the difference between astronomical model time and Earth-rotation time (delta T). Only its `std` feature is enabled; its numeric interval API needs no time-zone database or Chrono adapter.
 - `sunrise` 3.0.0 is retained only as a rejected comparison candidate.
@@ -15,7 +15,7 @@ Validated on 2026-10-16 with Windows 11 x64 build 26300.9711 and Rust 1.99.0, us
 
 Six tests cover 36 reference cases and input failures. The reference comparison checks 48 event times across northern and southern seasons, the equator, both poles, high-latitude transitions, the date line, and coordinates outside the selected clock's zone. Two cases supply explicit UTC boundaries for New York's 23-hour and 25-hour days. They test the solar interval API, not Windows rule discovery or host setting changes.
 
-Every event count must match the reference. Timing tolerances are 60 seconds through latitude +/-66 degrees and 120 seconds beyond that range. These are probe comparison limits, not guarantees about observed sunrise. USNO reports whole minutes, and shallow polar crossings amplify small differences between astronomical models. The initial uniform 60-second comparison failed on two polar sunsets; the research records those differences explicitly.
+Every event count must match the reference. Timing tolerances are 60 seconds through latitude +/-66 degrees and 120 seconds beyond that range. These are probe comparison limits, not guarantees about observed sunrise. USNO reports whole minutes, and shallow polar crossings amplify small differences between astronomical models. The [research](../../docs/research/solar-calculation.md) records observed polar differences.
 
 `fixtures.json` stores each request URL, retrieval date, coordinates, clock offset, and full response. These are public reference locations, not user coordinates. Routine tests read this file without network access. To refresh a fixture, retrieve its recorded URL, inspect the response and metadata, and rerun the comparison; do not replace independent expected values with local calculator output.
 
