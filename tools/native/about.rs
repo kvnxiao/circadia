@@ -92,7 +92,7 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
     automation.invoke(&window, process, automation_id::CHECK_UPDATES)?;
     wait("manual update check completes", || {
         Ok(
-            (automation.enabled(&window, process, automation_id::CHECK_UPDATES)? == Some(true)
+            (!automation.visible(&window, process, automation_id::UPDATE_PROGRESS)?
                 && automation.visible(&window, process, automation_id::UPDATE_STATUS)?)
             .then_some(()),
         )
@@ -104,10 +104,36 @@ pub(super) fn run(arguments: &[OsString]) -> io::Result<()> {
         crate::lifecycle::language().unwrap_or("en-US")
     );
     Capture::window(&window, process)?.snapshot(Path::new(&path))?;
+    dismiss_result(&automation, &window, process)?;
     crate::lifecycle::quit(&automation, &window, process)?;
     application.wait_exit()?;
     report(
-        "PASS: About navigation, build identity surface, narrow layouts, manual check result, and Quit on Settings; management remained off",
+        "PASS: About navigation, build identity surface, narrow layouts, manual check result, dismissal, and Quit on Settings; management remained off",
     );
+    Ok(())
+}
+
+fn dismiss_result(automation: &Automation, window: &winsafe::HWND, process: u32) -> io::Result<()> {
+    automation.invoke(window, process, crate::automation::DialogButton::Close.id())?;
+    wait("update banner dismissed", || {
+        Ok((!automation.visible(window, process, automation_id::UPDATE_STATUS)?).then_some(()))
+    })?;
+    show_page(automation, window, process, automation_id::NAV_GENERAL)?;
+    show_page(automation, window, process, automation_id::NAV_ABOUT)?;
+    require(
+        !automation.visible(window, process, automation_id::UPDATE_STATUS)?,
+        "dismissed update result stays hidden after navigation",
+    )?;
+    if automation.enabled(window, process, automation_id::CHECK_UPDATES)? != Some(true) {
+        return Ok(());
+    }
+    automation.invoke(window, process, automation_id::CHECK_UPDATES)?;
+    wait("new update result after dismissal", || {
+        Ok(
+            (!automation.visible(window, process, automation_id::UPDATE_PROGRESS)?
+                && automation.visible(window, process, automation_id::UPDATE_STATUS)?)
+            .then_some(()),
+        )
+    })?;
     Ok(())
 }

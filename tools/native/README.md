@@ -16,7 +16,7 @@ The Schedule page is checked at client widths of 640, 799, 800, 1120, 1280, 1366
 
 ## About page without Night light changes
 
-Run `just native-about` or `just native-about --language qps-Ploc` with Circadia closed. The check opens an isolated configuration with management and automatic update checks off. It resizes the window to 1000, 800, and 640 effective pixels, saves screenshots under `target/about-*`, invokes a manual check, and exits through Settings. It does not click external links, move the cursor, or send keyboard input. The windows can take focus. Inspect the screenshots for wrapping, complete glyphs, and reachable actions at 100% scaling. A development build reports that it has no distribution channel; a packaged-channel build makes a public GitHub metadata request.
+Run `just native-about` or `just native-about --language qps-Ploc` with Circadia closed. The check opens an isolated configuration with management and automatic update checks off. It resizes the window to 1200, 1000, 800, and 640 effective pixels, saves screenshots under `target/about-*`, invokes a manual check, and dismisses its result. It verifies that navigation preserves dismissal, starts another check when the button is enabled, and exits through Settings. A rate-limit cooldown prevents the second check. The harness does not click external links, move the cursor, or send keyboard input. The windows can take focus. Inspect the screenshots for wrapping, complete glyphs, and reachable actions at 100% scaling. A development build reports that it has no distribution channel; a packaged-channel build makes public GitHub metadata requests.
 
 ## Application lifecycle
 

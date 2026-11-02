@@ -530,7 +530,10 @@ impl Application for Desktop {
                     sign_in: self.sign_in.status(),
                     location: self.location.status(),
                     updates: self.updates.as_ref().map_or(
-                        crate::updates::Status::Failed,
+                        crate::updates::State {
+                            status: crate::updates::Status::Failed,
+                            dismissed: false,
+                        },
                         crate::updates::Client::status,
                     ),
                     contrast: self.contrast,
@@ -773,6 +776,11 @@ impl Desktop {
 
     fn command(&mut self, command: settings::Command) {
         match command {
+            settings::Command::DismissUpdate => {
+                if let Some(updates) = &self.updates {
+                    updates.dismiss();
+                }
+            }
             settings::Command::CheckUpdates => {
                 if let Some(updates) = &self.updates {
                     updates.check();

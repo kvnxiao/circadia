@@ -208,11 +208,13 @@ About identifies the installed version, source commit, and architecture. Stable 
 
 Stable installations check published, non-prerelease GitHub releases using semantic version order. An update is available only when its installer and checksum are available. Preview installations check successfully built main-branch packages, using build identity independently of the base version. Failed builds and expired or missing packages are not offered. Checks stay within the installed channel.
 
-Check for updates shows an in-progress banner, then an up-to-date result, an available-update result with a download-page link, or a readable failure. An absent downloadable build is reported separately from being up to date. Only one check runs at a time. The download action opens the browser; Circadia does not download or install the update itself. Preview download links explain that GitHub sign-in is required.
+Check for updates shows progress, then an up-to-date result, an available-update result with a download-page link, or a readable failure. An absent downloadable build is reported separately from being up to date. Only one check runs at a time. Completed banners can be dismissed. The download action opens the browser; Circadia does not download or install the update itself. Preview download links explain that GitHub sign-in is required.
 
-Check for updates automatically is a saved preference, enabled by default. When enabled, Circadia checks at startup and once every 24 hours while running. A manual check restarts that interval. Disabling the preference stops future automatic checks; an in-flight check may finish. Results remain available in About until another check or process exit. Checks do not open settings, display notifications, or interrupt Night light management.
+Check for updates automatically is a saved preference, enabled by default. When enabled, Circadia checks at startup and once every 24 hours while running. A manual check restarts that interval. Disabling the preference stops future automatic checks; an in-flight check may finish. Results remain visible in About until dismissed, replaced by another check, or process exit. Dismissed results stay hidden when settings reopens. Checks do not open settings, display notifications, or interrupt Night light management.
 
 Checks use bounded network work outside UI message handling. Failures allow a later manual check or the next daily check. Requests send only the metadata needed to query the distribution; configuration, logs, location, and application lists are not uploaded. Exit stops further checks and does not delay Night light cleanup for a pending network response.
+
+Rate limits, connection failures, and unexpected errors have distinct messages. A rate limit shows a warning and prevents manual and automatic requests during a cooldown. The cooldown honors usable service retry timing; without usable timing, it lasts one minute. Dismissing the warning does not end the cooldown. Expiry enables manual checking without initiating an extra automatic check or restoring a dismissed banner.
 
 **Scenarios:**
 
@@ -222,6 +224,9 @@ Checks use bounded network work outside UI message handling. Failures allow a la
 - A release is published before packaging finishes: About reports that a downloadable build is not yet available.
 - A preview build fails, or its artifact expires: it is not offered for download.
 - A user starts a check: About immediately shows progress and prevents duplicate checks, then shows the result. A network failure is not reported as up to date.
+- The service rate-limits a check: About shows a warning and disables checking until the cooldown expires. Dismissing the warning and reopening settings does not allow an early request or restore the banner.
+- A connection attempt fails: About asks the user to check the connection. Invalid response data instead produces an unexpected-error message.
+- The user dismisses a completed result and starts another check: progress and the new result are shown.
 - Automatic checks are disabled and Circadia restarts: it makes no automatic update request; Check for updates still works.
 - Settings is closed while an automatic check completes: it stays closed, and About shows the result when opened.
 - The user quits during a check: Night light cleanup proceeds without waiting for GitHub.

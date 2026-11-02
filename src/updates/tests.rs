@@ -336,7 +336,7 @@ fn manual_checks_coalesce_and_shutdown_discards_in_flight_results() {
             automatic: false,
             requested: false,
             stopped: false,
-            status: Status::Idle,
+            state: State::default(),
         }),
         Condvar::new(),
     ));
@@ -364,13 +364,150 @@ fn manual_checks_coalesce_and_shutdown_discards_in_flight_results() {
         .expect("checking notification");
     client.check();
     assert!(!shared.0.lock().expect("state lock").requested);
-    assert_eq!(client.status(), Status::Checking);
+    assert_eq!(client.status().status, Status::Checking);
     drop(client);
     finish.send(()).expect("release network fixture");
     worker.join().expect("worker exits");
     assert!(notifications.try_recv().is_err());
     assert_eq!(
-        shared.0.lock().expect("state lock").status,
+        shared.0.lock().expect("state lock").state.status,
         Status::Checking
     );
+}
+
+#[test_case(429, None, None, None, "", Some(60); "429 without timing")]
+#[test_case(403, Some("0"), None, Some("1120"), "", Some(120); "primary reset")]
+#[test_case(403, Some("12"), Some("90"), None, "", Some(90); "secondary retry")]
+#[test_case(403, Some("0"), Some("30"), Some("1120"), "", Some(120); "honor both deadlines")]
+#[test_case(403, None, None, None, r#"{"message":"You have exceeded a secondary rate limit."}"#, Some(60); "secondary body")]
+#[test_case(403, None, None, None, r#"{"message":"Forbidden"}"#, None; "unrelated forbidden")]
+#[test_case(500, Some("0"), None, None, "", None; "server error")]
+#[test_case(200, Some("0"), None, None, "", None; "last successful request")]
+#[test_case(429, None, Some("invalid"), None, "", Some(60); "malformed timing")]
+#[test_case(429, None, Some("18446744073709551615"), None, "", Some(60); "overflow timing")]
+#[test_case(403, Some("0"), Some("18446744073709551615"), Some("1120"), "", Some(120); "overflow retry preserves usable reset")]
+#[test_case(403, Some("0"), None, Some("999"), "", Some(60); "past reset")]
+fn rate_limit_responses(
+    status: u16,
+    remaining: Option<&str>,
+    retry: Option<&str>,
+    reset: Option<&str>,
+    body: &str,
+    seconds: Option<u64>,
+) {
+    let mut headers = ureq::http::HeaderMap::new();
+    for (name, value) in [
+        ("x-ratelimit-remaining", remaining),
+        ("retry-after", retry),
+        ("x-ratelimit-reset", reset),
+    ] {
+        if let Some(value) = value {
+            headers.insert(name, value.parse().expect("header fixture"));
+        }
+    }
+    assert_eq!(
+        rate_limit(
+            status,
+            &headers,
+            body,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1000)
+        ),
+        seconds.map(Duration::from_secs)
+    );
+}
+
+#[test]
+fn network_and_unexpected_failures_have_distinct_statuses() {
+    for error in [
+        ureq::Error::HostNotFound,
+        ureq::Error::ConnectionFailed,
+        ureq::Error::Io(io::Error::from(io::ErrorKind::ConnectionReset)),
+    ] {
+        assert_eq!(
+            failure_status(&io::Error::other(error)),
+            Status::ConnectionFailed
+        );
+    }
+    assert_eq!(
+        failure_status(&io::Error::from(io::ErrorKind::TimedOut)),
+        Status::ConnectionFailed
+    );
+    for error in [
+        io::Error::other(ureq::Error::StatusCode(503)),
+        io::Error::other("invalid release metadata"),
+    ] {
+        assert_eq!(failure_status(&error), Status::Failed);
+    }
+}
+
+#[test]
+fn dismissing_a_rate_limit_does_not_allow_another_request() {
+    let until = Instant::now() + Duration::from_secs(60);
+    let client = Client {
+        shared: Arc::new((
+            Mutex::new(Shared {
+                automatic: false,
+                requested: false,
+                stopped: false,
+                state: State {
+                    status: Status::RateLimited(Some(until)),
+                    dismissed: false,
+                },
+            }),
+            Condvar::new(),
+        )),
+    };
+    client.dismiss();
+    client.check();
+    assert_eq!(
+        client.status(),
+        State {
+            status: Status::RateLimited(Some(until)),
+            dismissed: true
+        }
+    );
+    assert!(!client.shared.0.lock().expect("state lock").requested);
+}
+
+#[test]
+fn cooldown_expiry_notifies_without_checking_and_preserves_dismissal() {
+    let shared = Arc::new((
+        Mutex::new(Shared {
+            automatic: false,
+            requested: false,
+            stopped: false,
+            state: State {
+                status: Status::RateLimited(Some(Instant::now())),
+                dismissed: true,
+            },
+        }),
+        Condvar::new(),
+    ));
+    let client = Client {
+        shared: Arc::clone(&shared),
+    };
+    let worker_shared = Arc::clone(&shared);
+    let (notified, notifications) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || {
+        run(
+            &worker_shared,
+            &|| {
+                notified.send(()).expect("listener");
+            },
+            || panic!("expiry must not request an update"),
+        );
+    });
+    notifications
+        .recv_timeout(Duration::from_secs(2))
+        .expect("expiry notification");
+    assert_eq!(
+        client.status(),
+        State {
+            status: Status::RateLimited(None),
+            dismissed: true
+        }
+    );
+    assert!(client.status().can_check());
+    drop(client);
+    worker.join().expect("worker exits");
 }

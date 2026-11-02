@@ -402,7 +402,7 @@ pub(super) struct Input {
     pub(super) icons: Rc<AppIcons>,
     pub(super) sign_in: general::SignInStatus,
     pub(super) location: location::Status,
-    pub(super) updates: crate::updates::Status,
+    pub(super) updates: crate::updates::State,
     pub(super) contrast: Option<crate::platform::contrast::ContrastColors>,
     pub(super) visual_revision: u64,
     pub(super) exiting: bool,
@@ -444,6 +444,7 @@ pub(super) enum Folder {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Command {
     CheckUpdates,
+    DismissUpdate,
     Reset,
     Retry,
     RetryNative,

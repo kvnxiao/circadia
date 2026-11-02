@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+use std::time::SystemTime;
 
 pub(crate) const REPOSITORY: &str = "https://github.com/kvnxiao/circadia";
 const DAILY: Duration = Duration::from_hours(24);
@@ -19,7 +20,51 @@ pub(crate) enum Status {
     Available(String),
     Unpublished,
     Development,
+    RateLimited(Option<Instant>),
+    ConnectionFailed,
     Failed,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct State {
+    pub(crate) status: Status,
+    pub(crate) dismissed: bool,
+}
+
+impl State {
+    pub(crate) fn can_check(&self) -> bool {
+        !matches!(self.status, Status::Checking | Status::RateLimited(Some(_)))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("update checks rate limited for {0:?}")]
+struct RateLimit(Duration);
+
+fn failure_status(error: &io::Error) -> Status {
+    if let Some(limit) = error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<RateLimit>())
+    {
+        return Status::RateLimited(Some(Instant::now() + limit.0));
+    }
+    let network = error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<ureq::Error>());
+    if matches!(
+        network,
+        Some(
+            ureq::Error::Io(_)
+                | ureq::Error::Timeout(_)
+                | ureq::Error::HostNotFound
+                | ureq::Error::ConnectionFailed
+        )
+    ) || error.kind() == io::ErrorKind::TimedOut
+    {
+        Status::ConnectionFailed
+    } else {
+        Status::Failed
+    }
 }
 
 pub(crate) fn version() -> String {
@@ -35,7 +80,7 @@ struct Shared {
     automatic: bool,
     requested: bool,
     stopped: bool,
-    status: Status,
+    state: State,
 }
 
 pub(crate) struct Client {
@@ -49,7 +94,7 @@ impl Client {
                 automatic,
                 requested: false,
                 stopped: false,
-                status: Status::Idle,
+                state: State::default(),
             }),
             Condvar::new(),
         ));
@@ -62,11 +107,22 @@ impl Client {
         Ok(Self { shared })
     }
 
-    pub(crate) fn status(&self) -> Status {
-        self.shared
-            .0
-            .lock()
-            .map_or(Status::Failed, |shared| shared.status.clone())
+    pub(crate) fn status(&self) -> State {
+        self.shared.0.lock().map_or(
+            State {
+                status: Status::Failed,
+                dismissed: false,
+            },
+            |shared| shared.state.clone(),
+        )
+    }
+
+    pub(crate) fn dismiss(&self) {
+        if let Ok(mut shared) = self.shared.0.lock()
+            && !matches!(shared.state.status, Status::Idle | Status::Checking)
+        {
+            shared.state.dismissed = true;
+        }
     }
 
     pub(crate) fn configure(&self, automatic: bool) {
@@ -80,11 +136,14 @@ impl Client {
 
     pub(crate) fn check(&self) {
         if let Ok(mut shared) = self.shared.0.lock() {
-            if shared.status == Status::Checking {
+            if !shared.state.can_check() {
                 return;
             }
             shared.requested = true;
-            shared.status = Status::Checking;
+            shared.state = State {
+                status: Status::Checking,
+                dismissed: false,
+            };
             self.shared.1.notify_one();
         }
     }
@@ -112,11 +171,27 @@ fn run(
         let Ok(mut state) = shared.0.lock() else {
             return;
         };
-        while !(state.stopped || state.requested || state.automatic && Instant::now() >= due) {
-            let waited = if state.automatic {
+        if let Status::RateLimited(Some(until)) = state.state.status
+            && Instant::now() >= until
+        {
+            state.state.status = Status::RateLimited(None);
+            drop(state);
+            wake();
+            continue;
+        }
+        let cooldown = match state.state.status {
+            Status::RateLimited(Some(until)) => Some(until),
+            _ => None,
+        };
+        if !(state.stopped
+            || state.requested
+            || state.automatic && Instant::now() >= due && cooldown.is_none())
+        {
+            let deadline = cooldown.or(state.automatic.then_some(due));
+            let waited = if let Some(deadline) = deadline {
                 shared
                     .1
-                    .wait_timeout(state, due.saturating_duration_since(Instant::now()))
+                    .wait_timeout(state, deadline.saturating_duration_since(Instant::now()))
                     .map(|(state, _)| state)
                     .ok()
             } else {
@@ -125,18 +200,22 @@ fn run(
             let Some(next) = waited else {
                 return;
             };
-            state = next;
+            drop(next);
+            continue;
         }
         if state.stopped {
             return;
         }
         state.requested = false;
-        state.status = Status::Checking;
+        state.state = State {
+            status: Status::Checking,
+            dismissed: false,
+        };
         drop(state);
         wake();
         let result = check().unwrap_or_else(|error| {
             tracing::warn!(%error, "checking for application updates failed");
-            Status::Failed
+            failure_status(&error)
         });
         let Ok(mut state) = shared.0.lock() else {
             return;
@@ -144,7 +223,7 @@ fn run(
         if state.stopped {
             return;
         }
-        state.status = result;
+        state.state.status = result;
         due = Instant::now() + DAILY;
         drop(state);
         wake();
@@ -154,6 +233,47 @@ fn run(
 struct Api {
     agent: ureq::Agent,
     deadline: Instant,
+}
+
+fn rate_limit(
+    status: u16,
+    headers: &ureq::http::HeaderMap,
+    body: &str,
+    now: SystemTime,
+) -> Option<Duration> {
+    if !matches!(status, 403 | 429) {
+        return None;
+    }
+    let header = |name| headers.get(name).and_then(|value| value.to_str().ok());
+    let exhausted = header("x-ratelimit-remaining") == Some("0");
+    let message = serde_json::from_str::<serde_json::Value>(body).ok();
+    let limited = message
+        .as_ref()
+        .and_then(|value| value.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|message| message.to_ascii_lowercase().contains("rate limit"));
+    if status != 429
+        && !(status == 403 && (exhausted || header("retry-after").is_some() || limited))
+    {
+        return None;
+    }
+    let retry = header("retry-after")
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs);
+    let reset = exhausted
+        .then(|| header("x-ratelimit-reset"))
+        .flatten()
+        .and_then(|value| value.parse::<u64>().ok())
+        .and_then(|seconds| SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(seconds)))
+        .and_then(|reset| reset.duration_since(now).ok());
+    Some(
+        retry
+            .into_iter()
+            .chain(reset)
+            .filter(|delay| !delay.is_zero() && Instant::now().checked_add(*delay).is_some())
+            .max()
+            .unwrap_or(Duration::from_secs(60)),
+    )
 }
 
 impl Api {
@@ -176,17 +296,26 @@ impl Api {
             .timeout_global(Some(remaining))
             .build()
             .call();
-        let mut response = match response {
-            Ok(response) => response,
-            Err(ureq::Error::StatusCode(404)) => return Ok(None),
-            Err(error) => return Err(io::Error::other(error)),
-        };
+        let mut response = response.map_err(io::Error::other)?;
+        let status = response.status().as_u16();
+        if status == 404 {
+            return Ok(None);
+        }
+        if let Some(delay) = rate_limit(status, response.headers(), "", SystemTime::now()) {
+            return Err(io::Error::other(RateLimit(delay)));
+        }
         let body = response
             .body_mut()
             .with_config()
             .limit(2 * 1024 * 1024)
             .read_to_string()
             .map_err(io::Error::other)?;
+        if let Some(delay) = rate_limit(status, response.headers(), &body, SystemTime::now()) {
+            return Err(io::Error::other(RateLimit(delay)));
+        }
+        if !response.status().is_success() {
+            return Err(io::Error::other(ureq::Error::StatusCode(status)));
+        }
         serde_json::from_str(&body)
             .map(Some)
             .map_err(io::Error::other)
@@ -197,6 +326,7 @@ fn check() -> io::Result<Status> {
     let api = Api {
         agent: ureq::Agent::config_builder()
             .https_only(true)
+            .http_status_as_error(false)
             .max_redirects(0)
             .user_agent(concat!("Circadia/", env!("CARGO_PKG_VERSION")))
             .build()

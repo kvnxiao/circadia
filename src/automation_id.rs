@@ -28,6 +28,8 @@ identifiers! {
     ABOUT_VERSION = "about-version";
     /// Manual update check.
     CHECK_UPDATES = "check-updates";
+    /// Active update check progress indicator.
+    UPDATE_PROGRESS = "update-progress";
     /// Automatic update preference.
     AUTOMATIC_UPDATES = "automatic-updates";
     /// Update check result.
