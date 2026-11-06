@@ -69,7 +69,6 @@ use windows_reactor::NavigationViewBackButtonVisible;
 use windows_reactor::NavigationViewItem;
 use windows_reactor::NavigationViewPaneDisplayMode;
 use windows_reactor::NumberBox;
-use windows_reactor::Orientation;
 use windows_reactor::ScrollViewer;
 use windows_reactor::Slider;
 use windows_reactor::StackPanel;
@@ -626,7 +625,7 @@ impl Settings {
         palette::Palette::new(palette::Theme::new(self.scheme, self.input.contrast))
     }
 
-    fn edit(&mut self, edits: Vec<(Field, FieldValue)>, context: &ComponentContext<Self>) {
+    fn edit(&mut self, edits: Vec<(Field, FieldValue)>, context: &ComponentContext<'_, Self>) {
         #[cfg(feature = "graph-measurement")]
         for (field, value) in &edits {
             let text = match value {
@@ -677,7 +676,7 @@ impl Settings {
         }
     }
 
-    fn animate(&mut self, context: &ComponentContext<Self>) {
+    fn animate(&mut self, context: &ComponentContext<'_, Self>) {
         let now = Instant::now();
         let phase = schedule::phase_deadline(
             &self.input.model,
@@ -768,7 +767,7 @@ impl Settings {
         }
     }
 
-    fn browse(&self, context: &ComponentContext<Self>) {
+    fn browse(&self, context: &ComponentContext<'_, Self>) {
         let text = &self.input.text;
         bind_text!(fl, text);
         let title = fl!("dialog-file-title");
@@ -811,7 +810,7 @@ impl Settings {
         }
     }
 
-    fn app_message(&mut self, message: Message, context: &ComponentContext<Self>) {
+    fn app_message(&mut self, message: Message, context: &ComponentContext<'_, Self>) {
         match message {
             Message::OpenDialog(list) => self.dialog = Some(apps::AddDialog::new(list)),
             Message::DialogClosed(result) => self.dialog_closed(result),
@@ -900,12 +899,12 @@ impl Settings {
         self.input.command.call(command);
     }
 
-    fn read_dpi(context: &ComponentContext<Self>) {
+    fn read_dpi(context: &ComponentContext<'_, Self>) {
         let _queued = context
             .run_window(|window| Message::Dpi(crate::platform::settings_window::dpi(&window)));
     }
 
-    fn solar_update(&mut self, message: Message, context: &ComponentContext<Self>) {
+    fn solar_update(&mut self, message: Message, context: &ComponentContext<'_, Self>) {
         if location::starts_request(&message, &self.input.model) {
             self.input.request_location.call(());
         }
@@ -1094,11 +1093,7 @@ impl Settings {
         )
     }
 
-    fn banner(
-        &self,
-        banner: Banner,
-        context: &ViewContext<'_, Self>,
-    ) -> windows_reactor::KeyedView {
+    fn banner(banner: Banner, context: &ViewContext<'_, Self>) -> windows_reactor::KeyedView {
         let actions: Vec<View> = banner
             .actions
             .into_iter()
@@ -1144,35 +1139,16 @@ impl Settings {
         if let Some(command) = banner.dismiss {
             info = info.on_closed(context.message(Message::Command(command)));
         }
+        let mut children: Vec<View> = vec![info.into()];
+        if !actions.is_empty() {
+            children.push(widgets::action_group(actions).into());
+        }
         keyed(
             banner.id,
-            Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto])
-                .rows([GridLength::Auto, GridLength::Auto])
-                .column_spacing(8.0)
+            StackPanel::new()
                 .margin(Thickness::new(0.0, 0.0, 0.0, 12.0))
-                .children((
-                    info.grid_column_span(if self.stacked() { 2 } else { 1 }),
-                    StackPanel::new()
-                        .grid_column(i32::from(!self.stacked()))
-                        .grid_column_span(if self.stacked() { 2 } else { 1 })
-                        .grid_row(i32::from(self.stacked()))
-                        .horizontal_alignment(HorizontalAlignment::Right)
-                        .margin(Thickness::new(
-                            0.0,
-                            if self.stacked() && !actions.is_empty() {
-                                8.0
-                            } else {
-                                0.0
-                            },
-                            0.0,
-                            0.0,
-                        ))
-                        .orientation(Orientation::Horizontal)
-                        .spacing(8.0)
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .children(actions),
-                )),
+                .spacing(8.0)
+                .children(children),
         )
     }
 
@@ -1309,7 +1285,7 @@ impl Component for Settings {
     type Input = Input;
     type Message = Message;
 
-    fn create(input: &Input, context: &ComponentContext<Self>) -> Self {
+    fn create(input: &Input, context: &ComponentContext<'_, Self>) -> Self {
         input.opened.call(());
         let visibility = context.callback(Message::Visibility);
         let minimize_events = crate::platform::settings_window::minimize_events(move |minimized| {
@@ -1361,7 +1337,7 @@ impl Component for Settings {
         settings
     }
 
-    fn input_changed(&mut self, input: &Input, context: &ComponentContext<Self>) {
+    fn input_changed(&mut self, input: &Input, context: &ComponentContext<'_, Self>) {
         if input.visual_revision != self.input.visual_revision {
             self.accents = progress::accent_colors();
         }
@@ -1386,7 +1362,7 @@ impl Component for Settings {
         self.request_icons();
     }
 
-    fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
+    fn update(&mut self, message: Message, context: &ComponentContext<'_, Self>) {
         match message {
             Message::Size(size) => self.resized(size),
             Message::Pane(open) => self.pane_open = !self.expanded_navigation() && open,
@@ -1493,7 +1469,7 @@ impl Component for Settings {
                 .keyed_children(
                     problems::banners(&self.input.model, &text, &self.input.region, self.page)
                         .into_iter()
-                        .map(|banner| self.banner(banner, context)),
+                        .map(|banner| Self::banner(banner, context)),
                 )
                 .into(),
         ];

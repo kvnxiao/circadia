@@ -313,7 +313,7 @@ fn a_pending_crash_notice_shows_a_closable_banner_with_both_commands_on_every_pa
             panic!("one banner on {page:?}: {banners:?}");
         };
         assert_eq!(banner.id, "banner-crash");
-        assert_eq!(banner.severity, InfoBarSeverity::Informational);
+        assert_eq!(banner.severity, InfoBarSeverity::Warning);
         assert_eq!(banner.title, "Circadia closed unexpectedly");
         assert_eq!(
             banner.actions,

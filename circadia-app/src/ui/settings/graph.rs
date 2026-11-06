@@ -484,7 +484,7 @@ impl Component for Surface {
     type Input = SurfaceInput;
     type Message = SurfaceMessage;
 
-    fn create(input: &SurfaceInput, _: &ComponentContext<Self>) -> Self {
+    fn create(input: &SurfaceInput, _: &ComponentContext<'_, Self>) -> Self {
         Self {
             host: ElementRef::new(),
             compositor: None,
@@ -494,12 +494,12 @@ impl Component for Surface {
         }
     }
 
-    fn input_changed(&mut self, input: &SurfaceInput, _: &ComponentContext<Self>) {
+    fn input_changed(&mut self, input: &SurfaceInput, _: &ComponentContext<'_, Self>) {
         self.input = input.clone();
         self.redraw();
     }
 
-    fn update(&mut self, message: SurfaceMessage, _: &ComponentContext<Self>) {
+    fn update(&mut self, message: SurfaceMessage, _: &ComponentContext<'_, Self>) {
         let SurfaceMessage::Host(event) = message;
         let (width, height, scale) = match event {
             CompositionHostEvent::Ready {

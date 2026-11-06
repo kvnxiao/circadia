@@ -1,5 +1,5 @@
 ---
-date: 2026-10-24
+date: 2026-11-05
 questions:
   - Which mechanism stores, loads, and selects translations in a Rust application built with windows-reactor, and how do MRT Core, Win32 string tables, and Rust localization libraries compare?
   - Which API formats clock times and numbers and parses locale-formatted latitude and longitude, and does it follow user regional overrides such as a 24-hour clock with an English display language?
@@ -8,12 +8,13 @@ questions:
   - Without a public Reactor FlowDirection or Language property, how can right-to-left layout and per-control language work, should Circadia request them upstream, and should the time graph mirror?
   - What happens when the user changes the Windows display language or regional format while Circadia runs, and what does each change-timing option require?
 observed-in:
-  - microsoft/windows-rs 722f202100c3bd428627941d3834d87ad6679d1c (Circadia's reference pin for windows-reactor, windows-window, and windows-reactor-setup before 2026-10-23)
-  - microsoft/windows-rs master ebc5a99d08be3f23cef4d428661357fad3d1c0db (2026-10-23), Reactor and reactor-setup only
+  - microsoft/windows-rs 27abacf80e4d3e60de129d32c559b618faeb1fec, 2026-11-05 (windows-reactor public API, generated bindings, notification-area tooltip handling, code-generator schema, and windows-reactor-setup manifest and runtime file list)
   - The settings-design rendering probe at microsoft/windows-rs 0496ec19116f1dac690daf31fcb96769118d9bac with fluent-pseudo 0.3.3, framework-dependent debug build, 2026-10-24
-  - Windows App SDK runtime 2.5.1 (Microsoft.WindowsAppSDK.Runtime NuGet package staged by windows-reactor-setup; Microsoft.UI.Xaml.dll 3.2.3.2609)
+  - Windows App SDK runtime 2.5.1 (staged Microsoft.WindowsAppSDK.Runtime package; Microsoft.UI.Xaml.dll 3.2.3.2609)
+  - Microsoft Learn, GitHub issue, and crates.io version and dependency data retrieved 2026-10-23
+  - windows-rs issue search for Reactor FlowDirection, language, and localization issues, 2026-11-05
   - microsoft/microsoft-ui-xaml f980ab26e378db4afe4264c4f00c5bf6cc11ec34 and microsoft/WindowsAppSDK 04babd7a522bddf156204664b2dda86596c83016 (main branches, source inspection only)
-  - Circadia source at commit 64a2c95 (lifecycle window and tooltip construction)
+  - Circadia source at commit 709224c, 2026-11-05 (lifecycle window, settings-change handling, and tray tooltip construction)
   - Windows 11 Pro build 26300.9711, display language en-US, regional format en-US with a user short-date override (yyyy-MM-dd) and the default 12-hour clock
   - Rust 1.99.0, x86_64-pc-windows-msvc, Cargo default release profile for size measurements
   - fluent-bundle 0.16.0, fluent-templates 0.15.1, i18n-embed 0.16.0, i18n-embed-fl 0.10.1, rust-i18n 4.2.4, gettext 0.4.0, gettext-rs 0.8.0 (metadata only), icu 2.4.0, intl_pluralrules 7.0.2, windows 0.62.2, windows-sys 0.61.2
@@ -32,11 +33,11 @@ Native WinUI text uses both Multilingual User Interface (MUI) satellite files an
 
 | Evidence | Version or condition | What it establishes |
 | :-- | :-- | :-- |
-| Reactor public API and generated bindings | windows-rs `722f202` and `ebc5a99` | Which properties Circadia can set on WinUI elements. |
+| Reactor public API and generated bindings | windows-rs `27abacf` | Which properties Circadia can set on WinUI elements. |
 | Staged runtime files and PRI dumps | Windows App SDK runtime 2.5.1, dumped with `makepri dump` from Windows SDK 10.0.26100.0 | Which control strings and languages the runtime ships. |
 | WinUI and Windows App SDK source | `main` branches at the listed commits, not the 2.5.1 release tags | How controls select their text and how MRT Core finds PRI files. The 2.5.1 binaries may differ. |
 | Console probes, run outside the repository and not retained | Windows 11 build 26300.9711, en-US display language and regional format, Rust 1.99.0 | Library behavior, NLS and WinRT formatting output, Win32 resource-loader selection, and binary sizes. They did not create a WinUI window or run Circadia. |
-| Microsoft Learn, GitHub issues, crates.io | Retrieved 2026-10-23 | Documented contracts, reported defects, and current versions. |
+| Microsoft Learn, GitHub issues, crates.io | Retrieved on the date in the frontmatter | Documented contracts, reported defects, and current versions. |
 
 No probe changed a Windows language or regional setting. The host's only regional override is a custom short date, so the user-override findings below are measured for the short date and inferred for the clock and decimal separator.
 
@@ -44,7 +45,7 @@ No probe changed a Windows language or regional setting. The host's only regiona
 
 ### MRT Core resources
 
-**Observed in windows-rs `722f202` and `ebc5a99`:** Reactor's public API has no resource-manager, resource-loader, or application-language types, and its internal bindings cover WinUI XAML types only. The `windows` crate in the same repository binds the inbox `Windows.ApplicationModel.Resources` namespaces, not the Windows App SDK `Microsoft.Windows.ApplicationModel.Resources` namespace. Circadia would have to generate bindings with `windows-bindgen` from `Microsoft.Windows.ApplicationModel.Resources.winmd` and `Microsoft.Windows.Globalization.winmd`, which the 2.5.1 runtime package includes. The application manifest that `windows-reactor-setup` embeds already registers the activatable classes `ResourceManager`, `ResourceLoader`, and `Microsoft.Windows.Globalization.ApplicationLanguages` in `Microsoft.Windows.ApplicationModel.Resources.dll`.
+**Observed in windows-rs `27abacf`:** Reactor's public API has no resource-manager, resource-loader, or application-language types, and its internal bindings cover WinUI XAML types only. The `windows` crate in the same repository binds the inbox `Windows.ApplicationModel.Resources` namespaces, not the Windows App SDK `Microsoft.Windows.ApplicationModel.Resources` namespace. Circadia would have to generate bindings with `windows-bindgen` from `Microsoft.Windows.ApplicationModel.Resources.winmd` and `Microsoft.Windows.Globalization.winmd`, which the 2.5.1 runtime package includes. The application manifest that `windows-reactor-setup` embeds already registers the activatable classes `ResourceManager`, `ResourceLoader`, and `Microsoft.Windows.Globalization.ApplicationLanguages` in `Microsoft.Windows.ApplicationModel.Resources.dll`.
 
 **Observed in Windows App SDK `04babd7` source:** when `ResourceManager` is constructed without a file name, `MrmGetFilePathFromName` looks for `resources.pri` in the executable's directory first and for `<executable name>.pri` second. **Observed in the 2.5.1 self-contained output:** `windows-reactor-setup` copies the runtime's `resources.pri` (2,183,976 bytes, resource map `Microsoft.WindowsAppRuntime.2`) next to `circadia.exe`, and that file contains the `Microsoft.UI.Xaml/Resources` strings that WinUI controls display. **Observed in microsoft-ui-xaml `f980ab2` source:** when WinUI is not running from a framework package, `ResourceAccessor` reads control strings from the main resource map of a default-constructed `ResourceManager`. A Circadia `resources.pri` would therefore replace the controls' strings unless a build step merged both indexes with `makepri`; a separately named PRI loaded with `ResourceManager("circadia.pri")` avoids the collision but still needs the Windows SDK's `makepri.exe` at build time.
 
@@ -58,7 +59,7 @@ A `build.rs` step can compile `.rc` string tables with `rc.exe` through `embed-r
 
 **Observed with the listed crate versions:** each library ran the same three catalogs (en-US, de, and a hand-written `qps-ploc`), a plural message (`Add {count} app/apps`), and a message whose German translation reverses the order of four named values ("Morning and evening (1900 K) can't be lower than Bedtime (2400 K)."). Sizes are release-profile executables compared with a 135,168-byte program that prints one line.
 
-| Library | Current version (2026-10-23) | Format translators edit | Plural source | Compile-time checks | Embedding | Fallback | Measured executable / increase |
+| Library | Latest version when checked | Format translators edit | Plural source | Compile-time checks | Embedding | Fallback | Measured executable / increase |
 | :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
 | `fluent-bundle` | 0.16.0 (2025-05-22) | Fluent `.ftl` | CLDR 37 rules in `intl_pluralrules` 7.0.2 | None; lookups return `Option` | Application chooses, for example `include_str!` | Application implements | 399,872 B / +259 KiB |
 | `fluent-templates` (`static_loader!`) | 0.15.1 (2026-08-05) | Fluent `.ftl` | Same as `fluent-bundle` | None; files are embedded with `include_str!` but parsed at first use, and the generated code calls `unwrap` on parse failure | Compile-time `include_str!` | Built in to a named fallback language; `fr-FR` fell back to `en-US` | 467,456 B / +325 KiB |
@@ -99,7 +100,7 @@ Fluent does not localize numbers by default: the probes printed `1900` and `2400
 Each text source needs its own override for a test run in another language:
 
 - Circadia's strings: an application-level override, such as a command-line option or environment variable read before negotiation, replaces the preferred-language list. This works the same for `de` and `qps-Ploc` because Circadia controls selection.
-- WinUI MUI strings: **Observed on build 26300.9711** with the runtime's `Microsoft.ui.xaml.dll` loaded as a data file, `SetThreadPreferredUILanguages` with `de-DE` made `LoadStringW` return "Ein", "Aus", "Stunde", and "Minute"; `ja-JP` returned "オン" and "オフ"; `ar-SA` returned right-to-left-marked Arabic text; and `qps-ploc`, `qps-plocm`, and a language without a copied satellite fell back to English. Whether WinUI's own loads honor a thread or process list set by Circadia before Reactor starts is not verified.
+- WinUI MUI strings: **Observed on build 26300.9711** with the runtime's `Microsoft.ui.xaml.dll` loaded as a data file, `SetThreadPreferredUILanguages` with `de-DE` made `LoadStringW` return "Ein", "Aus", "Stunde", and "Minute"; `ja-JP` returned "オン" and "オフ"; `ar-SA` returned right-to-left-marked Arabic text; and `qps-ploc`, `qps-plocm`, and a language without a copied satellite fell back to English. In the framework-dependent [rendering probe](#rendering-probe-results), WinUI's own `ToggleSwitch` text followed thread and process lists set before Reactor started; the self-contained build is not verified.
 - WinUI MRT strings: the Windows App SDK `PrimaryLanguageOverride`, set before the first control string loads, is the documented control. Circadia would need generated bindings for it. A pseudo-locale override falls back to the English candidates.
 - Formatting: Circadia normally passes `LOCALE_NAME_USER_DEFAULT`; a test can pass an explicit locale name or an explicit format picture instead. **Observed on build 26300.9711:** `ResolveLocaleName` accepts `qps-ploc`, `qps-ploca`, and `qps-plocm` (and maps `qps-Ploc` to `qps-ploc`), `qps-plocm` reports a right-to-left reading layout, and `GetTimeFormatEx` with `qps-ploc` produced pseudo time markers such as "11:00 P̰̃M]".
 
@@ -125,7 +126,7 @@ Clock entry needs Circadia's own parser with any API. NLS and `Windows.Globaliza
 
 Microsoft's support documentation states that Windows signs the user out to apply a new display language, and the Win32 language documentation states that the user UI language takes effect after logging off and on. A running Circadia process therefore keeps its display language for the rest of the session unless Circadia has its own language setting.
 
-When locale settings change, the system sends `WM_SETTINGCHANGE` to all top-level windows with `wParam` 0 and `lParam` pointing to the string `"intl"`. **Observed in the Circadia source at `64a2c95`:** the hidden lifecycle window in `src/platform/events.rs` is a top-level window created with style 0 that already maps every `WM_SETTINGCHANGE` to `DesktopEvent::SettingsChanged`, which `src/ui.rs` currently uses only to detect time-zone changes; it ignores `lParam`. Whether NLS returns updated values to an already running process after the broadcast was not measured, because it requires changing the regional format.
+When locale settings change, the system sends `WM_SETTINGCHANGE` to all top-level windows with `wParam` 0 and `lParam` pointing to the string `"intl"`. **Observed in the Circadia source at `709224c`:** the hidden lifecycle window in `circadia-app/src/platform/events.rs` is a top-level window created with style 0 that maps every `WM_SETTINGCHANGE` and `WM_SYSCOLORCHANGE` to `DesktopEvent::SettingsChanged` and ignores `lParam`. The handler in `circadia-app/src/ui.rs` uses that event to refresh contrast colors and detect time-zone changes; it does not re-read regional formats. Whether NLS returns updated values to an already running process after the broadcast was not measured, because it requires changing the regional format.
 
 | Timing option | Regional format change | Display language change |
 | :-- | :-- | :-- |
@@ -135,7 +136,7 @@ When locale settings change, the system sends `WM_SETTINGCHANGE` to all top-leve
 
 ### Right-to-left layout
 
-**Observed in windows-rs `722f202` and `ebc5a99`:** Reactor's generated bindings list the `IFrameworkElement` `Language`, `FlowDirection`, and `SetFlowDirection` vtable slots as unused placeholders, the public API has no setter for either property, and `ElementRef` offers no general access to the native element. Reactor hosts each window in a WinUI `Microsoft.UI.Xaml.Window` and exposes its handle through `ComponentContext::run_window` and `WindowHandle::as_raw`. Reactor's code generator declares common properties as `[[visual_properties]]` entries with `owner = "Microsoft.UI.Xaml.FrameworkElement"` in `crates/tools/reactor/src/schema.toml`; adding `FlowDirection` and `Language` would probably be small schema entries, though that is inferred from the existing entries rather than tested. The windows-rs issue tracker had no issue about `FlowDirection`, language, or localization in Reactor on 2026-10-23.
+**Observed in windows-rs `27abacf`:** Reactor's generated bindings list the `IFrameworkElement` `Language`, `FlowDirection`, and `SetFlowDirection` vtable slots as unused placeholders, the public API has no setter for either property, and `ElementRef` offers no general access to the native element. Reactor hosts each window in a WinUI `Microsoft.UI.Xaml.Window` and exposes its handle through `ComponentContext::run_window` and `WindowHandle::as_raw`. Reactor's code generator declares common properties as `[[visual_properties]]` entries with `owner = "Microsoft.UI.Xaml.FrameworkElement"` in `crates/tools/reactor/src/schema.toml`; adding `FlowDirection` and `Language` would probably be small schema entries, though that is inferred from the existing entries rather than tested. The windows-rs issue tracker has no issue about `FlowDirection`, language, or localization in Reactor.
 
 Microsoft documents that WinUI does not set `FlowDirection` from the display language or change it when the language changes, and that the app must set it on the root element so descendants inherit it. The Win32 extended style `WS_EX_LAYOUTRTL` mirrors a window's Win32 coordinate space, but WinUI renders its content through composition and computes its own layout from `FlowDirection`; whether setting the style on Reactor's host window mirrors WinUI content, title-bar caption buttons, and pointer coordinates consistently is unverified, and Microsoft's WinUI guidance names only `FlowDirection`. Text in `TextBlock` is not mirrored by `FlowDirection`; Unicode bidirectional rules order Arabic and Hebrew text within each string even in a left-to-right layout, and Fluent's default isolation marks keep embedded values from reordering surrounding text.
 
@@ -143,7 +144,7 @@ Under `FlowDirection.RightToLeft`, a `Canvas` places `(0, 0)` at the top-right c
 
 ### Other locale-dependent constraints
 
-**Observed in windows-rs `722f202` and `ebc5a99`:** Reactor rejects a notification-area tooltip of 128 or more UTF-16 code units with `E_INVALIDARG` ("notification-area tooltip exceeds 127 UTF-16 code units"). Circadia's tooltip currently concatenates "Circadia: " with the first status line, so translated status text must be bounded by UTF-16 length before Circadia passes it to Reactor. **Observed in windows-rs `ebc5a99`:** the same tooltip limit now makes Reactor panic, and on the UI thread that panic aborts the process; [Windows Reactor UI support](windows-reactor-ui.md#failure-policy) records the failure policy.
+**Observed in windows-rs `27abacf`:** Reactor rejects a notification-area tooltip of 128 or more UTF-16 code units with `E_INVALIDARG` ("notification-area tooltip exceeds 127 UTF-16 code units"). Reactor's application icon update calls `unwrap` on that error, so the limit makes Reactor panic, and on the UI thread that panic aborts the process; [Windows Reactor UI support](windows-reactor-ui.md#failure-policy) records the failure policy. **Observed in the Circadia source at `709224c`:** the tray tooltip is the Fluent `tooltip` message, which in English is "Circadia: " followed by the status line, so translated status text must be bounded by UTF-16 length before Circadia passes it to Reactor. A unit test checks that every tray tooltip in each catalog is shorter than 128 UTF-16 code units and has no null character.
 
 **Observed in windows-result 0.100.0:** `HRESULT::message` calls `FormatMessageW` with language 0, which Microsoft documents as searching neutral, thread, user, and system languages before US English. Native error text that Circadia's `status::error_text` appends from `Display` implementations is therefore in the Windows display language for system messages and in English for Rust library messages, independent of Circadia's selected language. Circadia's diagnostic records use fixed snake-case category codes such as `configuration_read`, which are language-independent.
 
@@ -187,7 +188,7 @@ The segmented Wake and Bedtime picker avoids the tested Reactor `TimePicker` lim
 
 ## Rendering probe results
 
-**Measured with an experimental settings-design rendering probe on 2026-10-24:** windows-rs `0496ec1`, Windows 11 build 26300.9711 with an en-US display language and regional format, 100% scaling, and a default debug build using the installed Windows App SDK runtime 2.5.1. The probe embeds an English catalog, a partial German catalog, and a pseudo-locale generated with `fluent-pseudo` 0.3.3 as Fluent's bundle transform, and formats with NLS for the user default or an explicit locale name.
+**Measured with an experimental settings-design rendering probe:** windows-rs `0496ec1`, Windows 11 build 26300.9711 with an en-US display language and regional format, 100% scaling, and a default debug build using the installed Windows App SDK runtime 2.5.1. The probe embeds an English catalog, a partial German catalog, and a pseudo-locale generated with `fluent-pseudo` 0.3.3 as Fluent's bundle transform, and formats with NLS for the user default or an explicit locale name.
 
 - **Regional formats:** `en-US` produced "11:05 PM", the hour label "11 PM", "-74.0060", and "6,500"; `de-DE` produced "23:05", "23", "-74,0060", and "6.500". The 12-hour layout of the time picker has an AM/PM list; the 24-hour layout does not. Unit tests cover the probe's reading of 12-hour, 24-hour, AM/PM-first, and quoted-literal clock patterns.
 - **Coordinate entry:** with `de-DE` formats, the latitude field showed "40,7128", Circadia's parser rejected "40.5", and accepted "40,5".
@@ -213,8 +214,7 @@ The build dependency `basic-toml` 0.1.10, used by `i18n-config` 0.4.8 during mac
 
 ## Sources
 
-- windows-rs at `722f202`, the reference pin before 2026-10-23: `crates/libs/reactor/public-api.txt`, `crates/libs/reactor/src/native/bindings.rs`, `crates/libs/reactor/src/native/winui/hosting.rs`, `crates/libs/reactor/src/native/notifyicon/mod.rs`, `crates/libs/reactor-setup/src/lib.rs`, `crates/libs/reactor-setup/assets/runtime.txt`, `crates/libs/reactor-setup/assets/app.manifest` at https://github.com/microsoft/windows-rs/tree/722f202100c3bd428627941d3834d87ad6679d1c
-- windows-rs master: `crates/libs/reactor/public-api.txt` and `crates/tools/reactor/src/schema.toml` at https://github.com/microsoft/windows-rs/tree/ebc5a99d08be3f23cef4d428661357fad3d1c0db
+- windows-rs at `27abacf`: `crates/libs/reactor/public-api.txt`, `crates/libs/reactor/src/native/bindings.rs`, `crates/libs/reactor/src/native/winui/window/mod.rs`, `crates/libs/reactor/src/native/notifyicon/mod.rs`, `crates/libs/reactor/src/native/app/application.rs`, `crates/libs/reactor-setup/assets/runtime.txt`, `crates/libs/reactor-setup/assets/app.manifest`, and `crates/tools/reactor/src/schema.toml` at https://github.com/microsoft/windows-rs/tree/27abacf80e4d3e60de129d32c559b618faeb1fec
 - Windows App SDK MRT Core PRI search: https://github.com/microsoft/WindowsAppSDK/blob/04babd7a522bddf156204664b2dda86596c83016/dev/MRTCore/mrt/Core/src/MRM.cpp
 - Windows App SDK `ApplicationLanguages`: https://github.com/microsoft/WindowsAppSDK/blob/04babd7a522bddf156204664b2dda86596c83016/dev/MRTCore/mrt/Microsoft.Windows.ApplicationModel.Resources/src/ApplicationLanguages.cpp
 - WinUI `ResourceAccessor`: https://github.com/microsoft/microsoft-ui-xaml/blob/f980ab26e378db4afe4264c4f00c5bf6cc11ec34/controls/dev/ResourceHelper/ResourceAccessor.cpp
@@ -235,7 +235,7 @@ The build dependency `basic-toml` 0.1.10, used by `i18n-config` 0.4.8 during mac
 - `FrameworkElement.FlowDirection`: https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.frameworkelement.flowdirection
 - ICU4X `host_info` (unpublished): https://github.com/unicode-org/icu4x/tree/41c76d50c08e2de05e507d01a06da750dc9aa785/utils/host_info
 - ICU4X 2.4.0 release notes (CLDR 49): https://github.com/unicode-org/icu4x/releases/tag/icu%402.4.0
-- Crate versions and dependencies from the crates.io API, retrieved 2026-10-23: https://crates.io/crates/fluent-bundle, https://crates.io/crates/fluent-templates, https://crates.io/crates/i18n-embed, https://crates.io/crates/i18n-embed-fl, https://crates.io/crates/rust-i18n, https://crates.io/crates/gettext, https://crates.io/crates/gettext-rs, https://crates.io/crates/icu, https://crates.io/crates/fluent-pseudo
+- Crate versions and dependencies from the crates.io API: https://crates.io/crates/fluent-bundle, https://crates.io/crates/fluent-templates, https://crates.io/crates/i18n-embed, https://crates.io/crates/i18n-embed-fl, https://crates.io/crates/rust-i18n, https://crates.io/crates/gettext, https://crates.io/crates/gettext-rs, https://crates.io/crates/icu, https://crates.io/crates/fluent-pseudo
 - Weblate Fluent support: https://docs.weblate.org/en/latest/formats/fluent.html
 - Material Design bidirectionality: https://m1.material.io/usability/bidirectionality.html
 - Wikimedia Codex bidirectionality: https://doc.wikimedia.org/codex/main/style-guide/bidirectionality.html

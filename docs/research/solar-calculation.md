@@ -34,7 +34,7 @@ The API represents time as a Julian date, a continuous astronomical day count. I
 
 The comparison probe stored full USNO responses and request URLs. Its tests did not call a live solar service. Expected results come from USNO, not from either Rust candidate. The API returns a list of phenomena for the requested civil date and clock offset, including zero or multiple events of one type. [USNO API documentation](https://aa.usno.navy.mil/data/api).
 
-**Measured on 2026-10-16:** Six Rust tests pass. The reference test covers 36 cases and 48 individual rise/set times. Additional tests distinguish invalid coordinates and invalid search inputs from legitimate missing events. All reference event counts match.
+**Measured:** Six Rust tests pass. The reference test covers 36 cases and 48 individual rise/set times. Additional tests distinguish invalid coordinates and invalid search inputs from legitimate missing events. All reference event counts match.
 
 | Reference group | Coverage and result |
 | :-- | :-- |
@@ -51,7 +51,7 @@ The comparison limits are 60 seconds through latitude +/-66 degrees and 120 seco
 
 The error review informs whether startup needs an ordinary solar fallback mode. No valid-input operational failure was observed in the recorded fixtures. The source provides concrete rejection paths for unsupported inputs and guards against unexpected numerical defects; it does not establish an expected solar-service outage.
 
-**Observed in 0.7.1 source on 2026-10-17:** The numeric SPA event calculation performs local arithmetic. Its built-in position provider returns `Ok` without network, file, or service access. The interval wrapper rejects nonfinite elevation or hour angle. Upstream tests that inject failing or nonfinite custom providers exercise that wrapper; they do not demonstrate failure of the built-in SPA provider.
+**Observed in 0.7.1 source:** The numeric SPA event calculation performs local arithmetic. Its built-in position provider returns `Ok` without network, file, or service access. The interval wrapper rejects nonfinite elevation or hour angle. Upstream tests that inject failing or nonfinite custom providers exercise that wrapper; they do not demonstrate failure of the built-in SPA provider.
 
 | Condition | Evidence and classification |
 | :-- | :-- |

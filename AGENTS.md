@@ -1,78 +1,68 @@
 # Repository instructions
 
-## Scope and decisions
+Circadia is one Rust process that controls Windows Night light through a settings window and a tray icon built with Reactor, the preview UI library in the windows-rs repository. These rules apply to every task.
 
-- Read [SPEC.md](docs/specs/SPEC.md) and the relevant areas in its [area index](docs/specs/SPEC.md#area-specifications) before changing behavior. Treat their requirements as the product contract; use [research](docs/research/README.md) for evidence and limitations.
+## Product scope
+
+- Read [SPEC.md](docs/specs/SPEC.md) and the relevant areas in its [area index](docs/specs/SPEC.md#area-specifications) before changing behavior. Treat their requirements as the product contract, and use [research](docs/research/README.md) for evidence and limitations.
 - Preserve settled choices: one Rust process using the Windows Reactor UI library, native Night light control, three ordered temperature levels with generated transitions around user-entered Wake/Bedtime clocks and optional solar targets, automatic suppression for explicitly listed foreground executables, and a one-hour manual suppression toggle. Both suppression sources request a temporary 6500 K override. For example, do not add a fullscreen detector to the MVP.
-- Use the available `brainstorm` skill for explicitly open product decisions before implementation. For example, settle a question under Open questions instead of selecting its answer in a plan.
-- Keep implementations simple and proportional to the requirement. Prefer direct code; do not add services, separate UI processes, recovery subsystems, or general abstractions without a demonstrated need.
-- Write code only for situations the spec requires Circadia to handle, and prevent other situations instead of handling them. For example, disable a control while its state change runs instead of supporting rapid toggling, and treat a configuration file in a format Circadia no longer writes as invalid instead of converting it. When an uncommon situation already behaves as the spec requires, leave it unchanged; fix it only when the behavior violates the spec.
-- Do not change the sibling `win-nightlight-cli` repository as an incidental part of a Circadia task. Treat a required public library extension as a dependency task with its own authorized scope.
+- Settle explicitly open product decisions with the `brainstorm` skill before implementation. For example, settle a question under the spec's Open questions instead of selecting its answer in a plan.
+- Mark a spec draft approved or start implementation planning only after the user authorizes that step. For example, ask before running `plan-from-spec` on a draft spec.
+- Write code only for situations the spec requires Circadia to handle, and prevent other situations instead of handling them. Leave an uncommon situation unchanged when it already behaves as the spec requires. For example, disable a control while its state change runs instead of supporting rapid toggling, and treat a configuration file in a format Circadia no longer writes as invalid instead of converting it.
+- Keep implementations simple and proportional to the requirement, and prefer direct code. For example, do not add services, separate UI processes, recovery subsystems, or general abstractions without a demonstrated need.
+- Change the sibling `win-nightlight-cli` repository only in a separately authorized dependency task. For example, propose a required public library extension as its own task instead of editing that repository during a Circadia task.
 
-## Implementation
+## Architecture invariants
 
-- Follow [rust-rules](.agents/skills/rust-rules/SKILL.md) for Rust work and [github-actions-rules](.agents/skills/github-actions-rules/SKILL.md) for workflow changes.
-- Write application code, tests, and desktop automation in Rust. Do not add Python or PowerShell scripts; for example, add a desktop check as a `circadia-harness` scenario instead of a `.ps1` script.
-- Keep each workspace crate in a root directory named after its package, such as `circadia-app/`, and give a new crate the `circadia-` prefix. Declare dependencies shared by crates, including every windows-rs Git dependency, in the root `[workspace.dependencies]`; for example, add `windows-window.workspace = true` to a member manifest instead of repeating its `rev`.
-- Call a maintained public crate's safe API whenever one provides the operation with the results the caller needs, including a crate the workspace does not use yet. For example, capture screen pixels with `xcap` instead of wrapping `GetDIBits`, and call winsafe's safe `HWND::SetWindowPos` instead of the windows-sys function.
-- Write a safe wrapper in [circadia-winsafe](circadia-winsafe/README.md) only when no maintained public crate meets that test, and keep every `unsafe` block there: one Windows operation per function, with a signature that enforces the call's preconditions. Declare `#![forbid(unsafe_code)]` at the root of every other crate. For example, `message::send` accepts only integer-parameter `Message` variants because no maintained crate exposes `SendMessageTimeoutW` safely.
-- Keep each `unsafe` block under `#[expect(unsafe_code, reason = "...")]` with a `SAFETY` comment, and update the inventory table in the circadia-winsafe README when a site is added or removed. For example, copy the replacement rows that its inventory test prints when the counts differ.
-- Keep the controller as the only component requesting Night light writes. Route settings and tray configuration edits through the shared configuration validation and persistence path.
-- Use public Night light library operations. Do not duplicate the undocumented registry codec or assume a proposed API exists in the pinned dependency.
-- Keep foreground inspection limited to window metadata, process identity, and the size, last-write time, version information, and icon of an identified or user-selected executable file. Do not request elevation, inject code, or read another application's memory to improve matching; for example, read an app's display name from its executable's version resource and its icon from the executable's icon resource.
-- Track windows-rs `master` for `windows-reactor`, `windows-window`, and `windows-reactor-setup` while Reactor is in preview. Build against one reference commit, set as the `rev` of every windows-rs entry in the root `Cargo.toml`, and bump it to the latest `master` commit at the start of Reactor UI work, when Circadia needs a newer feature or fix, and before a release. For example, review the Reactor commits since the current pin, change every windows-rs `rev` in `[workspace.dependencies]` and `[patch.crates-io]`, update the lockfile, regenerate the composition bindings, and rerun the application checks in one dependency change.
-- Default to no comments or private docstrings. Explain only constraints the code cannot express, such as an OS race or an ABI requirement; keep public documentation to the linter's required contract.
-- Avoid abstractions used once and constants that merely rename one literal. Share a constant when multiple callers depend on the same rule, and derive dependent values from existing data.
-- Derive dependent state from a few source values with pure functions instead of setting or checking it in conditionals spread across event handlers. Let handlers update only the source values; for example, compute whether saving is paused from the configuration load report instead of storing a flag that handlers set and clear.
+[Implementation boundaries](DEVELOPMENT.md#implementation-boundaries) explains these rules.
 
-## UI design and implementation
+- Keep the controller as the only component requesting Night light writes, through public Night light library operations. For example, do not duplicate the undocumented registry codec or assume a proposed library API exists in the pinned dependency.
+- Route settings and tray configuration edits through the shared configuration validation and persistence path.
+- Limit foreground inspection to window metadata, process identity, and the size, last-write time, version information, and icon of an identified or user-selected executable file. For example, read an app's display name from its executable's version resource; do not request elevation, inject code, or read another application's memory.
 
-- Compose settings declaratively with Reactor grids, stacks, and shared components that express each region's role. For example, give a row an automatically sized icon column, a star-sized text column that uses the remaining width, and an automatically sized action column anchored to the right.
-- Reserve enough space for actions and the padding supplied by native control templates, and align action groups from their right edge. For example, place a non-interactive lock icon in the same width as an icon button so it aligns with the delete button on adjacent rows; additional actions extend left with consistent spacing.
-- Make layouts respond to the available window width and fit smaller desktops, including 1280×720 and 1366×768 at 100% scaling with their taskbar space excluded. Let text wrap and containers grow; use content sizing, flexible columns, and minimum sizes instead of fixed text widths or heights. For example, move an action group below its labels when the horizontal arrangement cannot fit; vertical scrolling does not resolve horizontal overflow.
-- Express XAML layout in effective pixels and convert to physical pixels only at rendering or platform boundaries that require them. For example, keep a button's logical size stable across DPI changes and rebuild a custom drawing for its current size and scale instead of caching initial pixel dimensions.
-- Share repeated layout and sizing rules while keeping page content and callbacks in their page modules. For example, use the shared action-group and icon-button helpers instead of repeating alignment properties or compensating with offsets; do not create a general layout framework for one view.
-- Use the typography and spacing in [docs/design](docs/design/README.md) and theme resources selected by their UI purpose consistently. For example, reuse the shared caption and card helpers, and use system-aware foreground/background pairs instead of copying RGB colors from a screenshot; application icons retain their own colors, while temperature illustrations use system colors in contrast themes.
-- Keep view construction free of blocking work and derive visible state from its owner. For example, render a pending location request from the request state, and send a command from a callback instead of reading a file or requesting a position while building a row.
-- Preserve control identity and user context when updating a view. For example, keep keyboard focus, text selection, and scroll position stable when a status value changes, and key repeated interactive components by a stable model identity when the framework requires keys.
-- Prefer native semantic controls and preserve their keyboard and accessibility behavior. For example, give icon-only buttons accessible names, keep focus order consistent with visual order after reflow, and return focus to the trigger when a dialog closes.
-- Present loading, empty, invalid, disabled, and failure states explicitly at the relevant control or section. For example, keep invalid text available for correction, explain why an action is unavailable, and pair status color or animation with readable text.
-- Design text layout for translation and user-provided content. For example, wrap descriptions and errors, reserve room for expanded translated button labels, and keep a complete value accessible when deliberate truncation is necessary; do not assemble sentences from separately translated fragments.
-- Use motion to communicate a state change or progress, and preserve native feedback and system preferences for optional effects. For example, animate the user-started daily schedule Preview from its recorded start time and elapsed playback time, stop each indicator's animation while its page or window is hidden, and avoid decorative animations on every settings edit; animation must not determine when the underlying operation completes.
-- Give progress bars for fixed-duration UI previews a brief, bounded interval at full width before removal. For example, let Preview's visual bar finish slightly before its playback deadline under [the footer design](docs/design/settings-window.md#preview-footer), while playback, editing, and the graph keep their actual timing.
-- Verify layout changes in rendered screenshots as well as automated checks. For example, resize between the declared minimum and the available desktop dimensions and inspect complete glyphs, wrapped text, and aligned actions with expandable sections both open and closed; UI Automation bounds alone do not establish that content fits. Require acceptance at 100% display scaling, preserve existing DPI support, and record checks above 100% as post-MVP work.
+## Code
 
-These conventions adapt [Windows responsive layout](https://learn.microsoft.com/en-us/windows/apps/design/layout/screen-sizes-and-breakpoints-for-responsive-design), [CSS Grid's content and flexible sizing](https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Grid_layout/Basic_concepts), [component and state ownership](https://react.dev/learn/thinking-in-react), and [Windows accessibility guidance](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/accessibility-checklist) to Reactor. The approved spec remains the product contract; these sources do not add browser APIs, new product features, or additional release gates.
+- Write application code, tests, and desktop automation in Rust, and do not add Python or PowerShell scripts. For example, add a desktop check as a `circadia-harness` scenario instead of a `.ps1` script.
+- Keep each workspace crate in a root directory named after its package, and give a new crate the `circadia-` prefix. Declare dependencies shared by crates, including every windows-rs Git dependency, in the root `[workspace.dependencies]`. For example, add `windows-window.workspace = true` to a member manifest instead of repeating its `rev`.
+- Call a maintained public crate's safe API whenever one provides the operation with the results the caller needs, including a crate the workspace does not use yet. For example, capture screen pixels with `xcap` instead of wrapping `GetDIBits`.
+- Write a safe wrapper in [circadia-winsafe](circadia-winsafe/README.md) only when no maintained crate meets that test, with one Windows operation per function and a signature that enforces the call's preconditions. For example, `message::send` accepts only integer-parameter `Message` variants because no maintained crate exposes `SendMessageTimeoutW` safely.
+- Keep every `unsafe` block in circadia-winsafe under `#[expect(unsafe_code, reason = "...")]` with a `SAFETY` comment, and declare `#![forbid(unsafe_code)]` at the root of every other crate. When a site is added or removed, copy the replacement inventory rows that the circadia-winsafe inventory test prints into its README.
+- Write a comment or docstring only for a constraint the code cannot express, and keep public documentation to what the workspace lints require. For example, explain an OS race or an ABI requirement, not what a function's signature already shows.
+- Do not add an abstraction used once or a constant that renames one literal. For example, share a constant only when several callers depend on the same rule.
+- Derive dependent state from a few source values with pure functions, and let event handlers update only the source values. For example, compute whether saving is paused from the configuration load report instead of storing a flag that handlers set and clear.
+- Test meaningful boundaries and failures with expectations independent of the implementation. For example, validate curve results against fixed reference cases instead of computing expected values with the function under test.
 
-## Documentation
+## Wording
 
-- Use `Night light` (with the official Windows translation in localized text) or `display color temperature` in UI text, documentation, and code comments; do not use `display warmth` or `warmth overrides`. Keep `warming` and `cooling` for transition direction, and use `suppression` without defining it in introductory or UI copy. For example, write "Suppress Night light while this app is focused."
-- Keep the spec to intended observable behavior and its guarantees, with functional requirements, nonfunctional requirements, and non-goals before mechanics. Describe visuals, their measurements, and the design language in [docs/design](docs/design/README.md); mechanisms and measured results in research; and file names, control types, and crates that the spec does not require in implementation plans. For example, the spec says "a navigation pane lists the settings pages", while the design document gives its width.
-- Amend requirements and their scenarios together when behavior changes. Preserve requirement IDs when their meaning is refined; remove obsolete references when a requirement is retired.
-- Keep unresolved behavior explicit and the spec status accurate. Do not mark a draft approved or start implementation planning without the user's authorization for that step.
-- Keep consequential evaluated directions in `docs/decisions.md` and implementation history in ignored plans; for example, record why an evaluated product direction was unsuitable, not a sequence of editing steps.
-- Put research in `docs/research/` with descriptive filenames without dates, such as `windows-clock-conversion.md`. Put dates, questions, observed versions, and recheck conditions in the required YAML frontmatter, and update the research index.
-- Distinguish documented behavior, source inspection, measured results, and inference. For example, an unchanged gamma-table read does not prove unchanged calibrated display output.
-- Preserve research findings when product choices change. Explain current applicability beside the affected findings and keep the research index navigational; do not rewrite evidence to imply a different result.
-- Write direct prose that makes sense without the conversation. State concrete behavior, define project-specific terms, and keep emojis and kaomojis out of repository files.
+These rules apply to UI text, Fluent catalogs, code comments, and documentation.
 
-## Application harness
+- Use `Night light`, with the official Windows translation in localized text, or `display color temperature`. For example, write "Suppress Night light while this app is focused", not "pause display warmth" or "warmth overrides".
+- Use `warming` and `cooling` only for the direction of a transition.
+- Define suppression once, at its first use in a document, and do not define it in UI text. For example, a document can define it as the temporary 6500 K override that Circadia requests while the focused app matches the suppression list or one-hour manual suppression is active.
+- Keep emojis and kaomojis out of repository files.
 
-- Add each end-to-end desktop check to [circadia-harness](circadia-harness/README.md) as an `accept`, `capture`, or `measure` scenario, and run it through the matching `just` recipe. For example, a check whose main output is screenshots for review is a `capture` scenario run with `just capture <scenario>`.
-- Apply the application's lint policy, validation, diagnostics, and test standards to harness code.
-- Write every harness output into the run's directory under `target/harness/`. For example, save a screenshot through `support::run::image` so the run's `manifest.tsv` lists it and `result.txt` counts it for visual review, instead of writing to a fixed `target/` path.
-- Keep the harness deterministic: it records raw data and the results of automated checks, and a person or an LLM evaluates screenshots and measurements from the run directory. For example, write measured samples to the run directory instead of adding a pass threshold that depends on the machine.
-- Keep harness runs separate from `just check`. Run a scenario only for task-relevant validation after reading its side effects in the harness README; for example, run cursor-moving scenarios explicitly, not as unit tests.
-- Document each scenario's purpose, prerequisites, command, outputs, side effects, and limitations in the harness README. Keep dated results, run counts, and environment records in `docs/research/` or ignored plans; for example, put measured CPU use in research and the command in the README.
-- Do not commit standalone experiments or probes. Run a scratch experiment outside the repository or in an ignored directory, and record its findings, versions, environment, and limitations in `docs/research/` without linking to its source; Git history keeps retired experiments.
+## Before the task
 
-## Tools and validation
+Read every rule file whose row matches the task before starting it. A task often matches several rows; for example, a settings-page change with a design-document update needs rust-rules, settings-ui-rules, and docs-rules.
 
-- Update Git ignore rules only in repository `.gitignore` files. Do not edit files under `.git/` or global Git ignore settings; for example, add `/.plans/` to the root `.gitignore`, not `.git/info/exclude`. Use Git commands for normal repository operations.
-- Use the coding agent's Bash tool with MSYS2 syntax on Windows when available. Otherwise run commands through MSYS2 Bash; use PowerShell only when a Windows-only API requires it.
-- Use `rg` for search and `gh` for GitHub. Run `just --list` and use the applicable recipe.
-- Inspect the actual repository tooling before selecting checks. Do not assume Cargo or `just` commands exist before their manifests are added.
-- Use Python 3.15 for `uv run` checks. Run the spec structural checker after spec changes: `uv run --python 3.15 "$HOME/.agents/skills/write-spec/scripts/check_spec.py" docs/specs/SPEC.md`. Check local Markdown links when moving or adding documents.
-- Test meaningful boundaries and failures with expectations independent of the implementation. For example, validate curve results against fixed reference cases rather than computing expected values with the function under test.
-- Keep tests that change live Night light separate from default automated checks. Run live Night light harness scenarios only within the authorized task and record their display and OS limitations.
-- Use the available `review-changes` skill with `mode=apply` on the accumulated changes before finishing implementation or preparing a commit or PR. Apply confirmed fixes, report remaining decisions, and preserve unrelated work.
+| Task | Read |
+| :-- | :-- |
+| Rust code or Cargo manifests | [rust-rules](.agents/skills/rust-rules/SKILL.md) |
+| GitHub Actions workflows | [github-actions-rules](.agents/skills/github-actions-rules/SKILL.md) |
+| Settings window, tray menu, or other Reactor UI | [settings-ui-rules](.agents/skills/settings-ui-rules/SKILL.md) |
+| Any Markdown document, including the spec, design, research, decisions, READMEs, guides, plans, and instruction files | [docs-rules](.agents/skills/docs-rules/SKILL.md) |
+| Harness scenarios, end-to-end desktop checks, screenshots, or scratch experiments and probes | [harness-rules](.agents/skills/harness-rules/SKILL.md) |
+| windows-rs update, due at the start of Reactor UI work, when Circadia needs an upstream feature or fix, and before a release | [Updating Reactor](DEVELOPMENT.md#updating-reactor), then rust-rules and docs-rules for the manifests and the Reactor research |
+
+## Tools
+
+- Use the coding agent's Bash tool with MSYS2 syntax on Windows; without that tool, run commands through MSYS2 Bash. Use PowerShell only when a Windows-only API requires it.
+- Use `rg` for search and `gh` for GitHub. Run `just --list` before choosing checks, and use the applicable recipe.
+- Use Git commands for repository operations, and do not edit files under `.git/`. Change ignore rules only in repository `.gitignore` files; for example, add `/.plans/` to the root `.gitignore`, not to `.git/info/exclude` or a global ignore file.
+- Use Python 3.15 for `uv run` checks.
+- Keep tests that change live Night light out of `just check`, and run them only within a task the user authorized for that effect. Record their display and OS limitations in the harness README or the research document they support.
+
+## Finishing work
+
+- Before finishing implementation or preparing a commit or PR, run `review-changes` with `mode=apply` once on the changes since the branch's base. Apply confirmed fixes, report remaining decisions, and preserve unrelated work.
+- When those changes include Markdown documents, run `audit-prose` with `mode=apply` on them after the review, including instruction files. For example, audit `docs/research/windows-reactor-ui.md` after a dependency bump rewrites its findings, even when no code changed.

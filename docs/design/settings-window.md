@@ -56,7 +56,7 @@ The status line summarizes the state and wraps to a second line instead of trunc
 
 - The content column fills the available page width up to 1000 epx and is centered beside the navigation pane. Cards use that full width; the 40 epx margins on each side are outside the width limit. The bottom margin is 40 epx, with none at the top. The column scrolls vertically; the title bar and navigation pane stay in place.
 - The page title repeats the navigation label in the Title style, with 4 epx above it and 20 epx below it.
-- Banners, when present, sit between the page title and the first card, with 12 epx below each banner. See [Error presentation](#error-presentation).
+- Banners, when present, sit between the page title and the first card, with 12 epx below each banner, measured from its action row when it has one. See [Error presentation](#error-presentation).
 - Section headers use BodyStrong with 28 epx above and 8 epx below. A section header that starts the page has no space above it.
 
 ### Cards
@@ -407,9 +407,9 @@ App-wide problems appear as banners at the top of every page:
 - The settings file has keys Circadia does not recognize: the title "Some settings were ignored" and the message "config.toml has settings Circadia doesn't recognize: theme. They're removed the next time settings are saved." It closes after that save.
 - Circadia closed unexpectedly during an earlier run (the crash notice).
 
-Each banner follows the standard Windows information bar: a severity glyph and color, a title that names the problem in plain words, a message that explains it and, for a failed operation, ends with the technical code (for example `0x80070005`), and its actions as buttons beside it. Examples of actions: "Retry" when settings could not be saved; "Reset to default settings" and "Open folder" when settings could not be read; "Open folder" and "Report a problem" for the crash notice. The spec defines each problem's actions and when its banner closes. Banners do not show raw library messages.
+Each banner follows the standard Windows information bar: a severity glyph and color, a title that names the problem in plain words, a message that explains it and, for a failed operation, ends with the technical code (for example `0x80070005`). The bar spans the content column, and its actions are buttons in a right-aligned row 8 epx below it, 12 epx apart, as in card rows. Examples of actions: "Retry" when settings could not be saved; "Reset to default settings" and "Open folder" when settings could not be read; "Open folder" and "Report a problem" for the crash notice. The spec defines each problem's actions and when its banner closes. Banners do not show raw library messages.
 
-Use the Error severity for a current failure, including invalid values in the settings file. A failure to obtain or use Windows' time-zone rules uses Warning while the last scheduled temperature remains in use, and Error when control stops without one. The time-zone failure banner is non-closable and offers Retry in both cases. The restored-backup and unrecognized-settings banners use Warning. The crash notice reports an earlier event and uses Informational. While settings cannot be read, every settings control shows its disabled state until the user resets the settings. Source: [InfoBar](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/infobar).
+Use the Error severity for a current failure, including invalid values in the settings file. A failure to obtain or use Windows' time-zone rules uses Warning while the last scheduled temperature remains in use, and Error when control stops without one. The time-zone failure banner is non-closable and offers Retry in both cases. The restored-backup and unrecognized-settings banners use Warning. The crash notice uses Warning because it asks the user to look at the log and report the problem. While settings cannot be read, every settings control shows its disabled state until the user resets the settings. Source: [InfoBar](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/infobar).
 
 ### Feature messages in their cards
 

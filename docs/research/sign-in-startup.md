@@ -22,9 +22,9 @@ Circadia registers or removes its current-user Run entry when the Start at sign-
 
 **Microsoft documentation:** The current-user Run key starts a command at user logon. Commands are limited to 260 characters, and Windows may delay execution. Registration does not guarantee an immediate launch after sign-in. [Run and RunOnce keys](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys).
 
-**Microsoft documentation, retrieved 2026-10-25:** The Run and RunOnce page applies the 260-character limit to the whole command line, not to each path in it. The page does not state whether the 260 characters include the terminating null. Windows' long-path support, which requires both the `LongPathsEnabled` registry value and a `longPathAware` application manifest, removes the `MAX_PATH` limit only for the file and directory functions listed on the [Maximum Path Length Limitation](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation) page. Neither page says that long-path support changes the Run command limit.
+**Microsoft documentation:** The Run and RunOnce page applies the 260-character limit to the whole command line, not to each path in it. The page does not state whether the 260 characters include the terminating null. Windows' long-path support, which requires both the `LongPathsEnabled` registry value and a `longPathAware` application manifest, removes the `MAX_PATH` limit only for the file and directory functions listed on the [Maximum Path Length Limitation](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation) page. Neither page says that long-path support changes the Run command limit.
 
-**Community reports, not reproduced by Circadia, retrieved 2026-10-25:** None of these reports states its Windows version or tests long-path support.
+**Community reports, not reproduced by Circadia:** None of these reports states its Windows version or tests long-path support.
 
 - A June 2012 Stack Overflow question, read through the Stack Exchange API, reports that a RunOnce command of 265 characters never ran and its entry was not removed. [Limitations of RunOnce in Windows](https://stackoverflow.com/questions/11128342/limitations-of-runonce-in-windows).
 - A 2016-11-02 post on the blog of Denny Cherry & Associates Consulting (DCAC) reports that a PowerShell command of more than 350 characters, apparently in a RunOnce key, did not run, and that moving the command into a batch file fixed it. [Length limit of the Run and RunOnce registry keys](https://www.dcac.com/syndication/length-limit-of-the-run-and-runonce-registry-keys/).
@@ -42,11 +42,11 @@ Circadia writes only the `Circadia` value under `HKCU\Software\Microsoft\Windows
 
 The read-only approval lookup uses the `Circadia` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`. Its decoder requires a 12-byte binary value. The first four bytes encode state 0 or 2 for enabled, or 3 for disabled; the final eight bytes are ignored. Unknown states, malformed data, and registry failures produce unavailable status rather than an enabled claim. A missing Run entry is unregistered. A Run command for another executable or data directory is reported separately.
 
-**Source inspection, 2026-10-25:** Settings has no Save step. Turning the Start at sign-in switch on or off registers or removes the Run command at once and shows a failure at the switch with a Retry command. Opening settings reads the Run command and the approval record. Circadia logs a failed read under the `startup_status_read` operation and logs the first successful read after a failure as its recovery. Relaunching and changes to other settings do not retry failed registration.
+**Source inspection:** Settings has no Save step. Turning the Start at sign-in switch on or off registers or removes the Run command at once and shows a failure at the switch with a Retry command. Opening settings reads the Run command and the approval record. Circadia logs a failed read under the `startup_status_read` operation and logs the first successful read after a failure as its recovery. Relaunching and changes to other settings do not retry failed registration.
 
 ## Measured integration checks
 
-**Observed on Windows 11 x64 build 26300.9711, 2026-10-22, with the earlier Save/Discard settings model:** the application harness startup check passed with a debug application and isolated configuration. The check verified:
+**Observed on Windows 11 x64 build 26300.9711, with the earlier Save/Discard settings model:** the application harness startup check passed with a debug application and isolated configuration. The check verified:
 
 - Save registers the current executable and data directory; editing and Discard do not.
 - Injected disabled approval survives unrelated Save and explicit Retry.

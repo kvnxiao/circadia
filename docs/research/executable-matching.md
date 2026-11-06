@@ -1,39 +1,39 @@
 ---
-date: 2026-10-30
+date: 2026-11-05
 questions:
   - How can executable rules distinguish installations that share a filename without complicating ordinary app selection?
 observed-in:
-  - Circadia working contents based on c453c2f, inspected 2026-10-29 before path restrictions
+  - Circadia source at 709224c, inspected 2026-11-05 (foreground lookup, hosted-window resolution, configuration parsing, foreground history, and metadata identity)
   - f.lux developer forum discussions retrieved 2026-10-29
   - Microsoft Windows file-naming documentation retrieved 2026-10-30
   - Microsoft CompareStringOrdinal documentation retrieved 2026-10-30
-  - Circadia installation-restriction implementation based on 13d8e66, checked on Windows 11 x64 at 96 DPI on 2026-10-30
+  - Circadia installation-restriction implementation based on 13d8e66 with windows-rs 3b6bea5, checked on Windows 11 x64 at 96 DPI on 2026-10-30
 recheck-when: Foreground identity, executable selection, or f.lux matching behavior changes.
 ---
 
 # Executable filenames and installation paths
 
-Keep exact filename matching as the default and offer an optional full-path restriction. This preserves one-click selection for ordinary applications while allowing two installations named `browser.exe` or `Engine.exe` to have different rules. Circadia already obtains the required paths; the change needs consistent identity handling throughout the application.
+Keep exact filename matching as the default and offer an optional full-path restriction. This preserves one-click selection for ordinary applications while allowing two installations named `browser.exe` or `Engine.exe` to have different rules. Circadia obtains the required paths from foreground lookup and the file picker, and identifies an executable by its filename plus optional path throughout the application.
 
 ## Comparable behavior
 
-**Observed in f.lux developer discussions retrieved 2026-10-29:** f.lux applies its per-app behavior while the application is in the foreground. Its developer acknowledged permissive name matching that could match `eso` inside `Resource`, and stated that earlier window-title matching had been removed. The proposed stricter behavior in that discussion is not evidence of a published full-path matcher. These sources do not establish current full-path support, duplicate handling, or precedence between overlapping rules.
+**Observed in f.lux developer discussions:** f.lux applies its per-app behavior while the application is in the foreground. Its developer acknowledged permissive name matching that could match `eso` inside `Resource`, and stated that earlier window-title matching had been removed. The proposed stricter behavior in that discussion is not evidence of a published full-path matcher. These sources do not establish current full-path support, duplicate handling, or precedence between overlapping rules.
 
 ## Circadia source findings
 
-**Observed in the inspected Circadia working contents:** foreground lookup obtains a full executable path with limited-query process access. The file picker also supplies a full path. Runtime foreground state, configuration membership, recent history, display-name replies, and cached icons currently use filenames as their identity. Merely adding a saved path field would leave those operations unable to distinguish installations.
+**Observed in the Circadia source at `709224c`:** foreground lookup obtains a full executable path with limited-query process access. The file picker also supplies a full path. Runtime foreground state, configuration matching, recent history, display-name replies, and cached icons record the path with the filename, so each operation can distinguish installations that share a filename.
 
-Circadia resolves the actual application behind a shared `ApplicationFrameHost.exe` window by inspecting candidate child windows. That resolver currently deduplicates candidates by filename. Distinct hosted executables with the same filename must remain distinct candidates, so unresolved ambiguity cannot select the wrong installation. No additional process access or executable inspection is needed.
+Circadia resolves the actual application behind a shared `ApplicationFrameHost.exe` window by inspecting candidate child windows. Hosted executables with the same filename at different paths remain distinct candidates, so the resolver reports an ambiguous result instead of selecting the wrong installation; paths that differ only in case identify one candidate. The resolver uses no additional process access or executable inspection.
 
-The current configuration parser accepts only its declared schema version. An unknown entry key is reported but omitted from matching. Therefore a path restriction needs a schema-version change: an older binary must reject the new format instead of ignoring the path and applying a broader rule. Converting configuration files from earlier unreleased development versions is outside the current specification.
+The configuration parser accepts only its declared schema version. An unknown entry key is reported but omitted from matching. Path restrictions therefore depend on the schema version: an older binary rejects the newer format instead of ignoring the path and applying a broader rule. Converting configuration files from earlier unreleased development versions is outside the current specification.
 
 ## Path syntax
 
-**Observed in Microsoft's file-naming documentation, retrieved 2026-10-30:** ordinary Win32 paths restrict component characters and reserved device names. Shell interfaces do not support names ending in a space or period. The extended-length prefix disables ordinary path parsing, so removing that prefix does not by itself establish that two paths identify the same file.
+**Observed in Microsoft's file-naming documentation:** ordinary Win32 paths restrict component characters and reserved device names. Shell interfaces do not support names ending in a space or period. The extended-length prefix disables ordinary path parsing, so removing that prefix does not by itself establish that two paths identify the same file.
 
 Circadia can support a consistent lexical subset for both ordinary and extended-length drive and UNC paths. Explicitly rejecting unsupported components avoids interpreting a malformed restriction as a broader filename rule. This does not require checking file existence, resolving aliases, or accessing an unavailable network share. The specification defines the accepted subset and its comparison rules.
 
-**Observed in Microsoft's `CompareStringOrdinal` documentation, retrieved 2026-10-30:** case-insensitive ordinal comparison uses the operating system's uppercase table and does not perform linguistic comparison. Using that same comparator for identity equality and ordering avoids different path identities in matching and ordered maps. Case-preserving strings need a retained representative spelling for stable UI keys; their raw bytes cannot supply a case-insensitive hash.
+**Observed in Microsoft's `CompareStringOrdinal` documentation:** case-insensitive ordinal comparison uses the operating system's uppercase table and does not perform linguistic comparison. Using that same comparator for identity equality and ordering avoids different path identities in matching and ordered maps. Case-preserving strings need a retained representative spelling for stable UI keys; their raw bytes cannot supply a case-insensitive hash.
 
 ## Alternatives
 
@@ -54,7 +54,7 @@ Use filename plus optional path as the identity of a saved rule. Separate paths 
 
 Retain the path in foreground history and asynchronous metadata replies. Read and cache each installation's icon and display name independently. A late reply for one path must not update a different installation with the same filename.
 
-## Implementation checks, 2026-10-30
+## Implementation checks
 
 **Observed in automated checks of the implementation based on `13d8e66`:** path tests cover ordinary and extended drive/UNC forms, Unicode case comparison, malformed restrictions, and distinct normalized scopes. Configuration tests reject schema 2, retain invalid path fields as nonmatching rules, and check overlapping inclusions and exclusions. Metadata tests keep names and icons separate by path across delayed replies, cache reloads, missing files, and source changes. Invalid title expressions do not match. Their valid filename and path conditions still count toward installation coverage, which determines listed status and whether a recent-app or tray action can remove one unambiguous rule.
 
@@ -78,9 +78,9 @@ The [application harness instructions](../../circadia-harness/README.md#installa
 
 ## Sources
 
-- [f.lux foreground application behavior](https://forum.justgetflux.com/topic/6230/disable-when-specific-applications-running), retrieved 2026-10-29.
-- [f.lux developer discussion of overly broad executable matching](https://forum.justgetflux.com/topic/8666/f-lux-excluded-apps-file-detection-should-be-stricter), retrieved 2026-10-29.
-- [Microsoft file names, paths, and namespaces](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file), retrieved 2026-10-30.
-- [Microsoft ordinal string comparison](https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-comparestringordinal), retrieved 2026-10-30.
-- [Circadia foreground lookup](../../circadia-app/src/platform/foreground.rs), [foreground history](../../circadia-app/src/suppression.rs), and [configuration parsing and matching](../../circadia-app/src/config.rs), inspected 2026-10-29.
-- [Metadata requests](../../circadia-app/src/ui/file_info.rs) and [icon cache](../../circadia-app/src/ui/icon_cache.rs), inspected 2026-10-29.
+- [f.lux foreground application behavior](https://forum.justgetflux.com/topic/6230/disable-when-specific-applications-running).
+- [f.lux developer discussion of overly broad executable matching](https://forum.justgetflux.com/topic/8666/f-lux-excluded-apps-file-detection-should-be-stricter).
+- [Microsoft file names, paths, and namespaces](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file).
+- [Microsoft ordinal string comparison](https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-comparestringordinal).
+- [Circadia foreground lookup](../../circadia-app/src/platform/foreground.rs), [foreground history](../../circadia-app/src/suppression.rs), and [configuration parsing and matching](../../circadia-app/src/config.rs), inspected at `709224c`.
+- [Metadata requests](../../circadia-app/src/ui/file_info.rs) and [icon cache](../../circadia-app/src/ui/icon_cache.rs), inspected at `709224c`.

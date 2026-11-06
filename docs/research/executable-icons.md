@@ -66,7 +66,7 @@ A Store application's logo is stored in its package assets, not in its executabl
 
 ### Documented extraction functions
 
-**Observed in Microsoft Learn, retrieved 2026-10-24:**
+**Observed in Microsoft Learn:**
 
 - `PrivateExtractIconsW` extracts icons at a requested pixel size from executables, DLLs, and icon files, but its page states that it "is not intended for general use" and "may be altered or unavailable in subsequent versions of Windows" ([documentation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-privateextracticonsw)).
 - `SHDefExtractIconW` is "a default handler to extract an icon from a file". It takes the large icon size in pixels in the low word of `nIconSize`. It returns `S_OK` on success, `S_FALSE` when "the requested icon is not present", and `E_FAIL` when "the file cannot be accessed, or is being accessed through a slow link". The caller destroys the returned icons with `DestroyIcon` ([documentation](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shdefextracticonw)).
@@ -101,7 +101,7 @@ Read icons with `SHDefExtractIconW` from the executable path, at the pixel size 
 
 Effective pixels (epx) are layout units that Windows converts to physical pixels according to display scaling.
 
-On 2026-10-27 at `0496ec1`, an experimental probe of runtime icon rendering in Reactor displayed `notepad.exe` icons on Windows 11 Pro x64 build 26300 at 100% scaling (96 DPI), in a dark window theme. It used Rust 1.99.0, a default debug build, and the installed Windows App SDK runtime.
+**Observed at windows-rs `0496ec1` on Windows 11 Pro x64 build 26300 at 100% scaling (96 DPI), in a dark window theme, with Rust 1.99.0, a default debug build, and the installed Windows App SDK runtime:** An experimental probe of runtime icon rendering in Reactor displayed `notepad.exe` icons.
 
 A 32 px PNG extracted with `SHDefExtractIconW` matched all 1,024 pixels of a 32 epx `Image` through both in-memory and file sources. A 64 px extraction scaled to 32 epx matched 336 pixels, with a maximum channel difference of 169. Each source was compared with the 32 px PNG composited over the same black background. The separately drawn 32 px icon resource is the inferred cause of the difference; each display scale needs its own extraction.
 
@@ -118,5 +118,5 @@ The measurements leave these boundaries unverified:
 
 ## Sources
 
-- Microsoft Learn, retrieved 2026-10-24: [PrivateExtractIconsW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-privateextracticonsw), [SHDefExtractIconW](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shdefextracticonw), [SHGetStockIconInfo](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shgetstockiconinfo), and [GetFileAttributesExW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileattributesexw). [Hosted application identity](hosted-application-identity.md) cites the limited-query contract of `QueryFullProcessImageNameW`.
-- Measurements with temporary Python 3.15.0 ctypes scripts on Windows 11 Pro build 26300.9711, 2026-10-24, as described under [Evidence boundaries](#evidence-boundaries).
+- Microsoft Learn: [PrivateExtractIconsW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-privateextracticonsw), [SHDefExtractIconW](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shdefextracticonw), [SHGetStockIconInfo](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shgetstockiconinfo), and [GetFileAttributesExW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileattributesexw). [Hosted application identity](hosted-application-identity.md) cites the limited-query contract of `QueryFullProcessImageNameW`.
+- Measurements with temporary Python 3.15.0 ctypes scripts on Windows 11 Pro build 26300.9711, as described under [Evidence boundaries](#evidence-boundaries).

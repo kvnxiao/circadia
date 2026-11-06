@@ -1,5 +1,5 @@
 ---
-date: 2026-10-18
+date: 2026-11-05
 questions:
   - Can foreground suppression identify a hosted executable without matching its shared Windows host?
   - Which documented APIs respect limited-query process access?
@@ -7,6 +7,7 @@ observed-in:
   - Microsoft Learn window and process-image API documentation retrieved 2026-10-18
   - Microsoft PowerToys process_path.h main branch inspected 2026-10-18
   - Microsoft WinApp issue 691 reporting a Calculator experiment on 2026-07-28
+  - Circadia 709224c foreground resolver, source inspection on 2026-11-05
 recheck-when: Foreground identity resolution, Windows hosting behavior, supported applications, or process-access requirements change.
 ---
 
@@ -16,13 +17,13 @@ A foreground window's creating process does not always identify the application 
 
 ## Documented and inspected evidence
 
-**Observed in Microsoft documentation retrieved 2026-10-18:** `GetWindowThreadProcessId` returns the process that created the supplied window. `EnumChildWindows` enumerates descendant windows, whose process identities can be queried separately. Neither contract guarantees which descendant represents the application. [Window ownership](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowthreadprocessid), [child enumeration](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumchildwindows).
+**Observed in Microsoft documentation:** `GetWindowThreadProcessId` returns the process that created the supplied window. `EnumChildWindows` enumerates descendant windows, whose process identities can be queried separately. Neither contract guarantees which descendant represents the application. [Window ownership](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowthreadprocessid), [child enumeration](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumchildwindows).
 
 Microsoft's WinApp issue reports a Calculator experiment where the visible window belonged to `ApplicationFrameHost`, while controls and keyboard focus belonged to `CalculatorApp`. This is another project's runtime observation on its recorded configuration, not a Circadia measurement or a guarantee for every Windows version. [WinApp experiment](https://github.com/microsoft/winappCli/issues/691).
 
-**Observed in PowerToys source inspected 2026-10-18:** The process-path helper detects `ApplicationFrameHost.exe`, enumerates child windows, and queries a child process with a different identity. It also requests process-memory-read access and can return the host on failure. Those choices do not satisfy Circadia's process-access and matching constraints; the source provides a resolution precedent, not reusable proof of conformance. [Inspected source](https://raw.githubusercontent.com/microsoft/PowerToys/main/src/common/utils/process_path.h).
+**Observed in PowerToys source inspected:** The process-path helper detects `ApplicationFrameHost.exe`, enumerates child windows, and queries a child process with a different identity. It also requests process-memory-read access and can return the host on failure. Those choices do not satisfy Circadia's process-access and matching constraints; the source provides a resolution precedent, not reusable proof of conformance. [Inspected source](https://raw.githubusercontent.com/microsoft/PowerToys/main/src/common/utils/process_path.h).
 
-**Observed in Microsoft documentation retrieved 2026-10-18:** `QueryFullProcessImageNameW` accepts a handle opened with `PROCESS_QUERY_LIMITED_INFORMATION`. Querying the executable path therefore does not require reading the process's memory. [Process-image API](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew).
+**Observed in Microsoft documentation:** `QueryFullProcessImageNameW` accepts a handle opened with `PROCESS_QUERY_LIMITED_INFORMATION`. Querying the executable path therefore does not require reading the process's memory. [Process-image API](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew).
 
 ## Alternatives and recommendation
 
@@ -32,4 +33,6 @@ Resolve the actual executable within the existing access limits and return unres
 
 ## Validation limits
 
-No Circadia resolver or live foreground test was run. The evidence supports a bounded metadata-based approach, not complete hosted-application coverage. Implementation and release checks need directly owned windows, multiple hosted apps open together, process/window exit during lookup, and inaccessible or ambiguous identities. Record Windows and app versions on the minimum and current supported builds.
+**Source inspection of Circadia `709224c`:** the foreground resolver in [`circadia-app/src/platform/foreground.rs`](../../circadia-app/src/platform/foreground.rs) treats a window owned by `ApplicationFrameHost.exe` as hosted. It enumerates the window's children, queries each child owner other than the host with `PROCESS_QUERY_LIMITED_INFORMATION`, and returns an identity only when exactly one installation path other than the host remains. A failed owner or path query, an ownership change during lookup, zero candidates, or more than one candidate returns an unknown foreground.
+
+No live foreground test of this resolver is recorded. The evidence supports a bounded metadata-based approach, not complete hosted-application coverage. Live checks need directly owned windows, multiple hosted apps open together, process/window exit during lookup, and inaccessible or ambiguous identities, with Windows and app versions recorded on the minimum and current supported builds.

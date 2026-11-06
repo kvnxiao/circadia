@@ -1,12 +1,13 @@
 ---
-date: 2026-10-16
+date: 2026-11-05
 questions:
   - Does a Windows tray utility need separate processes or executables for its settings window, and what does separation achieve?
   - Which Reactor dependency source supports a controller that survives closing settings?
 observed-in:
   - Microsoft Win32 message-loop documentation retrieved 2026-10-16
   - Published windows-reactor and windows-reactor-setup 0.100.0 at a57cc321bfdbac6bb98c488ba49f399da8fcb98a
-  - Microsoft windows-rs development revision 722f202100c3bd428627941d3834d87ad6679d1c
+  - Microsoft windows-rs development revision 722f202100c3bd428627941d3834d87ad6679d1c, the lifecycle probe on Windows build 26300.9711
+  - Microsoft windows-rs master 27abacf80e4d3e60de129d32c559b618faeb1fec, source inspection of the Reactor run methods, application lifetime, window handle, deployment readme, and setup helper on 2026-11-05
 recheck-when: The selected UI library changes initialization or deployment behavior, or a release-build prototype supplies process and module measurements.
 ---
 
@@ -24,21 +25,21 @@ An executable is a file on disk. A process is a running instance of a program. T
 
 ## Windows event handling
 
-**Observed in Microsoft documentation retrieved 2026-10-16:** A thread that creates windows retrieves messages from its queue and dispatches them to the corresponding window procedures. One message loop can dispatch messages for multiple windows, including a modeless settings dialog. The loop can continue after an individual window closes if the application does not end the loop at that point.
+**Observed in Microsoft documentation:** A thread that creates windows retrieves messages from its queue and dispatches them to the corresponding window procedures. One message loop can dispatch messages for multiple windows, including a modeless settings dialog. The loop can continue after an individual window closes if the application does not end the loop at that point.
 
 This supports a single-process design: the process continues to handle tray actions and scheduling while the settings window is absent, creates or shows the settings window when requested, and continues running after that window closes. The scheduling and notification integration still needs to avoid blocking message dispatch. This is a proposed architecture using documented Windows behavior, not a verified description of f.lux's implementation.
 
 ## Reactor initialization and deployment
 
-**Source inspection:** Both inspected versions bootstrap the runtime and initialize the UI thread within the application run path. A shared executable could select another process role before entering that path. That control-flow observation does not prove that executable imports or other initialization avoid loading every Windows App SDK module in that role.
+**Source inspection:** Published 0.100.0 and windows-rs `27abacf` bootstrap the runtime and initialize the UI thread within the application run path. A shared executable could select another process role before entering that path. That control-flow observation does not prove that executable imports or other initialization avoid loading every Windows App SDK module in that role.
 
-**Source inspection:** Default deployment uses an installed Windows App SDK runtime and does not require an application build script. Self-contained deployment uses `windows-reactor-setup` in `build.rs` and copies runtime DLLs and directories beside the executable. Distributing one executable does not necessarily mean distributing one file. The published setup helper stages runtime 2.4.0; the inspected development helper stages 2.5.1. Keep the helper and Reactor source compatible.
+**Source inspection:** Default deployment uses an installed Windows App SDK runtime and does not require an application build script. Self-contained deployment uses `windows-reactor-setup` in `build.rs` and copies runtime DLLs and directories beside the executable. Distributing one executable does not necessarily mean distributing one file. The published setup helper stages runtime 2.4.0; the setup helper at `27abacf` stages 2.6.4. Keep the helper and Reactor source compatible.
 
 **Published 0.100.0:** `App::run`, `run_windows`, and `run_component` run windows and exit after the final window closes. Its internal `run_with` is private. Do not copy development lifecycle examples into a crates.io 0.100.0 application and assume they are available.
 
-**Development revision `722f2021`:** `App::run_application` accepts an `Application` whose view declares windows and notification icons. A declared but closed window does not keep the application running; a live notification icon does. `show_window` opens, restores, or activates the named settings window. Closing it drops component state but preserves application state. `context.exit()` ends the application. The lower-level `App::run_with` selects explicit dispatcher shutdown, and `AppContext::open_component_window` disables automatic last-window exit for that path.
+**Development revision `27abacf`:** `App::run_application` accepts an `Application` whose view declares windows and notification icons. A declared but closed window does not keep the application running; a live notification icon does. `show_window` opens, restores, or activates the named settings window. Closing it drops component state but preserves application state. `context.exit()` ends the application. The other run methods are `App::run_component` and `App::run_component_with_policy`, which run one component window and exit when it closes; `App::run_with` and `AppContext` do not exist.
 
-These are different entry points with different lifetime rules. An experimental probe tested Reactor's application lifetime at the development revision then pinned with the application declaration API and a tray icon. It kept a counter in application state so closing and reopening settings could test ownership directly.
+These are different entry points with different lifetime rules. An experimental probe tested Reactor's application lifetime at `722f2021` with the application declaration API and a tray icon. It kept a counter in application state so closing and reopening settings could test ownership directly.
 
 **Measured on Windows build 26300.9711:** the development probe stayed in one process after settings closed, reopened with its application counter preserved, and exited through its explicit action. Activation used a synthetic notification callback addressed to that process. These results verify that lifetime path, not actual Shell input or a complete Circadia controller.
 
@@ -52,7 +53,7 @@ Component-scoped tasks can be cancelled when settings closes. They suit operatio
 
 The development `show_window` method handles requests inside the current process. A second invocation still needs detection and signaling to that process. It must not initialize another controller or write Night light. The lifecycle probe does not test cross-process activation.
 
-Development `ComponentContext::run_window` exposes a scoped native window handle; the probe observed a non-null handle. The handle can identify the settings window as the owner of a native file picker. It does not establish that a picker can run without blocking controller work or that its result remains valid after settings closes.
+**Observed in windows-rs `27abacf`:** `ComponentContext::run_window` exposes a scoped native window handle; the lifecycle probe at `722f2021` observed a non-null handle. The handle can identify the settings window as the owner of a native file picker. It does not establish that a picker can run without blocking controller work or that its result remains valid after settings closes.
 
 ## Alternatives
 
@@ -83,8 +84,7 @@ The recorded lifecycle probe establishes application state surviving settings cl
 
 ## Sources
 
-- [Microsoft: Using Messages and Message Queues](https://learn.microsoft.com/en-us/windows/win32/winmsg/using-messages-and-message-queues), retrieved 2026-10-16.
-- [Microsoft: published Reactor application source](https://github.com/microsoft/windows-rs/blob/a57cc321bfdbac6bb98c488ba49f399da8fcb98a/crates/libs/reactor/src/app.rs), inspected 2026-10-16.
-- [Microsoft: development Reactor application source](https://github.com/microsoft/windows-rs/tree/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/native/app), inspected 2026-10-16.
-- [Microsoft: application and notification-icon declarations](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/application.rs), inspected 2026-10-16.
-- [Microsoft: development Reactor setup guide](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/docs/crates/windows-reactor-setup.md), inspected 2026-10-16.
+- [Microsoft: Using Messages and Message Queues](https://learn.microsoft.com/en-us/windows/win32/winmsg/using-messages-and-message-queues).
+- [Microsoft: published Reactor application source](https://github.com/microsoft/windows-rs/blob/a57cc321bfdbac6bb98c488ba49f399da8fcb98a/crates/libs/reactor/src/app.rs), inspected.
+- [Microsoft: Reactor setup readme at `27abacf`](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor-setup/readme.md).
+- Microsoft windows-rs at `27abacf`: [`App::run_application`](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor/src/native/app/application.rs#L49), [`App::run_component`](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor/src/native/app/mod.rs#L612), [`show_window` and `exit`](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor/src/application.rs#L51), and [the setup helper's runtime version](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor-setup/src/lib.rs#L12).
