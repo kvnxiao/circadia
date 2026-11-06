@@ -1,11 +1,11 @@
 ---
-date: 2026-10-19
+date: 2026-11-05
 questions:
   - Can Circadia turn Night light off during graceful Windows shutdown without a service?
   - Can the pinned Reactor and Night light APIs support exit cleanup and a short startup fade?
 observed-in:
   - Microsoft Win32 session-ending and Windows App SDK lifecycle documentation accessed 2026-10-17
-  - windows-rs revision 722f202100c3bd428627941d3834d87ad6679d1c, Reactor and window library source
+  - windows-rs revision 27abacf80e4d3e60de129d32c559b618faeb1fec, Reactor application, notification icon, and window library source
   - win-nightlight-lib 0.5.0 source and transition guide, commit 0461529455f3594b9b9d6cc3d6c2e7a9736de9b5
 recheck-when: Windows session-ending behavior, the Reactor revision, or the Night light library changes.
 ---
@@ -18,7 +18,7 @@ The design question is whether a tray application can reduce the chance of leavi
 
 ## Documented Windows behavior
 
-**Observed in Microsoft Win32 documentation accessed 2026-10-17:** `WM_QUERYENDSESSION` asks whether the application is ready to exit. Microsoft directs applications to respond promptly and postpone cleanup. `WM_ENDSESSION` then reports whether the session is actually ending. Cleanup belongs in the confirmed path, where `wParam` is true; a false value means the application continues. Turning Night light off during the initial query would therefore change it even when shutdown is subsequently canceled. See [WM_QUERYENDSESSION](https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-queryendsession) and [WM_ENDSESSION](https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-endsession).
+**Observed in Microsoft Win32 documentation accessed:** `WM_QUERYENDSESSION` asks whether the application is ready to exit. Microsoft directs applications to respond promptly and postpone cleanup. `WM_ENDSESSION` then reports whether the session is actually ending. Cleanup belongs in the confirmed path, where `wParam` is true; a false value means the application continues. Turning Night light off during the initial query would therefore change it even when shutdown is subsequently canceled. See [WM_QUERYENDSESSION](https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-queryendsession) and [WM_ENDSESSION](https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-endsession).
 
 The session can end after applications return from the confirmed notification. Merely posting cleanup to a worker and returning does not establish that the worker will finish. `lParam` flags distinguish sign-out and certain other causes, but a zero value does not distinguish shutdown from restart. Restart Manager also uses this message sequence when closing applications for servicing; the notification does not always mean the computer is powering off. See [Restart Manager application guidelines](https://learn.microsoft.com/en-us/windows/win32/rstmgr/guidelines-for-applications).
 
@@ -30,11 +30,11 @@ An ordinary Quit command is controlled by the application and can finish an off 
 
 ## Pinned framework integration
 
-**Observed in windows-rs revision `722f202100c3bd428627941d3834d87ad6679d1c` source:** Reactor's public `Application` callbacks do not include a session-ending callback. Its tray implementation already creates a hidden top-level native window, but does not expose a public arbitrary-message callback on that tray window.
+**Observed in windows-rs revision `27abacf80e4d3e60de129d32c559b618faeb1fec` source:** Reactor's public `Application` trait has `create`, `update`, and `view` methods and does not include a session-ending callback. A Reactor notification icon creates a hidden top-level callback window, but the public `NotifyIcon` builder exposes only activation and menu callbacks, not an arbitrary-message callback.
 
-The existing supporting `windows-window` library exposes `WindowBuilder::on_message` and hidden-window construction. Its ordinary window has a null parent, so it is a top-level window rather than a message-only window. Reactor's `App::run_with` retains returned application resources for the application lifetime and uses explicit dispatcher shutdown. These APIs support an application-owned hidden window that remains available while settings is closed. The implementation can depend directly on the supporting window library pinned to the same revision; the inspected APIs do not require a service, another process, or a Reactor fork.
+The supporting `windows-window` library exposes `WindowBuilder::on_message` and hidden-window construction through `visible(false)`. Its window is created with a null parent, so it is a top-level window rather than a message-only window. Reactor's `App::run_application` keeps the application model and its host for the application lifetime and sets explicit dispatcher shutdown. These APIs support an application-owned hidden window that remains available while settings is closed. The implementation can depend directly on the supporting window library pinned to the same revision; the inspected APIs do not require a service, another process, or a Reactor fork.
 
-Source inspection establishes API availability, not successful session-ending delivery in Circadia. Relevant sources are [application callbacks](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/application.rs), [tray integration](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/native/notifyicon/mod.rs), [window construction and message callbacks](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/window/src/window.rs), and [application lifetime](https://github.com/microsoft/windows-rs/blob/722f202100c3bd428627941d3834d87ad6679d1c/crates/libs/reactor/src/native/app/mod.rs).
+Source inspection establishes API availability, not successful session-ending delivery in Circadia. Relevant sources are [application callbacks](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor/src/application.rs), [tray integration](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor/src/native/notifyicon/mod.rs), [window construction and message callbacks](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/window/src/window.rs), [application host](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor/src/native/app/application.rs), and [application lifetime](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor/src/native/app/mod.rs).
 
 ## Night light operations and ordering
 

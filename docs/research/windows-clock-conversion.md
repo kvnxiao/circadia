@@ -8,12 +8,15 @@ observed-in:
   - CPython 3.15.0a2 with standard-library ctypes on Windows 11 x64 build 26300
   - Installed Eastern Standard Time, Lord Howe Standard Time, Samoa Standard Time, and UTC rules
   - Microsoft Learn time-zone API contracts retrieved on 2026-10-17
+  - Read-only conversion suite, 18 tests passing on 2026-10-17
+  - Host-setting exercise with actual time-zone setting changes on 2026-10-16, passing again on 2026-10-17 on build 26300.9711
+  - Solar date-filtering integration experiment, 2026-10-16
 recheck-when: Windows time-zone data, the conversion adapter, or the clock policy changes.
 ---
 
 # Windows clock conversion
 
-An experimental read-only Windows API probe tests omission of skipped local clocks and selection of the first repeated instant for the recorded dates and zones. All 18 tests in its final suite pass on 2026-10-17, including four complete transition days, half-hour changes, year crossings, date boundaries, and elapsed-time interpolation. This establishes a conversion reference, not verification of the Rust application. The [host-setting exercise](#host-setting-exercise) records snapshots after actual setting changes on 2026-10-16. The relocated host-setting exercise passed again on 2026-10-17 and verified restoration of Eastern Standard Time with daylight adjustment enabled.
+An experimental read-only Windows API probe tests omission of skipped local clocks and selection of the first repeated instant for the recorded dates and zones. All 18 tests in its suite pass, including four complete transition days, half-hour changes, year crossings, date boundaries, and elapsed-time interpolation. This establishes a conversion reference, not verification of the Rust application. The [host-setting exercise](#host-setting-exercise) records snapshots after actual setting changes and verifies restoration of Eastern Standard Time with daylight adjustment enabled.
 
 The [schedule requirements](../specs/schedule.md) define the policy. The conversion evidence identifies missing and repeated local times and supports elapsed-time interpolation. The probe's omission policy does not implement the spec's dated Wake/Bedtime adjustment or its graph-boundary clamping. [Clock-change intervals](clock-change-intervals.md) explains the selected elapsed-interval policy separately. Relative offsets remain probe fixtures for schedules with user-defined points; the MVP does not expose them.
 
@@ -63,7 +66,7 @@ Additional assertions verify:
 - UTC has ordinary year-boundary conversions. Eastern rules differ between the 2006 and 2007 spring fixtures.
 - Explicit rules with both transition dates cleared use a fixed bias. This does not exercise the actual Windows Settings toggle.
 
-The original 10 conversion tests group multiple fixtures and dense loops. The final suite adds two Windows local-date interval tests and six interpolation/display-boundary cases. Expectations for clock conversions and intervals are fixed independently of the converter under test.
+The suite has 10 conversion tests that group multiple fixtures and dense loops, two Windows local-date interval tests, and six interpolation/display-boundary cases. Expectations for clock conversions and intervals are fixed independently of the converter under test.
 
 ## API limitations observed during investigation
 
@@ -75,7 +78,7 @@ Microsoft also documents that the non-Ex converter can miscalculate when the UTC
 
 An in-memory copy of a named dynamic zone with daylight adjustment disabled still followed installed daylight rules through Ex conversion. Explicit rules with transition dates cleared used the fixed bias as expected. These experiments did not change the host's setting. The production implementation must obtain and honor the computer's actual adjustment setting; copying the named-zone structure alone has not established that behavior.
 
-At Samoa's historical date-line change, an attempt to infer the local year from UTC alone was ambiguous: explicit 2011 and 2012 rules each produced a result in their own year. The integration experiment on 2026-10-16 used the known target local year for solar date filtering. The general conversion helper rejects ambiguous inference. The explicit target-year fixture does not establish universal historical conversion from an unqualified UTC instant.
+At Samoa's historical date-line change, an attempt to infer the local year from UTC alone was ambiguous: explicit 2011 and 2012 rules each produced a result in their own year. The solar date-filtering integration experiment used the known target local year. The general conversion helper rejects ambiguous inference. The explicit target-year fixture does not establish universal historical conversion from an unqualified UTC instant.
 
 ## Host-setting exercise
 
@@ -87,12 +90,11 @@ At Samoa's historical date-line change, an attempt to infer the local year from 
 | Eastern Standard Time with daylight adjustment disabled | 12:00 |
 | Eastern Standard Time with daylight adjustment enabled | 13:00 |
 
-The host-setting script restored Eastern Standard Time with daylight adjustment enabled in a `finally` block. It does not change the system UTC clock. The relocated script passed again on 2026-10-17 with CPython 3.15.0a2 on Windows build 26300.9711, including all three settings and restoration. This verifies fresh snapshots after setting changes, not delivery of a Rust application's time-change notification.
-
+The host-setting script restored Eastern Standard Time with daylight adjustment enabled in a `finally` block. It does not change the system UTC clock. The script passed with CPython 3.15.0a2 on Windows build 26300.9711, including all three settings and restoration. This verifies fresh snapshots after setting changes, not delivery of a Rust application's time-change notification.
 
 ## Documented API failures
 
-**Observed in Microsoft documentation retrieved on 2026-10-17:** The researched conversion path has explicit error returns:
+**Observed in Microsoft documentation retrieved:** The researched conversion path has explicit error returns:
 
 - `GetDynamicTimeZoneInformation` returns `TIME_ZONE_ID_INVALID` on failure. `TIME_ZONE_ID_UNKNOWN` is a successful result. [Current-zone API](https://learn.microsoft.com/en-us/windows/win32/api/timezoneapi/nf-timezoneapi-getdynamictimezoneinformation).
 - `GetTimeZoneInformationForYear` returns zero on failure. [Yearly rule API](https://learn.microsoft.com/en-us/windows/win32/api/timezoneapi/nf-timezoneapi-gettimezoneinformationforyear).

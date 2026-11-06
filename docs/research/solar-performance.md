@@ -8,6 +8,7 @@ observed-in:
   - Rust 1.99.0 default Cargo debug profile, unoptimized with debuginfo
   - CPython 3.15.0a2 on Windows 11 x64 build 26300.9711
   - AMD Ryzen 7 9800X3D, 16 logical processors
+  - Measurements recorded 2026-10-17 23:28:58 UTC
 recheck-when: The solar library, calculation convention, compiler/profile, or representative hardware changes.
 ---
 
@@ -25,7 +26,7 @@ Dates use explicit fixed UTC offsets to isolate calculation from Windows date co
 
 ## Measured results
 
-Measurements were recorded at 2026-10-17 23:28:58 UTC on the environment in the frontmatter.
+Measurements used the environment in the frontmatter.
 
 | Location and local date | UTC offset | Sunrise / sunset count | Median per calculation | Observed range | First call |
 | :-- | :-- | :-- | --: | :-- | --: |

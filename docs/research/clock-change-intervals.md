@@ -1,10 +1,11 @@
 ---
-date: 2026-10-18
+date: 2026-11-05
 questions:
   - Can manual targets preserve their ordinary elapsed separation across forward and backward Windows clock changes?
 observed-in:
   - Microsoft Learn TIME_ZONE_INFORMATION documentation retrieved 2026-10-18
   - Recorded Windows clock and host-setting evidence from 2026-10-16 and 2026-10-17
+  - Circadia 709224c schedule adjustment test fixtures, source inspection on 2026-11-05
 recheck-when: Manual-target adjustment policy, Windows conversion behavior, or automatic daylight-saving setting handling changes.
 ---
 
@@ -14,7 +15,7 @@ Elapsed-time addition can preserve the ordinary interval to a manual target acro
 
 ## Evidence and arithmetic
 
-**Observed in Microsoft documentation retrieved 2026-10-18:** Windows converts local time with `UTC = local time + bias`; standard and daylight biases contribute to the effective bias. The adjustment must use the actual bias difference rather than assuming one hour. [Time-zone structure](https://learn.microsoft.com/en-us/windows/win32/api/timezoneapi/ns-timezoneapi-time_zone_information).
+**Observed in Microsoft documentation:** Windows converts local time with `UTC = local time + bias`; standard and daylight biases contribute to the effective bias. The adjustment must use the actual bias difference rather than assuming one hour. [Time-zone structure](https://learn.microsoft.com/en-us/windows/win32/api/timezoneapi/ns-timezoneapi-time_zone_information).
 
 The [clock-conversion research](windows-clock-conversion.md) records one-hour Eastern and half-hour Lord Howe changes, repeated instants, and missing local minutes. The [host-setting investigation](windows-clock-conversion.md#host-setting-exercise) verifies conversion using newly read Windows time-zone rules and the actual automatic daylight-saving setting. Its tests do not implement elapsed-interval target adjustment.
 
@@ -37,4 +38,6 @@ The selected policy preserves the interval affected by the offset change, then r
 
 ## Validation limits
 
-The elapsed-interval target policy has not been exercised by the recorded clock conversion probe. Implementation needs fixed scenarios for both clock-change directions, a target in the second occurrence of a repeated clock interval, half-hour changes, closely spaced targets, disabled automatic adjustment, and evaluation in different orders or after restart. Existing conversion results remain evidence about their recorded fixtures rather than proof of this policy.
+The elapsed-interval target policy has not been exercised by the recorded clock conversion probe. Existing conversion results remain evidence about their recorded fixtures rather than proof of this policy.
+
+**Source inspection of Circadia `709224c`:** the Wake and Bedtime adjustment tests in [`circadia-app/src/schedule/anchors.rs`](../../circadia-app/src/schedule/anchors.rs) compare adjusted occurrences with fixed UTC instants for both clock-change directions, a target in the second occurrence of a repeated clock interval, the Lord Howe half-hour change, closely spaced targets, disabled automatic adjustment, and evaluation in reverse order or after recreating the time-zone snapshot. This document does not record their results.

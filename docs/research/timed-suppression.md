@@ -13,9 +13,9 @@ Manual suppression temporarily overrides the schedule with 6500 K for one hour. 
 
 ## Documented behavior
 
-**Observed in Microsoft documentation retrieved 2026-10-18:** `GetTickCount64` returns milliseconds since system startup. Microsoft recommends it for elapsed time including sleep or hibernation. It is available from Windows Vista, below Circadia's Windows 11 minimum, and typically resolves 10–16 milliseconds. [GetTickCount64](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-gettickcount64).
+**Observed in Microsoft documentation:** `GetTickCount64` returns milliseconds since system startup. Microsoft recommends it for elapsed time including sleep or hibernation. It is available from Windows Vista, below Circadia's Windows 11 minimum, and typically resolves 10–16 milliseconds. [GetTickCount64](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-gettickcount64).
 
-**Observed in Microsoft documentation retrieved 2026-10-18:** Interrupt time is independent of user and Windows time-service adjustments. Unbiased interrupt time excludes sleep and hibernation. Raising system timer resolution can increase power consumption. [Interrupt Time](https://learn.microsoft.com/en-us/windows/win32/sysinfo/interrupt-time).
+**Observed in Microsoft documentation:** Interrupt time is independent of user and Windows time-service adjustments. Unbiased interrupt time excludes sleep and hibernation. Raising system timer resolution can increase power consumption. [Interrupt Time](https://learn.microsoft.com/en-us/windows/win32/sysinfo/interrupt-time).
 
 ## Comparison and recommendation
 
