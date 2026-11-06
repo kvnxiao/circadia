@@ -133,14 +133,14 @@ Root patches align crates.io dependencies whose version ranges accept the pinned
 
 ### Updating Reactor
 
-Update the reference pin at the start of Reactor UI work, when Circadia needs an upstream feature or fix, and before release:
+Update the reference pin to the latest windows-rs `master` commit, in one dependency change, at the start of Reactor UI work, when Circadia needs an upstream feature or fix, and before release:
 
 1. Review commits since the current pin for API changes, behavior changes, and replacements for application workarounds.
 2. Update every windows-rs `rev` value in the root `Cargo.toml`, in both `[workspace.dependencies]` and `[patch.crates-io]`, and the lockfile together.
 3. Regenerate the composition bindings and run `just check`. Run affected harness scenarios only with an available desktop and authorization for their documented effects.
-4. Record the new evidence and its exact conditions in [Reactor research](docs/research/windows-reactor-ui.md). If the staged runtime changes, recheck [Windows compatibility](docs/research/windows-compatibility.md).
+4. Update [Reactor research](docs/research/windows-reactor-ui.md) to the new pin: replace findings that the recheck changed, and keep each finding the recheck did not cover with its existing version label. If the staged runtime changes, recheck [Windows compatibility](docs/research/windows-compatibility.md).
 
-Keep the previous pin when validation fails until the application or upstream dependency resolves the failure. Older research retains the revision it actually observed. Evaluate a published crate when Reactor leaves preview.
+Keep the previous pin when validation fails until the application or upstream dependency resolves the failure. Evaluate a published crate when Reactor leaves preview.
 
 ### Generated composition bindings
 
