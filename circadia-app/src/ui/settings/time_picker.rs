@@ -337,7 +337,7 @@ impl Component for TimePicker {
     type Input = PickerInput;
     type Message = Message;
 
-    fn create(input: &PickerInput, _: &ComponentContext<Self>) -> Self {
+    fn create(input: &PickerInput, _: &ComponentContext<'_, Self>) -> Self {
         Self {
             input: input.clone(),
             layout: Layout::new(&input.region),
@@ -348,7 +348,7 @@ impl Component for TimePicker {
         }
     }
 
-    fn input_changed(&mut self, input: &PickerInput, _: &ComponentContext<Self>) {
+    fn input_changed(&mut self, input: &PickerInput, _: &ComponentContext<'_, Self>) {
         if input.minute != self.input.minute {
             self.selection = Selection::new(input.minute);
         }
@@ -358,7 +358,7 @@ impl Component for TimePicker {
         self.input = input.clone();
     }
 
-    fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
+    fn update(&mut self, message: Message, context: &ComponentContext<'_, Self>) {
         if matches!(message, Message::Refocus) {
             self.refocus = None;
             if !self.button.request_focus() {

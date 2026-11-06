@@ -187,7 +187,7 @@ impl Component for Marker {
     type Input = Input;
     type Message = CompositionHostEvent;
 
-    fn create(input: &Input, _: &ComponentContext<Self>) -> Self {
+    fn create(input: &Input, _: &ComponentContext<'_, Self>) -> Self {
         Self {
             input: input.clone(),
             host: ElementRef::new(),
@@ -198,14 +198,14 @@ impl Component for Marker {
         }
     }
 
-    fn input_changed(&mut self, input: &Input, _: &ComponentContext<Self>) {
+    fn input_changed(&mut self, input: &Input, _: &ComponentContext<'_, Self>) {
         if self.input != *input {
             self.input = input.clone();
             self.rebuild();
         }
     }
 
-    fn update(&mut self, event: CompositionHostEvent, _: &ComponentContext<Self>) {
+    fn update(&mut self, event: CompositionHostEvent, _: &ComponentContext<'_, Self>) {
         let (width, height, scale) = match event {
             CompositionHostEvent::Ready {
                 compositor,

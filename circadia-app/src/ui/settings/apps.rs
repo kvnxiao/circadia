@@ -1386,7 +1386,7 @@ impl Component for Candidate {
     type Input = CandidateInput;
     type Message = Option<bool>;
 
-    fn create(input: &Self::Input, _: &ComponentContext<Self>) -> Self {
+    fn create(input: &Self::Input, _: &ComponentContext<'_, Self>) -> Self {
         Self {
             input: input.clone(),
             checkbox: ElementRef::new(),
@@ -1395,7 +1395,7 @@ impl Component for Candidate {
         }
     }
 
-    fn input_changed(&mut self, input: &Self::Input, _: &ComponentContext<Self>) {
+    fn input_changed(&mut self, input: &Self::Input, _: &ComponentContext<'_, Self>) {
         let target = self.focused.map(|restriction| {
             if restriction {
                 &self.restriction
@@ -1411,7 +1411,7 @@ impl Component for Candidate {
         self.input = input.clone();
     }
 
-    fn update(&mut self, focused: Option<bool>, _: &ComponentContext<Self>) {
+    fn update(&mut self, focused: Option<bool>, _: &ComponentContext<'_, Self>) {
         self.focused = focused;
     }
 
