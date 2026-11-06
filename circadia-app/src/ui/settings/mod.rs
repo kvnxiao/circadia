@@ -69,7 +69,6 @@ use windows_reactor::NavigationViewBackButtonVisible;
 use windows_reactor::NavigationViewItem;
 use windows_reactor::NavigationViewPaneDisplayMode;
 use windows_reactor::NumberBox;
-use windows_reactor::Orientation;
 use windows_reactor::ScrollViewer;
 use windows_reactor::Slider;
 use windows_reactor::StackPanel;
@@ -1094,11 +1093,7 @@ impl Settings {
         )
     }
 
-    fn banner(
-        &self,
-        banner: Banner,
-        context: &ViewContext<'_, Self>,
-    ) -> windows_reactor::KeyedView {
+    fn banner(banner: Banner, context: &ViewContext<'_, Self>) -> windows_reactor::KeyedView {
         let actions: Vec<View> = banner
             .actions
             .into_iter()
@@ -1144,35 +1139,16 @@ impl Settings {
         if let Some(command) = banner.dismiss {
             info = info.on_closed(context.message(Message::Command(command)));
         }
+        let mut children: Vec<View> = vec![info.into()];
+        if !actions.is_empty() {
+            children.push(widgets::action_group(actions).into());
+        }
         keyed(
             banner.id,
-            Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto])
-                .rows([GridLength::Auto, GridLength::Auto])
-                .column_spacing(8.0)
+            StackPanel::new()
                 .margin(Thickness::new(0.0, 0.0, 0.0, 12.0))
-                .children((
-                    info.grid_column_span(if self.stacked() { 2 } else { 1 }),
-                    StackPanel::new()
-                        .grid_column(i32::from(!self.stacked()))
-                        .grid_column_span(if self.stacked() { 2 } else { 1 })
-                        .grid_row(i32::from(self.stacked()))
-                        .horizontal_alignment(HorizontalAlignment::Right)
-                        .margin(Thickness::new(
-                            0.0,
-                            if self.stacked() && !actions.is_empty() {
-                                8.0
-                            } else {
-                                0.0
-                            },
-                            0.0,
-                            0.0,
-                        ))
-                        .orientation(Orientation::Horizontal)
-                        .spacing(8.0)
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .children(actions),
-                )),
+                .spacing(8.0)
+                .children(children),
         )
     }
 
@@ -1493,7 +1469,7 @@ impl Component for Settings {
                 .keyed_children(
                     problems::banners(&self.input.model, &text, &self.input.region, self.page)
                         .into_iter()
-                        .map(|banner| self.banner(banner, context)),
+                        .map(|banner| Self::banner(banner, context)),
                 )
                 .into(),
         ];

@@ -238,7 +238,7 @@ fn crash(model: &Model, text: &Text) -> Option<Banner> {
     bind_text!(fl, text);
     model.crash.as_ref().map(|_| Banner {
         id: automation_id::BANNER_CRASH,
-        severity: InfoBarSeverity::Informational,
+        severity: InfoBarSeverity::Warning,
         title: fl!("banner-crash-title"),
         message: fl!("banner-crash-message"),
         actions: vec![
