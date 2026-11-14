@@ -723,6 +723,78 @@ fn exit_attempts_cleanup_and_off_independently_once(cleanup_fails: bool) {
     );
 }
 
+#[test_case(true, "failed", "succeeded"; "cleanup fails")]
+#[test_case(false, "succeeded", "failed"; "off fails")]
+fn exit_records_the_start_and_outcome_of_each_attempt(
+    cleanup_fails: bool,
+    preview: &str,
+    off: &str,
+) {
+    let log = crate::log::capture(tracing::Level::DEBUG, || {
+        exercise(
+            vec![
+                (Call::Register, Reply::Ok),
+                (Call::Settings, settings(Some(3400), false)),
+                (Call::State, Reply::Active(true)),
+                (
+                    Call::Cleanup,
+                    if cleanup_fails {
+                        failure(DiagnosticOperation::PreviewCleanup, false)
+                    } else {
+                        Reply::Ok
+                    },
+                ),
+                (
+                    Call::Active(false),
+                    if cleanup_fails {
+                        Reply::Ok
+                    } else {
+                        failure(DiagnosticOperation::NativeActivationWrite, false)
+                    },
+                ),
+            ],
+            |native| {
+                assert!(native.control(|_fresh| None).error.is_none());
+                assert!(native.exit().is_some());
+            },
+        );
+    });
+    assert_eq!(
+        log,
+        [
+            r#"DEBUG circadia_app::log: exit step started step="preview cleanup""#.to_owned(),
+            format!(
+                r#"DEBUG circadia_app::log: exit step finished step="preview cleanup" outcome="{preview}""#
+            ),
+            r#"DEBUG circadia_app::log: exit step started step="off attempt""#.to_owned(),
+            format!(
+                r#"DEBUG circadia_app::log: exit step finished step="off attempt" outcome="{off}""#
+            ),
+        ]
+    );
+}
+
+#[test]
+fn release_after_management_turns_off_does_not_record_exit_steps() {
+    let log = crate::log::capture(tracing::Level::DEBUG, || {
+        exercise(
+            vec![
+                (Call::Register, Reply::Ok),
+                (Call::Settings, settings(Some(3400), false)),
+                (Call::State, Reply::Active(true)),
+                (Call::Cleanup, Reply::Ok),
+                (Call::Active(false), Reply::Ok),
+                (Call::Release, Reply::Ok),
+            ],
+            |native| {
+                assert!(native.control(|_fresh| None).error.is_none());
+                assert!(native.release().is_some());
+            },
+        );
+    });
+    assert_eq!(log, Vec::<String>::new());
+}
+
 #[test]
 fn exit_before_access_prevents_future_access() {
     exercise(Vec::new(), |native| {

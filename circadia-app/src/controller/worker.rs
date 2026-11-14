@@ -44,6 +44,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
@@ -298,13 +299,57 @@ struct Queue {
     resume_epoch: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum ExitRequest {
+    None,
+    /// The worker's run ended without an exit request.
+    Stopped,
+    Quit,
+    SessionEnd,
+    Panic,
+}
+
+impl ExitRequest {
+    fn decode(value: u8) -> Self {
+        [
+            Self::None,
+            Self::Stopped,
+            Self::Quit,
+            Self::SessionEnd,
+            Self::Panic,
+        ]
+        .into_iter()
+        .find(|request| *request as u8 == value)
+        .unwrap_or(Self::Panic)
+    }
+
+    fn replaces(self, current: Self) -> bool {
+        match self {
+            Self::None => false,
+            Self::Stopped => current == Self::None,
+            Self::Quit => matches!(current, Self::None | Self::Stopped),
+            Self::SessionEnd | Self::Panic => true,
+        }
+    }
+}
+
+impl From<ExitKind> for ExitRequest {
+    fn from(kind: ExitKind) -> Self {
+        match kind {
+            ExitKind::Quit => Self::Quit,
+            ExitKind::SessionEnd => Self::SessionEnd,
+            ExitKind::Panic => Self::Panic,
+        }
+    }
+}
+
 struct Shared {
     origin: Instant,
     queue: Mutex<Queue>,
     latest: Mutex<Option<Arc<ControllerSnapshot>>>,
     generation: AtomicU64,
-    stopping: AtomicBool,
-    exit: Mutex<Option<ExitKind>>,
+    exit: AtomicU8,
     finished: AtomicBool,
     wake: Arc<NativeWake>,
     calculation: CalculationClient,
@@ -312,11 +357,27 @@ struct Shared {
 }
 
 impl Shared {
-    fn exit_kind(&self) -> Option<ExitKind> {
-        *self
-            .exit
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    fn exit(&self) -> ExitRequest {
+        ExitRequest::decode(self.exit.load(Ordering::Acquire))
+    }
+
+    fn stopping(&self) -> bool {
+        self.exit() != ExitRequest::None
+    }
+
+    fn request(&self, request: ExitRequest) {
+        let mut current = self.exit.load(Ordering::Acquire);
+        while request.replaces(ExitRequest::decode(current)) {
+            match self.exit.compare_exchange_weak(
+                current,
+                request as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
+        }
     }
 }
 
@@ -324,7 +385,7 @@ struct StopAdmission(Arc<Shared>);
 
 impl Drop for StopAdmission {
     fn drop(&mut self) {
-        self.0.stopping.store(true, Ordering::Release);
+        self.0.request(ExitRequest::Stopped);
         let mut queue = self
             .0
             .queue
@@ -368,7 +429,7 @@ impl ControllerClient {
             .queue
             .lock()
             .map_err(|_error| io::Error::other("controller queue lock failed"))?;
-        if self.0.stopping.load(Ordering::Acquire) {
+        if self.0.stopping() {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "controller stopped",
@@ -487,26 +548,25 @@ impl ControllerClient {
     /// # Errors
     /// Report a failed wake operation.
     pub fn request_exit(&self, kind: ExitKind) -> io::Result<()> {
-        let mut exit = self
-            .0
-            .exit
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if exit.is_none() || kind != ExitKind::Quit {
-            *exit = Some(kind);
-        }
-        drop(exit);
-        self.0.stopping.store(true, Ordering::Release);
+        self.0.request(kind.into());
         self.0.wake.signal()
     }
 
-    pub(crate) fn finish_after_panic(&self, deadline: &OnceLock<Instant>, wait: Duration) {
+    pub(crate) fn finish_after_panic(
+        &self,
+        deadline: &OnceLock<Instant>,
+        wait: Duration,
+        record: &dyn Fn(Option<bool>),
+    ) {
         if CONTROLLER_THREAD.try_with(Cell::get).unwrap_or(false) {
             return;
         }
         // Several aborting panics can reach the hook; later calls share the
         // first deadline instead of extending it.
+        let mut requested = false;
         let deadline = *deadline.get_or_init(|| {
+            requested = true;
+            record(None);
             drop(self.request_exit(ExitKind::Panic));
             Instant::now()
                 .checked_add(wait)
@@ -518,6 +578,9 @@ impl ControllerClient {
                 break;
             }
             std::thread::sleep(remaining.min(Duration::from_millis(10)));
+        }
+        if requested {
+            record(Some(self.is_finished()));
         }
     }
 }
@@ -595,8 +658,7 @@ impl ControllerWorker {
             queue: Mutex::new(Queue::default()),
             latest: Mutex::new(None),
             generation: AtomicU64::new(0),
-            stopping: AtomicBool::new(false),
-            exit: Mutex::new(None),
+            exit: AtomicU8::new(ExitRequest::None as u8),
             finished: AtomicBool::new(false),
             wake,
             calculation: calculation.client(),
@@ -614,7 +676,7 @@ impl ControllerWorker {
                 let _admission = StopAdmission(Arc::clone(&shared));
                 let mut worker = Worker::new(config, runtime, shared, native, foreground);
                 let result = worker.run();
-                worker.shared.stopping.store(true, Ordering::Release);
+                worker.shared.request(ExitRequest::Stopped);
                 let faded = worker.fade_before_exit();
                 let exit = worker.driver.exit();
                 for failure in exit
@@ -802,7 +864,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
 
     fn run(&mut self) -> io::Result<()> {
         self.recalculate(OutputUpdate::Fade, None)?;
-        while !self.shared.stopping.load(Ordering::Acquire) {
+        while !self.shared.stopping() {
             let (commands, generation) = {
                 let mut queue = self
                     .shared
@@ -818,7 +880,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             let admission = Arc::clone(&self.shared);
             for command in commands
                 .into_iter()
-                .take_while(|_command| !admission.stopping.load(Ordering::Acquire))
+                .take_while(|_command| !admission.stopping())
             {
                 self.apply(command)?;
             }
@@ -838,17 +900,14 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             let shared = Arc::clone(&self.shared);
             let cycle = self.driver.cycle(
                 || time(origin),
-                || {
-                    !shared.stopping.load(Ordering::Acquire)
-                        && shared.generation.load(Ordering::Acquire) == generation
-                },
+                || !shared.stopping() && shared.generation.load(Ordering::Acquire) == generation,
             );
             match cycle {
                 Ok(report) => self.native_result(report)?,
                 Err(error) => self.evaluation_error(error)?,
             }
             self.apply_deferred()?;
-            if self.shared.stopping.load(Ordering::Acquire) {
+            if self.shared.stopping() {
                 break;
             }
             let observed = self
@@ -891,15 +950,32 @@ impl<F: FnMut() -> Foreground> Worker<F> {
     }
 
     fn fade_before_exit(&mut self) -> io::Result<()> {
-        // A worker failure ends `run` without an exit request.
-        let kind = self.shared.exit_kind().unwrap_or(ExitKind::Panic);
+        let kind = match self.shared.exit() {
+            ExitRequest::Quit => ExitKind::Quit,
+            ExitRequest::SessionEnd => ExitKind::SessionEnd,
+            // A worker failure ends `run` without an exit request.
+            ExitRequest::None | ExitRequest::Stopped | ExitRequest::Panic => ExitKind::Panic,
+        };
         if let Err(error) = self.driver.begin_exit(kind, self.now()) {
+            crate::log::exit_step_started("exit fade");
             tracing::warn!(%error, "starting the exit fade");
+            crate::log::exit_step_finished("exit fade", false);
             return Ok(());
         }
+        if kind != ExitKind::Quit || !self.driver.fading_out(self.now()) {
+            return Ok(());
+        }
+        crate::log::exit_step_started("exit fade");
+        let faded = self.exit_fade();
+        let finished = !self.driver.runtime().fading_out(self.now().output);
+        crate::log::exit_step_finished("exit fade", faded.is_ok() && finished);
+        faded
+    }
+
+    fn exit_fade(&mut self) -> io::Result<()> {
         let origin = self.origin;
         let shared = Arc::clone(&self.shared);
-        let quitting = || shared.exit_kind() == Some(ExitKind::Quit);
+        let quitting = || shared.exit() == ExitRequest::Quit;
         while quitting() && self.driver.fading_out(self.now()) {
             let now = self.now();
             let deadline = match self.driver.next_deadline(now) {
@@ -1106,7 +1182,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             && previous.configured_revision == self.configured_revision
             && previous.control_error.as_ref().map(Arc::as_ptr)
                 == self.control_error.as_ref().map(Arc::as_ptr)
-            && previous.stopped == self.shared.stopping.load(Ordering::Acquire)
+            && previous.stopped == self.shared.stopping()
     }
 
     fn publish(&mut self) -> io::Result<()> {
@@ -1139,7 +1215,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             native_errors: self.native_errors.clone(),
             configured_revision: self.configured_revision,
             control_error: self.control_error.clone(),
-            stopped: self.shared.stopping.load(Ordering::Acquire),
+            stopped: self.shared.stopping(),
         };
         let active = |snapshot: &ControllerSnapshot| {
             [

@@ -469,9 +469,12 @@ impl Native {
         if self.exited || !self.begun {
             return None;
         }
-        let exit = self.end_access();
+        self.begun = false;
+        self.cleanup_pending = false;
+        let preview = self.backend.end_preview();
+        let off = self.backend.set_active(false);
         self.backend.release_watchers();
-        Some(exit)
+        Some(NativeExit { preview, off })
     }
 
     /// End preview and request off independently once after access began,
@@ -481,15 +484,18 @@ impl Native {
             return None;
         }
         self.exited = true;
-        self.begun.then(|| self.end_access())
-    }
-
-    fn end_access(&mut self) -> NativeExit {
+        if !self.begun {
+            return None;
+        }
         self.begun = false;
         self.cleanup_pending = false;
+        crate::log::exit_step_started("preview cleanup");
         let preview = self.backend.end_preview();
+        crate::log::exit_step_finished("preview cleanup", preview.is_ok());
+        crate::log::exit_step_started("off attempt");
         let off = self.backend.set_active(false);
-        NativeExit { preview, off }
+        crate::log::exit_step_finished("off attempt", off.is_ok());
+        Some(NativeExit { preview, off })
     }
 }
 

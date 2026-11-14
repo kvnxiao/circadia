@@ -114,7 +114,17 @@ A failed save keeps the edited configuration running and displays Retry. The nex
 
 ## Logs and crash reports
 
-General → Logs → Open folder opens the data directory's `logs` subfolder. `circadia.log` is the current log; `circadia.1.log` is the previous file. Together they are bounded to 2 MiB. The normal log records starts, lifecycle changes, failures, recovery, and crashes. `--verbose` or `-V` adds temperature-write timing, foreground and title changes, and configuration writes for that process.
+General → Logs → Open folder opens the data directory's `logs` subfolder. `circadia.log` is the current log; `circadia.1.log` is the previous file. Together they are bounded to 2 MiB. The normal log records starts, lifecycle changes, failures, recovery, and crashes. Starting Circadia with `--verbose` or `-V` adds these records for that process:
+
+- Each Night light temperature change and how long it took.
+- Each change of the focused window and its title.
+- Each save of the settings file.
+- Each change of state of Preview and of update checking, with the previous and next state. Preview's states are `Not previewing`, `Starting`, and `Playing`; for example, a record names the move from `Starting` to `Playing` when playback begins. State names are the same in every interface language.
+- Each step Circadia takes to turn Night light off when it exits: when the step starts, and whether it `succeeded` or `failed`. The steps are:
+  - `exit fade`: the fade toward 6500 K after Quit.
+  - `preview cleanup`: turning off the Windows Night light preview mode, which Circadia turns on to apply changing temperatures at once. This mode is separate from Circadia's Preview command.
+  - `off attempt`: turning Night light off.
+  - `panic cleanup`: after an internal error, waiting up to 2 seconds for preview cleanup and the off attempt. The step fails when the 2 seconds end first.
 
 Logs can include coordinates, executable names, file paths, and window titles. Remove anything you do not want to share before attaching them to a report. Circadia does not upload or attach them automatically.
 

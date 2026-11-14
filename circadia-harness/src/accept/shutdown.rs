@@ -9,6 +9,9 @@ use crate::support::app::wait_temperature;
 use crate::support::app::window;
 use crate::support::automation::Automation;
 use crate::support::automation::wait;
+use crate::support::log::QUIT_EXIT_STEPS;
+use crate::support::log::SESSION_END_EXIT_STEPS;
+use crate::support::log::exit_steps;
 use circadia_app::ConfigInput;
 use circadia_app::InstanceClaim;
 use circadia_app::automation_id;
@@ -86,7 +89,8 @@ fn exercise(executable: &Path, directory: &Path, case: ExitCase) -> io::Result<(
     let automation = Automation::new()?;
     let native = Nightlight::new();
     native.read_settings().map_err(io::Error::other)?;
-    let mut application = Process::start(executable, directory)?;
+    let earlier = exit_steps(&crate::support::log::read(directory)?).len();
+    let mut application = Process::start_verbose(executable, directory)?;
     let process = application.id();
     report(&format!("CHECK: {case:?} in owned process {process}"));
     let settings = wait("shutdown settings window", || settings_window(process))?;
@@ -116,8 +120,25 @@ fn exercise(executable: &Path, directory: &Path, case: ExitCase) -> io::Result<(
             "exit lost the edit made before the dialog opened",
         )?;
     }
+    let log = crate::support::log::read(directory)?;
+    let recorded = exit_steps(&log);
+    let recorded = recorded.get(earlier..).unwrap_or_default();
+    let expected: &[(&str, &str)] = match case {
+        ExitCase::QuitDialog => &QUIT_EXIT_STEPS,
+        // Session end during startup can arrive before Night light access
+        // begins; exit then makes neither native attempt.
+        ExitCase::SessionEndOpening if recorded.is_empty() => &[],
+        ExitCase::SessionEndDialog
+        | ExitCase::SessionEndOpening
+        | ExitCase::SessionEndPicker
+        | ExitCase::SessionEndFlyout => &SESSION_END_EXIT_STEPS,
+    };
+    require(
+        recorded == expected,
+        &format!("the log records the exit steps {recorded:?} instead of {expected:?}"),
+    )?;
     report(&format!(
-        "PASS: {case:?} exits cleanly, clears Night light, and keeps the written edit"
+        "PASS: {case:?} exits cleanly, clears Night light, keeps the written edit, and the verbose log records each exit step"
     ));
     Ok(())
 }

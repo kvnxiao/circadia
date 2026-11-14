@@ -13,6 +13,8 @@ use crate::support::app::wait;
 use crate::support::app::wait_temperature;
 use crate::support::app::window;
 use crate::support::automation::Automation;
+use crate::support::log::QUIT_EXIT_STEPS;
+use crate::support::log::SESSION_END_EXIT_STEPS;
 use crate::support::tray;
 use circadia_app::ConfigInput;
 use circadia_app::InstanceClaim;
@@ -116,7 +118,11 @@ fn exercise(
         "Starting application with start_minimized={minimized}"
     ));
     seed(directory, &input(3400, minimized))?;
-    let mut application = Process::start(executable, directory)?;
+    let mut application = if matches!(explorer, ExplorerTest::Settings) {
+        Process::start_verbose(executable, directory)?
+    } else {
+        Process::start(executable, directory)?
+    };
     let process = application.id();
     let receiver = wait("application receiver", || {
         window(process, "Circadia event receiver", false)
@@ -181,12 +187,15 @@ fn exercise(
     close_settings(automation, &settings, process)?;
     report("PASS: settings closes and reopens in the original process");
 
-    request_checked_exit(
+    let exit_steps = request_checked_exit(
         executable, directory, automation, native, process, minimized, explorer,
     )?;
     application.wait_exit()?;
     verify_off(native)?;
     report("PASS: process exited, native preview cleared, and Night light off");
+    if matches!(explorer, ExplorerTest::Settings) {
+        crate::accept::settings::check_verbose_log(directory, exit_steps)?;
+    }
     Ok(())
 }
 
@@ -198,7 +207,7 @@ fn request_checked_exit(
     process: u32,
     minimized: bool,
     explorer: ExplorerTest,
-) -> io::Result<()> {
+) -> io::Result<&'static [(&'static str, &'static str)]> {
     let settings = if minimized || matches!(explorer, ExplorerTest::Settings) {
         Some(open_settings(executable, directory, automation, process)?)
     } else {
@@ -213,14 +222,15 @@ fn request_checked_exit(
         && minimized
     {
         quit(automation, settings, process)?;
+        Ok(&QUIT_EXIT_STEPS)
     } else {
         let receiver = window(process, "Circadia event receiver", false)?
             .ok_or_else(|| io::Error::other("application event receiver is missing"))?;
         native_message(&receiver, Message::EndSession { ending: true })?;
         verify_off(native)?;
         report("PASS: synthetic confirmed session end completes native cleanup before returning");
+        Ok(&SESSION_END_EXIT_STEPS)
     }
-    Ok(())
 }
 
 fn check_reconciliation(native: &Nightlight, receiver: &HWND) -> io::Result<()> {

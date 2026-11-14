@@ -24,8 +24,7 @@ fn unchanged_publication_reuses_the_snapshot_and_command_changes_still_notify() 
         queue: Mutex::new(Queue::default()),
         latest: Mutex::new(None),
         generation: AtomicU64::new(0),
-        stopping: AtomicBool::new(false),
-        exit: Mutex::new(None),
+        exit: AtomicU8::new(ExitRequest::None as u8),
         finished: AtomicBool::new(false),
         wake: Arc::new(NativeWake::new().expect("wake event")),
         calculation: calculation.client(),
@@ -72,7 +71,7 @@ fn unchanged_publication_reuses_the_snapshot_and_command_changes_still_notify() 
             .command,
         Some((1, CommandOutcome::Applied))
     );
-    shared.stopping.store(true, Ordering::Release);
+    shared.request(ExitRequest::Stopped);
     worker.publish().expect("shutdown publication");
     notifications.try_recv().expect("shutdown notification");
     assert!(
@@ -735,8 +734,7 @@ fn a_repeated_resume_epoch_does_not_expedite_a_pending_native_retry() {
         queue: Mutex::new(Queue::default()),
         latest: Mutex::new(None),
         generation: AtomicU64::new(0),
-        stopping: AtomicBool::new(false),
-        exit: Mutex::new(None),
+        exit: AtomicU8::new(ExitRequest::None as u8),
         finished: AtomicBool::new(false),
         wake: Arc::new(NativeWake::new().expect("wake event")),
         calculation: calculation.client(),
@@ -815,11 +813,11 @@ fn panic_cleanup_ends_preview_and_turns_night_light_off_once() {
     wait_for(&client, &notified, scheduled);
     let before = records.lock().expect("records").calls.len();
     let deadline = OnceLock::new();
-    client.finish_after_panic(&deadline, Duration::from_secs(10));
+    client.finish_after_panic(&deadline, Duration::from_secs(10), &|_| {});
     assert!(client.is_finished());
     let requested = deadline.get().copied().expect("exit requested");
     let started = Instant::now();
-    client.finish_after_panic(&deadline, Duration::from_secs(10));
+    client.finish_after_panic(&deadline, Duration::from_secs(10), &|_| {});
     assert!(started.elapsed() < Duration::from_secs(1));
     assert_eq!(deadline.get().copied(), Some(requested));
     let exit = worker.shutdown();
@@ -848,7 +846,7 @@ fn panic_cleanup_stops_waiting_at_its_deadline_while_a_native_call_blocks() {
         .recv_timeout(Duration::from_secs(10))
         .expect("native operation blocked");
     let started = Instant::now();
-    client.finish_after_panic(&OnceLock::new(), Duration::from_millis(200));
+    client.finish_after_panic(&OnceLock::new(), Duration::from_millis(200), &|_| {});
     let waited = started.elapsed();
     assert!(waited >= Duration::from_millis(200), "{waited:?}");
     assert!(waited < Duration::from_secs(5), "{waited:?}");
@@ -881,7 +879,7 @@ fn panic_cleanup_before_native_access_exits_without_night_light_calls() {
     wait_for(&client, &notified, |snapshot| {
         snapshot.scheduling == SchedulingState::Waiting
     });
-    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(10));
+    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(10), &|_| {});
     assert!(client.is_finished());
     let exit = worker.shutdown();
     assert!(exit.worker.is_ok(), "{:?}", exit.worker);
@@ -901,7 +899,7 @@ fn panic_cleanup_on_the_controller_thread_returns_without_requesting_exit() {
         if let Some(client) = hooked.get() {
             let deadline = OnceLock::new();
             let started = Instant::now();
-            client.finish_after_panic(&deadline, Duration::from_secs(10));
+            client.finish_after_panic(&deadline, Duration::from_secs(10), &|_| {});
             *observed.lock().expect("outcome") =
                 Some((deadline.get().is_some(), started.elapsed()));
         }
@@ -994,8 +992,7 @@ fn ready_worker(config: &Config) -> (Worker<impl FnMut() -> Foreground>, Calcula
         queue: Mutex::new(Queue::default()),
         latest: Mutex::new(None),
         generation: AtomicU64::new(0),
-        stopping: AtomicBool::new(false),
-        exit: Mutex::new(None),
+        exit: AtomicU8::new(ExitRequest::None as u8),
         finished: AtomicBool::new(false),
         wake: Arc::new(NativeWake::new().expect("wake event")),
         calculation: calculation.client(),
@@ -1568,6 +1565,309 @@ fn quit_after_a_confirmed_session_end_does_not_start_a_fade() {
     );
 }
 
+fn exit_client() -> (ControllerClient, CalculationWorker) {
+    let calculation = CalculationWorker::start(|| Ok(())).expect("calculation worker");
+    let shared = Arc::new(Shared {
+        origin: Instant::now(),
+        queue: Mutex::new(Queue::default()),
+        latest: Mutex::new(None),
+        generation: AtomicU64::new(0),
+        exit: AtomicU8::new(ExitRequest::None as u8),
+        finished: AtomicBool::new(false),
+        wake: Arc::new(NativeWake::new().expect("wake event")),
+        calculation: calculation.client(),
+        notify: Arc::new(|| Ok(())),
+    });
+    (ControllerClient(shared), calculation)
+}
+
+#[test_case(ExitKind::Panic, ExitKind::SessionEnd, ExitRequest::SessionEnd; "session end after panic")]
+#[test_case(ExitKind::SessionEnd, ExitKind::Panic, ExitRequest::Panic; "panic after session end")]
+#[test_case(ExitKind::Quit, ExitKind::SessionEnd, ExitRequest::SessionEnd; "session end after quit")]
+#[test_case(ExitKind::Quit, ExitKind::Panic, ExitRequest::Panic; "panic after quit")]
+fn a_later_session_end_or_panic_replaces_the_earlier_exit_request(
+    earlier: ExitKind,
+    later: ExitKind,
+    expected: ExitRequest,
+) {
+    let (client, calculation) = exit_client();
+    client
+        .request_exit(earlier)
+        .expect("earlier exit requested");
+    client.request_exit(later).expect("later exit requested");
+    assert_eq!(client.0.exit(), expected);
+    calculation.shutdown().expect("calculation shutdown");
+}
+
+#[test_case(ExitKind::SessionEnd, ExitRequest::SessionEnd; "after session end")]
+#[test_case(ExitKind::Panic, ExitRequest::Panic; "after panic")]
+fn quit_does_not_replace_an_earlier_exit_request(earlier: ExitKind, expected: ExitRequest) {
+    let (client, calculation) = exit_client();
+    client
+        .request_exit(earlier)
+        .expect("earlier exit requested");
+    client.request_exit(ExitKind::Quit).expect("Quit requested");
+    assert_eq!(client.0.exit(), expected);
+    calculation.shutdown().expect("calculation shutdown");
+}
+
+#[test]
+fn the_end_of_the_worker_run_replaces_only_no_request_and_quit_replaces_it() {
+    let (client, calculation) = exit_client();
+    assert_eq!(client.0.exit(), ExitRequest::None);
+    client.0.request(ExitRequest::Stopped);
+    assert_eq!(client.0.exit(), ExitRequest::Stopped);
+    client.request_exit(ExitKind::Quit).expect("Quit requested");
+    assert_eq!(client.0.exit(), ExitRequest::Quit);
+    client.0.request(ExitRequest::Stopped);
+    assert_eq!(client.0.exit(), ExitRequest::Quit);
+    client
+        .request_exit(ExitKind::SessionEnd)
+        .expect("session end requested");
+    client.0.request(ExitRequest::Stopped);
+    assert_eq!(client.0.exit(), ExitRequest::SessionEnd);
+    calculation.shutdown().expect("calculation shutdown");
+}
+
+#[test]
+fn quit_followed_by_the_end_of_the_worker_run_still_fades_to_6500_k_before_cleanup_and_off() {
+    let directory = tempfile::tempdir().expect("directory");
+    let Started {
+        worker,
+        records,
+        before,
+        _notified,
+    } = start_at_kelvin(&directory, 250);
+    let client = worker.client();
+    client.request_exit(ExitKind::Quit).expect("Quit requested");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !client.is_finished() {
+        assert!(Instant::now() < deadline, "worker did not finish");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(client.0.exit(), ExitRequest::Quit);
+    let exit = worker.shutdown();
+    assert!(exit.worker.is_ok(), "{:?}", exit.worker);
+    let calls = records.lock().expect("records").calls.split_off(before);
+    assert_eq!(kelvins(&calls).last(), Some(&6500), "{calls:?}");
+    assert!(
+        calls.ends_with(&[Call::Cleanup, Call::Activate(false)]),
+        "{calls:?}"
+    );
+}
+
+fn exit_step_records(log: &[String]) -> Vec<&str> {
+    log.iter()
+        .map(String::as_str)
+        .filter(|record| record.contains(" exit step "))
+        .collect()
+}
+
+fn wait_for_held_write(records: &Arc<Mutex<Records>>, before: usize) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !records.lock().expect("records").calls[before..]
+        .iter()
+        .any(|call| matches!(call, Call::Temperature(_, TemperatureMode::Hold)))
+    {
+        assert!(Instant::now() < deadline, "fade did not start");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test_case(false, "succeeded"; "off succeeds")]
+#[test_case(true, "failed"; "off fails")]
+fn quit_at_2400_k_records_the_exit_fade_preview_cleanup_and_off_attempt_in_order(
+    off_fails: bool,
+    off: &str,
+) {
+    let directory = tempfile::tempdir().expect("directory");
+    let log = crate::log::capture(tracing::Level::DEBUG, || {
+        let Started {
+            worker,
+            records,
+            _notified,
+            ..
+        } = start_at_kelvin(&directory, 250);
+        records.lock().expect("records").off_fails = off_fails;
+        worker
+            .client()
+            .request_exit(ExitKind::Quit)
+            .expect("exit requested");
+        assert!(worker.shutdown().worker.is_ok());
+    });
+    assert_eq!(
+        exit_step_records(&log),
+        [
+            r#"DEBUG circadia_app::log: exit step started step="exit fade""#,
+            r#"DEBUG circadia_app::log: exit step finished step="exit fade" outcome="succeeded""#,
+            r#"DEBUG circadia_app::log: exit step started step="preview cleanup""#,
+            r#"DEBUG circadia_app::log: exit step finished step="preview cleanup" outcome="succeeded""#,
+            r#"DEBUG circadia_app::log: exit step started step="off attempt""#,
+            &format!(
+                r#"DEBUG circadia_app::log: exit step finished step="off attempt" outcome="{off}""#
+            ),
+        ]
+    );
+}
+
+#[test]
+fn confirmed_session_end_during_the_quit_fade_records_the_exit_fade_as_failed() {
+    let directory = tempfile::tempdir().expect("directory");
+    let log = crate::log::capture(tracing::Level::DEBUG, || {
+        let Started {
+            worker,
+            records,
+            before,
+            _notified,
+        } = start_at_kelvin(&directory, 10_000);
+        let client = worker.client();
+        client.request_exit(ExitKind::Quit).expect("Quit requested");
+        wait_for_held_write(&records, before);
+        client
+            .request_exit(ExitKind::SessionEnd)
+            .expect("session end requested");
+        assert!(worker.shutdown().worker.is_ok());
+    });
+    assert_eq!(
+        exit_step_records(&log),
+        [
+            r#"DEBUG circadia_app::log: exit step started step="exit fade""#,
+            r#"DEBUG circadia_app::log: exit step finished step="exit fade" outcome="failed""#,
+            r#"DEBUG circadia_app::log: exit step started step="preview cleanup""#,
+            r#"DEBUG circadia_app::log: exit step finished step="preview cleanup" outcome="succeeded""#,
+            r#"DEBUG circadia_app::log: exit step started step="off attempt""#,
+            r#"DEBUG circadia_app::log: exit step finished step="off attempt" outcome="succeeded""#,
+        ]
+    );
+}
+
+#[test]
+fn quit_during_the_turn_off_fade_records_its_shared_steps_under_the_exit_step_names() {
+    let directory = tempfile::tempdir().expect("directory");
+    let log = crate::log::capture(tracing::Level::DEBUG, || {
+        let Started {
+            worker,
+            records,
+            before,
+            _notified,
+        } = start_at_kelvin(&directory, 1500);
+        let client = worker.client();
+        client
+            .submit(ControllerCommand::Configure {
+                config: Arc::new(
+                    ConfigInput {
+                        ordinary_fade_ms: 1500,
+                        ..unmanaged(2400)
+                    }
+                    .validate()
+                    .expect("config"),
+                ),
+                revision: 1,
+            })
+            .expect("configure");
+        wait_for_held_write(&records, before);
+        client.request_exit(ExitKind::Quit).expect("Quit requested");
+        assert!(worker.shutdown().worker.is_ok());
+        let calls = calls_since(&records, before);
+        assert_eq!(kelvins(&calls).last(), Some(&6500), "{calls:?}");
+        assert!(!calls.contains(&Call::Release), "{calls:?}");
+    });
+    assert_eq!(
+        exit_step_records(&log),
+        [
+            r#"DEBUG circadia_app::log: exit step started step="exit fade""#,
+            r#"DEBUG circadia_app::log: exit step finished step="exit fade" outcome="succeeded""#,
+            r#"DEBUG circadia_app::log: exit step started step="preview cleanup""#,
+            r#"DEBUG circadia_app::log: exit step finished step="preview cleanup" outcome="succeeded""#,
+            r#"DEBUG circadia_app::log: exit step started step="off attempt""#,
+            r#"DEBUG circadia_app::log: exit step finished step="off attempt" outcome="succeeded""#,
+        ]
+    );
+}
+
+#[test]
+fn panic_cleanup_records_its_start_and_outcome_around_the_cleanup_and_off_attempts() {
+    let directory = tempfile::tempdir().expect("directory");
+    let log = crate::log::capture(tracing::Level::DEBUG, || {
+        let Started {
+            worker, _notified, ..
+        } = start_at_kelvin(&directory, 250);
+        let client = worker.client();
+        client.finish_after_panic(
+            &OnceLock::new(),
+            Duration::from_secs(2),
+            &panic_cleanup_records,
+        );
+        assert!(client.is_finished());
+        assert!(worker.shutdown().worker.is_ok());
+    });
+    assert_eq!(
+        exit_step_records(&log),
+        [
+            r#"DEBUG circadia_app::log: exit step started step="panic cleanup""#,
+            r#"DEBUG circadia_app::log: exit step started step="preview cleanup""#,
+            r#"DEBUG circadia_app::log: exit step finished step="preview cleanup" outcome="succeeded""#,
+            r#"DEBUG circadia_app::log: exit step started step="off attempt""#,
+            r#"DEBUG circadia_app::log: exit step finished step="off attempt" outcome="succeeded""#,
+            r#"DEBUG circadia_app::log: exit step finished step="panic cleanup" outcome="succeeded""#,
+        ]
+    );
+}
+
+#[test]
+fn panic_cleanup_that_reaches_its_deadline_records_that_it_failed() {
+    let directory = tempfile::tempdir().expect("directory");
+    saved(&directory);
+    let log = crate::log::capture(tracing::Level::DEBUG, || {
+        let (entered, blocked) = mpsc::sync_channel(1);
+        let (release, finish) = mpsc::sync_channel(1);
+        let records = Arc::new(Mutex::new(Records {
+            blocked: Some((entered, finish)),
+            ..Records::default()
+        }));
+        let (worker, _notified) = start(&directory, &records);
+        let client = worker.client();
+        blocked
+            .recv_timeout(Duration::from_secs(10))
+            .expect("native operation blocked");
+        client.finish_after_panic(
+            &OnceLock::new(),
+            Duration::from_millis(200),
+            &panic_cleanup_records,
+        );
+        assert!(!client.is_finished());
+        release.send(()).expect("finish native call");
+        assert!(worker.shutdown().worker.is_ok());
+    });
+    assert_eq!(
+        exit_step_records(&log),
+        [
+            r#"DEBUG circadia_app::log: exit step started step="panic cleanup""#,
+            r#"DEBUG circadia_app::log: exit step finished step="panic cleanup" outcome="failed""#,
+            r#"DEBUG circadia_app::log: exit step started step="preview cleanup""#,
+            r#"DEBUG circadia_app::log: exit step finished step="preview cleanup" outcome="succeeded""#,
+            r#"DEBUG circadia_app::log: exit step started step="off attempt""#,
+            r#"DEBUG circadia_app::log: exit step finished step="off attempt" outcome="succeeded""#,
+        ]
+    );
+}
+
+#[test]
+fn exit_steps_are_not_recorded_at_the_default_level() {
+    let directory = tempfile::tempdir().expect("directory");
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let Started {
+            worker, _notified, ..
+        } = start_at_kelvin(&directory, 250);
+        let client = worker.client();
+        client.request_exit(ExitKind::Quit).expect("Quit requested");
+        client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2), &|_| {});
+        assert!(client.is_finished());
+        assert!(worker.shutdown().worker.is_ok());
+    });
+    assert_eq!(exit_step_records(&log), Vec::<&str>::new());
+}
+
 fn unmanaged(kelvin: i64) -> ConfigInput {
     ConfigInput {
         manage_night_light: false,
@@ -1697,7 +1997,7 @@ fn panic_cleanup_while_managing_at_2400_k_turns_night_light_off_without_a_fade_w
     } = start_at_kelvin(&directory, 250);
     let client = worker.client();
     let started = Instant::now();
-    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2));
+    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2), &|_| {});
     assert!(client.is_finished());
     assert!(started.elapsed() < Duration::from_secs(2));
     assert_eq!(
@@ -1727,7 +2027,7 @@ fn panic_cleanup_waits_for_a_120_ms_library_call_and_then_turns_night_light_off(
         std::thread::sleep(Duration::from_millis(120));
         release.send(()).expect("finish native call");
     });
-    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2));
+    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2), &|_| {});
     let waited = started.elapsed();
     call.join().expect("library call thread");
     assert!(client.is_finished());
@@ -1789,7 +2089,7 @@ fn panic_cleanup_during_the_turn_off_fade_skips_the_rest_of_the_fade_and_makes_e
         ManagementState::TurningOff
     );
     let started = Instant::now();
-    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2));
+    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2), &|_| {});
     assert!(client.is_finished());
     assert!(started.elapsed() < Duration::from_secs(2));
     let calls = calls_since(&records, before);
@@ -1826,7 +2126,7 @@ fn panic_cleanup_after_turning_management_off_finished_makes_no_native_call() {
         snapshot.management == ManagementState::Off
     });
     let before = records.lock().expect("records").calls.len();
-    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2));
+    client.finish_after_panic(&OnceLock::new(), Duration::from_secs(2), &|_| {});
     assert!(client.is_finished());
     let exit = worker.shutdown();
     assert!(exit.native.is_none());
@@ -1922,4 +2222,11 @@ fn a_failed_off_attempt_while_turning_off_is_reported_once_and_not_retried() {
     let exit = worker.shutdown();
     assert!(exit.native.is_none());
     assert_eq!(attempts(), 1);
+}
+
+fn panic_cleanup_records(finished: Option<bool>) {
+    match finished {
+        None => crate::log::exit_step_started("panic cleanup"),
+        Some(succeeded) => crate::log::exit_step_finished("panic cleanup", succeeded),
+    }
 }

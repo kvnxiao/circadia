@@ -263,11 +263,7 @@ pub(crate) fn require(condition: bool, error: &str) -> io::Result<()> {
 }
 
 pub(crate) fn read_log(directory: &Path) -> io::Result<String> {
-    match fs_err::read_to_string(directory.join("logs").join("circadia.log")) {
-        Ok(text) => Ok(text),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(error),
-    }
+    crate::support::log::read_file(directory, "circadia.log")
 }
 
 pub(crate) fn error_records(log: &str) -> Vec<&str> {
@@ -287,11 +283,23 @@ pub(crate) struct Process {
 
 impl Process {
     pub(crate) fn start(executable: &Path, directory: &Path) -> io::Result<Self> {
+        Self::spawn(&mut Self::command(executable, directory))
+    }
+
+    pub(crate) fn start_verbose(executable: &Path, directory: &Path) -> io::Result<Self> {
+        Self::spawn(Self::command(executable, directory).arg("-V"))
+    }
+
+    fn command(executable: &Path, directory: &Path) -> Command {
         let mut command = Command::new(executable);
         command.arg("--data-dir").arg(directory);
         if let Some(language) = language() {
             command.arg("--language").arg(language);
         }
+        command
+    }
+
+    fn spawn(command: &mut Command) -> io::Result<Self> {
         Ok(Self {
             child: command.spawn()?,
             foreground_fixture: false,
