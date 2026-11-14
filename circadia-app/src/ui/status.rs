@@ -302,10 +302,7 @@ impl<'a> Control<'a> {
                 .calculation
                 .as_ref()
                 .and_then(|calculation| calculation.result.as_ref().ok()),
-            last_scheduled: snapshot
-                .accepted
-                .as_ref()
-                .and_then(crate::ConfigLayer::last_scheduled),
+            last_scheduled: snapshot.last_scheduled,
             output_failed: managing
                 && snapshot
                     .native_errors
@@ -642,7 +639,7 @@ pub(super) fn menu_items(
         let regex = snapshot
             .and_then(|snapshot| snapshot.accepted.as_ref())
             .into_iter()
-            .flat_map(|layer| layer.config().entries(crate::Field::Suppression))
+            .flat_map(|config| config.entries(crate::Field::Suppression))
             .find(|entry| {
                 entry.path.is_none() && crate::same_executable(&entry.executable, executable)
             })

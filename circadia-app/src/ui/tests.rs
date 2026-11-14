@@ -249,6 +249,7 @@ fn closing_settings_preserves_a_newer_selected_metadata_source() {
     };
     desktop.snapshot = Some(Arc::new(ControllerSnapshot {
         accepted: None,
+        last_scheduled: None,
         scheduling: crate::SchedulingState::Available,
         management: crate::ManagementState::On,
         preview: None,
@@ -765,6 +766,7 @@ fn retry_pressed_twice_before_the_controller_processes_it_sends_one_command() {
     let processed = |id| {
         Arc::new(ControllerSnapshot {
             accepted: None,
+            last_scheduled: None,
             scheduling: crate::SchedulingState::Available,
             management: crate::ManagementState::On,
             preview: None,

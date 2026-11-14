@@ -609,7 +609,8 @@ fn a_failed_off_attempt_after_management_turned_off_does_not_report_unavailable_
 fn snapshot(input: ConfigInput) -> ControllerSnapshot {
     let config = input.validate().expect("valid settings fixture");
     ControllerSnapshot {
-        accepted: Some(crate::ConfigLayer::new(config)),
+        accepted: Some(Arc::new(config)),
+        last_scheduled: None,
         scheduling: SchedulingState::Available,
         management: crate::ManagementState::On,
         preview: None,

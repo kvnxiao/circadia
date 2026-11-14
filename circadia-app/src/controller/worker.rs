@@ -3,7 +3,6 @@ use super::CalculationPurpose;
 use super::CalculationRequest;
 use super::CalculationResult;
 use super::CalculationWorker;
-use super::ConfigLayer;
 use super::ControlError;
 use super::ControlRuntime;
 use super::ControlTime;
@@ -12,6 +11,7 @@ use super::ManagementState;
 use super::NativeCycle;
 use super::NativeDriver;
 use super::OutputUpdate;
+use super::Resumed;
 use super::RunningPreview;
 use super::RuntimeTime;
 use super::SchedulingState;
@@ -226,9 +226,11 @@ pub struct CommandReceipt {
 /// Publish immutable controller state without waiting for native operations.
 #[derive(Clone, Debug)]
 pub struct ControllerSnapshot {
-    /// Accepted configuration and its own last scheduled output.
-    pub accepted: Option<ConfigLayer>,
-    /// Active layer's schedule availability.
+    /// Accepted configuration.
+    pub accepted: Option<Arc<Config>>,
+    /// Last scheduled output, excluding Preview and suppression.
+    pub last_scheduled: Option<u16>,
+    /// Active schedule availability.
     pub scheduling: SchedulingState,
     /// Whether Circadia manages Night light or is changing that state.
     pub management: ManagementState,
@@ -671,14 +673,13 @@ struct Worker<F> {
     shared: Arc<Shared>,
     origin: Instant,
     driver: NativeDriver,
-    accepted: Option<ConfigLayer>,
+    accepted: Option<Arc<Config>>,
     management: ManagementState,
     command: Option<(u64, CommandOutcome)>,
     configured_revision: u64,
     native_errors: BTreeMap<DiagnosticOperation, Arc<NativeFailure>>,
     control_error: Option<Arc<ControlError>>,
     next_date: Option<Timestamp>,
-    resume_epoch: Option<u64>,
     taskbar_epoch: Option<u64>,
     log: DiagnosticLog,
     foreground: F,
@@ -696,14 +697,13 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             origin: shared.origin,
             shared,
             driver: NativeDriver::new(runtime, native),
-            accepted: config.map(|config| ConfigLayer::new(Arc::unwrap_or_clone(config))),
+            accepted: config,
             management: ManagementState::Off,
             command: None,
             configured_revision: 0,
             native_errors: BTreeMap::new(),
             control_error: None,
             next_date: None,
-            resume_epoch: None,
             taskbar_epoch: None,
             log: DiagnosticLog::default(),
             foreground,
@@ -730,7 +730,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         let request = self
             .driver
             .runtime_mut()
-            .configure(self.accepted.as_ref(), update, now)
+            .configure(self.accepted.as_deref(), update, now)
             .map_err(io::Error::other)?;
         self.driver
             .runtime_mut()
@@ -893,7 +893,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
     fn accepted_managing(&self) -> bool {
         self.accepted
             .as_ref()
-            .is_some_and(|layer| layer.config().input().manage_night_light)
+            .is_some_and(|config| config.input().manage_night_light)
     }
 
     fn accepted_schedule_differs(&self) -> bool {
@@ -901,7 +901,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             .runtime()
             .config()
             .zip(self.accepted.as_ref())
-            .is_some_and(|(current, next)| !current.same_schedule(next.config()))
+            .is_some_and(|(current, next)| !current.same_schedule(next))
     }
 
     fn apply_deferred(&mut self) -> io::Result<()> {
@@ -962,9 +962,6 @@ impl<F: FnMut() -> Foreground> Worker<F> {
     }
 
     fn native_result(&mut self, report: NativeCycle) -> io::Result<()> {
-        if let (Some(value), Some(layer)) = (report.scheduled, &mut self.accepted) {
-            layer.last_scheduled = Some(value);
-        }
         let healthy = report.attempt.as_ref().is_some_and(|attempt| {
             !attempt.cancelled && attempt.error.is_none() && report.control_error.is_none()
         });
@@ -1040,6 +1037,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         let preview =
             |preview: &RunningPreview| (Arc::as_ptr(&preview.playback), preview.start, preview.end);
         previous.accepted == self.accepted
+            && previous.last_scheduled == runtime.last_scheduled()
             && previous.scheduling == runtime.state()
             && previous.management == self.management
             && previous.preview.as_ref().map(preview) == runtime.preview().map(preview)
@@ -1081,6 +1079,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         }
         let snapshot = ControllerSnapshot {
             accepted: self.accepted.clone(),
+            last_scheduled: runtime.last_scheduled(),
             scheduling: runtime.state(),
             management: self.management,
             preview: runtime.preview().cloned(),
@@ -1101,7 +1100,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 snapshot
                     .accepted
                     .as_ref()
-                    .is_some_and(|layer| layer.config().input().manage_night_light),
+                    .is_some_and(|config| config.input().manage_night_light),
                 snapshot.suppression.automatic,
                 snapshot.suppression.manual(),
                 snapshot.preview_active,
@@ -1144,10 +1143,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             .advance(now)
             .map_err(io::Error::other)?;
         self.apply_deferred()?;
-        let matches = self
-            .accepted
-            .as_ref()
-            .is_some_and(|layer| layer.config() == config);
+        let matches = self.accepted.as_deref() == Some(config);
         let request = matches
             .then(|| self.driver.runtime_mut().preview_request(entered, now))
             .flatten();
@@ -1214,26 +1210,21 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                 self.recompute(reason, now)?;
             }
             ControllerCommand::Suspend => self.driver.runtime_mut().suspend(now),
-            ControllerCommand::Resume { epoch, foreground } if self.resume_epoch != Some(epoch) => {
-                self.resume_epoch = Some(epoch);
-                let request = self
+            ControllerCommand::Resume { epoch, foreground } => {
+                let resumed = self
                     .driver
                     .runtime_mut()
                     .resume(epoch, &foreground, now)
                     .map_err(io::Error::other)?;
-                if let Some(request) = request {
+                expedite = matches!(resumed, Resumed::Processed(_));
+                if let Resumed::Processed(Some(request)) = resumed {
                     let revision = self.shared.calculation.submit(request)?;
                     self.driver.runtime_mut().expect_calculation(revision);
                 }
-                expedite = true;
             }
-            ControllerCommand::Resume { .. } => {}
             ControllerCommand::Configure { config, revision } => {
                 self.configured_revision = revision;
-                self.accepted = Some(ConfigLayer::reconfigured(
-                    self.accepted.as_ref(),
-                    Arc::unwrap_or_clone(config),
-                ));
+                self.accepted = Some(config);
                 if self.accepted_managing() && !self.driver.runtime().managing() {
                     self.forget_native_errors();
                     expedite = true;
