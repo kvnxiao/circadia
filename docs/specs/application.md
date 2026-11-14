@@ -199,7 +199,7 @@ When a starting or playing run ends, the graph returns to actual current time an
 - Playback begins and the user selects Stop at once: the run ends, and Preview is available again immediately.
 - D is 1 second, and the controller stays busy for 2 seconds after the user selects Preview: the deadline passes before playback, Preview does not play, and editing returns 1 second after the selection.
 - The user types 2200 in the Sleep temperature field and selects Preview: the field commits 2200 when focus moves, and Preview plays the schedule with that value.
-- Management turns off from the tray after the user selects Preview but before playback begins: Preview does not start, the starting state ends, and settings shows that Preview requires management.
+- The user turns management off in settings after selecting Preview but before playback begins: Preview does not start, the starting state ends, and settings shows that Preview requires management.
 - Output fails during playback: graph time continues, and recovery uses its current position. Completion selects the current target even if native recovery remains pending.
 - A native call started during a ten-second Preview is still running at its deadline: the graph returns to current time, Preview status ends, editing becomes available, and a held location result applies. Cleanup and replacement output wait for the running call.
 - Preview runs with a 1 Hz output-rate ceiling: the visible graph moves between native calls according to the playback clock without increasing their permitted rate.
