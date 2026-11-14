@@ -569,6 +569,52 @@ fn browsing_to_a_listed_executable_keeps_the_restriction_choice_available() {
 }
 
 #[test]
+fn restricting_a_browsed_listed_executable_to_its_installation_clears_the_already_listed_message() {
+    let fixture = Fixture::new(Some(&entries_file(&["javaw.exe"], &[])));
+    let model = fixture.model(Vec::new());
+    let mut dialog = AddDialog::new(Field::Suppression);
+    assert!(dialog.browsed(&model, file("javaw.exe")));
+    dialog.restrict(
+        &file("javaw.exe").identity().expect("fixture path"),
+        true,
+        &model,
+    );
+    let view = dialog_view(&model, &english(), &region(), &dialog);
+    assert!(view.rows[0].available);
+    assert_eq!(view.message, None);
+}
+
+#[test]
+fn a_scope_chosen_in_the_dialog_does_not_read_as_already_on_the_list() {
+    let fixture = Fixture::new(None);
+    let model = fixture.model(Vec::new());
+    let mut dialog = AddDialog::new(Field::Suppression);
+    assert!(dialog.browsed(&model, installation("A")));
+    assert!(dialog.browsed(&model, installation("B")));
+    let view = dialog_view(&model, &english(), &region(), &dialog);
+    let available = |folder| {
+        view.rows
+            .iter()
+            .find(|row| row.path == installation(folder).identity())
+            .map(|row| row.available)
+    };
+    assert_eq!(available("A"), Some(true));
+    assert_eq!(available("B"), Some(false));
+    assert_eq!(view.message, None);
+}
+
+#[test]
+fn removing_the_listed_rule_clears_the_already_listed_message() {
+    let listed = Fixture::new(Some(&entries_file(&["javaw.exe"], &[])));
+    let mut dialog = AddDialog::new(Field::Suppression);
+    assert!(dialog.browsed(&listed.model(Vec::new()), file("javaw.exe")));
+    let removed = Fixture::new(Some(&entries_file(&[], &[])));
+    let view = dialog_view(&removed.model(Vec::new()), &english(), &region(), &dialog);
+    assert!(view.rows[0].available);
+    assert_eq!(view.message, None);
+}
+
+#[test]
 fn browsed_candidate_keeps_its_section_when_it_enters_recent_history() {
     let fixture = Fixture::new(None);
     let model = fixture.model(Vec::new());
