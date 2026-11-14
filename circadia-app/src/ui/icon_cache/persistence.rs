@@ -86,6 +86,7 @@ fn run(folder: &Path, shared: &(Mutex<Work>, Condvar)) {
         .and_then(super::valid_index)
         .map(|(entries, _)| entries.into_values().map(|entry| entry.image).collect())
         .unwrap_or_default();
+    let mut failure = None;
     loop {
         let work = shared
             .0
@@ -104,14 +105,15 @@ fn run(folder: &Path, shared: &(Mutex<Work>, Condvar)) {
         for image in stored.difference(&keep) {
             delete_images(folder, *image);
         }
+        let mut written = Ok(());
         for (image, images) in images {
             if let Err(error) = super::write_images(folder, image, &images) {
-                tracing::warn!(%error, "writing a cached icon");
                 delete_images(folder, image);
+                written = written.and(Err(error));
             }
         }
         stored = keep;
-        let written = toml::to_string(&index)
+        let index_written = toml::to_string(&index)
             .map_err(io::Error::other)
             .and_then(|text| {
                 fs_err::create_dir_all(folder)?;
@@ -119,8 +121,18 @@ fn run(folder: &Path, shared: &(Mutex<Work>, Condvar)) {
                 fs_err::write(&partial, text)?;
                 fs_err::rename(partial, folder.join("index.toml"))
             });
-        if let Err(error) = written {
-            tracing::warn!(%error, "writing the icon cache index");
+        match written.and(index_written) {
+            Ok(()) => {
+                if failure.take().is_some() {
+                    tracing::info!("icon cache writes recovered");
+                }
+            }
+            Err(error) => {
+                if failure != Some(error.kind()) {
+                    tracing::warn!(%error, "writing the icon cache");
+                }
+                failure = Some(error.kind());
+            }
         }
     }
 }
