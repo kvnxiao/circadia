@@ -186,7 +186,18 @@ impl LogFile {
         };
         if size > 0 && size + length > WRITER_LIMIT as u64 {
             drop(file);
-            fs_err::rename(&self.current, &self.previous)?;
+            // A deleted current file needs no rotation; removing the previous
+            // file would discard records while the log is below its size bound.
+            let rotated = match fs_err::rename(&self.current, &self.previous) {
+                Ok(()) => true,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+                Err(_) => fs_err::remove_file(&self.previous)
+                    .and_then(|()| fs_err::rename(&self.current, &self.previous))
+                    .is_ok(),
+            };
+            if !rotated {
+                drop(fs_err::File::create(&self.current)?);
+            }
             file = open_append(&self.current)?;
             size = 0;
         }
@@ -288,6 +299,40 @@ mod tests {
         write_records(&writer, 1..=1);
 
         assert_eq!(file_size(directory.path(), "circadia.1.log"), 1_048_000);
+        assert_eq!(file_size(directory.path(), "circadia.log"), 1024);
+    }
+
+    #[test]
+    fn failed_rotation_discards_the_oldest_records() {
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        let logs = directory.path().join("logs");
+        fs_err::create_dir(&logs).expect("log directory");
+        fs_err::create_dir(logs.join("circadia.1.log")).expect("blocked previous log");
+        fs_err::write(logs.join("circadia.log"), vec![b'x'; WRITER_LIMIT]).expect("full log");
+
+        let writer = LogWriter::new(directory.path());
+        write_records(&writer, 1..=1);
+
+        assert!(read_log(directory.path(), "circadia.log").starts_with("record 00001 "));
+        assert_eq!(file_size(directory.path(), "circadia.log"), 1024);
+    }
+
+    #[test]
+    fn a_deleted_current_file_keeps_the_previous_file() {
+        let directory = tempfile::tempdir().expect("temporary data directory");
+        let logs = directory.path().join("logs");
+        fs_err::create_dir(&logs).expect("log directory");
+        fs_err::write(logs.join("circadia.1.log"), b"older\n").expect("previous log");
+        fs_err::write(logs.join("circadia.log"), vec![b'x'; WRITER_LIMIT - 1024])
+            .expect("nearly full log");
+
+        let writer = LogWriter::new(directory.path());
+        write_records(&writer, 1..=1);
+        fs_err::remove_file(logs.join("circadia.log")).expect("delete the open current log");
+        write_records(&writer, 2..=2);
+
+        assert_eq!(read_log(directory.path(), "circadia.1.log"), "older\n");
+        assert!(read_log(directory.path(), "circadia.log").starts_with("record 00002 "));
         assert_eq!(file_size(directory.path(), "circadia.log"), 1024);
     }
 
