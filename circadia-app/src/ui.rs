@@ -54,6 +54,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Duration;
+use std::time::Instant;
 use windows_reactor::App;
 use windows_reactor::Application;
 use windows_reactor::ApplicationContext;
@@ -409,8 +410,42 @@ struct Desktop {
     location_source: Box<dyn settings::location::Locate>,
     location_event: Arc<Mutex<Option<settings::location::Event>>>,
     held_location: Option<crate::Coordinates>,
-    stopped_preview: Option<std::time::Instant>,
+    preview: PreviewRequest,
+    logged_preview: &'static str,
     updates: Option<crate::updates::Client>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum PreviewRequest {
+    Idle,
+    Requested {
+        deadline: Instant,
+        receipt: Option<u64>,
+    },
+}
+
+impl PreviewRequest {
+    fn submitted(&mut self, command: &ControllerCommand, id: u64) {
+        if let Self::Requested {
+            receipt: receipt @ None,
+            ..
+        } = self
+            && matches!(command, ControllerCommand::Preview(_))
+        {
+            *receipt = Some(id);
+        }
+    }
+}
+
+fn stops_preview(command: &ControllerCommand) -> bool {
+    matches!(
+        command,
+        ControllerCommand::StopPreview
+            | ControllerCommand::Lock
+            | ControllerCommand::Suspend
+            | ControllerCommand::Resume { .. }
+            | ControllerCommand::Recompute(Recompute::Clock)
+    ) || matches!(command, ControllerCommand::Configure { config, .. } if !config.input().manage_night_light)
 }
 
 impl Application for Desktop {
@@ -482,14 +517,18 @@ impl Application for Desktop {
         } else if self.exit_ready() {
             context.exit();
         }
+        self.log_preview();
         self.icons.flush();
     }
 
     fn view(&self, input: &Input, context: &ApplicationViewContext<Self>) -> ApplicationView {
         let configuration = self.configuration.borrow();
-        let control = self.snapshot.as_deref().map(|snapshot| {
-            status::Control::new(snapshot, std::time::Instant::now(), self.stopped_preview)
-        });
+        let now = Instant::now();
+        let preview = self.preview_view(now);
+        let control = self
+            .snapshot
+            .as_deref()
+            .map(|snapshot| status::Control::new(snapshot, &preview, now));
         let line = status::status_line(
             &input.text,
             &input.regional_format,
@@ -510,7 +549,7 @@ impl Application for Desktop {
                 .map_or(&empty_names, FileInfoClient::names),
         )
         .with_sources(sources)
-        .with_stopped_preview(self.stopped_preview)
+        .with_preview(preview)
         .with_crash(self.crash.as_ref());
         let items = status::menu_items(
             &input.text,
@@ -597,15 +636,31 @@ impl Desktop {
             location_source,
             location_event: Arc::default(),
             held_location: None,
-            stopped_preview: None,
+            preview: PreviewRequest::Idle,
+            logged_preview: "Start",
             updates: None,
+        }
+    }
+
+    fn preview_view(&self, now: Instant) -> status::PreviewView {
+        status::preview_view(&self.preview, self.snapshot.as_deref(), now)
+    }
+
+    fn preview_idle(&self) -> bool {
+        self.preview_view(Instant::now()) == status::PreviewView::Idle
+    }
+
+    fn log_preview(&mut self) {
+        let state = self.preview_view(Instant::now()).name();
+        if state != self.logged_preview {
+            crate::log::transition("preview", self.logged_preview, state);
+            self.logged_preview = state;
         }
     }
 
     fn settings_closed(&mut self) {
         self.set_settings_open(false);
         if !self.exiting {
-            self.stopped_preview = self.snapshot.as_deref().and_then(status::preview_deadline);
             self.queue(ControllerCommand::StopPreview);
             // Closing settings ends Preview, so a position held for playback
             // applies now.
@@ -690,14 +745,7 @@ impl Desktop {
     }
 
     fn release_location(&mut self) {
-        if !self
-            .snapshot
-            .as_ref()
-            .filter(|snapshot| {
-                !status::preview_stopped(status::preview_deadline(snapshot), self.stopped_preview)
-            })
-            .is_some_and(|snapshot| status::preview_active(snapshot, std::time::Instant::now()))
-        {
+        if self.preview_idle() {
             self.apply_location();
         }
     }
@@ -775,6 +823,15 @@ impl Desktop {
     }
 
     fn command(&mut self, command: settings::Command) {
+        let edits = matches!(
+            command,
+            settings::Command::Add(..)
+                | settings::Command::Remove(..)
+                | settings::Command::Title { .. }
+        );
+        if edits && !self.preview_idle() {
+            return;
+        }
         match command {
             settings::Command::DismissUpdate => {
                 if let Some(updates) = &self.updates {
@@ -816,7 +873,14 @@ impl Desktop {
             settings::Command::RetrySignIn => self.retry_sign_in(),
             settings::Command::Preview => {
                 let config = self.configuration.borrow().accepted().cloned();
-                if let Some(config) = config {
+                if let Some(config) = config
+                    && self.preview_idle()
+                {
+                    self.preview = PreviewRequest::Requested {
+                        deadline: Instant::now()
+                            + Duration::from_secs(config.input().preview_seconds.unsigned_abs()),
+                        receipt: None,
+                    };
                     self.queue(ControllerCommand::Preview(Box::new(Arc::unwrap_or_clone(
                         config,
                     ))));
@@ -972,6 +1036,12 @@ impl Desktop {
     }
 
     fn edit(&mut self, edits: Vec<(Field, FieldValue)>) {
+        let turns_management_off = edits
+            .iter()
+            .any(|edit| matches!(edit, (Field::ManageNightLight, FieldValue::Switch(false))));
+        if !turns_management_off && !self.preview_idle() {
+            return;
+        }
         let sign_in = edits
             .iter()
             .find_map(|(field, value)| match (field, value) {
@@ -1079,16 +1149,8 @@ impl Desktop {
         if self.exiting || self.fatal.is_some() {
             return;
         }
-        let stops_preview = matches!(
-            command,
-            ControllerCommand::StopPreview
-                | ControllerCommand::Lock
-                | ControllerCommand::Suspend
-                | ControllerCommand::Resume { .. }
-                | ControllerCommand::Recompute(Recompute::Clock)
-        ) || matches!(&command, ControllerCommand::Configure { config, .. } if !config.input().manage_night_light);
-        if stops_preview {
-            self.stopped_preview = self.snapshot.as_deref().and_then(status::preview_deadline);
+        if stops_preview(&command) {
+            self.preview = PreviewRequest::Idle;
         }
         // Each Configure has the whole configuration, so a newer one replaces a
         // directly preceding pending Configure. Otherwise a slider drag while
@@ -1121,7 +1183,11 @@ impl Desktop {
             return;
         };
         while let Some(command) = self.pending.front() {
-            match session.client.submit(command.clone()) {
+            let submitted = session.client.submit(command.clone());
+            if let Ok(receipt) = &submitted {
+                self.preview.submitted(command, receipt.id);
+            }
+            match submitted {
                 Ok(receipt)
                     if matches!(command, ControllerCommand::Recompute(Recompute::Retry)) =>
                 {
@@ -1315,6 +1381,8 @@ impl Desktop {
     fn begin_exit(&mut self) {
         self.updates = None;
         self.cancel_location();
+        self.preview = PreviewRequest::Idle;
+        self.log_preview();
         if !self.exiting {
             self.configuration.borrow_mut().exit();
         }

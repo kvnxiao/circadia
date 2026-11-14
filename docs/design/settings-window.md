@@ -76,7 +76,7 @@ Compact switches and icon actions stay beside wrapping descriptions at supported
 
 The rightmost icon button or lock glyph uses a 40 epx action area whose right edge is 4 epx inside the card. Its center sits 24 epx from the card edge, while its 16 epx glyph ends at the same visible inset as ordinary controls. Each compact switch uses a 52 epx action area with a 40 epx track and its state label in the preceding column. Its action area uses the same 4 epx inset. These areas preserve native hit testing and focus visuals.
 
-A disabled setting shows its controls' disabled state, and its description says why when the reason is not visible nearby. Source: [Guidelines for app settings](https://learn.microsoft.com/en-us/windows/apps/design/app-settings/guidelines-for-app-settings#recommended-page-content). While Preview plays, every editable control shows its disabled state.
+A disabled setting shows its controls' disabled state, and its description says why when the reason is not visible nearby. Source: [Guidelines for app settings](https://learn.microsoft.com/en-us/windows/apps/design/app-settings/guidelines-for-app-settings#recommended-page-content). While Preview starts or plays, every editable control except the "Let Circadia manage Night light" switch shows its disabled state.
 
 ### Controls
 
@@ -201,13 +201,14 @@ When translated text does not fit, the text wraps within its column. If a column
 A 1 epx divider runs across the top of the footer. The footer has 12 epx vertical and 20 epx horizontal padding and 16 epx between its parts:
 
 - **Left:** a caption in Caption and secondary text. While Preview plays, a 3 epx progress bar (accent fill on a neutral track) appears 8 epx below the caption. Its space and top margin remain reserved while idle, so inserting and removing the bar does not change the footer height. Its fill advances linearly to full width shortly before the playback deadline, independently of Night light writes.
-- **Right:** a button at least 112 epx wide with a play glyph and "Preview", or a stop glyph and "Stop" while Preview plays.
+- **Right:** a button at least 112 epx wide with a play glyph and "Preview", or a stop glyph and "Stop" while Preview plays. From the moment the user selects Preview until playback begins or Preview ends without playing, the button shows "Preview" in its disabled state.
 
 The bar reaches full width before the playback deadline by the smaller of 100 ms and 10% of the duration captured when playback starts. It stays full until the actual deadline, then disappears. Its accessible progress value follows that visual fill; the playback clock and graph continue on the actual timeline. Editing unlocks at the actual deadline. The visual deadline does not change the timing of Night light requests. Stop and the other cancellations defined by [the Preview contract](../specs/application.md#req-preview-temperature-curve--preview-a-complete-daily-cycle) remove the bar immediately. Starting another Preview replaces the visual timeline, and hiding the Schedule page stops its animation.
 
 | State | Caption |
 | :-- | :-- |
 | Ready | "Plays the next 24 hours on your screen in 10 seconds, even while suppressed." |
+| Starting | "Starting the preview…" |
 | Playing | "Previewing 9:42 PM · 3100 K" |
 | Blocked by invalid input | "Fix the highlighted values to preview." |
 | Blocked because management is off | "Turn on Night light management to preview." |
@@ -425,6 +426,7 @@ A feature message is a nested row directly below the card's header row, visible 
 - From top to bottom: page title, app-wide banners (the first one is the problem the navigation status line names), the banner for other pages, then the page's cards.
 - Screen readers announce each banner, field message, and feature message when it appears, changes, or disappears.
 - One accessible status text announces management mode, schedule phase, failures, and recovery on every page without interrupting current screen-reader speech. Changing temperatures, progress percentages, and playback clocks remain available on demand without automatic announcements.
+- Screen readers announce the Preview state caption when it changes, without interrupting current speech: "Starting the preview…" when the user selects Preview, "Previewing" without the changing time and temperature when playback begins, and the Ready or Blocked caption when Preview ends.
 - A banner does not appear and disappear in quick succession, so the page does not flash or jump. Source: [InfoBar: Enter and exit usability](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/infobar#enter-and-exit-usability).
 
 ## Time picker

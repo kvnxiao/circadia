@@ -964,7 +964,7 @@ fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
         submit(ControllerCommand::Preview(Box::new(
             config.clone().validate().expect("preview config"),
         )));
-        wait_for(&client, &notified, |snapshot| snapshot.preview_active);
+        wait_for(&client, &notified, |snapshot| snapshot.preview.is_some());
         submit(ControllerCommand::StopPreview);
         wait_for(&client, &notified, |snapshot| !snapshot.preview_active);
         assert!(worker.shutdown().worker.is_ok());
@@ -983,6 +983,176 @@ fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
             "INFO circadia_app::controller::worker: manual suppression ended",
             "INFO circadia_app::controller::worker: preview started",
             "INFO circadia_app::controller::worker: preview ended",
+        ]
+    );
+}
+
+fn ready_worker(config: &Config) -> (Worker<impl FnMut() -> Foreground>, CalculationWorker) {
+    let calculation = CalculationWorker::start(|| Ok(())).expect("calculation worker");
+    let shared = Arc::new(Shared {
+        origin: Instant::now(),
+        queue: Mutex::new(Queue::default()),
+        latest: Mutex::new(None),
+        generation: AtomicU64::new(0),
+        stopping: AtomicBool::new(false),
+        exit: Mutex::new(None),
+        finished: AtomicBool::new(false),
+        wake: Arc::new(NativeWake::new().expect("wake event")),
+        calculation: calculation.client(),
+        notify: Arc::new(|| Ok(())),
+    });
+    let mut worker = Worker::new(
+        Some(Arc::new(config.clone())),
+        ControlRuntime::new("circadia.exe").expect("runtime"),
+        shared,
+        Native::with_backend(Backend(Arc::default())),
+        || Foreground::Unknown,
+    );
+    worker
+        .recalculate(OutputUpdate::Fade, None)
+        .expect("schedule request");
+    apply_calculations(&mut worker, |runtime| {
+        runtime.state() == SchedulingState::Available
+    });
+    worker.publish().expect("initial publication");
+    (worker, calculation)
+}
+
+fn apply_calculations<F: FnMut() -> Foreground>(
+    worker: &mut Worker<F>,
+    until: impl Fn(&ControlRuntime) -> bool,
+) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !until(worker.driver.runtime()) {
+        assert!(Instant::now() < deadline, "calculation result applied");
+        std::thread::sleep(Duration::from_millis(5));
+        worker.apply_calculation().expect("calculation result");
+    }
+}
+
+fn apply_now<F: FnMut() -> Foreground>(
+    worker: &mut Worker<F>,
+    id: u64,
+    command: ControllerCommand,
+) {
+    let entered = worker.now().output;
+    worker
+        .apply(Envelope {
+            id,
+            command,
+            calculation: None,
+            completion: mpsc::sync_channel(1).0,
+            entered,
+        })
+        .expect("command applied");
+}
+
+fn preview_records(log: &[String]) -> Vec<&str> {
+    log.iter()
+        .map(String::as_str)
+        .filter(|record| record.contains("preview"))
+        .collect()
+}
+
+fn one_second_preview() -> Config {
+    ConfigInput {
+        preview_seconds: 1,
+        ..input(3400)
+    }
+    .validate()
+    .expect("config")
+}
+
+#[test]
+fn preview_while_management_is_off_records_that_it_did_not_start() {
+    let config = unmanaged(3400).validate().expect("config");
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let (mut worker, calculation) = ready_worker(&config);
+        apply_now(
+            &mut worker,
+            1,
+            ControllerCommand::Preview(Box::new(config.clone())),
+        );
+        worker.publish().expect("publication");
+        calculation.shutdown().expect("calculation shutdown");
+    });
+    assert_eq!(
+        preview_records(&log),
+        ["INFO circadia_app::controller::worker: preview not started"]
+    );
+}
+
+#[test]
+fn a_pending_preview_whose_deadline_passes_before_its_calculation_records_that_it_did_not_start() {
+    let config = one_second_preview();
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let (mut worker, calculation) = ready_worker(&config);
+        let entered = worker.now().output;
+        apply_now(
+            &mut worker,
+            1,
+            ControllerCommand::Preview(Box::new(config.clone())),
+        );
+        worker.publish().expect("pending publication");
+        assert!(worker.driver.runtime().preview_active());
+        let mut later = worker.now();
+        later.output.elapsed = entered.elapsed + Duration::from_secs(2);
+        worker
+            .driver
+            .runtime_mut()
+            .advance(later)
+            .expect("logical deadline");
+        worker.publish().expect("publication after the deadline");
+        assert!(!worker.driver.runtime().preview_active());
+        calculation.shutdown().expect("calculation shutdown");
+    });
+    assert_eq!(
+        preview_records(&log),
+        ["INFO circadia_app::controller::worker: preview not started"]
+    );
+}
+
+#[test]
+fn a_stop_processed_with_its_preview_before_any_publication_records_that_it_did_not_start() {
+    let config = one_second_preview();
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let (mut worker, calculation) = ready_worker(&config);
+        apply_now(
+            &mut worker,
+            1,
+            ControllerCommand::Preview(Box::new(config.clone())),
+        );
+        apply_now(&mut worker, 2, ControllerCommand::StopPreview);
+        worker.publish().expect("publication");
+        calculation.shutdown().expect("calculation shutdown");
+    });
+    assert_eq!(
+        preview_records(&log),
+        ["INFO circadia_app::controller::worker: preview not started"]
+    );
+}
+
+#[test]
+fn preview_started_is_recorded_when_playback_begins_not_when_the_run_is_pending() {
+    let config = input(3400).validate().expect("config");
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        let (mut worker, calculation) = ready_worker(&config);
+        apply_now(
+            &mut worker,
+            1,
+            ControllerCommand::Preview(Box::new(config.clone())),
+        );
+        worker.publish().expect("pending publication");
+        tracing::info!("preview pending published");
+        apply_calculations(&mut worker, |runtime| runtime.preview().is_some());
+        worker.publish().expect("playback publication");
+        calculation.shutdown().expect("calculation shutdown");
+    });
+    assert_eq!(
+        preview_records(&log),
+        [
+            "INFO circadia_app::controller::worker::tests: preview pending published",
+            "INFO circadia_app::controller::worker: preview started",
         ]
     );
 }

@@ -7,6 +7,7 @@ use crate::ConfigInput;
 use crate::Coordinates;
 use crate::controller::ControllerCommand;
 use crate::ui::Desktop;
+use crate::ui::PreviewRequest;
 use crate::ui::configuration::Configuration;
 use crate::ui::settings::Model;
 use crate::ui::settings::number_edits;
@@ -278,6 +279,33 @@ fn managed_configuration(directory: &tempfile::TempDir) -> Configuration {
     configuration
 }
 
+fn selected(snapshot: &mut ControllerSnapshot, seconds: u64) -> PreviewRequest {
+    snapshot.command = Some((1, crate::CommandOutcome::Applied));
+    PreviewRequest::Requested {
+        deadline: snapshot.origin + Duration::from_secs(seconds),
+        receipt: Some(1),
+    }
+}
+
+fn with_request(
+    configuration: &Configuration,
+    snapshot: &ControllerSnapshot,
+    request: &PreviewRequest,
+) -> Model {
+    Model::new(
+        configuration,
+        Some(snapshot),
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    )
+    .with_preview(status::preview_view(
+        request,
+        Some(snapshot),
+        Instant::now(),
+    ))
+}
+
 fn preview_reason(model: &Model) -> (bool, String) {
     let view = preview_view(model, &english(), &region(), Instant::now());
     (view.enabled, plain(&view.caption))
@@ -291,14 +319,17 @@ fn preview_playback_disables_inputs_but_not_stop_the_management_switch_or_manual
     let configuration = managed_configuration(&directory);
     let mut model = managing(&configuration);
     assert!(model.editable());
-    model.preview_active = true;
+    model.preview = status::PreviewView::Playing {
+        playing: Playing::new(&playing_snapshot(1)).expect("playback fixture"),
+        deadline: Instant::now() + std::time::Duration::from_secs(10),
+    };
     assert!(!model.editable());
     assert_eq!(management_view(&model, &english()), unlocked(true));
     let preview = preview_view(&model, &english(), &region(), Instant::now());
     assert!(preview.playing && preview.enabled);
-    assert_eq!(plain(&preview.caption), "Starting the preview…");
+    assert_eq!(plain(&preview.caption), "Previewing");
     assert!(apps::manual_view(&model, &english(), &region()).enabled);
-    model.preview_active = false;
+    model.preview = status::PreviewView::Idle;
     assert!(model.editable());
 }
 
@@ -307,6 +338,200 @@ fn preview_is_ready_while_management_is_on_and_every_field_is_valid() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     let model = managing(&managed_configuration(&directory));
     assert_eq!(preview_reason(&model), (true, READY.to_owned()));
+}
+
+fn playing_snapshot(processed: u64) -> ControllerSnapshot {
+    let mut snapshot = calculated(None, Vec::new());
+    let mut zone = crate::WindowsZone::named("UTC", false).expect("UTC rules");
+    let playback = crate::Playback::capture(
+        &Config::default(),
+        &mut zone,
+        "2026-10-27T12:00:00Z".parse().expect("UTC instant"),
+    )
+    .expect("captured playback");
+    snapshot.preview = Some(crate::RunningPreview {
+        playback: Arc::new(playback),
+        start: Duration::ZERO,
+        end: Duration::from_secs(10),
+    });
+    snapshot.preview_active = true;
+    snapshot.preview_deadline = Some(Duration::from_secs(10));
+    snapshot.command = Some((processed, crate::CommandOutcome::Applied));
+    snapshot
+}
+
+fn managed_desktop(directory: &tempfile::TempDir) -> (Rc<RefCell<Configuration>>, Desktop) {
+    let (configuration, mut desktop) = desktop(directory);
+    desktop.edit(switch_edit(true));
+    desktop.pending.clear();
+    (configuration, desktop)
+}
+
+fn shown(configuration: &RefCell<Configuration>, desktop: &Desktop, now: Instant) -> Model {
+    Model::new(
+        &configuration.borrow(),
+        desktop.snapshot.as_deref(),
+        false,
+        String::new(),
+        &BTreeMap::new(),
+    )
+    .with_preview(desktop.preview_view(now))
+}
+
+fn submit(desktop: &mut Desktop, first: u64) {
+    for (id, command) in (first..).zip(std::mem::take(&mut desktop.pending)) {
+        desktop.preview.submitted(&command, id);
+    }
+}
+
+fn announced(model: &Model) -> String {
+    plain(&status::announcement(
+        &english(),
+        &model.control(Instant::now()),
+        status::Stored::default(),
+        jiff::Timestamp::now(),
+    ))
+}
+
+fn accepted(configuration: &RefCell<Configuration>) -> crate::ConfigInput {
+    configuration
+        .borrow()
+        .accepted()
+        .expect("accepted configuration")
+        .input()
+        .clone()
+}
+
+#[test]
+fn selecting_preview_before_any_snapshot_shows_it_starting_with_preview_and_edits_disabled() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let (configuration, mut desktop) = managed_desktop(&directory);
+    let before = shown(&configuration, &desktop, Instant::now());
+    desktop.command(crate::ui::settings::Command::Preview);
+    let starting = shown(&configuration, &desktop, Instant::now());
+    assert!(!starting.editable());
+    let preview = preview_view(&starting, &english(), &region(), Instant::now());
+    assert!(!preview.playing && !preview.enabled);
+    assert_eq!(plain(&preview.caption), "Starting the preview…");
+    let ready = preview_view(&before, &english(), &region(), Instant::now());
+    assert_ne!(plain(&ready.caption), plain(&preview.caption));
+    assert!(
+        !announced(&starting).contains("Starting the preview…"),
+        "{}",
+        announced(&starting)
+    );
+}
+
+#[test]
+fn an_edit_after_selecting_preview_does_not_apply_but_a_tray_toggle_and_turning_management_off_do()
+{
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let (configuration, mut desktop) = managed_desktop(&directory);
+    desktop.command(crate::ui::settings::Command::Preview);
+    let before = accepted(&configuration);
+    desktop.edit(vec![(Field::SleepKelvin, FieldValue::Number(2200))]);
+    assert_eq!(accepted(&configuration), before);
+    desktop.tray_toggle("add:0:C:/Apps/game.exe");
+    assert_eq!(
+        accepted(&configuration)
+            .suppression
+            .iter()
+            .map(|entry| entry.executable.as_str())
+            .collect::<Vec<_>>(),
+        ["game.exe"]
+    );
+    desktop.edit(switch_edit(false));
+    assert!(!accepted(&configuration).manage_night_light);
+}
+
+#[test]
+fn a_second_preview_selection_while_starting_queues_no_command() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let (_configuration, mut desktop) = managed_desktop(&directory);
+    desktop.command(crate::ui::settings::Command::Preview);
+    desktop.command(crate::ui::settings::Command::Preview);
+    assert_eq!(desktop.pending.len(), 1, "{:?}", desktop.pending);
+    submit(&mut desktop, 1);
+    desktop.command(crate::ui::settings::Command::Preview);
+    assert!(desktop.pending.is_empty(), "{:?}", desktop.pending);
+}
+
+#[test]
+fn a_one_second_preview_without_a_snapshot_change_restores_editing_one_second_after_selection() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let (configuration, mut desktop) = managed_desktop(&directory);
+    desktop.edit(vec![(Field::PreviewSeconds, FieldValue::Number(1))]);
+    desktop.pending.clear();
+    let selected = Instant::now();
+    desktop.command(crate::ui::settings::Command::Preview);
+    let returned = Instant::now();
+    let starting = shown(&configuration, &desktop, returned);
+    assert!(!starting.editable());
+    let deadline = starting.preview.deadline().expect("logical deadline");
+    assert!(deadline >= selected + Duration::from_secs(1));
+    assert!(deadline <= returned + Duration::from_secs(1));
+    let ended = shown(&configuration, &desktop, deadline);
+    assert_eq!(ended.preview, status::PreviewView::Idle);
+    assert!(ended.editable());
+}
+
+#[test]
+fn turning_management_off_while_preview_starts_ends_it_and_says_preview_needs_management() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let (configuration, mut desktop) = managed_desktop(&directory);
+    desktop.command(crate::ui::settings::Command::Preview);
+    desktop.edit(switch_edit(false));
+    let model = shown(&configuration, &desktop, Instant::now());
+    assert_eq!(model.preview, status::PreviewView::Idle);
+    assert!(model.editable());
+    assert_eq!(
+        preview_reason(&model),
+        (
+            false,
+            "Turn on Night light management on the Schedule page to preview.".to_owned()
+        )
+    );
+}
+
+#[test]
+fn a_rejected_start_restores_editing_and_shows_why_preview_is_unavailable() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let (configuration, mut desktop) = managed_desktop(&directory);
+    desktop.command(crate::ui::settings::Command::Preview);
+    submit(&mut desktop, 1);
+    let mut snapshot = calculated(None, Vec::new());
+    snapshot.management = ManagementState::Off;
+    snapshot.command = Some((1, crate::CommandOutcome::Unavailable));
+    desktop.snapshot = Some(Arc::new(snapshot));
+    let model = shown(&configuration, &desktop, Instant::now());
+    assert_eq!(model.preview, status::PreviewView::Idle);
+    assert!(model.editable());
+    assert_eq!(
+        preview_reason(&model),
+        (
+            false,
+            "Turn on Night light management on the Schedule page to preview.".to_owned()
+        )
+    );
+}
+
+#[test]
+fn stop_during_playback_makes_preview_available_at_once() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let (configuration, mut desktop) = managed_desktop(&directory);
+    desktop.command(crate::ui::settings::Command::Preview);
+    submit(&mut desktop, 1);
+    desktop.snapshot = Some(Arc::new(playing_snapshot(1)));
+    let playing = shown(&configuration, &desktop, Instant::now());
+    let stop = preview_view(&playing, &english(), &region(), Instant::now());
+    assert!(stop.playing && stop.enabled);
+    assert!(!playing.editable());
+    desktop.command(crate::ui::settings::Command::StopPreview);
+    let stopped = shown(&configuration, &desktop, Instant::now());
+    let ready = preview_view(&stopped, &english(), &region(), Instant::now());
+    assert!(!ready.playing && ready.enabled);
+    assert_eq!(plain(&ready.caption), READY);
+    assert!(stopped.editable());
 }
 
 #[test]
@@ -331,17 +556,14 @@ fn an_expired_preview_snapshot_restores_editing_and_current_time() {
     });
     snapshot.preview_active = true;
     snapshot.preview_deadline = Some(Duration::from_secs(10));
-    let model = Model::new(
-        &configuration,
-        Some(&snapshot),
-        false,
-        String::new(),
-        &BTreeMap::new(),
-    );
+    let request = selected(&mut snapshot, 10);
+    let model = with_request(&configuration, &snapshot, &request);
     assert!(model.editable());
     assert!(!preview_view(&model, &english(), &region(), Instant::now()).playing);
-    assert!(model.playing.is_none());
-    assert!(!status::Control::new(&snapshot, Instant::now(), None).preview_active);
+    assert!(model.playing().is_none());
+    let now = Instant::now();
+    let view = status::preview_view(&request, Some(&snapshot), now);
+    assert!(!status::Control::new(&snapshot, &view, now).preview_active);
 }
 
 #[test]
@@ -365,17 +587,18 @@ fn stopping_a_blocked_run_unlocks_editing_without_stopping_its_replacement() {
         start: Duration::ZERO,
         end: Duration::from_secs(10),
     });
-    let stopped = snapshot.origin.checked_add(Duration::from_secs(10));
-    let model = snapshot_model(&configuration, &snapshot);
+    let request = selected(&mut snapshot, 10);
+    let model = with_request(&configuration, &snapshot, &request);
     assert!(!model.editable());
-    let ended = model.with_stopped_preview(stopped);
+    let ended = with_request(&configuration, &snapshot, &PreviewRequest::Idle);
     assert!(ended.editable());
-    assert!(ended.playing.is_none());
+    assert!(ended.playing().is_none());
     assert!(!ended.control(Instant::now()).preview_active);
     snapshot.preview_deadline = Some(Duration::from_secs(11));
-    let replacement = snapshot_model(&configuration, &snapshot).with_stopped_preview(stopped);
+    let request = selected(&mut snapshot, 11);
+    let replacement = with_request(&configuration, &snapshot, &request);
     assert!(!replacement.editable());
-    assert!(replacement.playing.is_some());
+    assert!(replacement.playing().is_some());
 }
 
 #[test]
@@ -385,20 +608,24 @@ fn native_temperature_status_changes_do_not_render_preview_at_the_output_rate() 
     let mut snapshot = scheduled(ConfigInput::default());
     snapshot.preview_active = true;
     snapshot.preview_deadline = Some(Duration::from_secs(10));
+    let request = selected(&mut snapshot, 10);
+    let preview = status::preview_view(&request, Some(&snapshot), Instant::now());
     let first = Model::new(
         &configuration,
         Some(&snapshot),
         false,
         "Preview 3400 K".into(),
         &BTreeMap::new(),
-    );
+    )
+    .with_preview(preview.clone());
     let next = Model::new(
         &configuration,
         Some(&snapshot),
         false,
         "Preview 3500 K".into(),
         &BTreeMap::new(),
-    );
+    )
+    .with_preview(preview);
     assert_eq!(first, next);
 }
 
@@ -1024,13 +1251,8 @@ fn visible_controls_determine_preview_ticks_and_graph_indicator_wakes() {
     });
     snapshot.preview_active = true;
     snapshot.preview_deadline = Some(Duration::from_secs(10));
-    let playing = Model::new(
-        &configuration,
-        Some(&snapshot),
-        false,
-        String::new(),
-        &BTreeMap::new(),
-    );
+    let request = selected(&mut snapshot, 10);
+    let playing = with_request(&configuration, &snapshot, &request);
     assert!(preview_values_shown(
         Page::Schedule,
         &playing,

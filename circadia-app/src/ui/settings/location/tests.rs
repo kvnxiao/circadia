@@ -4,6 +4,7 @@ use crate::ControllerSnapshot;
 use crate::controller::ControllerCommand;
 use crate::platform::nls::RegionalFormat;
 use crate::ui::Desktop;
+use crate::ui::PreviewRequest;
 use crate::ui::configuration::Configuration;
 use crate::ui::settings::Command;
 use crate::ui::settings::schedule::coordinates_enabled;
@@ -224,12 +225,20 @@ fn snapshot(preview_active: bool) -> Arc<ControllerSnapshot> {
             manual_deadline: None,
         },
         recent: Vec::new(),
-        command: None,
+        command: Some((1, crate::CommandOutcome::Applied)),
         native_errors: BTreeMap::new(),
         configured_revision: 0,
         control_error: None,
         stopped: false,
     })
+}
+
+fn previewing(desktop: &mut Desktop) {
+    desktop.preview = PreviewRequest::Requested {
+        deadline: std::time::Instant::now() + std::time::Duration::from_secs(10),
+        receipt: Some(1),
+    };
+    desktop.snapshot = Some(snapshot(true));
 }
 
 #[test]
@@ -422,17 +431,18 @@ fn a_failure_remains_visible_while_a_new_request_is_pending() {
 }
 
 #[test]
-fn turning_location_off_discards_a_position_held_for_preview() {
+fn turning_location_off_during_preview_does_not_apply_or_discard_the_held_position() {
     let (_directory, mut desktop) = desktop(&located_file());
-    desktop.snapshot = Some(snapshot(true));
+    previewing(&mut desktop);
     desktop.set_settings_open(true);
     desktop.located(Ok(SEATTLE));
     desktop.edit(vec![(Field::UseWindowsLocation, FieldValue::Switch(false))]);
-    desktop.pending.clear();
+    assert!(desktop.location_enabled());
+    assert!(desktop.pending.is_empty(), "{:?}", desktop.pending);
     desktop.snapshot = Some(snapshot(false));
     desktop.release_location();
-    assert_eq!(accepted_coordinates(&desktop), Some(NEW_YORK));
-    assert_eq!(configured_coordinates(&mut desktop), []);
+    assert_eq!(accepted_coordinates(&desktop), Some(SEATTLE));
+    assert_eq!(configured_coordinates(&mut desktop), [Some(SEATTLE)]);
 }
 
 #[test]
@@ -477,7 +487,7 @@ fn cancellation_discards_late_results(acquiring: bool) {
 #[test_case(Command::Quit; "exit")]
 fn reset_and_exit_discard_held_and_late_results(command: Command) {
     let (_directory, mut desktop) = desktop(&located_file());
-    desktop.snapshot = Some(snapshot(true));
+    previewing(&mut desktop);
     desktop.located(Ok(SEATTLE));
     let previous_completion = Arc::clone(&desktop.location_event);
     desktop.command(command);
@@ -505,7 +515,7 @@ fn reset_and_exit_discard_held_and_late_results(command: Command) {
 fn a_result_during_preview_applies_when_playback_ends() {
     let (_directory, mut desktop) = desktop(&located_file());
     desktop.set_settings_open(true);
-    desktop.snapshot = Some(snapshot(true));
+    previewing(&mut desktop);
     desktop.located(Ok(SEATTLE));
     assert_eq!(configured_coordinates(&mut desktop), []);
     assert_eq!(accepted_coordinates(&desktop), Some(NEW_YORK));
@@ -522,7 +532,7 @@ fn a_result_during_preview_applies_when_playback_ends() {
 fn a_result_during_preview_applies_when_closing_settings_ends_playback() {
     let (_directory, mut desktop) = desktop(&located_file());
     desktop.set_settings_open(true);
-    desktop.snapshot = Some(snapshot(true));
+    previewing(&mut desktop);
     desktop.located(Ok(SEATTLE));
     assert_eq!(configured_coordinates(&mut desktop), []);
     desktop.settings_closed();
@@ -535,7 +545,7 @@ fn a_result_during_preview_applies_when_closing_settings_ends_playback() {
 fn a_result_after_closure_ignores_the_preview_that_closure_ended(reopen: bool) {
     let (_directory, mut desktop) = desktop(&located_file());
     desktop.set_settings_open(true);
-    desktop.snapshot = Some(snapshot(true));
+    previewing(&mut desktop);
     desktop.settings_closed();
     desktop.pending.clear();
     desktop.set_settings_open(reopen);
@@ -548,12 +558,11 @@ fn a_result_after_closure_ignores_the_preview_that_closure_ended(reopen: bool) {
 fn a_new_preview_after_reopening_still_defers_a_position() {
     let (_directory, mut desktop) = desktop(&located_file());
     desktop.set_settings_open(true);
-    desktop.snapshot = Some(snapshot(true));
+    previewing(&mut desktop);
     desktop.settings_closed();
     desktop.pending.clear();
     desktop.set_settings_open(true);
-    let state = Arc::make_mut(desktop.snapshot.as_mut().expect("Preview snapshot"));
-    state.preview_deadline = Some(std::time::Duration::from_secs(11));
+    previewing(&mut desktop);
     desktop.located(Ok(SEATTLE));
     assert_eq!(configured_coordinates(&mut desktop), []);
     assert_eq!(accepted_coordinates(&desktop), Some(NEW_YORK));
@@ -566,14 +575,14 @@ fn a_new_preview_after_reopening_still_defers_a_position() {
 fn the_logical_deadline_releases_location_while_the_snapshot_still_reports_preview() {
     let (_directory, mut desktop) = desktop(&located_file());
     desktop.set_settings_open(true);
-    desktop.snapshot = Some(snapshot(true));
+    previewing(&mut desktop);
     desktop.located(Ok(SEATTLE));
     desktop.command(Command::PreviewElapsed);
     assert_eq!(configured_coordinates(&mut desktop), []);
-    let state = Arc::make_mut(desktop.snapshot.as_mut().expect("Preview snapshot"));
-    state.origin = std::time::Instant::now()
-        .checked_sub(std::time::Duration::from_secs(11))
-        .expect("earlier fixture clock");
+    desktop.preview = PreviewRequest::Requested {
+        deadline: std::time::Instant::now(),
+        receipt: Some(1),
+    };
     desktop.command(Command::PreviewElapsed);
     assert_eq!(configured_coordinates(&mut desktop), [Some(SEATTLE)]);
     desktop.command(Command::PreviewElapsed);

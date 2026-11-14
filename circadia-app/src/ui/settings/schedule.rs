@@ -44,6 +44,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use windows_reactor::AutomationLiveSetting;
 use windows_reactor::Border;
 use windows_reactor::Button;
 use windows_reactor::ButtonStyle;
@@ -149,7 +150,7 @@ pub(super) fn management_view(model: &Model, text: &Text) -> ManagementView {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Playing {
+pub(in crate::ui) struct Playing {
     pub(super) playback: Arc<Playback>,
     curve: Option<Arc<Curve>>,
     pub(super) started: Instant,
@@ -173,7 +174,7 @@ impl Playing {
         }
     }
 
-    pub(super) fn new(snapshot: &ControllerSnapshot) -> Option<Self> {
+    pub(in crate::ui) fn new(snapshot: &ControllerSnapshot) -> Option<Self> {
         let preview = snapshot.preview.as_ref()?;
         Some(Self {
             playback: Arc::clone(&preview.playback),
@@ -191,7 +192,7 @@ impl Playing {
         (elapsed / super::progress::bar_duration(self.playback.duration()).as_secs_f64()).min(1.0)
     }
 
-    pub(super) fn instant(&self, now: Instant) -> Option<jiff::Timestamp> {
+    pub(in crate::ui) fn instant(&self, now: Instant) -> Option<jiff::Timestamp> {
         self.playback
             .at(now.saturating_duration_since(self.started))
             .ok()
@@ -246,22 +247,31 @@ pub(super) fn preview_view(
     now: Instant,
 ) -> PreviewView {
     bind_text!(fl, text);
-    if model.preview_active {
-        let detail = model
-            .playing
-            .as_ref()
-            .and_then(|playing| playing.detail(text, region, now));
-        return PreviewView {
-            playing: true,
-            enabled: true,
-            caption: if detail.is_some() {
-                fl!("preview-playing")
-            } else {
-                fl!("preview-starting")
-            },
-            detail,
-            progress: model.playing.as_ref().map(|playing| playing.progress(now)),
-        };
+    match &model.preview {
+        status::PreviewView::Idle => {}
+        status::PreviewView::Starting { .. } => {
+            return PreviewView {
+                playing: false,
+                enabled: false,
+                caption: fl!("preview-starting"),
+                detail: None,
+                progress: None,
+            };
+        }
+        status::PreviewView::Playing { playing, .. } => {
+            let detail = playing.detail(text, region, now);
+            return PreviewView {
+                playing: true,
+                enabled: true,
+                caption: if detail.is_some() {
+                    fl!("preview-playing")
+                } else {
+                    fl!("preview-starting")
+                },
+                detail,
+                progress: Some(playing.progress(now)),
+            };
+        }
     }
     let seconds = model.config().input().preview_seconds;
     let ready = fl!(
@@ -302,7 +312,7 @@ pub(super) fn preview_values_shown(
     phase_progress_shown: bool,
 ) -> bool {
     visibility == Visibility::Shown
-        && model.playing.is_some()
+        && model.playing().is_some()
         && (page == Page::Schedule || phase_progress_shown)
 }
 
@@ -337,7 +347,7 @@ pub(super) fn phase_deadline(
         .filter(|boundary| *boundary > at)
         .min()?;
     if control.preview_active {
-        let playing = model.playing.as_ref()?;
+        let playing = model.playing()?;
         playing
             .started
             .checked_add(playing.playback.elapsed_at(boundary).ok()?)
@@ -356,7 +366,7 @@ pub(super) fn indicator_delay(
 ) -> Option<Duration> {
     let shown = visibility == Visibility::Shown
         && page == Page::Schedule
-        && model.playing.is_none()
+        && model.playing().is_none()
         && model.calculation.is_some();
     let minute = 60_000;
     let into = u64::try_from(now.as_millisecond().rem_euclid(minute)).ok()?;
@@ -373,8 +383,7 @@ fn graph_view(settings: &Settings, palette: &Palette) -> Option<View> {
     let calculation = settings.graph.as_ref()?;
     let schedule = calculation.schedule()?;
     let instant = model
-        .playing
-        .as_ref()
+        .playing()
         .and_then(|playing| playing.instant(Instant::now()))
         .unwrap_or_else(jiff::Timestamp::now);
     let layout = graph::layout(schedule, instant, palette.contrast().is_some())?;
@@ -408,8 +417,7 @@ fn graph_view(settings: &Settings, palette: &Palette) -> Option<View> {
         chip: &chip,
         hour: &hour,
         animation: model
-            .playing
-            .as_ref()
+            .playing()
             .filter(|_| settings.visibility == Visibility::Shown)
             .map(|playing| graph::animated_marker(calculation, layout.view, playing, *palette)),
     }))
@@ -419,8 +427,7 @@ fn preview_progress(settings: &Settings, progress: f64) -> View {
     let motion = settings
         .input
         .model
-        .playing
-        .as_ref()
+        .playing()
         .filter(|_| settings.visibility == Visibility::Shown)
         .map(|playing| super::progress::Timeline {
             revision: settings.input.visual_revision,
@@ -464,6 +471,7 @@ fn preview_footer(settings: &Settings, context: &ViewContext<'_, Settings>) -> V
     let mut line: Vec<View> = vec![
         widgets::caption(&preview.caption)
             .automation_id(automation_id::PREVIEW_STATE)
+            .automation_live_setting(AutomationLiveSetting::Polite)
             .into(),
     ];
     if let Some(detail) = &preview.detail {

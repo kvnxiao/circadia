@@ -719,7 +719,15 @@ struct Worker<F> {
     next_date: Option<Timestamp>,
     taskbar_epoch: Option<u64>,
     log: DiagnosticLog,
+    preview_run: PreviewRun,
     foreground: F,
+}
+
+#[derive(Clone, Copy)]
+enum PreviewRun {
+    None,
+    Pending,
+    Playing,
 }
 
 impl<F: FnMut() -> Foreground> Worker<F> {
@@ -743,6 +751,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             next_date: None,
             taskbar_epoch: None,
             log: DiagnosticLog::default(),
+            preview_run: PreviewRun::None,
             foreground,
         }
     }
@@ -1140,7 +1149,6 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                     .is_some_and(|config| config.input().manage_night_light),
                 snapshot.suppression.automatic,
                 snapshot.suppression.manual(),
-                snapshot.preview_active,
             ]
         };
         let current = active(&snapshot);
@@ -1150,22 +1158,41 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             .lock()
             .map_err(|_error| io::Error::other("controller snapshot lock failed"))?
             .replace(Arc::new(snapshot));
-        let previous = previous.as_deref().map_or([false; 4], active);
-        for ((name, was), is) in [
-            "management",
-            "automatic suppression",
-            "manual suppression",
-            "preview",
-        ]
-        .into_iter()
-        .zip(previous)
-        .zip(current)
+        let previous = previous.as_deref().map_or([false; 3], active);
+        for ((name, was), is) in ["management", "automatic suppression", "manual suppression"]
+            .into_iter()
+            .zip(previous)
+            .zip(current)
         {
             if was != is {
                 tracing::info!("{name} {}", if is { "started" } else { "ended" });
             }
         }
+        self.record_preview();
         (self.shared.notify)()
+    }
+
+    fn record_preview(&mut self) {
+        let runtime = self.driver.runtime();
+        let current = match (runtime.preview(), runtime.preview_active()) {
+            (Some(_), _) => PreviewRun::Playing,
+            (None, true) => PreviewRun::Pending,
+            (None, false) => PreviewRun::None,
+        };
+        let record = match (self.preview_run, current) {
+            (PreviewRun::None | PreviewRun::Pending, PreviewRun::Playing) => {
+                Some("preview started")
+            }
+            (PreviewRun::Playing, PreviewRun::None | PreviewRun::Pending) => Some("preview ended"),
+            (PreviewRun::Pending, PreviewRun::None) => Some("preview not started"),
+            (PreviewRun::None, PreviewRun::None | PreviewRun::Pending)
+            | (PreviewRun::Pending, PreviewRun::Pending)
+            | (PreviewRun::Playing, PreviewRun::Playing) => None,
+        };
+        if let Some(record) = record {
+            tracing::info!("{record}");
+        }
+        self.preview_run = current;
     }
 
     fn preview(
@@ -1222,6 +1249,7 @@ impl<F: FnMut() -> Foreground> Worker<F> {
             ControllerCommand::Preview(config) => {
                 expedite = self.preview(&config, envelope.entered, envelope.calculation, now)?;
                 if !expedite {
+                    tracing::info!("preview not started");
                     outcome = CommandOutcome::Unavailable;
                 }
             }
@@ -1272,6 +1300,9 @@ impl<F: FnMut() -> Foreground> Worker<F> {
         if expedite {
             self.driver.expedite(self.now().output.elapsed);
         }
+        // Several commands can run between publications, so a run that a
+        // later command in the same batch ends is recorded here.
+        self.record_preview();
         self.command = Some((envelope.id, outcome.clone()));
         drop(envelope.completion.try_send(outcome));
         Ok(())
