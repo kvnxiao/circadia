@@ -67,6 +67,12 @@ pub(super) fn source(
     })
 }
 
+enum WriterState {
+    NotStarted,
+    Running(Writer),
+    Failed(io::ErrorKind),
+}
+
 pub(super) struct IconCache {
     folder: PathBuf,
     icons: BTreeMap<ExecutablePath, (Entry, Option<IconImages>)>,
@@ -76,7 +82,7 @@ pub(super) struct IconCache {
     generic: Option<IconImages>,
     view: Rc<AppIcons>,
     pending: Pending,
-    writer: Option<Writer>,
+    writer: WriterState,
 }
 
 pub(super) fn latest_path<'a>(
@@ -116,7 +122,7 @@ impl IconCache {
             generic: None,
             view: Rc::default(),
             pending: Pending::default(),
-            writer: None,
+            writer: WriterState::NotStarted,
         };
         cache.update_view();
         cache
@@ -279,18 +285,35 @@ impl IconCache {
     }
 
     pub(super) fn flush(&mut self) {
+        self.flush_with(Writer::start);
+    }
+
+    fn flush_with(&mut self, start: impl FnOnce(PathBuf) -> io::Result<Writer>) {
         if !self.pending.dirty {
             return;
         }
-        if self.writer.is_none() {
-            match Writer::start(self.folder.clone()) {
-                Ok(writer) => self.writer = Some(writer),
+        if let WriterState::NotStarted | WriterState::Failed(_) = self.writer {
+            let failed = match self.writer {
+                WriterState::Failed(kind) => Some(kind),
+                WriterState::NotStarted | WriterState::Running(_) => None,
+            };
+            self.writer = match start(self.folder.clone()) {
+                Ok(writer) if failed.is_some() => {
+                    tracing::info!("icon cache writer recovered");
+                    WriterState::Running(writer)
+                }
+                Ok(writer) => WriterState::Running(writer),
+                Err(error) if failed == Some(error.kind()) => WriterState::Failed(error.kind()),
                 Err(error) => {
                     tracing::warn!(%error, "starting the icon cache writer");
-                    return;
+                    WriterState::Failed(error.kind())
                 }
-            }
+            };
         }
+        let WriterState::Running(writer) = &self.writer else {
+            self.pending.dirty = false;
+            return;
+        };
         let index = Index {
             version: 1,
             apps: self
@@ -304,14 +327,16 @@ impl IconCache {
                 .map(|(name, path)| (name.as_str().to_owned(), path.as_str().to_owned()))
                 .collect(),
         };
-        if let Some(writer) = &self.writer {
-            writer.submit(index, std::mem::take(&mut self.pending));
-        }
+        writer.submit(index, std::mem::take(&mut self.pending));
     }
 }
 
 impl Drop for IconCache {
     fn drop(&mut self) {
+        // A failed start clears `dirty` but keeps its changes unsaved.
+        if let WriterState::Failed(_) = self.writer {
+            self.pending.dirty = true;
+        }
         self.flush();
     }
 }

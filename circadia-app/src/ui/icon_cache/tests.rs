@@ -104,7 +104,7 @@ fn show(cache: &mut IconCache, files: &FakeFiles, executable: &str, known: Optio
 
 fn flush(cache: &mut IconCache) {
     cache.flush();
-    drop(cache.writer.take());
+    cache.writer = WriterState::NotStarted;
 }
 
 fn load_shown(directory: &Path) -> IconCache {
@@ -139,7 +139,7 @@ fn startup_loads_only_metadata_and_requested_rows_keep_their_missing_executable_
     let mut cache = IconCache::load(directory.path());
     assert_eq!(cache.icons.len(), 2);
     assert!(cache.view().apps.is_empty());
-    assert!(cache.writer.is_none());
+    assert!(matches!(cache.writer, WriterState::NotStarted));
     show(&mut cache, &files, "cs2.exe", None);
     assert_eq!(shown(&cache, "cs2.exe"), Some(vec![1, 32]));
     assert_eq!(shown(&cache, "other.exe"), None);
@@ -541,4 +541,72 @@ fn the_index_is_replaced_whole_without_a_leftover_partial_file() {
     let icons = directory.path().join("icons");
     assert!(icons.join("index.toml").is_file());
     assert!(!icons.join("index.toml.tmp").exists());
+}
+
+#[test]
+fn a_failed_writer_start_is_logged_once_and_retried_only_after_a_new_change() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let mut cache = IconCache::load(directory.path());
+    let mut attempts = 0;
+    let log = crate::log::capture(tracing::Level::INFO, || {
+        cache.observe(&AppFile {
+            executable: "cs2.exe".to_owned(),
+            path: CS2.into(),
+        });
+        for _ in 0..3 {
+            cache.flush_with(|_| {
+                attempts += 1;
+                Err(io::Error::other("spawn"))
+            });
+        }
+        cache.observe(&AppFile {
+            executable: "cs2.exe".to_owned(),
+            path: r"C:\Other\cs2.exe".into(),
+        });
+        cache.flush_with(|_| {
+            attempts += 1;
+            Err(io::Error::other("spawn"))
+        });
+        cache.observe(&AppFile {
+            executable: "cs2.exe".to_owned(),
+            path: CS2.into(),
+        });
+        flush(&mut cache);
+    });
+    assert_eq!(attempts, 2);
+    assert_eq!(
+        log,
+        [
+            "WARN circadia_app::ui::icon_cache: starting the icon cache writer error=spawn",
+            "INFO circadia_app::ui::icon_cache: icon cache writer recovered",
+        ]
+    );
+    let index: Index = toml::from_str(
+        &fs_err::read_to_string(directory.path().join("icons/index.toml")).expect("saved index"),
+    )
+    .expect("valid index");
+    assert_eq!(
+        index.sources,
+        BTreeMap::from([("cs2.exe".to_owned(), CS2.to_owned())])
+    );
+}
+
+#[test]
+fn exit_after_a_failed_writer_start_saves_the_unsaved_changes() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let mut cache = IconCache::load(directory.path());
+    cache.observe(&AppFile {
+        executable: "cs2.exe".to_owned(),
+        path: CS2.into(),
+    });
+    cache.flush_with(|_| Err(io::Error::other("spawn")));
+    drop(cache);
+    let index: Index = toml::from_str(
+        &fs_err::read_to_string(directory.path().join("icons/index.toml")).expect("saved index"),
+    )
+    .expect("valid index");
+    assert_eq!(
+        index.sources,
+        BTreeMap::from([("cs2.exe".to_owned(), CS2.to_owned())])
+    );
 }
