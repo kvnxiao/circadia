@@ -19,9 +19,13 @@ fn main() -> io::Result<()> {
     let output = PathBuf::from(
         std::env::var_os("OUT_DIR").ok_or_else(|| io::Error::other("OUT_DIR is missing"))?,
     );
+    // Cargo 1.100 and later set OUT_DIR to
+    // `<profile>/build/<package>/<hash>/out`; earlier releases use
+    // `<profile>/build/<package>-<hash>/out`.
     let profile = output
         .ancestors()
-        .nth(3)
+        .find(|path| path.file_name().is_some_and(|name| name == "build"))
+        .and_then(Path::parent)
         .ok_or_else(|| io::Error::other("Cargo profile directory is missing"))?;
     let manifest_directory = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR")
