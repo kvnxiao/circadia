@@ -491,7 +491,13 @@ pub(super) struct AddDialog {
     chosen: BTreeSet<crate::ExecutablePath>,
     restricted: BTreeSet<crate::ExecutablePath>,
     browsed: Vec<AppFile>,
-    problem: Option<(String, FieldErrorKind)>,
+    last_browse: Option<Browse>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Browse {
+    Fixed(String),
+    File(crate::ExecutablePath),
 }
 
 impl AddDialog {
@@ -501,7 +507,7 @@ impl AddDialog {
             chosen: BTreeSet::new(),
             restricted: BTreeSet::new(),
             browsed: Vec::new(),
-            problem: None,
+            last_browse: None,
         }
     }
 
@@ -554,12 +560,16 @@ impl AddDialog {
         self.restricted.retain(|path| current.contains(path));
     }
 
-    fn available(&self, path: &crate::ExecutablePath, model: &Model) -> bool {
+    fn entry(&self, path: &crate::ExecutablePath) -> AppEntry {
         let selection = self.selected(AppFile {
             executable: path.file_name().to_ascii_lowercase(),
             path: path.as_path().to_path_buf(),
         });
-        let entry = selection.entry(selection.file.executable.clone());
+        selection.entry(selection.file.executable.clone())
+    }
+
+    fn available(&self, path: &crate::ExecutablePath, model: &Model) -> bool {
+        let entry = self.entry(path);
         model
             .config()
             .add_entries(self.list, [entry.clone()], &model.running_executable)
@@ -568,13 +578,7 @@ impl AddDialog {
                 .chosen
                 .iter()
                 .filter(|chosen| *chosen != path)
-                .any(|chosen| {
-                    let selected = self.selected(AppFile {
-                        executable: chosen.file_name().to_ascii_lowercase(),
-                        path: chosen.as_path().to_path_buf(),
-                    });
-                    selected.entry(selected.file.executable.clone()).scope() == entry.scope()
-                })
+                .any(|chosen| self.entry(chosen).scope() == entry.scope())
     }
 
     pub(super) fn browsed(&mut self, model: &Model, file: AppFile) -> bool {
@@ -583,15 +587,13 @@ impl AddDialog {
             return false;
         };
         if crate::is_fixed_exclusion(&file.executable, &model.running_executable) {
-            self.problem = Some((file.executable, FieldErrorKind::FixedExclusion));
+            self.last_browse = Some(Browse::Fixed(file.executable));
             return false;
         }
-        let available = self.available(&path, model);
-        self.problem =
-            (!available).then(|| (file.executable.clone(), FieldErrorKind::AlreadyListed));
-        if available {
+        if self.available(&path, model) {
             self.chosen.insert(path.clone());
         }
+        self.last_browse = Some(Browse::File(path.clone()));
         if !self
             .browsed
             .iter()
@@ -735,19 +737,23 @@ pub(super) fn dialog_view(
             fl!("dialog-add", count = count, apps = apps.as_str())
         },
         primary_enabled: count > 0,
-        message: dialog
-            .problem
-            .as_ref()
-            .and_then(|(executable, kind)| match kind {
-                FieldErrorKind::AlreadyListed => Some(fl!(
-                    "dialog-already-listed",
-                    executable = executable.as_str()
-                )),
-                FieldErrorKind::FixedExclusion => {
-                    Some(fl!("dialog-fixed", executable = executable.as_str()))
-                }
-                _ => None,
+        message: dialog.last_browse.as_ref().and_then(|browse| match browse {
+            Browse::Fixed(executable) => {
+                Some(fl!("dialog-fixed", executable = executable.as_str()))
+            }
+            Browse::File(path) => matches!(
+                model.config().add_entries(
+                    dialog.list,
+                    [dialog.entry(path)],
+                    &model.running_executable
+                ),
+                Err(FieldErrorKind::AlreadyListed)
+            )
+            .then(|| {
+                let executable = path.file_name().to_ascii_lowercase();
+                fl!("dialog-already-listed", executable = executable.as_str())
             }),
+        }),
     }
 }
 
