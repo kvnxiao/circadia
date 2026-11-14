@@ -143,22 +143,46 @@ Fixing the last mark ends the pause and writes the accepted configuration, inclu
 
 Settings provides Preview beside the graph and a duration setting, initially 10 seconds, accepting whole seconds from 1 through 60. Preview captures the accepted configuration's schedule, its output rate, and its duration. It starts only while management is on, after startup prerequisites pass, when the configuration can be evaluated, and while no settings field has invalid input. Active suppression does not prevent it.
 
-A native error does not disable Preview: the request retries access immediately, and the graph plays while screen output is unavailable. Preview does not save configuration. Edits in the settings window are disabled during playback; tray toggles remain available. Stop, closing settings, turning management off, Quit, and the manual suppression command remain available. Disabled controls become editable again when playback ends.
+A native error does not disable Preview: the request retries access immediately, and the graph plays while screen output is unavailable. Preview does not save configuration. Edits in the settings window are disabled while Preview starts and during playback; tray toggles remain available. While Preview starts, the Preview command is unavailable; Stop replaces it when playback begins. Closing settings, turning management off, Quit, and the manual suppression command remain available while Preview starts and during playback. Disabled controls become editable again when the run ends.
 
-Each run captures the actual current instant T and its local clock in the current Windows time zone. The endpoint E is that clock on the following calendar date. A missing local endpoint advances to the first valid instant after the gap; a repeated endpoint uses its first occurrence. Playback uniformly maps the elapsed interval from T to E into the configured duration D. It uses actual dated schedules and solar results throughout, including any target adjustment across a clock change. It does not repeat a frozen graph image or assume that every day has 24 elapsed hours.
+When the user selects Preview, settings shows at once that Preview is starting and makes the Preview command and settings edits unavailable, before the controller responds. They stay unavailable until the run leaves the starting state under the diagram below, which happens when:
 
-The graph's time indicator follows playback independently of Night light calls and the configured output-rate ceiling. While visible, its motion follows Windows' display presentation cadence; no fixed sustained frame rate is guaranteed. It selects its displayed interval from the playback instant. The logical playback deadline is exactly D elapsed seconds after entry. At that deadline, settings ends its Preview state, returns the graph to actual current time, and enables editing without waiting for native output. Entry immediately requests the captured schedule's temperature at T; there is no ramp-up or extra return phase. A rerun captures a new current instant. A synchronous native call can finish after the deadline; cancellation prevents subsequent obsolete steps and waits for that call before cleanup or replacement.
+- The controller reports playback.
+- The controller reports that it did not start Preview.
+- A stop event occurs.
+- The logical deadline, D elapsed seconds after the selection, passes.
 
-Playback stops on:
+An edit committed because focus moves to Preview applies before Preview captures the configuration. An edit committed in the settings window after the selection does not apply; tray toggles apply as usual. When Preview does not start, editing becomes available again, and settings shows why Preview is unavailable if a start condition no longer holds.
 
-- Completion, Stop, or closing settings.
+Each run captures, at the moment the user selects Preview (entry), the actual current instant T and its local clock in the current Windows time zone. The endpoint E is that clock on the following calendar date. A missing local endpoint advances to the first valid instant after the gap; a repeated endpoint uses its first occurrence. Playback uniformly maps the elapsed interval from T to E into the configured duration D. It uses actual dated schedules and solar results throughout, including any target adjustment across a clock change. It does not repeat a frozen graph image or assume that every day has 24 elapsed hours.
+
+The graph's time indicator follows playback independently of Night light calls and the configured output-rate ceiling. While visible, its motion follows Windows' display presentation cadence; no fixed sustained frame rate is guaranteed. It selects its displayed interval from the playback instant. The logical playback deadline is exactly D elapsed seconds after entry. At that deadline, settings ends its Preview state, returns the graph to actual current time, and enables editing without waiting for native output. When playback begins, the controller requests the captured schedule's temperature at the current playback instant, which is T when playback begins without delay; there is no ramp-up or extra return phase. A playback report that arrives after the logical deadline does not start playback. A rerun captures a new current instant. A synchronous native call can finish after the deadline; cancellation prevents subsequent obsolete steps and waits for that call before cleanup or replacement.
+
+A stop event ends a run that is starting or playing:
+
+- Stop during playback, or closing settings.
 - Turning management off.
 - Session lock, system suspension, or a clock, time-zone, or daylight-saving-setting change.
 - Required time-zone evaluation failure or exit.
 
+The diagram lists every transition of a Preview run as settings shows it. Not previewing includes the time when a start condition fails and Preview is unavailable.
+
+```mermaid
+stateDiagram-v2
+  state "Not previewing" as Idle
+  state "Starting" as Starting
+  state "Playing" as Playing
+  [*] --> Idle
+  Idle --> Starting: User selects Preview while its start conditions hold
+  Starting --> Playing: Controller reports playback
+  Starting --> Idle: Controller does not start Preview
+  Starting --> Idle: Stop event or logical deadline
+  Playing --> Idle: Stop event or logical deadline
+```
+
 Playback does not depend on the foreground window. Switching to another application, including a listed one, does not stop it. Suppression that is active when playback starts, or that starts during it, does not change output until playback ends, under REQ-suppress-on-focus. Solar calculation failure uses fallback without changing the deadline. Native errors also preserve the logical timeline; recovery applies the current playback position instead of replaying missed output.
 
-When playback completes or is stopped, the graph returns to actual current time and Circadia immediately requests the current target. This includes Stop, closing settings, session lock, and clock, time-zone, or daylight-saving-setting changes. With suppression active, output fades from the last Preview value toward 6500 K; otherwise it returns to the schedule's current temperature without an additional fade. These actions do not restore a captured temperature. A time-zone evaluation failure immediately selects the response of REQ-schedule-evaluation-failure. A pending native error still preserves its recovery delay. Turning management off follows REQ-manage-night-light, suspension stops playback without writing a schedule temperature, and exit follows REQ-exit-night-light-off. Stopped playback never restarts automatically.
+When a starting or playing run ends, the graph returns to actual current time and Circadia immediately requests the current target. This includes Stop, closing settings, session lock, and clock, time-zone, or daylight-saving-setting changes. With suppression active, output fades toward 6500 K from the last Preview value, or from the last written temperature when the run ended before playback; otherwise it returns to the schedule's current temperature without an additional fade. These actions do not restore a captured temperature. A time-zone evaluation failure immediately selects the response of REQ-schedule-evaluation-failure. A pending native error still preserves its recovery delay. Turning management off follows REQ-manage-night-light, suspension stops playback without writing a schedule temperature, and exit follows REQ-exit-night-light-off. Stopped playback never restarts automatically.
 
 **Scenarios:**
 
@@ -170,6 +194,12 @@ When playback completes or is stopped, the graph returns to actual current time 
 - Preview starts again after completion: it captures the new current clock instead of reusing the prior 09:00 start.
 - A ten-second playback ends without suppression: it immediately selects the schedule at the actual current time, without adding entry or exit fades.
 - A user tries to edit the rate during playback: the edit is disabled. Stop restores editing.
+- The controller is finishing a slow native call when the user selects Preview: settings shows that Preview is starting and disables Preview and editing at once, before playback begins.
+- The user double-clicks Preview: the second click has no effect because Preview is unavailable while it starts, and one run starts.
+- Playback begins and the user selects Stop at once: the run ends, and Preview is available again immediately.
+- D is 1 second, and the controller stays busy for 2 seconds after the user selects Preview: the deadline passes before playback, Preview does not play, and editing returns 1 second after the selection.
+- The user types 2200 in the Sleep temperature field and selects Preview: the field commits 2200 when focus moves, and Preview plays the schedule with that value.
+- Management turns off from the tray after the user selects Preview but before playback begins: Preview does not start, the starting state ends, and settings shows that Preview requires management.
 - Output fails during playback: graph time continues, and recovery uses its current position. Completion selects the current target even if native recovery remains pending.
 - A native call started during a ten-second Preview is still running at its deadline: the graph returns to current time, Preview status ends, editing becomes available, and a held location result applies. Cleanup and replacement output wait for the running call.
 - Preview runs with a 1 Hz output-rate ceiling: the visible graph moves between native calls according to the playback clock without increasing their permitted rate.
@@ -212,9 +242,29 @@ Check for updates shows progress, then an up-to-date result, an available-update
 
 Check for updates automatically is a saved preference, enabled by default. When enabled, Circadia checks at startup and once every 24 hours while running. A manual check restarts that interval. Disabling the preference stops future automatic checks; an in-flight check may finish. Results remain visible in About until dismissed, replaced by another check, or process exit. Dismissed results stay hidden when settings reopens. Checks do not open settings, display notifications, or interrupt Night light management.
 
-Checks use bounded network work outside UI message handling. Failures allow a later manual check or the next daily check. Requests send only the metadata needed to query the distribution; configuration, logs, location, and application lists are not uploaded. Exit stops further checks and does not delay Night light cleanup for a pending network response.
+Checks use bounded network work outside UI message handling. A failed check allows a later manual check or the next daily check. Requests send only the metadata needed to query the distribution; configuration, logs, location, and application lists are not uploaded. Exit stops further checks and does not delay Night light cleanup for a pending network response.
+
+If Circadia cannot start its background update-check work when it starts, Check for updates stays unavailable until the process exits, automatic checks do not run, and About states that update checking is unavailable until Circadia restarts. That message cannot be dismissed.
 
 Rate limits, connection failures, and unexpected errors have distinct messages. A rate limit shows a warning and prevents manual and automatic requests during a cooldown. The cooldown honors usable service retry timing; without usable timing, it lasts one minute. Dismissing the warning does not end the cooldown. Expiry enables manual checking without initiating an extra automatic check or restoring a dismissed banner.
+
+The diagram lists every transition of update checking while Circadia runs. A result is up to date, an available update, no downloadable build yet, a development build, a rate-limit warning whose cooldown has expired, a connection failure, or an unexpected error. Dismissing a result hides its banner without changing the state.
+
+```mermaid
+stateDiagram-v2
+  state "Unavailable" as Unavailable
+  state "No result" as Idle
+  state "Checking" as Checking
+  state "Result available" as Result
+  state "Rate-limit cooldown" as Cooldown
+  [*] --> Idle: Update checking starts
+  [*] --> Unavailable: Update checking cannot start
+  Idle --> Checking: Manual check, or automatic check due
+  Result --> Checking: Manual check, or automatic check due
+  Checking --> Result: Check finishes without a rate limit
+  Checking --> Cooldown: Service rate-limits the check
+  Cooldown --> Result: Cooldown expires
+```
 
 **Scenarios:**
 
@@ -230,6 +280,7 @@ Rate limits, connection failures, and unexpected errors have distinct messages. 
 - Automatic checks are disabled and Circadia restarts: it makes no automatic update request; Check for updates still works.
 - Settings is closed while an automatic check completes: it stays closed, and About shows the result when opened.
 - The user quits during a check: Night light cleanup proceeds without waiting for GitHub.
+- Update checking cannot start: Check for updates is unavailable, About states that update checking is unavailable until Circadia restarts, the message has no dismiss action, and no automatic check runs while the process continues.
 
 ## Resource use and background work
 
