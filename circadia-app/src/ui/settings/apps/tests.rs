@@ -420,7 +420,15 @@ impl Fixture {
                 crate::ControllerCommand::Configure { config, .. } => {
                     Some(config.entries(Field::Suppression).to_vec())
                 }
-                _ => None,
+                crate::ControllerCommand::Manual(_)
+                | crate::ControllerCommand::Preview(_)
+                | crate::ControllerCommand::StopPreview
+                | crate::ControllerCommand::Diagnostic { .. }
+                | crate::ControllerCommand::Foreground { .. }
+                | crate::ControllerCommand::Recompute(_)
+                | crate::ControllerCommand::Lock
+                | crate::ControllerCommand::Suspend
+                | crate::ControllerCommand::Resume { .. } => None,
             })
             .collect()
     }

@@ -25,6 +25,10 @@ pub struct Coordinates {
 /// - An empty `title` means the entry has no window-title condition, whatever
 ///   `regex` is.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "regex is the saved title option, and wrong_type and wrong_title record separate load failures"
+)]
 pub struct AppEntry {
     /// Executable file name, with ASCII characters lowercased when valid.
     pub executable: String,
@@ -230,6 +234,10 @@ pub fn valid_title(title: &str, regex: bool) -> bool {
 
 /// Describe how the suppression and exclusion lists treat one window.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag answers a separate question about one window"
+)]
 pub struct Membership {
     /// Some suppression entry matches the window and no exclusion does.
     pub matches: bool,
@@ -547,7 +555,20 @@ impl Field {
             Self::OrdinaryFadeMs => (100, 10_000, 1),
             Self::FocusDelayMs => (0, 5000, 1),
             Self::PreviewSeconds => (1, 60, 1),
-            _ => return None,
+            Self::Wake
+            | Self::Bedtime
+            | Self::SolarTiming
+            | Self::Sunrise
+            | Self::Sunset
+            | Self::UseWindowsLocation
+            | Self::Coordinates
+            | Self::Suppression
+            | Self::Exclusions
+            | Self::StartAtSignIn
+            | Self::StartMinimized
+            | Self::CheckUpdatesAutomatically
+            | Self::ManageNightLight
+            | Self::InterfaceLanguage => return None,
         };
         Some(NumberRange {
             minimum,
@@ -879,7 +900,20 @@ impl ConfigInput {
             Field::FocusDelayMs => self.focus_delay_ms,
             Field::OutputRateHz => self.output_rate_hz,
             Field::PreviewSeconds => self.preview_seconds,
-            _ => return None,
+            Field::Wake
+            | Field::Bedtime
+            | Field::SolarTiming
+            | Field::Sunrise
+            | Field::Sunset
+            | Field::UseWindowsLocation
+            | Field::Coordinates
+            | Field::Suppression
+            | Field::Exclusions
+            | Field::StartAtSignIn
+            | Field::StartMinimized
+            | Field::CheckUpdatesAutomatically
+            | Field::ManageNightLight
+            | Field::InterfaceLanguage => return None,
         })
     }
 
@@ -893,7 +927,20 @@ impl ConfigInput {
             Field::FocusDelayMs => &mut self.focus_delay_ms,
             Field::OutputRateHz => &mut self.output_rate_hz,
             Field::PreviewSeconds => &mut self.preview_seconds,
-            _ => return None,
+            Field::Wake
+            | Field::Bedtime
+            | Field::SolarTiming
+            | Field::Sunrise
+            | Field::Sunset
+            | Field::UseWindowsLocation
+            | Field::Coordinates
+            | Field::Suppression
+            | Field::Exclusions
+            | Field::StartAtSignIn
+            | Field::StartMinimized
+            | Field::CheckUpdatesAutomatically
+            | Field::ManageNightLight
+            | Field::InterfaceLanguage => return None,
         })
     }
 
@@ -915,7 +962,14 @@ impl ConfigInput {
             Field::Suppression => FieldValue::Apps(self.suppression.clone()),
             Field::Exclusions => FieldValue::Apps(self.exclusions.clone()),
             Field::InterfaceLanguage => FieldValue::Language(self.interface_language.clone()),
-            _ => FieldValue::Number(self.number(field).unwrap_or_default()),
+            Field::DaytimeKelvin
+            | Field::MiddleKelvin
+            | Field::SleepKelvin
+            | Field::ScheduledTransitionMinutes
+            | Field::OrdinaryFadeMs
+            | Field::FocusDelayMs
+            | Field::OutputRateHz
+            | Field::PreviewSeconds => FieldValue::Number(self.number(field).unwrap_or_default()),
         }
     }
 
@@ -955,7 +1009,14 @@ fn check_alone(field: Field, input: &ConfigInput) -> Result<(), FieldErrorKind> 
         }),
         Field::InterfaceLanguage if crate::l10n::saveable(&input.interface_language) => Ok(()),
         Field::InterfaceLanguage => Err(FieldErrorKind::Language),
-        _ => match (field.range(), input.number(field)) {
+        Field::DaytimeKelvin
+        | Field::MiddleKelvin
+        | Field::SleepKelvin
+        | Field::ScheduledTransitionMinutes
+        | Field::OrdinaryFadeMs
+        | Field::FocusDelayMs
+        | Field::OutputRateHz
+        | Field::PreviewSeconds => match (field.range(), input.number(field)) {
             (Some(range), Some(value)) if !(range.minimum..=range.maximum).contains(&value) => {
                 Err(FieldErrorKind::OutOfRange {
                     minimum: range.minimum,
@@ -964,6 +1025,16 @@ fn check_alone(field: Field, input: &ConfigInput) -> Result<(), FieldErrorKind> 
             }
             _ => Ok(()),
         },
+        Field::SolarTiming
+        | Field::Sunrise
+        | Field::Sunset
+        | Field::UseWindowsLocation
+        | Field::Suppression
+        | Field::Exclusions
+        | Field::StartAtSignIn
+        | Field::StartMinimized
+        | Field::CheckUpdatesAutomatically
+        | Field::ManageNightLight => Ok(()),
     }
 }
 
@@ -1006,7 +1077,28 @@ fn consistency(field: Field, input: &ConfigInput) -> Result<(), FieldErrorKind> 
         {
             Err(FieldErrorKind::CoordinatesRequired)
         }
-        _ => Ok(()),
+        Field::Wake
+        | Field::Bedtime
+        | Field::DaytimeKelvin
+        | Field::MiddleKelvin
+        | Field::SleepKelvin
+        | Field::ScheduledTransitionMinutes
+        | Field::OrdinaryFadeMs
+        | Field::FocusDelayMs
+        | Field::OutputRateHz
+        | Field::PreviewSeconds
+        | Field::SolarTiming
+        | Field::Sunrise
+        | Field::Sunset
+        | Field::UseWindowsLocation
+        | Field::Coordinates
+        | Field::Suppression
+        | Field::Exclusions
+        | Field::StartAtSignIn
+        | Field::StartMinimized
+        | Field::CheckUpdatesAutomatically
+        | Field::ManageNightLight
+        | Field::InterfaceLanguage => Ok(()),
     }
 }
 
@@ -1131,7 +1223,27 @@ impl Config {
     pub fn entries(&self, list: Field) -> &[AppEntry] {
         match list {
             Field::Exclusions => &self.input.exclusions,
-            _ => &self.input.suppression,
+            Field::Suppression
+            | Field::Wake
+            | Field::Bedtime
+            | Field::DaytimeKelvin
+            | Field::MiddleKelvin
+            | Field::SleepKelvin
+            | Field::ScheduledTransitionMinutes
+            | Field::OrdinaryFadeMs
+            | Field::FocusDelayMs
+            | Field::OutputRateHz
+            | Field::PreviewSeconds
+            | Field::SolarTiming
+            | Field::Sunrise
+            | Field::Sunset
+            | Field::UseWindowsLocation
+            | Field::Coordinates
+            | Field::StartAtSignIn
+            | Field::StartMinimized
+            | Field::CheckUpdatesAutomatically
+            | Field::ManageNightLight
+            | Field::InterfaceLanguage => &self.input.suppression,
         }
     }
 
@@ -1142,7 +1254,27 @@ impl Config {
     fn rules(&self, list: Field) -> &Arc<AppRules> {
         match list {
             Field::Exclusions => &self.exclusion_rules,
-            _ => &self.suppression_rules,
+            Field::Suppression
+            | Field::Wake
+            | Field::Bedtime
+            | Field::DaytimeKelvin
+            | Field::MiddleKelvin
+            | Field::SleepKelvin
+            | Field::ScheduledTransitionMinutes
+            | Field::OrdinaryFadeMs
+            | Field::FocusDelayMs
+            | Field::OutputRateHz
+            | Field::PreviewSeconds
+            | Field::SolarTiming
+            | Field::Sunrise
+            | Field::Sunset
+            | Field::UseWindowsLocation
+            | Field::Coordinates
+            | Field::StartAtSignIn
+            | Field::StartMinimized
+            | Field::CheckUpdatesAutomatically
+            | Field::ManageNightLight
+            | Field::InterfaceLanguage => &self.suppression_rules,
         }
     }
 
@@ -1529,7 +1661,12 @@ fn decode_value(
                     toml::Value::Table(table) => {
                         Some(decode_entry(field, table, &mut keys.unknown, &mut missing))
                     }
-                    _ => None,
+                    toml::Value::String(_)
+                    | toml::Value::Integer(_)
+                    | toml::Value::Float(_)
+                    | toml::Value::Boolean(_)
+                    | toml::Value::Datetime(_)
+                    | toml::Value::Array(_) => None,
                 })
                 .collect::<Option<_>>()
                 .ok_or(FieldErrorKind::WrongType)?;

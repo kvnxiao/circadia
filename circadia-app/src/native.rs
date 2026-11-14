@@ -205,6 +205,10 @@ pub(crate) trait NativeBackend: Send {
 }
 
 /// Serialize public Night light calls under one controller-owned handle.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "only Native's methods write these flags; they never leave begun and exited both set, and cleanup_pending records a separate preview cleanup"
+)]
 pub struct Native {
     backend: Box<dyn NativeBackend>,
     begun: bool,

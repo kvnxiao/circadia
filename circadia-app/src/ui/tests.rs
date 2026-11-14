@@ -738,7 +738,15 @@ fn consecutive_configure_commands_wait_as_the_newest_one() {
         .iter()
         .map(|command| match command {
             ControllerCommand::Configure { revision, .. } => Some(*revision),
-            _ => None,
+            ControllerCommand::Manual(_)
+            | ControllerCommand::Preview(_)
+            | ControllerCommand::StopPreview
+            | ControllerCommand::Diagnostic { .. }
+            | ControllerCommand::Foreground { .. }
+            | ControllerCommand::Recompute(_)
+            | ControllerCommand::Lock
+            | ControllerCommand::Suspend
+            | ControllerCommand::Resume { .. } => None,
         })
         .collect();
     assert_eq!(
@@ -886,7 +894,15 @@ fn an_entry_added_before_its_name_arrives_records_the_name_with_one_configure() 
             ControllerCommand::Configure { config, .. } => {
                 Some(config.entries(Field::Suppression).to_vec())
             }
-            _ => None,
+            ControllerCommand::Manual(_)
+            | ControllerCommand::Preview(_)
+            | ControllerCommand::StopPreview
+            | ControllerCommand::Diagnostic { .. }
+            | ControllerCommand::Foreground { .. }
+            | ControllerCommand::Recompute(_)
+            | ControllerCommand::Lock
+            | ControllerCommand::Suspend
+            | ControllerCommand::Resume { .. } => None,
         })
         .collect();
     assert_eq!(configured, [vec![crate::AppEntry::new("game.exe", "Game")]]);

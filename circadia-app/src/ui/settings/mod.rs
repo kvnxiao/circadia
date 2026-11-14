@@ -157,6 +157,10 @@ pub(super) enum Visibility {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "paused, retrying, and preview_active come from the configuration, the native retry, and the controller snapshot, which change independently"
+)]
 pub(super) struct Model {
     accepted: Option<Arc<Config>>,
     inputs: FieldInputs,
@@ -361,7 +365,7 @@ impl Model {
             } else {
                 ManagementState::TurningOff
             }),
-            _ => None,
+            ManagementState::Off | ManagementState::On | ManagementState::Exiting => None,
         }
     }
 
@@ -379,14 +383,22 @@ impl Model {
     fn clock(&self, field: Field) -> u16 {
         match self.value(field) {
             FieldValue::Clock(minute) => minute,
-            _ => 0,
+            FieldValue::Number(_)
+            | FieldValue::Switch(_)
+            | FieldValue::Coordinates(_)
+            | FieldValue::Apps(_)
+            | FieldValue::Language(_) => 0,
         }
     }
 
     fn number(&self, field: Field) -> i64 {
         match self.value(field) {
             FieldValue::Number(number) => number,
-            _ => 0,
+            FieldValue::Clock(_)
+            | FieldValue::Switch(_)
+            | FieldValue::Coordinates(_)
+            | FieldValue::Apps(_)
+            | FieldValue::Language(_) => 0,
         }
     }
 }
@@ -628,7 +640,11 @@ impl Settings {
         for (field, value) in &edits {
             let text = match value {
                 FieldValue::Number(number) => number.to_string(),
-                other => format!("{other:?}"),
+                other @ (FieldValue::Clock(_)
+                | FieldValue::Switch(_)
+                | FieldValue::Coordinates(_)
+                | FieldValue::Apps(_)
+                | FieldValue::Language(_)) => format!("{other:?}"),
             };
             super::measurement::input(field.key(), &text);
             if *field == Field::MiddleKelvin {
@@ -741,6 +757,10 @@ impl Settings {
         }
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "the exhaustive match in update sends only timer messages here"
+    )]
     fn timer_elapsed(&mut self, message: &Message) {
         #[cfg(feature = "graph-measurement")]
         crate::activity::record(crate::ActivityEvent::SettingsTick);
@@ -808,6 +828,10 @@ impl Settings {
         }
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "the exhaustive match in update sends only add-app and title dialog messages here"
+    )]
     fn app_message(&mut self, message: Message, context: &ComponentContext<'_, Self>) {
         match message {
             Message::OpenDialog(list) => self.dialog = Some(apps::AddDialog::new(list)),
@@ -902,6 +926,10 @@ impl Settings {
             .run_window(|window| Message::Dpi(crate::platform::settings_window::dpi(&window)));
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "the exhaustive match in update sends only Opened and location messages here"
+    )]
     fn solar_update(&mut self, message: Message, context: &ComponentContext<'_, Self>) {
         if location::starts_request(&message, &self.input.model) {
             self.input.request_location.call(());

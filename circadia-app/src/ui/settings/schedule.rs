@@ -1043,21 +1043,52 @@ fn temperature_card(
 ) -> View {
     let text = &settings.input.text;
     bind_text!(fl, text);
-    let (title, description) = match field {
-        Field::DaytimeKelvin if config.sunrise_enabled() => {
-            (fl!("color-daytime"), fl!("color-daytime-description"))
-        }
-        Field::DaytimeKelvin => (fl!("color-daytime"), fl!("color-daytime-description-wake")),
-        Field::MiddleKelvin if unused(config, field) => {
-            (fl!("color-middle"), fl!("color-middle-description-unused"))
-        }
-        Field::MiddleKelvin => (fl!("color-middle"), fl!("color-middle-description")),
-        _ => (fl!("color-bedtime"), fl!("color-bedtime-description")),
-    };
-    let (slider, number) = match field {
-        Field::DaytimeKelvin => (automation_id::DAYTIME_SLIDER, automation_id::DAYTIME_NUMBER),
-        Field::MiddleKelvin => (automation_id::MIDDLE_SLIDER, automation_id::MIDDLE_NUMBER),
-        _ => (automation_id::SLEEP_SLIDER, automation_id::SLEEP_NUMBER),
+    let (title, description, slider, number) = match field {
+        Field::DaytimeKelvin => (
+            fl!("color-daytime"),
+            if config.sunrise_enabled() {
+                fl!("color-daytime-description")
+            } else {
+                fl!("color-daytime-description-wake")
+            },
+            automation_id::DAYTIME_SLIDER,
+            automation_id::DAYTIME_NUMBER,
+        ),
+        Field::MiddleKelvin => (
+            fl!("color-middle"),
+            if unused(config, field) {
+                fl!("color-middle-description-unused")
+            } else {
+                fl!("color-middle-description")
+            },
+            automation_id::MIDDLE_SLIDER,
+            automation_id::MIDDLE_NUMBER,
+        ),
+        Field::SleepKelvin
+        | Field::Wake
+        | Field::Bedtime
+        | Field::ScheduledTransitionMinutes
+        | Field::OrdinaryFadeMs
+        | Field::FocusDelayMs
+        | Field::OutputRateHz
+        | Field::PreviewSeconds
+        | Field::SolarTiming
+        | Field::Sunrise
+        | Field::Sunset
+        | Field::UseWindowsLocation
+        | Field::Coordinates
+        | Field::Suppression
+        | Field::Exclusions
+        | Field::StartAtSignIn
+        | Field::StartMinimized
+        | Field::CheckUpdatesAutomatically
+        | Field::ManageNightLight
+        | Field::InterfaceLanguage => (
+            fl!("color-bedtime"),
+            fl!("color-bedtime-description"),
+            automation_id::SLEEP_SLIDER,
+            automation_id::SLEEP_NUMBER,
+        ),
     };
     let mut heading: Vec<View> = vec![widgets::body(&title).into()];
     if unused(config, field) {

@@ -73,7 +73,11 @@ impl ScheduleError {
                 category: DiagnosticCategory::Windows,
                 code: error.raw_os_error(),
             },
-            _ => DiagnosticFailure {
+            ErrorKind::Date(_)
+            | ErrorKind::Integer(_)
+            | ErrorKind::Rules
+            | ErrorKind::Curve
+            | ErrorKind::Solar(_) => DiagnosticFailure {
                 category: DiagnosticCategory::Calculation,
                 code: None,
             },

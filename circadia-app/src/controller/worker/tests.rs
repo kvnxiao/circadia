@@ -99,6 +99,10 @@ enum Call {
     Release,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "active is the simulated Night light state, and off_fails and settings_fails inject independent failures"
+)]
 struct Records {
     settings: NativeSettings,
     active: bool,
@@ -702,7 +706,13 @@ fn duplicate_resume_preserves_generation_and_requires_only_one_application() {
         .iter()
         .filter_map(|call| match call {
             Call::Temperature(value, mode) => Some((*value, *mode)),
-            _ => None,
+            Call::Register
+            | Call::Settings
+            | Call::State
+            | Call::Schedule
+            | Call::Cleanup
+            | Call::Activate(_)
+            | Call::Release => None,
         })
         .collect();
     assert_eq!(
@@ -985,7 +995,13 @@ fn temperatures(records: &Arc<Mutex<Records>>) -> Vec<u16> {
         .iter()
         .filter_map(|call| match call {
             Call::Temperature(value, _) => Some(*value),
-            _ => None,
+            Call::Register
+            | Call::Settings
+            | Call::State
+            | Call::Schedule
+            | Call::Cleanup
+            | Call::Activate(_)
+            | Call::Release => None,
         })
         .collect()
 }
@@ -1280,7 +1296,13 @@ fn kelvins(calls: &[Call]) -> Vec<u16> {
         .iter()
         .filter_map(|call| match call {
             Call::Temperature(kelvin, _) => Some(*kelvin),
-            _ => None,
+            Call::Register
+            | Call::Settings
+            | Call::State
+            | Call::Schedule
+            | Call::Cleanup
+            | Call::Activate(_)
+            | Call::Release => None,
         })
         .collect()
 }

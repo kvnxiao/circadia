@@ -77,6 +77,10 @@ struct Parts {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "twelve_hour, period_first, and padded_hour are separate settings of the regional clock format"
+)]
 struct Layout {
     twelve_hour: bool,
     period_first: bool,

@@ -30,6 +30,7 @@ Circadia is one Rust process that controls Windows Night light through a setting
 - Write a comment or docstring only for a constraint the code cannot express, and keep public documentation to what the workspace lints require. For example, explain an OS race or an ABI requirement, not what a function's signature already shows.
 - Do not add an abstraction used once or a constant that renames one literal. For example, share a constant only when several callers depend on the same rule.
 - Derive dependent state from a few source values with pure functions, and let event handlers update only the source values. For example, compute whether saving is paused from the configuration load report instead of storing a flag that handlers set and clear.
+- Merge separate fields into one enum only when the code can reach a combination of them that it must never produce, or when code in more than one module or on more than one thread assigns them; give each variant only the data valid in its state. For example, store the controller's exit request, which the UI thread and the controller thread both assign, as one enum value instead of a stopping flag and a separate exit kind, but keep separate flags that only one module assigns when every combination is valid.
 - Test meaningful boundaries and failures with expectations independent of the implementation. For example, validate curve results against fixed reference cases instead of computing expected values with the function under test.
 
 ## Wording

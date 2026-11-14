@@ -5,6 +5,7 @@ use crate::support::app::wait;
 use crate::support::automation::Automation;
 use circadia_app::ActivityEvent;
 use circadia_app::ActivityMeasurement;
+use circadia_app::ActivityRecord;
 use circadia_app::ActivityWait;
 use circadia_app::CommandOutcome;
 use circadia_app::ConfigInput;
@@ -361,13 +362,9 @@ fn automatic(
     )?;
     let before = native.native_calls()?.len();
     let records = activity.records()?;
-    let date = records
-        .iter()
-        .rev()
-        .find_map(|record| match record.event {
-            ActivityEvent::DateDeadline(date) => date,
-            _ => None,
-        })
+    let date = date_deadlines(&records)
+        .flatten()
+        .next()
         .ok_or_else(|| io::Error::other("suppression lost its date deadline"))?;
     let mark = records.len();
     let delta =
@@ -380,14 +377,7 @@ fn automatic(
             .skip(mark)
             .filter(|record| matches!(record.event, ActivityEvent::DateRecompute))
             .count();
-        let following_date = records
-            .iter()
-            .rev()
-            .find_map(|record| match record.event {
-                ActivityEvent::DateDeadline(date) => Some(date),
-                _ => None,
-            })
-            .flatten();
+        let following_date = date_deadlines(&records).next().flatten();
         Ok((count == 1
             && following_date.is_some_and(|following| following > date)
             && activity
@@ -682,6 +672,30 @@ fn command(activity: &ActivityMeasurement, command: ControllerCommand) -> io::Re
     )
 }
 
+fn date_deadlines(records: &[ActivityRecord]) -> impl Iterator<Item = Option<Timestamp>> + '_ {
+    records
+        .iter()
+        .rev()
+        .filter_map(|record| match record.event {
+            ActivityEvent::DateDeadline(date) => Some(date),
+            ActivityEvent::ForegroundEvent
+            | ActivityEvent::ForegroundQuery
+            | ActivityEvent::CurveEvaluation
+            | ActivityEvent::Calculation
+            | ActivityEvent::DateRecompute
+            | ActivityEvent::WorkerWake(_)
+            | ActivityEvent::SettingsTick
+            | ActivityEvent::SettingsView
+            | ActivityEvent::GraphAnimationStarted
+            | ActivityEvent::GraphAnimationStopped
+            | ActivityEvent::ProgressAnimationStarted
+            | ActivityEvent::ProgressAnimationStopped
+            | ActivityEvent::NativeDue { .. }
+            | ActivityEvent::Wait(_)
+            | ActivityEvent::Mark(_) => None,
+        })
+}
+
 fn latest_wait(activity: &ActivityMeasurement) -> io::Result<(usize, ActivityWait)> {
     activity
         .records()?
@@ -690,7 +704,21 @@ fn latest_wait(activity: &ActivityMeasurement) -> io::Result<(usize, ActivityWai
         .rev()
         .find_map(|(index, record)| match record.event {
             ActivityEvent::Wait(waiting) => Some((index, waiting)),
-            _ => None,
+            ActivityEvent::ForegroundEvent
+            | ActivityEvent::ForegroundQuery
+            | ActivityEvent::CurveEvaluation
+            | ActivityEvent::Calculation
+            | ActivityEvent::DateRecompute
+            | ActivityEvent::DateDeadline(_)
+            | ActivityEvent::WorkerWake(_)
+            | ActivityEvent::SettingsTick
+            | ActivityEvent::SettingsView
+            | ActivityEvent::GraphAnimationStarted
+            | ActivityEvent::GraphAnimationStopped
+            | ActivityEvent::ProgressAnimationStarted
+            | ActivityEvent::ProgressAnimationStopped
+            | ActivityEvent::NativeDue { .. }
+            | ActivityEvent::Mark(_) => None,
         })
         .ok_or_else(|| io::Error::other("controller has not selected a wait"))
 }
@@ -736,7 +764,22 @@ fn completed_wait(
             {
                 Some(waiting)
             }
-            _ => None,
+            ActivityEvent::ForegroundEvent
+            | ActivityEvent::ForegroundQuery
+            | ActivityEvent::CurveEvaluation
+            | ActivityEvent::Calculation
+            | ActivityEvent::DateRecompute
+            | ActivityEvent::DateDeadline(_)
+            | ActivityEvent::WorkerWake(_)
+            | ActivityEvent::SettingsTick
+            | ActivityEvent::SettingsView
+            | ActivityEvent::GraphAnimationStarted
+            | ActivityEvent::GraphAnimationStopped
+            | ActivityEvent::ProgressAnimationStarted
+            | ActivityEvent::ProgressAnimationStopped
+            | ActivityEvent::NativeDue { .. }
+            | ActivityEvent::Wait(_)
+            | ActivityEvent::Mark(_) => None,
         })
 }
 

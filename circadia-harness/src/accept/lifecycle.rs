@@ -75,7 +75,9 @@ fn check(explorer: ExplorerTest, arguments: &[OsString]) -> io::Result<()> {
             .tempdir()?;
         let test = match explorer {
             ExplorerTest::Restart if !minimized => ExplorerTest::Preserve,
-            test => test,
+            test @ (ExplorerTest::Preserve | ExplorerTest::Restart | ExplorerTest::Settings) => {
+                test
+            }
         };
         let result = exercise(
             &executable,

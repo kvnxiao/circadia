@@ -261,6 +261,10 @@ pub(super) fn preview_stopped(deadline: Option<Instant>, stopped: Option<Instant
 }
 
 #[derive(Clone, Copy, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "preview_active, output_failed, and observation_failed are independent conditions of the status table"
+)]
 pub(super) struct Control<'a> {
     pub(super) management: ManagementState,
     pub(super) scheduling: SchedulingState,

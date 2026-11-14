@@ -28,6 +28,10 @@ pub enum Foreground {
 /// Present one recent executable, when it had focus, its last seen window
 /// title, and its current inclusion and exclusion.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "included, removable, and excluded copy separate answers from the window's Membership"
+)]
 pub struct RecentApp {
     /// Normalized executable filename used for matching.
     pub executable: String,

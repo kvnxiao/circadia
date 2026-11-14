@@ -239,7 +239,27 @@ impl Check<'_> {
     fn add(&self, list: Field, path: &ExecutablePath, restricted: bool) -> io::Result<()> {
         let command = match list {
             Field::Exclusions => automation_id::ADD_EXCLUSION,
-            _ => automation_id::ADD_APP,
+            Field::Suppression
+            | Field::Wake
+            | Field::Bedtime
+            | Field::DaytimeKelvin
+            | Field::MiddleKelvin
+            | Field::SleepKelvin
+            | Field::ScheduledTransitionMinutes
+            | Field::OrdinaryFadeMs
+            | Field::FocusDelayMs
+            | Field::OutputRateHz
+            | Field::PreviewSeconds
+            | Field::SolarTiming
+            | Field::Sunrise
+            | Field::Sunset
+            | Field::UseWindowsLocation
+            | Field::Coordinates
+            | Field::StartAtSignIn
+            | Field::StartMinimized
+            | Field::CheckUpdatesAutomatically
+            | Field::ManageNightLight
+            | Field::InterfaceLanguage => automation_id::ADD_APP,
         };
         crate::accept::picker::open_dialog(&self.automation, &self.window, self.process, command)?;
         let choice = automation_id::dialog_choice(path.as_str());
@@ -575,7 +595,27 @@ fn persisted(entry: &AppEntry, path: Option<&str>) -> bool {
 fn entries(input: &ConfigInput, list: Field) -> &[AppEntry] {
     match list {
         Field::Exclusions => &input.exclusions,
-        _ => &input.suppression,
+        Field::Suppression
+        | Field::Wake
+        | Field::Bedtime
+        | Field::DaytimeKelvin
+        | Field::MiddleKelvin
+        | Field::SleepKelvin
+        | Field::ScheduledTransitionMinutes
+        | Field::OrdinaryFadeMs
+        | Field::FocusDelayMs
+        | Field::OutputRateHz
+        | Field::PreviewSeconds
+        | Field::SolarTiming
+        | Field::Sunrise
+        | Field::Sunset
+        | Field::UseWindowsLocation
+        | Field::Coordinates
+        | Field::StartAtSignIn
+        | Field::StartMinimized
+        | Field::CheckUpdatesAutomatically
+        | Field::ManageNightLight
+        | Field::InterfaceLanguage => &input.suppression,
     }
 }
 

@@ -180,10 +180,8 @@ impl Location {
 }
 
 pub(super) fn starts_request(message: &Message, model: &Model) -> bool {
-    match message {
-        Message::Opened => model.value(Field::UseWindowsLocation) == FieldValue::Switch(true),
-        _ => false,
-    }
+    matches!(message, Message::Opened)
+        && model.value(Field::UseWindowsLocation) == FieldValue::Switch(true)
 }
 
 pub(super) fn failure_message(text: &Text, failure: DiagnosticFailure) -> String {
@@ -191,7 +189,11 @@ pub(super) fn failure_message(text: &Text, failure: DiagnosticFailure) -> String
     let message = match failure.category {
         DiagnosticCategory::AccessDenied => fl!("location-denied"),
         DiagnosticCategory::Unavailable => fl!("location-disabled"),
-        _ => fl!("location-unavailable"),
+        DiagnosticCategory::Missing
+        | DiagnosticCategory::InvalidData
+        | DiagnosticCategory::Io
+        | DiagnosticCategory::Windows
+        | DiagnosticCategory::Calculation => fl!("location-unavailable"),
     };
     super::problems::with_code(text, message, failure)
 }

@@ -649,6 +649,10 @@ pub(super) enum CandidateSection {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "checked, restricted, and available set separate controls of one candidate row"
+)]
 pub(super) struct DialogRow {
     pub(super) executable: String,
     pub(super) path: Option<crate::ExecutablePath>,
@@ -913,6 +917,10 @@ fn last_seen<'a>(model: &'a Model, entry: &AppEntry) -> Option<&'a str> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "regex, restricted, and save_enabled set separate controls of the title dialog"
+)]
 pub(super) struct TitleDialogView {
     pub(super) title: String,
     pub(super) description: String,
@@ -946,7 +954,9 @@ pub(super) fn title_dialog_view(
         path_error: dialog.path_error(model).map(|problem| match problem {
             EntryProblem::Duplicate => fl!("dialog-scope-duplicate"),
             EntryProblem::PathFilename => fl!("entry-path-filename"),
-            _ => fl!("entry-path-invalid"),
+            EntryProblem::Invalid | EntryProblem::Expression | EntryProblem::Path => {
+                fl!("entry-path-invalid")
+            }
         }),
         suggestion: last_seen(model, &dialog.replacement())
             .map(|title| fl!("title-dialog-last-seen", title = title)),

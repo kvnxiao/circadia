@@ -42,6 +42,10 @@ enum Call {
     Release,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "active is the simulated Night light state, and registration_fails and unreadable_settings inject independent failures"
+)]
 struct Records {
     settings: NativeSettings,
     active: bool,
@@ -1082,7 +1086,14 @@ fn temperatures(calls: &[(u64, Call)]) -> Vec<u16> {
         .iter()
         .filter_map(|(_, call)| match call {
             Call::Temperature(kelvin, _) => Some(*kelvin),
-            _ => None,
+            Call::Register
+            | Call::Settings
+            | Call::State
+            | Call::Schedule
+            | Call::Cleanup
+            | Call::Activate(_)
+            | Call::Observe(_)
+            | Call::Release => None,
         })
         .collect()
 }

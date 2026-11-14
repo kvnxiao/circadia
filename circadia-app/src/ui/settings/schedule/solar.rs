@@ -235,7 +235,11 @@ impl Axis {
 fn coordinates(model: &Model) -> Option<Coordinates> {
     match model.value(Field::Coordinates) {
         FieldValue::Coordinates(coordinates) => coordinates,
-        _ => None,
+        FieldValue::Clock(_)
+        | FieldValue::Number(_)
+        | FieldValue::Switch(_)
+        | FieldValue::Apps(_)
+        | FieldValue::Language(_) => None,
     }
 }
 

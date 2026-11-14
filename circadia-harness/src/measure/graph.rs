@@ -241,7 +241,20 @@ fn animation_active(activity: &ActivityMeasurement) -> io::Result<bool> {
         .find_map(|record| match record.event {
             ActivityEvent::GraphAnimationStarted => Some(true),
             ActivityEvent::GraphAnimationStopped => Some(false),
-            _ => None,
+            ActivityEvent::ForegroundEvent
+            | ActivityEvent::ForegroundQuery
+            | ActivityEvent::CurveEvaluation
+            | ActivityEvent::Calculation
+            | ActivityEvent::DateRecompute
+            | ActivityEvent::DateDeadline(_)
+            | ActivityEvent::WorkerWake(_)
+            | ActivityEvent::SettingsTick
+            | ActivityEvent::SettingsView
+            | ActivityEvent::ProgressAnimationStarted
+            | ActivityEvent::ProgressAnimationStopped
+            | ActivityEvent::NativeDue { .. }
+            | ActivityEvent::Wait(_)
+            | ActivityEvent::Mark(_) => None,
         })
         .unwrap_or(false))
 }
