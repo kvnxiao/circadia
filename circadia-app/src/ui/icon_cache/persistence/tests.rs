@@ -89,11 +89,14 @@ fn a_repeated_cache_write_failure_is_logged_once_and_its_recovery_once() {
             );
             wait_until_taken(&writer);
         }
-        // Taking the third index means the second write finished before the
-        // folder is freed.
+        // Taking the third index means the second write finished, but the
+        // third write can still have the blocking file open. Windows does not
+        // remove a deleted file's path until its last handle closes, so
+        // creating the folder there fails with access denied, a second error
+        // kind. Renaming the file frees the path at once.
         writer.submit(sources(3), Pending::default());
         wait_until_taken(&writer);
-        fs_err::remove_file(&folder).expect("free the cache folder");
+        fs_err::rename(&folder, directory.path().join("blocker")).expect("free the cache folder");
         writer.submit(sources(4), Pending::default());
     });
     let [failure, recovery] = log.as_slice() else {
