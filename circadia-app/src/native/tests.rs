@@ -35,7 +35,10 @@ impl Reply {
         match self {
             Self::Ok => Ok(()),
             Self::Failed(error) => Err(error),
-            other => Err(unexpected(&other)),
+            other @ (Self::Cancel(_)
+            | Self::Settings(_)
+            | Self::Active(_)
+            | Self::Notifications(_)) => Err(unexpected(&other)),
         }
     }
 }
@@ -56,7 +59,11 @@ impl Scripted {
                 cancelled.store(true, Ordering::SeqCst);
                 Reply::Ok
             }
-            other => other,
+            other @ (Reply::Ok
+            | Reply::Settings(_)
+            | Reply::Active(_)
+            | Reply::Failed(_)
+            | Reply::Notifications(_)) => other,
         }
     }
 }
@@ -77,7 +84,11 @@ impl NativeBackend for Scripted {
     fn notifications(&mut self, mode: ObservationMode) -> NativeNotifications {
         match self.call(Call::Notifications(mode)) {
             Reply::Notifications(report) => report,
-            other => panic!("expected notifications, received {other:?}"),
+            other @ (Reply::Ok
+            | Reply::Cancel(_)
+            | Reply::Settings(_)
+            | Reply::Active(_)
+            | Reply::Failed(_)) => panic!("expected notifications, received {other:?}"),
         }
     }
 
@@ -89,7 +100,9 @@ impl NativeBackend for Scripted {
         match self.call(Call::Settings) {
             Reply::Settings(settings) => Ok(settings),
             Reply::Failed(error) => Err(error),
-            other => Err(unexpected(&other)),
+            other @ (Reply::Ok | Reply::Cancel(_) | Reply::Active(_) | Reply::Notifications(_)) => {
+                Err(unexpected(&other))
+            }
         }
     }
 
@@ -97,7 +110,10 @@ impl NativeBackend for Scripted {
         match self.call(Call::State) {
             Reply::Active(active) => Ok(active),
             Reply::Failed(error) => Err(error),
-            other => Err(unexpected(&other)),
+            other @ (Reply::Ok
+            | Reply::Cancel(_)
+            | Reply::Settings(_)
+            | Reply::Notifications(_)) => Err(unexpected(&other)),
         }
     }
 

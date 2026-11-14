@@ -227,6 +227,10 @@ fn settings_values(settings: &win_nightlight_lib::Settings) -> NativeSettings {
     }
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "win_nightlight_lib::ErrorKind is non-exhaustive, and other kinds keep the current category"
+)]
 fn diagnostic(error: &(dyn Error + 'static)) -> DiagnosticFailure {
     let mut current = Some(error);
     let mut category = DiagnosticCategory::Windows;

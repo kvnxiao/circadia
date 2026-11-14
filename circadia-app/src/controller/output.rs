@@ -106,7 +106,9 @@ impl OutputTarget {
                 }
                 TemperatureFade::scheduled(now.elapsed, duration, now.wall, from, curve)
             }
-            _ => TemperatureFade::fixed(now.elapsed, duration, from, self.point(now)?.temperature),
+            Self::Retained(_) | Self::Suppression | Self::Preview { .. } => {
+                TemperatureFade::fixed(now.elapsed, duration, from, self.point(now)?.temperature)
+            }
         }
     }
 
@@ -234,6 +236,10 @@ enum Startup {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag records a separate property of one step, computed once when the step is issued"
+)]
 struct Issued {
     request: NativeRequest,
     prepared: Duration,
@@ -656,7 +662,10 @@ impl TemperatureOutput {
             if let Some(step) = issued {
                 self.pending = match step.request.mode {
                     TemperatureMode::Set => Pending::Set,
-                    _ => Pending::Retry,
+                    TemperatureMode::Apply
+                    | TemperatureMode::Hold
+                    | TemperatureMode::ApplyHeld
+                    | TemperatureMode::FinishHeld => Pending::Retry,
                 };
                 self.refresh |= !report.requested_stored
                     && matches!(

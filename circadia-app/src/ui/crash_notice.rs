@@ -35,6 +35,10 @@ fn failed(category: DiagnosticCategory, code: Option<i32>) {
 // The notice uses std::fs because fs_err errors do not expose the OS error
 // code, and the log records only the category and code.
 fn io_failed(error: &io::Error) {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "io::ErrorKind is non-exhaustive, and every other kind is an I/O failure"
+    )]
     let category = match error.kind() {
         io::ErrorKind::PermissionDenied => DiagnosticCategory::AccessDenied,
         _ => DiagnosticCategory::Io,

@@ -43,6 +43,10 @@ impl StorageError {
     pub fn diagnostic(&self) -> DiagnosticFailure {
         let (category, code) = match &self.0 {
             StorageErrorKind::Io { source, .. } => {
+                #[expect(
+                    clippy::wildcard_enum_match_arm,
+                    reason = "io::ErrorKind is non-exhaustive, and every other kind is an I/O failure"
+                )]
                 let category = match source.kind() {
                     io::ErrorKind::NotFound => DiagnosticCategory::Missing,
                     io::ErrorKind::PermissionDenied => DiagnosticCategory::AccessDenied,

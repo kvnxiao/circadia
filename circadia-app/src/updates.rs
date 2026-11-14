@@ -76,6 +76,10 @@ pub(crate) fn version() -> String {
     format!("{}{suffix}", env!("CARGO_PKG_VERSION"))
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the UI thread sets automatic, requested, and stopped, and the update worker clears requested, both under one lock"
+)]
 struct Shared {
     automatic: bool,
     requested: bool,
@@ -181,7 +185,15 @@ fn run(
         }
         let cooldown = match state.state.status {
             Status::RateLimited(Some(until)) => Some(until),
-            _ => None,
+            Status::Idle
+            | Status::Checking
+            | Status::Current
+            | Status::Available(_)
+            | Status::Unpublished
+            | Status::Development
+            | Status::RateLimited(None)
+            | Status::ConnectionFailed
+            | Status::Failed => None,
         };
         if !(state.stopped
             || state.requested

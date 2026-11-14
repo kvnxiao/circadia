@@ -60,6 +60,10 @@ pub(crate) enum Toggles {
     Paused,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "only Configuration's methods write these flags, and restore_dismissed, pending, and exited record separate facts in any combination"
+)]
 pub(crate) struct Configuration {
     store: ConfigStore,
     running_executable: String,
@@ -231,7 +235,9 @@ impl Configuration {
         if let Some(problem) = self.restore {
             let line = match problem {
                 FileProblem::Unusable(Unusable::Syntax { line }) => line,
-                _ => None,
+                FileProblem::Missing
+                | FileProblem::Unreadable { .. }
+                | FileProblem::Unusable(Unusable::Version) => None,
             };
             match file {
                 Read::Bytes(bytes) => {
@@ -263,7 +269,7 @@ impl Configuration {
                     },
                     code: match error.file {
                         FileProblem::Unreadable { code } => code,
-                        _ => None,
+                        FileProblem::Missing | FileProblem::Unusable(_) => None,
                     },
                 },
             );

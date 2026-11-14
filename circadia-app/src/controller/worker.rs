@@ -144,7 +144,14 @@ impl ControllerCommand {
         let input = match self {
             Self::Preview(config) => Some(config.input()),
             Self::Configure { config, .. } => Some(config.input()),
-            _ => None,
+            Self::Manual(_)
+            | Self::StopPreview
+            | Self::Diagnostic { .. }
+            | Self::Foreground { .. }
+            | Self::Recompute(_)
+            | Self::Lock
+            | Self::Suspend
+            | Self::Resume { .. } => None,
         };
         let payload = if let Some(input) = input {
             input
@@ -190,7 +197,22 @@ impl ControllerCommand {
                     .len()
                     .saturating_add(path.as_os_str().len())
                     .saturating_add(title.as_ref().map_or(0, String::len)),
-                _ => 0,
+                Self::Foreground {
+                    foreground: Foreground::Unknown | Foreground::Shell,
+                    ..
+                }
+                | Self::Resume {
+                    foreground: Foreground::Unknown | Foreground::Shell,
+                    ..
+                }
+                | Self::Configure { .. }
+                | Self::Manual(_)
+                | Self::Preview(_)
+                | Self::StopPreview
+                | Self::Diagnostic { .. }
+                | Self::Recompute(_)
+                | Self::Lock
+                | Self::Suspend => 0,
             }
         };
         size_of::<Self>().saturating_add(payload)
@@ -379,7 +401,14 @@ impl ControllerClient {
             ControllerCommand::Configure { config, .. } => {
                 Some((config.as_ref().clone(), CalculationPurpose::Schedule))
             }
-            _ => None,
+            ControllerCommand::Manual(_)
+            | ControllerCommand::StopPreview
+            | ControllerCommand::Diagnostic { .. }
+            | ControllerCommand::Foreground { .. }
+            | ControllerCommand::Recompute(_)
+            | ControllerCommand::Lock
+            | ControllerCommand::Suspend
+            | ControllerCommand::Resume { .. } => None,
         };
         let calculation = request
             .map(|(config, purpose)| {
@@ -392,7 +421,15 @@ impl ControllerClient {
             .transpose()?;
         let interrupts = match &command {
             ControllerCommand::Resume { epoch, .. } => queue.resume_epoch != Some(*epoch),
-            _ => command.interrupts_output(),
+            ControllerCommand::Configure { .. }
+            | ControllerCommand::Manual(_)
+            | ControllerCommand::Preview(_)
+            | ControllerCommand::StopPreview
+            | ControllerCommand::Diagnostic { .. }
+            | ControllerCommand::Foreground { .. }
+            | ControllerCommand::Recompute(_)
+            | ControllerCommand::Lock
+            | ControllerCommand::Suspend => command.interrupts_output(),
         };
         if let ControllerCommand::Resume { epoch, .. } = &command {
             queue.resume_epoch = Some(*epoch);

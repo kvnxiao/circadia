@@ -95,6 +95,10 @@ impl SignIn {
     }
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "io::ErrorKind is non-exhaustive, and every other kind is a Windows failure"
+)]
 fn diagnostic(error: &io::Error) -> DiagnosticFailure {
     DiagnosticFailure {
         category: match error.kind() {
@@ -452,7 +456,11 @@ fn language_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vi
     let options = languages(text);
     let selected = match model.value(Field::InterfaceLanguage) {
         FieldValue::Language(language) => options.iter().position(|(value, _)| *value == language),
-        _ => None,
+        FieldValue::Clock(_)
+        | FieldValue::Number(_)
+        | FieldValue::Switch(_)
+        | FieldValue::Coordinates(_)
+        | FieldValue::Apps(_) => None,
     };
     let combo = ComboBox::new()
         .items_source(options.iter().map(|(_, label)| label.as_str()))

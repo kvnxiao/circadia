@@ -66,6 +66,7 @@ correctness = { level = "deny", priority = -1 }
 multiple_crate_versions = "allow"
 cast_precision_loss = "allow"
 must_use_candidate = "allow"
+wildcard_enum_match_arm = "warn"
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"

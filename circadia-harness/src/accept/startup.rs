@@ -319,7 +319,13 @@ impl RegistryFixture {
                 RegistryValue::Binary(value) if path == APPROVED => {
                     self.approval.as_ref() == Some(&value)
                 }
-                _ => false,
+                RegistryValue::Binary(_)
+                | RegistryValue::Dword(_)
+                | RegistryValue::Qword(_)
+                | RegistryValue::Sz(_)
+                | RegistryValue::ExpandSz(_)
+                | RegistryValue::MultiSz(_)
+                | RegistryValue::None => false,
             };
             require(
                 owned,

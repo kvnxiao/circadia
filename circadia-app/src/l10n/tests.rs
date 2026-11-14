@@ -86,7 +86,11 @@ fn signatures(source: &str) -> BTreeMap<String, BTreeSet<String>> {
                 }
                 Some((message.id.name.to_owned(), names))
             }
-            _ => None,
+            ast::Entry::Term(_)
+            | ast::Entry::Comment(_)
+            | ast::Entry::GroupComment(_)
+            | ast::Entry::ResourceComment(_)
+            | ast::Entry::Junk { .. } => None,
         })
         .collect()
 }
@@ -131,7 +135,12 @@ fn inline_variables(inline: &ast::InlineExpression<&str>, names: &mut BTreeSet<S
                 inline_variables(&argument.value, names);
             }
         }
-        _ => {}
+        ast::InlineExpression::StringLiteral { .. }
+        | ast::InlineExpression::NumberLiteral { .. }
+        | ast::InlineExpression::MessageReference { .. }
+        | ast::InlineExpression::TermReference {
+            arguments: None, ..
+        } => {}
     }
 }
 
@@ -142,7 +151,11 @@ fn terms(source: &str) -> BTreeSet<String> {
         .iter()
         .filter_map(|entry| match entry {
             ast::Entry::Term(term) => Some(term.id.name.to_owned()),
-            _ => None,
+            ast::Entry::Message(_)
+            | ast::Entry::Comment(_)
+            | ast::Entry::GroupComment(_)
+            | ast::Entry::ResourceComment(_)
+            | ast::Entry::Junk { .. } => None,
         })
         .collect()
 }
@@ -512,7 +525,9 @@ fn shared_terms_are_invariant_string_literals() {
             ast::Entry::Comment(_)
             | ast::Entry::GroupComment(_)
             | ast::Entry::ResourceComment(_) => {}
-            _ => panic!("shared.ftl must define only invariant terms"),
+            ast::Entry::Message(_) | ast::Entry::Junk { .. } => {
+                panic!("shared.ftl must define only invariant terms")
+            }
         }
     }
 }

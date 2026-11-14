@@ -532,7 +532,15 @@ fn configures(desktop: &mut Desktop) -> Vec<Arc<Config>> {
         .drain(..)
         .filter_map(|command| match command {
             ControllerCommand::Configure { config, .. } => Some(config),
-            _ => None,
+            ControllerCommand::Manual(_)
+            | ControllerCommand::Preview(_)
+            | ControllerCommand::StopPreview
+            | ControllerCommand::Diagnostic { .. }
+            | ControllerCommand::Foreground { .. }
+            | ControllerCommand::Recompute(_)
+            | ControllerCommand::Lock
+            | ControllerCommand::Suspend
+            | ControllerCommand::Resume { .. } => None,
         })
         .collect()
 }

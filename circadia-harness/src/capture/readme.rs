@@ -236,13 +236,13 @@ fn place(window: &HWND, x: i32, y: i32, width: i32, height: i32) -> io::Result<(
 }
 
 fn visible_bounds(window: &HWND) -> io::Result<RECT> {
-    match window
+    let winsafe::DwmAttr::ExtendedFrameBounds(bounds) = window
         .DwmGetWindowAttribute(co::DWMWA::EXTENDED_FRAME_BOUNDS)
         .map_err(io::Error::other)?
-    {
-        winsafe::DwmAttr::ExtendedFrameBounds(bounds) => Ok(bounds),
-        _ => Err(io::Error::other("DWM returned another window attribute")),
-    }
+    else {
+        return Err(io::Error::other("DWM returned another window attribute"));
+    };
+    Ok(bounds)
 }
 
 struct Backdrop {

@@ -426,7 +426,20 @@ pub(crate) fn hidden(activity: &ActivityMeasurement) -> io::Result<()> {
         .fold(0_i32, |active, record| match record.event {
             ActivityEvent::ProgressAnimationStarted => active + 1,
             ActivityEvent::ProgressAnimationStopped => active - 1,
-            _ => active,
+            ActivityEvent::ForegroundEvent
+            | ActivityEvent::ForegroundQuery
+            | ActivityEvent::CurveEvaluation
+            | ActivityEvent::Calculation
+            | ActivityEvent::DateRecompute
+            | ActivityEvent::DateDeadline(_)
+            | ActivityEvent::WorkerWake(_)
+            | ActivityEvent::SettingsTick
+            | ActivityEvent::SettingsView
+            | ActivityEvent::GraphAnimationStarted
+            | ActivityEvent::GraphAnimationStopped
+            | ActivityEvent::NativeDue { .. }
+            | ActivityEvent::Wait(_)
+            | ActivityEvent::Mark(_) => active,
         });
     require(
         active == 0,

@@ -132,6 +132,7 @@ allow-panic-in-tests = true
 avoid-breaking-exported-api = false
 excessive-nesting-threshold = 4
 max-fn-params-bools = 1
+max-struct-bools = 2
 ```
 
 Default test functions to returning `()` and use descriptive `expect` messages for fallible setup.
@@ -143,8 +144,9 @@ does not establish that context. Permit indexing and explicit panic for test fai
 
 Lint exported APIs during bootstrap with `avoid-breaking-exported-api = false`. Before applying a
 suggested API change to an existing published library, review compatibility and obtain approval for
-any necessary lint exception. Keep the nesting threshold at four and permit at most one boolean
-parameter; use named states for independent flags. See
+any necessary lint exception. Keep the nesting threshold at four, permit at most one boolean
+parameter, and permit at most two bool fields in a struct; use named states for independent
+flags. See
 [Clippy configuration](https://doc.rust-lang.org/clippy/lint_configuration.html#avoid-breaking-exported-api).
 
 ## Limit exceptions to their approved scope (Required)
@@ -160,13 +162,15 @@ same condition, such as `#[cfg_attr(feature = "cli", expect(clippy::print_stdout
 output lists packages"))]`. Passing the checks does not establish compliance with contracts that
 require code review.
 
-| Condition                                                                                     | Permitted exception                                                                                                                                                                                                        |
-| --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A function implements CLI output or diagnostics                                               | Expect only the `print_stdout` or `print_stderr` lint that fires in that function.                                                                                                                                         |
-| A build script emits Cargo directives or a function implements another stdout/stderr protocol | Scope the corresponding printing expectation to the protocol-emitting function.                                                                                                                                            |
-| A public trait in a private module intentionally seals another public trait                   | Expect `unnameable_types` only on the sealing trait; keep ordinary return and argument types nameable.                                                                                                                     |
-| An invalid literal is rejected during forced compile-time evaluation                          | Keep rejection in a const evaluation context; request approval if a lint suppression is still needed.                                                                                                                      |
-| The user approves unsafe implementation in a crate                                            | Change the applicable `unsafe_code` policy from `forbid` to `deny`, then scope expectations to the approved implementation and satisfy the [unsafe obligations](rust-api-design.md#unsafe-soundness-obligations-required). |
+| Condition                                                                                                                                                                                        | Permitted exception                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A function implements CLI output or diagnostics                                                                                                                                                  | Expect only the `print_stdout` or `print_stderr` lint that fires in that function.                                                                                                                                         |
+| A build script emits Cargo directives or a function implements another stdout/stderr protocol                                                                                                    | Scope the corresponding printing expectation to the protocol-emitting function.                                                                                                                                            |
+| A public trait in a private module intentionally seals another public trait                                                                                                                      | Expect `unnameable_types` only on the sealing trait; keep ordinary return and argument types nameable.                                                                                                                     |
+| An invalid literal is rejected during forced compile-time evaluation                                                                                                                             | Keep rejection in a const evaluation context; request approval if a lint suppression is still needed.                                                                                                                      |
+| The user approves unsafe implementation in a crate                                                                                                                                               | Change the applicable `unsafe_code` policy from `forbid` to `deny`, then scope expectations to the approved implementation and satisfy the [unsafe obligations](rust-api-design.md#unsafe-soundness-obligations-required). |
+| A match on an enum from another crate marked `#[non_exhaustive]`, or a match whose wildcard arm must also cover variants added later, such as a handler whose caller sends it only some variants | Expect `wildcard_enum_match_arm` on the smallest item that contains the match, with a reason that names the enum or the caller that selects the variants.                                                                  |
+| A struct has more than two bool fields, code in only its own module assigns them, and every reachable combination of them is valid                                                               | Expect `struct_excessive_bools` on the struct, with a reason that states why every combination is valid.                                                                                                                   |
 
 ```rust
 #[expect(clippy::print_stdout, reason = "CLI output lists the installed packages")]
@@ -201,6 +205,7 @@ lint in the Clippy manifest table unless the row names a Rust lint, and document
 | Iteration order affects reproducible output or other observable behavior               | `iter_over_hash_type = "deny"`                                  |
 | A public library exposes types that callers need to inspect in diagnostics             | `missing_debug_implementations = "warn"` in the Rust lint table |
 | Numeric code needs lint coverage for arithmetic on untrusted or unbounded values       | `arithmetic_side_effects = "deny"`                              |
+| Code must handle each new variant of an enum defined in the workspace at every match   | `wildcard_enum_match_arm = "warn"`                              |
 
 For public libraries, default to `Debug` implementations on public types and enable the
 corresponding Rust lint. Redact sensitive fields in a manual implementation. Apply the lint at the

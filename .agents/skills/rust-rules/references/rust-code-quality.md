@@ -1,6 +1,6 @@
 ---
 paths: **/*.{rs,toml}
-description: "General Rust code-quality patterns; edition and MSRV, derived metadata, enums over booleans and strings, #[must_use], and choosing function parameter types."
+description: "General Rust code-quality patterns; edition and MSRV, derived metadata, enums over booleans and strings, when to merge fields into one enum, #[must_use], and choosing function parameter types."
 ---
 
 # Code Quality Standards
@@ -77,6 +77,15 @@ pub enum ValidationMode { Lenient, Strict }
 
 fn process(data: &str, verbosity: Verbosity, validation: ValidationMode) {}
 ```
+
+## Merge fields into an enum only for reachable invalid combinations or several writers (Default)
+
+Merge separate fields into one enum only when the code can reach a combination of them that it must
+never produce, or when code in more than one module or on more than one thread assigns them; give
+each variant only the data valid in its state. For example, store the controller's exit request,
+which the UI thread and the controller thread both assign, as one enum value instead of a stopping
+flag and a separate exit kind, but keep separate flags that only one module assigns when every
+combination is valid.
 
 ## Prefer domain types after string boundaries (Default)
 
