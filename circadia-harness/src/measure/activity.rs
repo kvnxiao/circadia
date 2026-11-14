@@ -77,10 +77,7 @@ fn exercise(
         Ok(activity.controller()?.snapshot()?.filter(|snapshot| {
             snapshot.scheduling == SchedulingState::Available
                 && snapshot.native_errors.is_empty()
-                && snapshot
-                    .accepted
-                    .as_ref()
-                    .is_some_and(|layer| layer.last_scheduled() == Some(3400))
+                && snapshot.last_scheduled == Some(3400)
         }))
     })?;
     quiet_wait(activity)?;
@@ -588,10 +585,7 @@ fn configure(activity: &ActivityMeasurement, input: &ConfigInput) -> io::Result<
     )?;
     wait("configured schedule calculation applied", || {
         Ok(activity.controller()?.snapshot()?.filter(|snapshot| {
-            snapshot
-                .accepted
-                .as_ref()
-                .is_some_and(|layer| layer.config() == &config)
+            snapshot.accepted.as_deref() == Some(&config)
                 && snapshot.scheduling == SchedulingState::Available
                 && snapshot.control_error.is_none()
         }))

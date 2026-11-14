@@ -18,7 +18,6 @@ use crate::Target;
 use crate::TemperatureMode;
 use crate::TimeInterval;
 use crate::WindowsZone;
-use crate::controller::Layers;
 use crate::controller::managed;
 use crate::native::NativeBackend;
 use jiff::Timestamp;
@@ -228,7 +227,7 @@ fn unmanaged() -> ConfigInput {
 
 struct Fixture {
     driver: NativeDriver,
-    session: Layers,
+    session: Option<crate::Config>,
     records: Arc<Mutex<Records>>,
     clock: Arc<AtomicU64>,
     kelvin: u16,
@@ -249,10 +248,10 @@ impl Fixture {
 
     fn with_config(input: ConfigInput, kelvin: u16) -> Self {
         let config = input.validate().expect("config");
-        let session = Layers::new(Some(config));
+        let session = Some(config);
         let mut runtime = ControlRuntime::new("circadia.exe").expect("runtime");
         let request = runtime
-            .configure(session.active(), OutputUpdate::Fade, at(0))
+            .configure(session.as_ref(), OutputUpdate::Fade, at(0))
             .expect("configure")
             .expect("request");
         runtime.expect_calculation(1);
@@ -290,13 +289,12 @@ impl Fixture {
     }
 
     fn configure(&mut self, input: ConfigInput, milliseconds: u64) {
-        self.session
-            .configure(input.validate().expect("edited config"));
+        self.session = Some(input.validate().expect("edited config"));
         let request = self
             .driver
             .runtime_mut()
             .configure(
-                self.session.active(),
+                self.session.as_ref(),
                 OutputUpdate::LiveEdit,
                 at(milliseconds),
             )
@@ -341,16 +339,9 @@ impl Fixture {
     fn cycle(&mut self, milliseconds: u64) -> NativeCycle {
         self.clock.store(milliseconds, Ordering::SeqCst);
         let clock = Arc::clone(&self.clock);
-        let report = self
-            .driver
+        self.driver
             .cycle(|| at(clock.load(Ordering::SeqCst)), || true)
-            .expect("cycle");
-        if let Some(value) = report.scheduled {
-            self.session
-                .record_scheduled(value)
-                .expect("scheduled value");
-        }
-        report
+            .expect("cycle")
     }
 
     fn observe(&mut self, milliseconds: u64) -> NativeCycle {
@@ -682,7 +673,7 @@ fn unavailable_schedule_without_stored_schedule_stops_native_retries() {
     let request = fixture
         .driver
         .runtime_mut()
-        .configure(fixture.session.active(), OutputUpdate::Fade, at(10))
+        .configure(fixture.session.as_ref(), OutputUpdate::Fade, at(10))
         .expect("configure")
         .expect("request");
     fixture.driver.runtime_mut().expect_calculation(2);
@@ -893,7 +884,7 @@ fn recalculation_preserves_a_suppression_fades_cleanup_deadline() {
         .manual(ManualCommand::Start, at(100))
         .expect("manual");
     fixture.cycle(100);
-    fixture.session.configure(
+    fixture.session = Some(
         ConfigInput {
             sleep_kelvin: 2200,
             ordinary_fade_ms: 500,
@@ -905,7 +896,7 @@ fn recalculation_preserves_a_suppression_fades_cleanup_deadline() {
     let request = fixture
         .driver
         .runtime_mut()
-        .configure(fixture.session.active(), OutputUpdate::LiveEdit, at(200))
+        .configure(fixture.session.as_ref(), OutputUpdate::LiveEdit, at(200))
         .expect("configure")
         .expect("request");
     fixture.driver.runtime_mut().expect_calculation(2);
@@ -1425,13 +1416,11 @@ fn an_edit_before_the_turn_on_calculation_keeps_the_startup_fade() {
         records.active = false;
         records.settings.temperature = Some(4000);
     }
-    fixture
-        .session
-        .configure(managed().validate().expect("managed config"));
+    fixture.session = Some(managed().validate().expect("managed config"));
     fixture
         .driver
         .runtime_mut()
-        .configure(fixture.session.active(), OutputUpdate::LiveEdit, at(100))
+        .configure(fixture.session.as_ref(), OutputUpdate::LiveEdit, at(100))
         .expect("configure")
         .expect("request");
     fixture.configure(

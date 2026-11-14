@@ -32,8 +32,6 @@ pub struct NativeCycle {
     pub cleanup: Option<Result<(), NativeFailure>>,
     /// Registration failures, present only when restoration was attempted.
     pub observation: Option<Vec<NativeFailure>>,
-    /// Successfully stored scheduled temperature to record in the active layer.
-    pub scheduled: Option<u16>,
     /// Calculation failure discovered after fresh reads or slow cleanup.
     pub control_error: Option<ControlError>,
     /// Cleanup and off attempts that ended Night light access after
@@ -242,7 +240,6 @@ impl NativeDriver {
     ///
     /// - Call after processing pending commands and calculation results.
     /// - Keep `current` nonblocking; false cancels remaining public calls.
-    /// - Record `scheduled` before adopting another configuration layer.
     ///
     /// # Errors
     /// Report invalid output bounds or an unrepresentable retry deadline.
@@ -290,13 +287,10 @@ impl NativeDriver {
             self.control(&now, &mut current, &mut report)?;
         } else if cleanup && current() {
             let result = self.native.cleanup();
-            if result.is_ok() {
-                match self.runtime.cleaned_up(now().output) {
-                    Ok(scheduled) => report.scheduled = scheduled,
-                    Err(error) => report.control_error = Some(error),
-                }
-            } else {
+            if result.is_err() {
                 self.runtime.output().failed();
+            } else if let Err(error) = self.runtime.cleaned_up(now().output) {
+                report.control_error = Some(error);
             }
             report.cleanup = Some(result);
         }
@@ -381,8 +375,7 @@ impl NativeDriver {
                 }
             }
         });
-        report.scheduled = self
-            .runtime
+        self.runtime
             .native_completed(&attempt, now().output.elapsed);
         #[cfg(feature = "output-measurement")]
         {

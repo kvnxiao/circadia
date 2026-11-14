@@ -37,7 +37,7 @@ pub enum OutputTarget {
         /// Interval whose solar and clock calculations are complete.
         valid: TimeInterval,
     },
-    /// Retain a configuration layer's last scheduled temperature.
+    /// Retain the last scheduled temperature.
     Retained(ColorTemperature),
     /// Apply the temporary 6500 K override.
     Suppression,

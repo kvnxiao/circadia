@@ -75,8 +75,6 @@ pub use controller::CommandOutcome;
 #[cfg(windows)]
 pub use controller::CommandReceipt;
 #[cfg(windows)]
-pub use controller::ConfigLayer;
-#[cfg(windows)]
 pub use controller::ControlError;
 #[cfg(windows)]
 pub use controller::ControlRuntime;
@@ -114,6 +112,8 @@ pub use controller::OutputTarget;
 pub use controller::OutputUpdate;
 #[cfg(windows)]
 pub use controller::Recompute;
+#[cfg(windows)]
+pub use controller::Resumed;
 #[cfg(windows)]
 pub use controller::RunningPreview;
 #[cfg(windows)]

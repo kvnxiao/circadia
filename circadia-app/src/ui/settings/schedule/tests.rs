@@ -827,6 +827,7 @@ fn calculated(
     };
     ControllerSnapshot {
         accepted: None,
+        last_scheduled: None,
         scheduling: crate::SchedulingState::Available,
         management: ManagementState::On,
         preview: None,

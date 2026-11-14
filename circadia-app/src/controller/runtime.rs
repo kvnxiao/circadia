@@ -28,42 +28,6 @@ use win_nightlight_lib::ColorTemperature;
 #[cfg(test)]
 mod tests;
 
-/// Keep the accepted configuration with its last stored scheduled temperature.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ConfigLayer {
-    pub(crate) config: Config,
-    pub(crate) last_scheduled: Option<u16>,
-}
-
-impl ConfigLayer {
-    /// Start a layer without a scheduled temperature.
-    pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            last_scheduled: None,
-        }
-    }
-
-    /// Start a layer for a newly accepted configuration that keeps the last
-    /// scheduled temperature of `previous` until its own schedule stores one.
-    pub fn reconfigured(previous: Option<&Self>, config: Config) -> Self {
-        Self {
-            config,
-            last_scheduled: previous.and_then(Self::last_scheduled),
-        }
-    }
-
-    /// Return the validated configuration.
-    pub fn config(&self) -> &Config {
-        &self.config
-    }
-
-    /// Return the last scheduled output, excluding Preview and suppression.
-    pub fn last_scheduled(&self) -> Option<u16> {
-        self.last_scheduled
-    }
-}
-
 /// Supply distinct scheduling, output, and sleep-inclusive clocks.
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeTime {
@@ -73,7 +37,7 @@ pub struct RuntimeTime {
     pub uptime: Duration,
 }
 
-/// Describe the active configuration layer's scheduling availability.
+/// Describe the active schedule's availability.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SchedulingState {
     /// Wait for accepted configuration without opening native access.
@@ -84,9 +48,9 @@ pub enum SchedulingState {
     Available,
     /// Use the Wake/Bedtime-only curve after solar failure.
     SolarFallback,
-    /// Use this layer's last scheduled temperature after clock failure.
+    /// Use the last scheduled temperature after clock failure.
     Retained,
-    /// Prohibit ordinary writes because this layer has no scheduled output.
+    /// Prohibit ordinary writes because no scheduled output was stored.
     Stopped,
 }
 
@@ -129,6 +93,17 @@ enum Lifecycle {
     Running,
     Suspended,
     Exited,
+}
+
+/// Report whether a resume notification started a new resume.
+#[derive(Debug)]
+pub enum Resumed {
+    /// Reconciled a new epoch, with a calculation request when a configuration
+    /// is accepted.
+    Processed(Option<CalculationRequest>),
+    /// Ignored an epoch already processed, or a notification after exit
+    /// started.
+    Repeated,
 }
 
 /// Combine scheduling availability, suppression, and output selection.
@@ -176,19 +151,18 @@ impl ControlRuntime {
         })
     }
 
-    /// Select the active configuration layer and request fresh calculation.
+    /// Select the accepted configuration and request fresh calculation.
     ///
     /// # Errors
-    /// Report invalid retained temperature or an unrepresentable focus
-    /// deadline.
+    /// Report an unrepresentable focus deadline.
     pub fn configure(
         &mut self,
-        layer: Option<&ConfigLayer>,
+        config: Option<&Config>,
         update: OutputUpdate,
         now: RuntimeTime,
     ) -> Result<Option<CalculationRequest>, ControlError> {
         self.recent.take();
-        let Some(layer) = layer else {
+        let Some(config) = config else {
             self.config = None;
             self.last_scheduled = None;
             self.state = SchedulingState::Waiting;
@@ -199,19 +173,14 @@ impl ControlRuntime {
             self.output.stop();
             return Ok(None);
         };
-        let managing = layer.config().input().manage_night_light;
+        let managing = config.input().manage_night_light;
         let handing_back = self.managing() && !managing;
         let fade_out = self.can_fade_out();
         let changed = self
             .config
             .as_ref()
-            .is_none_or(|old| !old.same_schedule(layer.config()));
-        self.config = Some(layer.config().clone());
-        self.last_scheduled = layer
-            .last_scheduled()
-            .map(ColorTemperature::new)
-            .transpose()
-            .map_err(|_error| ControlError::timing())?;
+            .is_none_or(|old| !old.same_schedule(config));
+        self.config = Some(config.clone());
         if self.state == SchedulingState::Stopped && self.last_scheduled.is_none() {
             self.focus_initialized = false;
         }
@@ -230,7 +199,6 @@ impl ControlRuntime {
             self.focus_initialized = false;
             self.stop_control(fade_out, now)?;
         }
-        let config = layer.config();
         if managing {
             self.suppression
                 .observe_focus(self.focus(config), now.uptime, config)?;
@@ -590,9 +558,9 @@ impl ControlRuntime {
         epoch: u64,
         foreground: &Foreground,
         now: RuntimeTime,
-    ) -> Result<Option<CalculationRequest>, ControlError> {
+    ) -> Result<Resumed, ControlError> {
         if self.resume_epoch == Some(epoch) || self.lifecycle == Lifecycle::Exited {
-            return Ok(None);
+            return Ok(Resumed::Repeated);
         }
         self.resume_epoch = Some(epoch);
         tracing::info!("resumed");
@@ -605,7 +573,7 @@ impl ControlRuntime {
         self.recent.take();
         let Some(config) = &self.config else {
             record_foreground(foreground, None);
-            return Ok(None);
+            return Ok(Resumed::Processed(None));
         };
         if self.managing() {
             let focus = self.focus(config);
@@ -619,7 +587,7 @@ impl ControlRuntime {
         }
         self.state = SchedulingState::Evaluating;
         self.calculation_update = OutputUpdate::Fade;
-        Ok(Some(self.request(config, now)))
+        Ok(Resumed::Processed(Some(self.request(config, now))))
     }
 
     /// Cancel future control, focus delays, manual suppression, and Preview.
@@ -697,25 +665,27 @@ impl ControlRuntime {
         self.output.startup_complete()
     }
 
-    /// Record stored output and return the active layer's scheduled update.
-    pub fn native_completed(&mut self, report: &NativeAttempt, now: Duration) -> Option<u16> {
-        let scheduled = self.output.completed(report, now);
-        if let Some(value) = scheduled {
+    /// Record stored output and its scheduled temperature.
+    pub fn native_completed(&mut self, report: &NativeAttempt, now: Duration) {
+        if let Some(value) = self.output.completed(report, now) {
             self.last_scheduled = Some(value);
         }
-        scheduled.map(ColorTemperature::kelvin)
     }
 
     /// Record a matching final fade value after independent cleanup.
     ///
     /// # Errors
     /// Report unavailable current schedule evaluation.
-    pub fn cleaned_up(&mut self, now: ControlTime) -> Result<Option<u16>, ControlError> {
-        let scheduled = self.output.cleaned_up(now)?;
-        if let Some(value) = scheduled {
+    pub fn cleaned_up(&mut self, now: ControlTime) -> Result<(), ControlError> {
+        if let Some(value) = self.output.cleaned_up(now)? {
             self.last_scheduled = Some(value);
         }
-        Ok(scheduled.map(ColorTemperature::kelvin))
+        Ok(())
+    }
+
+    /// Return the last scheduled output, excluding Preview and suppression.
+    pub fn last_scheduled(&self) -> Option<u16> {
+        self.last_scheduled.map(ColorTemperature::kelvin)
     }
 
     /// Return whether scheduling permits normal native operations.

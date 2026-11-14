@@ -203,6 +203,7 @@ fn model(desktop: &Desktop) -> Model {
 fn snapshot(preview_active: bool) -> Arc<ControllerSnapshot> {
     Arc::new(ControllerSnapshot {
         accepted: None,
+        last_scheduled: None,
         scheduling: crate::SchedulingState::Available,
         management: crate::ManagementState::On,
         preview: None,

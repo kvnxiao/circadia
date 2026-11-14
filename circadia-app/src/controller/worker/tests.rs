@@ -106,6 +106,7 @@ struct Records {
     temperature_changed: Option<mpsc::SyncSender<()>>,
     blocked: Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>,
     off_fails: bool,
+    settings_fails: bool,
 }
 
 impl Default for Records {
@@ -121,6 +122,7 @@ impl Default for Records {
             temperature_changed: None,
             blocked: None,
             off_fails: false,
+            settings_fails: false,
         }
     }
 }
@@ -154,6 +156,11 @@ impl NativeBackend for Backend {
     fn settings(&mut self) -> Result<NativeSettings, NativeFailure> {
         let mut state = self.records();
         state.calls.push(Call::Settings);
+        if state.settings_fails {
+            return Err(NativeFailure::injected(
+                DiagnosticOperation::NativeSettingsRead,
+            ));
+        }
         Ok(state.settings)
     }
 
@@ -378,10 +385,7 @@ fn configuration_recomputation_refreshes_previously_unknown_foreground() {
     });
     let client = worker.client();
     wait_for(&client, &notified, |snapshot| {
-        snapshot
-            .accepted
-            .as_ref()
-            .is_some_and(|layer| layer.last_scheduled() == Some(3400))
+        snapshot.last_scheduled == Some(3400)
     });
     let edited = client
         .submit(ControllerCommand::Configure {
@@ -656,10 +660,7 @@ fn duplicate_resume_preserves_generation_and_requires_only_one_application() {
     let (worker, notified) = start(&directory, &records);
     let client = worker.client();
     wait_for(&client, &notified, |snapshot| {
-        snapshot
-            .accepted
-            .as_ref()
-            .is_some_and(|layer| layer.last_scheduled() == Some(3400))
+        snapshot.last_scheduled == Some(3400)
     });
     let id = client
         .submit(ControllerCommand::Resume {
@@ -713,6 +714,77 @@ fn duplicate_resume_preserves_generation_and_requires_only_one_application() {
     );
 }
 
+#[test]
+fn a_repeated_resume_epoch_does_not_expedite_a_pending_native_retry() {
+    let (calculated, calculations) = mpsc::channel();
+    let calculation =
+        CalculationWorker::start(move || calculated.send(()).map_err(io::Error::other))
+            .expect("calculation worker");
+    let shared = Arc::new(Shared {
+        origin: Instant::now(),
+        queue: Mutex::new(Queue::default()),
+        latest: Mutex::new(None),
+        generation: AtomicU64::new(0),
+        stopping: AtomicBool::new(false),
+        exit: Mutex::new(None),
+        finished: AtomicBool::new(false),
+        wake: Arc::new(NativeWake::new().expect("wake event")),
+        calculation: calculation.client(),
+        notify: Arc::new(|| Ok(())),
+    });
+    let records = Arc::new(Mutex::new(Records {
+        settings_fails: true,
+        ..Records::default()
+    }));
+    let mut worker = Worker::new(
+        Some(Arc::new(input(3400).validate().expect("config"))),
+        ControlRuntime::new("circadia.exe").expect("runtime"),
+        shared,
+        Native::with_backend(Backend(records)),
+        || Foreground::Unknown,
+    );
+    let origin = worker.origin;
+    let failed_attempt = |worker: &mut Worker<_>| {
+        calculations
+            .recv_timeout(Duration::from_secs(10))
+            .expect("calculation result");
+        worker.apply_calculation().expect("calculation applied");
+        worker
+            .driver
+            .cycle(|| time(origin), || true)
+            .expect("native attempt");
+        worker
+            .driver
+            .recovery()
+            .deadline()
+            .expect("pending native retry")
+    };
+    let resume = |worker: &mut Worker<_>, id| {
+        let (completion, _completed) = mpsc::sync_channel(1);
+        worker
+            .apply(Envelope {
+                id,
+                command: ControllerCommand::Resume {
+                    epoch: 42,
+                    foreground: Foreground::Unknown,
+                },
+                calculation: None,
+                completion,
+                entered: time(origin).output,
+            })
+            .expect("resume");
+    };
+    worker
+        .recalculate(OutputUpdate::Fade, None)
+        .expect("startup calculation");
+    failed_attempt(&mut worker);
+    resume(&mut worker, 1);
+    let pending = failed_attempt(&mut worker);
+    resume(&mut worker, 2);
+    assert_eq!(worker.driver.recovery().deadline(), Some(pending));
+    calculation.shutdown().expect("calculation shutdown");
+}
+
 fn saved(directory: &TempDir) {
     ConfigStore::new(directory.path())
         .save(&input(3400).validate().expect("config"))
@@ -720,10 +792,7 @@ fn saved(directory: &TempDir) {
 }
 
 fn scheduled(snapshot: &ControllerSnapshot) -> bool {
-    snapshot
-        .accepted
-        .as_ref()
-        .is_some_and(|layer| layer.last_scheduled() == Some(3400))
+    snapshot.last_scheduled == Some(3400)
 }
 
 #[test]
@@ -862,10 +931,7 @@ fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
         let (worker, notified) = start(&directory, &records);
         let client = worker.client();
         wait_for(&client, &notified, |snapshot| {
-            snapshot
-                .accepted
-                .as_ref()
-                .is_some_and(|layer| layer.last_scheduled() == Some(3400))
+            snapshot.last_scheduled == Some(3400)
         });
         let submit = |command| {
             let receipt = client.submit(command).expect("command");
@@ -925,10 +991,7 @@ fn temperatures(records: &Arc<Mutex<Records>>) -> Vec<u16> {
 }
 
 fn last_scheduled(snapshot: &ControllerSnapshot, kelvin: u16) -> bool {
-    snapshot
-        .accepted
-        .as_ref()
-        .is_some_and(|layer| layer.last_scheduled() == Some(kelvin))
+    snapshot.last_scheduled == Some(kelvin)
 }
 
 #[test]
@@ -978,7 +1041,6 @@ fn configure_applies_a_lower_sleep_temperature_without_a_fade_and_reports_its_re
             .accepted
             .as_ref()
             .expect("accepted")
-            .config()
             .input()
             .sleep_kelvin,
         2200
@@ -1202,10 +1264,7 @@ fn start_at_kelvin(directory: &TempDir, ordinary_fade_ms: i64) -> Started {
     let (worker, notified) = start(directory, &records);
     let client = worker.client();
     wait_for(&client, &notified, |snapshot| {
-        snapshot
-            .accepted
-            .as_ref()
-            .is_some_and(|layer| layer.last_scheduled() == Some(2400))
+        snapshot.last_scheduled == Some(2400)
     });
     let before = records.lock().expect("records").calls.len();
     Started {
@@ -1634,7 +1693,6 @@ fn a_failed_off_attempt_while_turning_off_is_reported_once_and_not_retried() {
             .accepted
             .as_ref()
             .expect("accepted")
-            .config()
             .input()
             .manage_night_light
     );

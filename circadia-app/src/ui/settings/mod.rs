@@ -267,7 +267,7 @@ impl Model {
             ),
             applied: snapshot
                 .and_then(|snapshot| snapshot.accepted.as_ref())
-                .map(|layer| layer.config().input().manage_night_light),
+                .map(|config| config.input().manage_night_light),
             native_errors: snapshot.map_or_else(Vec::new, |snapshot| {
                 snapshot
                     .native_errors
@@ -304,9 +304,7 @@ impl Model {
             calculation: snapshot
                 .and_then(|snapshot| snapshot.calculation.clone())
                 .map(Calculation),
-            last_scheduled: snapshot
-                .and_then(|snapshot| snapshot.accepted.as_ref())
-                .and_then(crate::ConfigLayer::last_scheduled),
+            last_scheduled: snapshot.and_then(|snapshot| snapshot.last_scheduled),
             crash: None,
         }
     }
