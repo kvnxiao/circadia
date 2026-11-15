@@ -392,8 +392,9 @@ fn denied(
     snapshot(
         automation,
         &settings,
+        &automation_id::link(automation_id::LOCATION),
         "location-denied.png",
-        "Use my Windows location row with the Windows permission failure",
+        "Follow sunrise and sunset card with the Windows permission failure and its link",
     )?;
     show_page(automation, &settings, process, automation_id::NAV_GENERAL)?;
     automation.toggle(&settings, process, automation_id::START_MINIMIZED)?;
@@ -408,20 +409,22 @@ fn denied(
 
 fn finding(automation: &Automation, settings: &HWND) -> io::Result<()> {
     let expected = "Finding your location…";
+    let process = std::process::id();
     wait(&format!("location request shows {expected}"), || {
-        Ok((automation
-            .text(
-                settings,
-                std::process::id(),
-                automation_id::LOCATION_REQUESTING,
-            )?
-            .as_deref()
-            == Some(expected))
-        .then_some(()))
+        let caption = automation
+            .names(settings, process)?
+            .iter()
+            .any(|name| name == expected);
+        // WinUI prefixes an active progress ring's accessible name with "Busy".
+        let indicator = automation
+            .text(settings, process, automation_id::LOCATION_REQUESTING)?
+            .is_some_and(|name| name.ends_with(expected));
+        Ok((caption && indicator).then_some(()))
     })?;
     snapshot(
         automation,
         settings,
+        automation_id::LATITUDE,
         "location-finding.png",
         "Use my Windows location row while Windows finds the position",
     )
@@ -430,13 +433,14 @@ fn finding(automation: &Automation, settings: &HWND) -> io::Result<()> {
 fn snapshot(
     automation: &Automation,
     settings: &HWND,
+    shown: &str,
     image: &str,
     description: &str,
 ) -> io::Result<()> {
     let process = std::process::id();
-    wait("location row visible", || {
+    wait(&format!("{shown} visible"), || {
         Ok(automation
-            .show_control(settings, process, automation_id::USE_WINDOWS_LOCATION)?
+            .show_control(settings, process, shown)?
             .then_some(()))
     })?;
     std::thread::sleep(std::time::Duration::from_millis(250));
