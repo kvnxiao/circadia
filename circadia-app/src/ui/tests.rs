@@ -711,6 +711,102 @@ fn closing_settings_stops_preview_and_closing_during_exit_does_not() {
     assert!(desktop.pending.is_empty());
 }
 
+fn playing(processed: u64) -> Arc<ControllerSnapshot> {
+    let config = crate::Config::default();
+    let mut zone = crate::WindowsZone::named("UTC", false).expect("UTC rules");
+    let playback = crate::Playback::capture(
+        &config,
+        &mut zone,
+        "2026-10-27T12:00:00Z".parse().expect("UTC instant"),
+    )
+    .expect("captured Preview");
+    Arc::new(ControllerSnapshot {
+        accepted: Some(Arc::new(config)),
+        last_scheduled: None,
+        scheduling: crate::SchedulingState::Available,
+        management: crate::ManagementState::On,
+        preview: Some(crate::RunningPreview {
+            playback: Arc::new(playback),
+            start: Duration::ZERO,
+            end: Duration::from_secs(10),
+        }),
+        origin: Instant::now(),
+        calculation: None,
+        preview_active: true,
+        preview_deadline: Some(Duration::from_secs(10)),
+        suppression: crate::SuppressionState {
+            automatic: false,
+            manual_deadline: None,
+        },
+        recent: Vec::new(),
+        command: Some((processed, crate::CommandOutcome::Applied)),
+        native_errors: BTreeMap::new(),
+        configured_revision: 0,
+        control_error: None,
+        stopped: false,
+    })
+}
+
+fn submit_pending(desktop: &mut Desktop, first: u64) {
+    for (id, command) in (first..).zip(std::mem::take(&mut desktop.pending)) {
+        desktop.preview.submitted(&command, id);
+    }
+}
+
+#[test]
+fn each_change_of_the_derived_preview_state_writes_one_transition_record() {
+    let (_directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+    let log = crate::log::capture(tracing::Level::DEBUG, || {
+        desktop.log_preview();
+        desktop.command(settings::Command::Preview);
+        desktop.log_preview();
+        submit_pending(&mut desktop, 1);
+        desktop.log_preview();
+        desktop.snapshot = Some(playing(1));
+        desktop.log_preview();
+        desktop.command(settings::Command::StopPreview);
+        desktop.log_preview();
+        submit_pending(&mut desktop, 2);
+        desktop.log_preview();
+    });
+    let transitions: Vec<_> = log
+        .iter()
+        .filter(|record| record.contains("state transition"))
+        .collect();
+    assert_eq!(
+        transitions,
+        [
+            r#"DEBUG circadia_app::log: state transition activity="preview" from="Start" to="Not previewing""#,
+            r#"DEBUG circadia_app::log: state transition activity="preview" from="Not previewing" to="Starting""#,
+            r#"DEBUG circadia_app::log: state transition activity="preview" from="Starting" to="Playing""#,
+            r#"DEBUG circadia_app::log: state transition activity="preview" from="Playing" to="Not previewing""#,
+        ]
+    );
+}
+
+#[test]
+fn exit_ends_a_starting_preview_with_one_transition_record() {
+    let (_directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+    let log = crate::log::capture(tracing::Level::DEBUG, || {
+        desktop.log_preview();
+        desktop.command(settings::Command::Preview);
+        desktop.log_preview();
+        desktop.begin_exit();
+    });
+    let transitions: Vec<_> = log
+        .iter()
+        .filter(|record| record.contains("state transition"))
+        .collect();
+    assert_eq!(
+        transitions,
+        [
+            r#"DEBUG circadia_app::log: state transition activity="preview" from="Start" to="Not previewing""#,
+            r#"DEBUG circadia_app::log: state transition activity="preview" from="Not previewing" to="Starting""#,
+            r#"DEBUG circadia_app::log: state transition activity="preview" from="Starting" to="Not previewing""#,
+        ]
+    );
+}
+
 #[test]
 fn opening_and_closing_settings_without_an_edit_writes_nothing() {
     let (directory, mut desktop) = desktop_with(None);

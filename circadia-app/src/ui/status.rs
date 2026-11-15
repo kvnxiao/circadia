@@ -14,8 +14,10 @@ use crate::SuppressionState;
 use crate::l10n::Text;
 use crate::l10n::bind_text;
 use crate::platform::nls::RegionalFormat;
+use crate::ui::PreviewRequest;
 use crate::ui::configuration::Configuration;
 use crate::ui::configuration::Toggles;
+use crate::ui::settings::Playing;
 use jiff::SignedDuration;
 use jiff::Timestamp;
 use jiff::civil::DateTime;
@@ -256,8 +258,67 @@ pub(super) fn preview_active(snapshot: &ControllerSnapshot, now: Instant) -> boo
     snapshot.preview_active && preview_deadline(snapshot).is_none_or(|deadline| now < deadline)
 }
 
-pub(super) fn preview_stopped(deadline: Option<Instant>, stopped: Option<Instant>) -> bool {
-    stopped.is_some() && deadline == stopped
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum PreviewView {
+    Idle,
+    Starting { deadline: Instant },
+    Playing { playing: Playing, deadline: Instant },
+}
+
+impl PreviewView {
+    pub(super) fn name(&self) -> &'static str {
+        match self {
+            Self::Idle => "Not previewing",
+            Self::Starting { .. } => "Starting",
+            Self::Playing { .. } => "Playing",
+        }
+    }
+
+    pub(super) fn playing(&self) -> Option<&Playing> {
+        match self {
+            Self::Playing { playing, .. } => Some(playing),
+            Self::Idle | Self::Starting { .. } => None,
+        }
+    }
+
+    pub(super) fn deadline(&self) -> Option<Instant> {
+        match self {
+            Self::Idle => None,
+            Self::Starting { deadline } | Self::Playing { deadline, .. } => Some(*deadline),
+        }
+    }
+}
+
+pub(super) fn preview_view(
+    request: &PreviewRequest,
+    snapshot: Option<&ControllerSnapshot>,
+    now: Instant,
+) -> PreviewView {
+    let processed = |receipt: Option<u64>| {
+        receipt
+            .zip(snapshot.and_then(|snapshot| snapshot.command.as_ref()))
+            .is_some_and(|(receipt, (id, _outcome))| *id >= receipt)
+    };
+    match *request {
+        PreviewRequest::Requested { deadline, receipt } if now < deadline => {
+            if processed(receipt) {
+                reported(snapshot, deadline, now)
+            } else {
+                PreviewView::Starting { deadline }
+            }
+        }
+        PreviewRequest::Idle | PreviewRequest::Requested { .. } => PreviewView::Idle,
+    }
+}
+
+fn reported(snapshot: Option<&ControllerSnapshot>, deadline: Instant, now: Instant) -> PreviewView {
+    let Some(snapshot) = snapshot.filter(|snapshot| preview_active(snapshot, now)) else {
+        return PreviewView::Idle;
+    };
+    match Playing::new(snapshot) {
+        Some(playing) => PreviewView::Playing { playing, deadline },
+        None => PreviewView::Starting { deadline },
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -280,28 +341,16 @@ pub(super) struct Control<'a> {
 impl<'a> Control<'a> {
     pub(super) fn new(
         snapshot: &'a ControllerSnapshot,
+        preview: &PreviewView,
         now: Instant,
-        stopped: Option<Instant>,
     ) -> Self {
         let managing = snapshot.management.is_on();
-        let preview_active =
-            preview_active(snapshot, now) && !preview_stopped(preview_deadline(snapshot), stopped);
         Self {
             management: snapshot.management,
             scheduling: snapshot.scheduling,
             suppression: snapshot.suppression,
-            preview_active,
-            playback: snapshot
-                .preview
-                .as_ref()
-                .filter(|_| preview_active)
-                .and_then(|preview| {
-                    let started = snapshot.origin.checked_add(preview.start)?;
-                    preview
-                        .playback
-                        .at(now.saturating_duration_since(started))
-                        .ok()
-                }),
+            preview_active: preview.playing().is_some(),
+            playback: preview.playing().and_then(|playing| playing.instant(now)),
             schedule: snapshot
                 .calculation
                 .as_ref()

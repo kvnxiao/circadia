@@ -42,6 +42,7 @@ use jiff::Timestamp;
 use problems::Action;
 use problems::Banner;
 use problems::Feedback;
+pub(super) use schedule::Playing;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -157,10 +158,6 @@ pub(super) enum Visibility {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "paused, retrying, and preview_active come from the configuration, the native retry, and the controller snapshot, which change independently"
-)]
 pub(super) struct Model {
     accepted: Option<Arc<Config>>,
     inputs: FieldInputs,
@@ -179,9 +176,7 @@ pub(super) struct Model {
     retrying: bool,
     scheduling: SchedulingState,
     suppression: SuppressionState,
-    preview_active: bool,
-    preview_deadline: Option<Instant>,
-    playing: Option<schedule::Playing>,
+    preview: status::PreviewView,
     manual_end: Option<u16>,
     running_executable: String,
     recent: Vec<RecentApp>,
@@ -240,8 +235,6 @@ impl Model {
         status: String,
         names: &BTreeMap<crate::ExecutablePath, String>,
     ) -> Self {
-        let preview_active =
-            snapshot.is_some_and(|snapshot| status::preview_active(snapshot, Instant::now()));
         let managing = configuration
             .accepted()
             .is_some_and(|config| config.input().manage_night_light);
@@ -256,11 +249,7 @@ impl Model {
             write_error: configuration.write_error().map(|error| error.diagnostic()),
             backup_error: configuration.backup_error().map(|error| error.diagnostic()),
             launch_language: configuration.launch_language().to_owned(),
-            status: if preview_active {
-                String::new()
-            } else {
-                status
-            },
+            status,
             management: snapshot.map_or(
                 if managing {
                     ManagementState::TurningOn
@@ -284,11 +273,7 @@ impl Model {
             suppression: snapshot
                 .map(|snapshot| snapshot.suppression)
                 .unwrap_or_default(),
-            preview_active,
-            preview_deadline: snapshot.and_then(status::preview_deadline),
-            playing: snapshot
-                .filter(|_| preview_active)
-                .and_then(schedule::Playing::new),
+            preview: status::PreviewView::Idle,
             manual_end: snapshot
                 .and_then(|snapshot| {
                     snapshot
@@ -320,12 +305,18 @@ impl Model {
         }
     }
 
-    pub(super) fn with_stopped_preview(mut self, stopped: Option<Instant>) -> Self {
-        if status::preview_stopped(self.preview_deadline, stopped) {
-            self.preview_active = false;
-            self.playing = None;
+    // The status line changes at the output rate during Preview; leaving it
+    // out keeps those changes from rendering settings again.
+    pub(super) fn with_preview(mut self, preview: status::PreviewView) -> Self {
+        if preview != status::PreviewView::Idle {
+            self.status.clear();
         }
+        self.preview = preview;
         self
+    }
+
+    fn playing(&self) -> Option<&Playing> {
+        self.preview.playing()
     }
 
     fn control(&self, now: std::time::Instant) -> status::Control<'_> {
@@ -334,11 +325,8 @@ impl Model {
             management: self.management,
             scheduling: self.scheduling,
             suppression: self.suppression,
-            preview_active: self.preview_active,
-            playback: self
-                .playing
-                .as_ref()
-                .and_then(|playing| playing.instant(now)),
+            preview_active: self.playing().is_some(),
+            playback: self.playing().and_then(|playing| playing.instant(now)),
             schedule: self.calculation.as_ref().and_then(Calculation::schedule),
             last_scheduled: self.last_scheduled,
             output_failed,
@@ -350,7 +338,7 @@ impl Model {
     }
 
     fn editable(&self) -> bool {
-        self.accepted.is_some() && !self.preview_active
+        self.accepted.is_some() && self.preview == status::PreviewView::Idle
     }
 
     fn managing(&self) -> bool {
@@ -707,11 +695,7 @@ impl Settings {
                 )
             });
         }
-        let deadline = self
-            .input
-            .model
-            .preview_deadline
-            .filter(|_| self.input.model.preview_active);
+        let deadline = self.input.model.preview.deadline();
         if self
             .preview_deadline
             .as_ref()
@@ -731,7 +715,7 @@ impl Settings {
             self.pane_visible() && self.phase().progress.is_some(),
         ) {
             self.tick = None;
-        } else if let Some(playing) = &self.input.model.playing {
+        } else if let Some(playing) = self.input.model.playing() {
             let delay = playing.next_text_update(self.schedule(), now, self.page == Page::Schedule);
             let at = now + delay;
             if self.tick.as_ref().map(|(at, _)| *at) != Some(at) {
@@ -997,12 +981,7 @@ impl Settings {
                 start: segment.start,
                 end: segment.end,
             },
-            playing: self
-                .input
-                .model
-                .playing
-                .clone()
-                .filter(|_| control.preview_active),
+            playing: self.input.model.playing().cloned(),
         })
     }
 

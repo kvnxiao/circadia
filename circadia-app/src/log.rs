@@ -84,6 +84,10 @@ pub(crate) fn windows_build() -> Option<String> {
     (version.major != 0).then(|| format!("{}.{}.{}", version.major, version.minor, version.build))
 }
 
+pub(crate) fn transition(activity: &'static str, from: &'static str, to: &'static str) {
+    tracing::debug!(activity, from, to, "state transition");
+}
+
 #[cfg(test)]
 pub(crate) fn capture(level: Level, run: impl FnOnce()) -> Vec<String> {
     // While at most one dispatcher is registered, tracing-core caches a
@@ -397,6 +401,18 @@ mod tests {
             fs_err::read_to_string(&blocked).expect("blocked fixture"),
             "file instead of directory"
         );
+    }
+
+    #[test]
+    fn a_transition_is_one_debug_record_with_its_activity_and_states() {
+        let record = || transition("preview", "Not previewing", "Starting");
+        assert_eq!(
+            capture(Level::DEBUG, record),
+            [
+                r#"DEBUG circadia_app::log: state transition activity="preview" from="Not previewing" to="Starting""#
+            ]
+        );
+        assert_eq!(capture(Level::INFO, record), Vec::<String>::new());
     }
 
     #[test_case(Level::INFO, &["INFO circadia_app::log::tests: native failure code=5"]; "info")]

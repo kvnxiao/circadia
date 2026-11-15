@@ -141,7 +141,7 @@ pub(in crate::ui::settings) fn solar_messages(
     messages.extend(
         model
             .solar
-            .conflicts_in_view(model.playing.as_ref(), now, current)
+            .conflicts_in_view(model.playing(), now, current)
             .enumerate()
             .map(|(index, conflict)| {
                 (

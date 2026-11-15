@@ -398,17 +398,23 @@ fn stopped_preview_disappears_from_the_tooltip_before_the_native_snapshot_change
         start: Duration::ZERO,
         end: Duration::from_secs(10),
     });
+    state.command = Some((1, crate::CommandOutcome::Applied));
     let now = state.origin + Duration::from_secs(1);
-    let stopped = Some(state.origin + Duration::from_secs(10));
+    let selected = |seconds| PreviewRequest::Requested {
+        deadline: state.origin + Duration::from_secs(seconds),
+        receipt: Some(1),
+    };
+    let stopped = PreviewRequest::Idle;
     let current = "2026-10-27T13:00:00Z";
-    let active = Control::new(&state, now, None);
+    let active = Control::new(&state, &preview_view(&selected(10), Some(&state), now), now);
     assert!(line(&active, Stored::default(), current).starts_with("Previewing"));
-    let control = Control::new(&state, now, stopped);
+    let control = Control::new(&state, &preview_view(&stopped, Some(&state), now), now);
     let tooltip = tooltip(&english(), &line(&control, Stored::default(), current));
     assert!(!tooltip.contains("Previewing"), "{tooltip}");
     assert!(tooltip.contains("Managing Night light"), "{tooltip}");
     state.preview_deadline = Some(Duration::from_secs(20));
-    assert!(Control::new(&state, now, stopped).preview_active);
+    let replacement = preview_view(&selected(20), Some(&state), now);
+    assert!(Control::new(&state, &replacement, now).preview_active);
 }
 
 #[test]
@@ -598,7 +604,7 @@ fn a_failed_off_attempt_after_management_turned_off_does_not_report_unavailable_
             DiagnosticOperation::NativeActivationWrite,
         )),
     );
-    let control = Control::new(&state, Instant::now(), None);
+    let control = Control::new(&state, &PreviewView::Idle, Instant::now());
     assert!(!control.output_failed);
     assert_eq!(
         line(&control, Stored::default(), "2026-10-27T13:00:00Z"),
@@ -781,7 +787,15 @@ fn every_tray_tooltip_is_shorter_than_128_utf16_units_without_nul() {
             .iter()
             .flat_map(|state| stored.iter().map(move |stored| (state, *stored)));
         for (state, stored) in pairs {
-            let control = Control::new(state, Instant::now(), None);
+            let now = Instant::now();
+            let preview = if state.preview_active {
+                PreviewView::Starting {
+                    deadline: now + Duration::from_secs(10),
+                }
+            } else {
+                PreviewView::Idle
+            };
+            let control = Control::new(state, &preview, now);
             let line = status_line(&text, &region, Some(&control), stored, noon);
             tooltips.push(tooltip(&text, &line));
         }
@@ -1252,4 +1266,172 @@ fn tray_menu_keys_are_unique_with_a_full_recent_history(manual: ManualCommand) {
         assert_eq!(items.len(), expected);
         assert_eq!(keys.len(), expected);
     }
+}
+
+fn reporting(processed: u64, run: Option<bool>) -> ControllerSnapshot {
+    let mut state = snapshot(ConfigInput::default());
+    state.command = Some((processed, crate::CommandOutcome::Applied));
+    let Some(playing) = run else {
+        return state;
+    };
+    state.preview_active = true;
+    state.preview_deadline = Some(Duration::from_secs(10));
+    if playing {
+        let config = ConfigInput::default()
+            .validate()
+            .expect("valid Preview settings");
+        let mut zone = crate::WindowsZone::named("UTC", false).expect("UTC rules");
+        state.preview = Some(crate::RunningPreview {
+            playback: Arc::new(
+                crate::Playback::capture(&config, &mut zone, at("2026-10-27T12:00:00Z"))
+                    .expect("captured Preview"),
+            ),
+            start: Duration::ZERO,
+            end: Duration::from_secs(10),
+        });
+    }
+    state
+}
+
+const PENDING: Option<bool> = Some(false);
+const PLAYING: Option<bool> = Some(true);
+const NO_RUN: Option<bool> = None;
+
+fn requested(state: &ControllerSnapshot, receipt: Option<u64>) -> PreviewRequest {
+    PreviewRequest::Requested {
+        deadline: state.origin + Duration::from_secs(10),
+        receipt,
+    }
+}
+
+#[test]
+fn startup_is_not_previewing() {
+    let state = reporting(3, PLAYING);
+    let now = state.origin + Duration::from_secs(1);
+    assert_eq!(
+        preview_view(&PreviewRequest::Idle, None, now),
+        PreviewView::Idle
+    );
+    assert_eq!(
+        preview_view(&PreviewRequest::Idle, Some(&state), now),
+        PreviewView::Idle
+    );
+}
+
+#[test]
+fn a_selection_is_starting_until_the_controller_processes_it() {
+    let state = reporting(3, NO_RUN);
+    let deadline = state.origin + Duration::from_secs(10);
+    let now = state.origin + Duration::from_secs(1);
+    for (receipt, snapshot) in [
+        (None, None),
+        (None, Some(&state)),
+        (Some(4), Some(&state)),
+        (Some(4), None),
+    ] {
+        assert_eq!(
+            preview_view(&requested(&state, receipt), snapshot, now),
+            PreviewView::Starting { deadline },
+            "receipt {receipt:?}"
+        );
+    }
+}
+
+#[test_case(PENDING, "Starting"; "a pending run")]
+#[test_case(PLAYING, "Playing"; "playback")]
+#[test_case(NO_RUN, "Not previewing"; "no run")]
+fn after_the_controller_processes_a_selection_its_snapshot_decides(
+    run: Option<bool>,
+    expected: &str,
+) {
+    let state = reporting(4, run);
+    let view = preview_view(
+        &requested(&state, Some(4)),
+        Some(&state),
+        state.origin + Duration::from_secs(1),
+    );
+    assert_eq!(view.name(), expected);
+    if run == PENDING {
+        assert_eq!(
+            view,
+            PreviewView::Starting {
+                deadline: state.origin + Duration::from_secs(10)
+            }
+        );
+    }
+}
+
+#[test]
+fn a_selection_past_its_deadline_without_a_snapshot_change_is_not_previewing() {
+    let state = reporting(3, NO_RUN);
+    let request = requested(&state, Some(4));
+    let deadline = state.origin + Duration::from_secs(10);
+    let before = deadline
+        .checked_sub(Duration::from_nanos(1))
+        .expect("before the deadline");
+    assert_eq!(
+        preview_view(&request, Some(&state), before).name(),
+        "Starting"
+    );
+    assert_eq!(
+        preview_view(&request, Some(&state), deadline),
+        PreviewView::Idle
+    );
+    assert_eq!(preview_view(&request, None, deadline), PreviewView::Idle);
+}
+
+#[test]
+fn playback_ends_at_its_deadline() {
+    let state = reporting(4, PLAYING);
+    let request = requested(&state, Some(4));
+    let deadline = state.origin + Duration::from_secs(10);
+    let before = deadline
+        .checked_sub(Duration::from_nanos(1))
+        .expect("before the deadline");
+    assert_eq!(
+        preview_view(&request, Some(&state), before).name(),
+        "Playing"
+    );
+    assert_eq!(
+        preview_view(&request, Some(&state), deadline),
+        PreviewView::Idle
+    );
+}
+
+#[test]
+fn a_stop_ends_playback_before_an_older_snapshot_changes() {
+    let state = reporting(4, PLAYING);
+    let now = state.origin + Duration::from_secs(1);
+    assert_eq!(
+        preview_view(&PreviewRequest::Idle, Some(&state), now),
+        PreviewView::Idle
+    );
+}
+
+#[test]
+fn the_status_names_preview_only_while_it_plays() {
+    let state = reporting(4, PLAYING);
+    let now = state.origin + Duration::from_secs(1);
+    let starting = preview_view(&requested(&state, None), Some(&state), now);
+    assert_eq!(starting.name(), "Starting");
+    assert!(!Control::new(&state, &starting, now).preview_active);
+    let playing = preview_view(&requested(&state, Some(4)), Some(&state), now);
+    assert_eq!(playing.name(), "Playing");
+    assert!(Control::new(&state, &playing, now).preview_active);
+}
+
+#[test]
+fn playback_ends_at_the_deadline_of_the_selection() {
+    let state = reporting(4, PLAYING);
+    let now = state.origin + Duration::from_secs(1);
+    let selection = PreviewRequest::Requested {
+        deadline: state.origin + Duration::from_secs(8),
+        receipt: Some(4),
+    };
+    let playing = preview_view(&selection, Some(&state), now);
+    assert_eq!(playing.name(), "Playing");
+    assert_eq!(
+        playing.deadline(),
+        Some(state.origin + Duration::from_secs(8))
+    );
 }
