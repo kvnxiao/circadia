@@ -251,16 +251,18 @@ These checks establish application behavior after controlled failures at the nat
 just accept location
 ```
 
-This recipe uses simulated Night light and location outcomes to check consent and request lifetime. Close any running Circadia instance first. It uses UI Automation, opens and closes Settings, and can take focus. It does not move the cursor or send keys.
+This recipe uses simulated Night light and location outcomes to check Circadia's location consent dialog, which opens when Use my Windows location is turned on, and how position requests start, are reused, and complete. Close any running Circadia instance first. It uses UI Automation, opens and closes Settings, and can take focus. It does not move the cursor or send keys.
 
 Four separate processes share one temporary configuration directory:
 
-- Cancel keeps location off without a request. Turn on saves enablement. A delayed position received after Settings closes is saved.
-- The next process starts only in the tray and requests one position. Opening Settings reuses the pending request; page changes do not add requests.
-- Denied permission at tray startup keeps the saved preference and coordinates without requesting Windows consent. Opening Settings starts a simulated Windows permission request; the failure stays visible until acquisition succeeds.
-- Foreground startup with the saved preference requests once, even with solar timing off, without repeating Circadia's location consent dialog.
+- Cancelling the location consent dialog leaves the setting off and does not request a position. Choosing Turn on saves the setting as on. While the position is pending, a caption reads "Finding your location…", and the accessible name of the progress indicator beside the Use my Windows location switch ends with that text; WinUI adds "Busy" before it. A delayed position received after Settings closes is saved.
+- The next process starts with only its tray icon and requests one position. Opening Settings reuses the pending request; page changes do not add requests.
+- When Windows denies location access and Circadia starts with only its tray icon, the request fails and keeps the saved preference and coordinates. Opening Settings checks permission again and fails at once without a position request: the failure appears with an "Open Windows location settings" link, which the check does not select, and the progress indicator does not appear.
+- A process that starts with Settings open and the saved preference requests once, even with solar timing off, without repeating Circadia's location consent dialog.
 
-The recipe also checks Windows permission silently. When access is already allowed, a fifth process starts only in the tray and requests one real Windows position. It verifies that the position is saved without printing coordinates. Otherwise, it reports the host check as pending. It does not change Windows privacy settings or accept an OS permission prompt. A failed check retains the temporary directory for inspection.
+The recipe also checks Windows permission silently. When access is already allowed, a fifth process starts with only its tray icon and requests one real Windows position. It verifies that the position is saved without printing coordinates. Otherwise, it reports that this real-position check did not run. It does not change Windows privacy settings or answer a Windows permission prompt. A failed check retains the temporary directory for inspection.
+
+The first process saves `location-finding.png` while its position request is pending, and the third process saves `location-denied.png` while the failure is visible. `location-finding.png` shows the Settings window scrolled until the coordinate fields below the Use my Windows location row are visible, and `location-denied.png` shows it scrolled to the failure's link; the run directory has them and `manifest.tsv` lists them. Inspect `location-finding.png` for the "Finding your location…" caption below the location description and `location-denied.png` for the location failure message and its link in the Follow sunrise and sunset card, each with no clipped text and the rows below the location row aligned. `children.log` records each screenshot's path.
 
 ## Capture scenarios
 

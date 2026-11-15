@@ -33,29 +33,23 @@ const DENIED: DiagnosticFailure = DiagnosticFailure {
     code: None,
 };
 
-#[derive(Default)]
 struct FakeSource {
-    background: std::cell::Cell<bool>,
-    allowed: std::cell::Cell<bool>,
-    access: RefCell<Vec<Completed<()>>>,
+    permission: std::cell::Cell<Result<(), DiagnosticFailure>>,
     position: RefCell<Vec<Completed<Coordinates>>>,
+}
+
+impl Default for FakeSource {
+    fn default() -> Self {
+        Self {
+            permission: std::cell::Cell::new(Ok(())),
+            position: RefCell::default(),
+        }
+    }
 }
 
 impl Locate for FakeSource {
     fn permission(&self) -> Result<(), DiagnosticFailure> {
-        if self.allowed.get() {
-            Ok(())
-        } else {
-            Err(DENIED)
-        }
-    }
-
-    fn access(&self, completed: Completed<()>) -> Result<Option<Box<dyn Any>>, DiagnosticFailure> {
-        if self.background.get() {
-            return Ok(None);
-        }
-        self.access.borrow_mut().push(completed);
-        Ok(Some(Box::new(())))
+        self.permission.get()
     }
 
     fn position(
@@ -71,7 +65,7 @@ impl Locate for FakeSource {
 struct Events(Arc<Mutex<Vec<Event>>>);
 
 impl Events {
-    fn deliver(&self) -> impl Fn(Event) + Clone + Send + 'static {
+    fn deliver(&self) -> impl Fn(Event) + Send + 'static {
         let events = Arc::clone(&self.0);
         move |event| events.lock().expect("event list").push(event)
     }
@@ -97,18 +91,7 @@ impl Harness {
     }
 
     fn start(&mut self) -> Option<Result<Coordinates, DiagnosticFailure>> {
-        self.location
-            .start(&self.source, RequestMode::Foreground, self.events.deliver())
-    }
-
-    fn answer_access(&mut self, result: Result<(), DiagnosticFailure>) {
-        let completed = self
-            .source
-            .access
-            .borrow_mut()
-            .pop()
-            .expect("access request");
-        completed(result);
+        self.location.start(&self.source, self.events.deliver())
     }
 
     fn answer_position(&mut self, result: Result<Coordinates, DiagnosticFailure>) {
@@ -125,19 +108,11 @@ impl Harness {
         self.events
             .take()
             .into_iter()
-            .filter_map(|event| {
-                self.location
-                    .receive(event, &self.source, self.events.deliver())
-            })
+            .filter_map(|event| self.location.receive(event))
             .collect()
     }
 
     fn locate(&mut self, position: Coordinates) -> Vec<Result<Coordinates, DiagnosticFailure>> {
-        self.answer_access(Ok(()));
-        assert!(
-            self.receive().is_empty(),
-            "access starts the position request"
-        );
         self.answer_position(Ok(position));
         self.receive()
     }
@@ -256,11 +231,11 @@ fn turning_the_toggle_on_requests_once_and_a_result_sends_one_configure() {
     desktop.pending.clear();
     let mut harness = Harness::new();
     assert_eq!(harness.start(), None);
-    assert_eq!(harness.source.access.borrow().len(), 1);
-    assert!(harness.location.requesting());
+    assert_eq!(harness.source.position.borrow().len(), 1);
+    assert!(harness.location.status().requesting);
     let results = harness.locate(SEATTLE);
     assert_eq!(results, [Ok(SEATTLE)]);
-    assert!(!harness.location.requesting());
+    assert!(!harness.location.status().requesting);
     desktop.located(Ok(SEATTLE));
     assert_eq!(configured_coordinates(&mut desktop), [Some(SEATTLE)]);
     let saved = fs_err::read_to_string(directory.path().join("config.toml")).expect("saved file");
@@ -297,28 +272,15 @@ fn saved_location_requests_at_both_startup_preferences(
         ..located_file()
     });
     let model = model(&desktop);
-    let mut harness = Harness::new();
-    harness.source.allowed.set(true);
-    let mode = if desktop.configuration.borrow().opens_settings_at_launch() {
+    if desktop.configuration.borrow().opens_settings_at_launch() {
         assert!(starts_request(&Message::Opened, &model));
-        RequestMode::Foreground
-    } else {
-        RequestMode::Background
-    };
-    assert_eq!(
-        harness
-            .location
-            .start(&harness.source, mode, harness.events.deliver()),
-        None
-    );
+    }
     for page in ["general", "schedule"] {
         assert!(!starts_request(
             &Message::Navigate(Some(page.to_owned())),
             &model
         ));
     }
-    assert!(harness.source.access.borrow().is_empty());
-    assert_eq!(harness.source.position.borrow().len(), 1);
 }
 
 #[test]
@@ -343,18 +305,17 @@ fn a_denied_request_shows_the_error_at_the_toggle_and_keeps_the_coordinates() {
     let (_directory, mut desktop) = desktop(&located_file());
     desktop.set_settings_open(true);
     let mut harness = Harness::new();
-    assert_eq!(harness.start(), None);
-    harness.answer_access(Err(DENIED));
-    assert_eq!(harness.receive(), [Err(DENIED)]);
+    harness.source.permission.set(Err(DENIED));
+    assert_eq!(harness.start(), Some(Err(DENIED)));
     assert!(harness.source.position.borrow().is_empty());
-    assert_eq!(harness.location.failure(), Some(DENIED));
+    assert_eq!(harness.location.status().failure, Some(DENIED));
     let text = Text::load(&crate::l10n::LanguageTag::english()).expect("English catalog");
     let model = model(&desktop);
     let messages = solar_messages(
         &model,
         &text,
         &RegionalFormat::capture("en-US").expect("Windows resolves en-US"),
-        harness.location.failure(),
+        harness.location.status().failure,
         std::time::Instant::now(),
         jiff::Timestamp::now(),
     );
@@ -365,7 +326,7 @@ fn a_denied_request_shows_the_error_at_the_toggle_and_keeps_the_coordinates() {
     assert!(
         message
             .text
-            .starts_with("Windows location access is not available"),
+            .starts_with("Windows doesn't allow Circadia to use your location"),
         "{}",
         message.text
     );
@@ -373,7 +334,7 @@ fn a_denied_request_shows_the_error_at_the_toggle_and_keeps_the_coordinates() {
     assert_eq!(configured_coordinates(&mut desktop), []);
     assert_eq!(accepted_coordinates(&desktop), Some(NEW_YORK));
     harness.location.cancel();
-    assert_eq!(harness.location.failure(), None);
+    assert_eq!(harness.location.status().failure, None);
 }
 
 #[test]
@@ -413,7 +374,7 @@ fn overlapping_requests_are_coalesced() {
     let mut harness = Harness::new();
     assert_eq!(harness.start(), None);
     assert_eq!(harness.start(), None);
-    assert_eq!(harness.source.access.borrow().len(), 1);
+    assert_eq!(harness.source.position.borrow().len(), 1);
     assert_eq!(harness.locate(SEATTLE), [Ok(SEATTLE)]);
 }
 
@@ -421,13 +382,13 @@ fn overlapping_requests_are_coalesced() {
 fn a_failure_remains_visible_while_a_new_request_is_pending() {
     let mut harness = Harness::new();
     assert_eq!(harness.start(), None);
-    harness.answer_access(Err(DENIED));
+    harness.answer_position(Err(DENIED));
     assert_eq!(harness.receive(), [Err(DENIED)]);
     assert_eq!(harness.start(), None);
-    assert!(harness.location.requesting());
-    assert_eq!(harness.location.failure(), Some(DENIED));
+    assert!(harness.location.status().requesting);
+    assert_eq!(harness.location.status().failure, Some(DENIED));
     assert_eq!(harness.locate(SEATTLE), [Ok(SEATTLE)]);
-    assert_eq!(harness.location.failure(), None);
+    assert_eq!(harness.location.status().failure, None);
 }
 
 #[test]
@@ -451,36 +412,26 @@ fn a_superseded_request_result_is_dropped() {
     assert_eq!(harness.start(), None);
     let first = harness
         .source
-        .access
+        .position
         .borrow_mut()
         .pop()
-        .expect("first access");
+        .expect("first position request");
     harness.location.cancel();
     assert_eq!(harness.start(), None);
-    first(Ok(()));
+    first(Ok(NEW_YORK));
     assert_eq!(harness.receive(), []);
-    assert!(harness.source.position.borrow().is_empty());
+    assert!(harness.location.status().requesting);
     assert_eq!(harness.locate(SEATTLE), [Ok(SEATTLE)]);
 }
 
-#[test_case(false; "during access")]
-#[test_case(true; "during acquisition")]
-fn cancellation_discards_late_results(acquiring: bool) {
+#[test]
+fn cancellation_discards_a_late_result() {
     let mut harness = Harness::new();
     assert_eq!(harness.start(), None);
-    if acquiring {
-        harness.answer_access(Ok(()));
-        assert_eq!(harness.receive(), []);
-    }
     harness.location.cancel();
-    if acquiring {
-        harness.answer_position(Ok(SEATTLE));
-    } else {
-        harness.answer_access(Ok(()));
-    }
+    harness.answer_position(Ok(SEATTLE));
     assert_eq!(harness.receive(), []);
-    assert!(!harness.location.requesting());
-    assert!(harness.source.position.borrow().is_empty());
+    assert!(!harness.location.status().requesting);
 }
 
 #[test_case(Command::Reset; "reset")]
@@ -495,8 +446,7 @@ fn reset_and_exit_discard_held_and_late_results(command: Command) {
     desktop.pending.clear();
     assert!(desktop.held_location.is_none());
     assert!(!Arc::ptr_eq(&previous_completion, &desktop.location_event));
-    *previous_completion.lock().expect("obsolete completion") =
-        Some(Event::Position(1, Ok(SEATTLE)));
+    *previous_completion.lock().expect("obsolete completion") = Some(Event(1, Ok(SEATTLE)));
     assert!(
         desktop
             .location_event
@@ -602,38 +552,9 @@ fn manual_coordinates_are_disabled_while_the_toggle_is_on() {
 }
 
 #[test]
-fn background_position_acquisition_uses_prior_permission_without_requesting_consent() {
-    let mut harness = Harness::new();
-    harness.source.background.set(true);
-    harness.source.allowed.set(true);
-    assert_eq!(harness.start(), None);
-    assert!(harness.source.access.borrow().is_empty());
-    assert!(harness.location.requesting());
-    harness.answer_position(Ok(NEW_YORK));
-    assert_eq!(harness.receive(), [Ok(NEW_YORK)]);
-}
-
-#[test]
-fn denied_background_access_never_requests_consent_or_position() {
-    let mut harness = Harness::new();
-    assert_eq!(
-        harness.location.start(
-            &harness.source,
-            RequestMode::Background,
-            harness.events.deliver()
-        ),
-        Some(Err(DENIED))
-    );
-    assert!(harness.source.access.borrow().is_empty());
-    assert!(harness.source.position.borrow().is_empty());
-    assert_eq!(harness.location.failure(), Some(DENIED));
-}
-
-#[test]
 fn revoked_permission_during_acquisition_keeps_the_saved_preference_and_coordinates() {
     let (_directory, mut desktop) = desktop(&located_file());
     let mut harness = Harness::new();
-    harness.source.allowed.set(true);
     assert_eq!(harness.start(), None);
     harness.answer_position(Err(DENIED));
     assert_eq!(harness.receive(), [Err(DENIED)]);
@@ -641,4 +562,93 @@ fn revoked_permission_during_acquisition_keeps_the_saved_preference_and_coordina
     assert!(desktop.location_enabled());
     assert_eq!(accepted_coordinates(&desktop), Some(NEW_YORK));
     assert_eq!(configured_coordinates(&mut desktop), []);
+}
+
+fn location_records(records: &[String]) -> Vec<&str> {
+    records
+        .iter()
+        .map(String::as_str)
+        .filter(|record| record.contains(r#"activity="location request""#))
+        .collect()
+}
+
+#[test]
+fn an_allowed_request_finds_the_location_and_records_each_transition() {
+    let mut harness = Harness::new();
+    let records = crate::log::capture(Level::DEBUG, || {
+        assert_eq!(harness.start(), None);
+        assert!(harness.location.status().requesting);
+        harness.answer_position(Ok(SEATTLE));
+        assert_eq!(harness.receive(), [Ok(SEATTLE)]);
+        assert!(!harness.location.status().requesting);
+    });
+    assert_eq!(
+        location_records(&records),
+        [
+            r#"DEBUG circadia_app::log: state transition activity="location request" from="No request" to="Finding your location""#,
+            r#"DEBUG circadia_app::log: state transition activity="location request" from="Finding your location" to="No request""#,
+        ]
+    );
+}
+
+#[test]
+fn cancelling_a_pending_request_records_one_transition() {
+    let mut harness = Harness::new();
+    let records = crate::log::capture(Level::DEBUG, || {
+        assert_eq!(harness.start(), None);
+        harness.location.cancel();
+        harness.location.cancel();
+    });
+    assert_eq!(
+        location_records(&records),
+        [
+            r#"DEBUG circadia_app::log: state transition activity="location request" from="No request" to="Finding your location""#,
+            r#"DEBUG circadia_app::log: state transition activity="location request" from="Finding your location" to="No request""#,
+        ]
+    );
+}
+
+#[test]
+fn a_permission_failure_fails_at_once_and_records_its_start() {
+    let mut harness = Harness::new();
+    harness.source.permission.set(Err(DENIED));
+    let records = crate::log::capture(Level::DEBUG, || {
+        assert_eq!(harness.start(), Some(Err(DENIED)));
+    });
+    assert!(harness.source.position.borrow().is_empty());
+    assert!(!harness.location.status().requesting);
+    assert_eq!(harness.location.status().failure, Some(DENIED));
+    assert_eq!(
+        location_records(&records),
+        [
+            r#"DEBUG circadia_app::ui::settings::location: request started activity="location request""#,
+            r#"DEBUG circadia_app::log: state transition activity="location request" from="No request" to="No request""#,
+        ]
+    );
+}
+
+#[test_case(DiagnosticCategory::AccessDenied, Some("ms-settings:privacy-location"); "access denied")]
+#[test_case(DiagnosticCategory::Unavailable, Some("ms-settings:privacy-location"); "location services off")]
+#[test_case(DiagnosticCategory::Windows, None; "position not found")]
+fn permission_failures_link_to_windows_location_settings(
+    category: DiagnosticCategory,
+    expected: Option<&str>,
+) {
+    let (_directory, desktop) = desktop(&located_file());
+    let text = Text::load(&crate::l10n::LanguageTag::english()).expect("English catalog");
+    let messages = solar_messages(
+        &model(&desktop),
+        &text,
+        &RegionalFormat::capture("en-US").expect("Windows resolves en-US"),
+        Some(DiagnosticFailure {
+            category,
+            code: None,
+        }),
+        std::time::Instant::now(),
+        jiff::Timestamp::now(),
+    );
+    let [(_, message)] = messages.as_slice() else {
+        panic!("one location message, got {messages:?}");
+    };
+    assert_eq!(message.link.as_ref().map(|(_, target)| *target), expected);
 }

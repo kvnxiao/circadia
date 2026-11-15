@@ -448,7 +448,7 @@ pub(super) enum Command {
     OpenFolder(Folder),
     DismissRestore,
     DismissCrash,
-    Report(String),
+    OpenPage(String),
     Quit,
     RetrySignIn,
     Preview,
@@ -894,7 +894,7 @@ impl Settings {
                 let Some(crash) = &self.input.model.crash else {
                     return;
                 };
-                Command::Report(super::crash_notice::issue_url(
+                Command::OpenPage(super::crash_notice::issue_url(
                     &self.input.text,
                     env!("CARGO_PKG_VERSION"),
                     &crate::log::windows_build().unwrap_or_default(),

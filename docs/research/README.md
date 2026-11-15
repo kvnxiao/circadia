@@ -22,7 +22,7 @@ These documents record evidence for Circadia's design and implementation. Each t
 | [Solar calculation cost](solar-performance.md) | Four ordinary and polar dates on one desktop; no universal latency bound. |
 | [Windows clock conversion](windows-clock-conversion.md) | Skipped and repeated times, half-hour changes, and historical year-boundary limits. |
 | [Intervals across clock changes](clock-change-intervals.md) | Arithmetic supporting elapsed-interval preservation; the clock probe does not test the target-adjustment policy. |
-| [Location without open settings](background-location.md) | Silent permission checks, foreground consent, and one-time tray-only acquisition. |
+| [Location without open settings](background-location.md) | Silent permission checks, Windows location prompts, and one-time tray-only acquisition. |
 
 ## Interface, identity, and measurements
 

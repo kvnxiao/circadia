@@ -78,6 +78,18 @@ Evaluated directions that affected Circadia's behavior or feasibility. The [spec
 
 **Reevaluate when:** The product prioritizes agreement with wall-clock alarms over elapsed interval preservation, or adds schedules whose intervals need a different explicit policy.
 
+### DEC-foreground-location-consent — Request Windows location consent from foreground settings
+
+**Disposition:** Superseded
+
+**Requirement impact:** How a location request handles a Windows permission status that needs the user's answer.
+
+**Reason:** On the measured Windows build, the Windows consent prompt that the request opened offered to turn location services back on after the user had turned them off. Circadia does not turn on a Windows location setting for the user, so a request that Windows does not allow fails at once and links to the Location page of Windows Settings.
+
+**Basis:** [Measured permission statuses](research/background-location.md#measured-results-and-remaining-validation).
+
+**Reevaluate when:** Windows offers a consent request that does not change device or user location settings, or Circadia gains package identity.
+
 ## Application matching
 
 ### DEC-required-executable-path — Require a full path for every app rule

@@ -286,6 +286,11 @@ pub fn field_message(field: Field) -> String {
     message(field.key())
 }
 
+/// Name the link of a named row.
+pub fn link(name: &str) -> String {
+    format!("{name}-link")
+}
+
 /// Name the Retry command of a named row or banner.
 pub fn retry(name: &str) -> String {
     format!("{name}-retry")
@@ -501,6 +506,7 @@ mod tests {
     fn composed_identifiers_keep_their_published_form() {
         assert_eq!(field_message(Field::SleepKelvin), "sleep_kelvin-message");
         assert_eq!(retry(BANNER_NATIVE), "banner-native-retry");
+        assert_eq!(link(LOCATION), "location-link");
         assert_eq!(recent_add("game.exe"), "recent-add:67616d652e657865");
         assert_eq!(remove(&suppression_entry(2)), "suppression-2-remove");
         assert_eq!(mark(NAV_APPS), "nav-apps-mark");

@@ -7,6 +7,7 @@ use crate::support::app::show_page;
 use crate::support::automation::Automation;
 use crate::support::automation::DialogButton;
 use crate::support::automation::wait;
+use crate::support::capture::Capture;
 use circadia_app::ConfigInput;
 use circadia_app::ConfigStore;
 use circadia_app::Coordinates;
@@ -127,7 +128,6 @@ fn exercise(measurement: &GraphMeasurement, directory: &Path, scenario: &str) ->
                 measurement,
                 LocationMeasurement {
                     permission_checks: 1,
-                    consent_requests: 0,
                     position_requests: 1,
                 },
             )?;
@@ -195,10 +195,10 @@ fn consent(
         measurement,
         LocationMeasurement {
             permission_checks: 1,
-            consent_requests: 0,
             position_requests: 1,
         },
     )?;
+    finding(automation, &settings)?;
     require(
         saved(directory)?.use_windows_location,
         "confirmed location preference not saved",
@@ -221,7 +221,6 @@ fn consent(
         measurement,
         LocationMeasurement {
             permission_checks: 2,
-            consent_requests: 0,
             position_requests: 2,
         },
     )?;
@@ -300,7 +299,6 @@ fn tray(
         measurement,
         LocationMeasurement {
             permission_checks: 1,
-            consent_requests: 0,
             position_requests: 1,
         },
     )?;
@@ -325,7 +323,6 @@ fn tray(
         measurement.location_calls()?
             == LocationMeasurement {
                 permission_checks: 1,
-                consent_requests: 0,
                 position_requests: 1,
             },
         "opening Settings duplicated the pending startup request",
@@ -350,16 +347,16 @@ fn denied(
     automation: &Automation,
     directory: &Path,
 ) -> io::Result<()> {
+    let process = std::process::id();
     calls(
         measurement,
         LocationMeasurement {
             permission_checks: 1,
-            consent_requests: 0,
             position_requests: 0,
         },
     )?;
     require(
-        settings_window(std::process::id())?.is_none(),
+        settings_window(process)?.is_none(),
         "denied tray startup opened Settings",
     )?;
     require(
@@ -371,49 +368,85 @@ fn denied(
         measurement,
         LocationMeasurement {
             permission_checks: 2,
-            consent_requests: 1,
             position_requests: 0,
         },
     )?;
     location_failure(automation, &settings)?;
-    measurement.complete_location_access(Ok(()))?;
-    calls(
-        measurement,
-        LocationMeasurement {
-            permission_checks: 2,
-            consent_requests: 1,
-            position_requests: 1,
-        },
+    require(
+        automation
+            .text(&settings, process, automation_id::LOCATION_REQUESTING)?
+            .is_none(),
+        "denied request showed Finding your location",
     )?;
-    location_failure(automation, &settings)?;
-    measurement.complete_location(Ok(POSITION))?;
-    wait("successful request clears failure", || {
-        Ok(automation
+    require(
+        automation
             .text(
                 &settings,
-                std::process::id(),
-                &automation_id::message(automation_id::LOCATION),
+                process,
+                &automation_id::link(automation_id::LOCATION),
             )?
-            .is_none()
-            .then_some(()))
-    })?;
-    show_page(
+            .as_deref()
+            == Some("Open Windows location settings"),
+        "denied request failure has no Windows location settings link",
+    )?;
+    snapshot(
         automation,
         &settings,
-        std::process::id(),
-        automation_id::NAV_GENERAL,
+        &automation_id::link(automation_id::LOCATION),
+        "location-denied.png",
+        "Follow sunrise and sunset card with the Windows permission failure and its link",
     )?;
-    automation.toggle(
-        &settings,
-        std::process::id(),
-        automation_id::START_MINIMIZED,
-    )?;
+    show_page(automation, &settings, process, automation_id::NAV_GENERAL)?;
+    automation.toggle(&settings, process, automation_id::START_MINIMIZED)?;
     wait("foreground startup preference saved", || {
         Ok((!saved(directory)?.start_minimized).then_some(()))
     })?;
     report(
-        "PASS: denied tray startup never requests consent; Settings keeps the failure visible during foreground permission and acquisition; success clears it",
+        "PASS: denied permission fails at tray startup and again when Settings opens, without a position request or Finding your location; the failure stays visible with its Windows location settings link",
     );
+    Ok(())
+}
+
+fn finding(automation: &Automation, settings: &HWND) -> io::Result<()> {
+    let expected = "Finding your location…";
+    let process = std::process::id();
+    wait(&format!("location request shows {expected}"), || {
+        let caption = automation
+            .names(settings, process)?
+            .iter()
+            .any(|name| name == expected);
+        // WinUI prefixes an active progress ring's accessible name with "Busy".
+        let indicator = automation
+            .text(settings, process, automation_id::LOCATION_REQUESTING)?
+            .is_some_and(|name| name.ends_with(expected));
+        Ok((caption && indicator).then_some(()))
+    })?;
+    snapshot(
+        automation,
+        settings,
+        automation_id::LATITUDE,
+        "location-finding.png",
+        "Use my Windows location row while Windows finds the position",
+    )
+}
+
+fn snapshot(
+    automation: &Automation,
+    settings: &HWND,
+    shown: &str,
+    image: &str,
+    description: &str,
+) -> io::Result<()> {
+    let process = std::process::id();
+    wait(&format!("{shown} visible"), || {
+        Ok(automation
+            .show_control(settings, process, shown)?
+            .then_some(()))
+    })?;
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    let path = crate::support::run::image(image, description)?;
+    Capture::window(settings, process)?.snapshot(&path)?;
+    report(&format!("CAPTURE: {}", path.display()));
     Ok(())
 }
 
@@ -422,7 +455,6 @@ fn calls(measurement: &GraphMeasurement, expected: LocationMeasurement) -> io::R
         let actual = measurement.location_calls()?;
         require(
             actual.permission_checks <= expected.permission_checks
-                && actual.consent_requests <= expected.consent_requests
                 && actual.position_requests <= expected.position_requests,
             &format!("extra location calls: {actual:?}, expected {expected:?}"),
         )?;
