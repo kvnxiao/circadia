@@ -25,11 +25,11 @@ fn release(tag: &str) -> Release {
     }
 }
 
-#[test_case("v0.1.0", &Status::Current; "equal")]
-#[test_case("v0.0.9", &Status::Current; "installed newer")]
-#[test_case("v0.10.0", &Status::Available("https://github.com/kvnxiao/circadia/releases/tag/v0.10.0".into()); "numeric version comparison")]
-#[test_case("v0.2.0-preview", &Status::Unpublished; "prerelease tag")]
-fn stable_version_comparison(tag: &str, expected: &Status) {
+#[test_case("v0.1.0", &Outcome::Current; "equal")]
+#[test_case("v0.0.9", &Outcome::Current; "installed newer")]
+#[test_case("v0.10.0", &Outcome::Available("https://github.com/kvnxiao/circadia/releases/tag/v0.10.0".into()); "numeric version comparison")]
+#[test_case("v0.2.0-preview", &Outcome::Unpublished; "prerelease tag")]
+fn stable_version_comparison(tag: &str, expected: &Outcome) {
     assert_eq!(
         stable(Some(&release(tag)), "0.1.0").expect("valid versions"),
         *expected
@@ -40,18 +40,18 @@ fn stable_version_comparison(tag: &str, expected: &Status) {
 fn missing_release_and_incomplete_assets_do_not_claim_current_or_offer_downloads() {
     assert_eq!(
         stable(None, "0.1.0").expect("no release"),
-        Status::Unpublished
+        Outcome::Unpublished
     );
     let mut latest = release("v0.2.0");
     latest.assets.pop();
     assert_eq!(
         stable(Some(&latest), "0.1.0").expect("missing checksum"),
-        Status::Unpublished
+        Outcome::Unpublished
     );
     latest.assets.clear();
     assert_eq!(
         stable(Some(&latest), "0.1.0").expect("missing installer"),
-        Status::Unpublished
+        Outcome::Unpublished
     );
 }
 
@@ -61,13 +61,13 @@ fn draft_and_prerelease_flags_exclude_releases() {
     latest.draft = true;
     assert_eq!(
         stable(Some(&latest), "0.1.0").expect("draft"),
-        Status::Unpublished
+        Outcome::Unpublished
     );
     latest.draft = false;
     latest.prerelease = true;
     assert_eq!(
         stable(Some(&latest), "0.1.0").expect("prerelease"),
-        Status::Unpublished
+        Outcome::Unpublished
     );
 }
 
@@ -111,16 +111,16 @@ fn artifact(id: u64, expired: bool) -> Artifacts {
     }
 }
 
-#[test_case("abcdef012345", false, 64, &Status::Available("https://github.com/kvnxiao/circadia/actions/runs/120".into()); "complete pair")]
-#[test_case("abcdef0123456789", false, 64, &Status::Available("https://github.com/kvnxiao/circadia/actions/runs/120".into()); "longer abbreviated commit")]
-#[test_case("abcdef012345", true, 64, &Status::Unpublished; "expired checksum")]
-#[test_case("abcdef012345", false, 0, &Status::Unpublished; "empty checksum")]
-#[test_case("main", false, 64, &Status::Unpublished; "invalid commit")]
+#[test_case("abcdef012345", false, 64, &Outcome::Available("https://github.com/kvnxiao/circadia/actions/runs/120".into()); "complete pair")]
+#[test_case("abcdef0123456789", false, 64, &Outcome::Available("https://github.com/kvnxiao/circadia/actions/runs/120".into()); "longer abbreviated commit")]
+#[test_case("abcdef012345", true, 64, &Outcome::Unpublished; "expired checksum")]
+#[test_case("abcdef012345", false, 0, &Outcome::Unpublished; "empty checksum")]
+#[test_case("main", false, 64, &Outcome::Unpublished; "invalid commit")]
 fn preview_recognizes_separate_installer_and_checksum(
     source: &str,
     expired: bool,
     checksum_size: u64,
-    expected: &Status,
+    expected: &Outcome,
 ) {
     let name = format!("Circadia-0.1.0-preview-{source}-windows-x64-unsigned-setup.exe");
     let result = preview_packages(
@@ -143,7 +143,7 @@ fn preview_recognizes_separate_installer_and_checksum(
         },
         |commit| {
             assert!(
-                matches!(expected, Status::Available(_)),
+                matches!(expected, Outcome::Available(_)),
                 "incomplete or malformed package must not be compared"
             );
             assert_eq!(commit, source);
@@ -171,7 +171,7 @@ fn preview_rejects_an_incomplete_separate_download(name: &str) {
         |_| panic!("incomplete package must not be compared"),
     )
     .expect("preview metadata");
-    assert_eq!(result, Status::Unpublished);
+    assert_eq!(result, Outcome::Unpublished);
 }
 
 #[expect(
@@ -215,7 +215,7 @@ fn previews_select_the_newest_source_even_when_older_ci_is_rerun_later() {
     assert_eq!(requested, [120, 110, 100]);
     assert_eq!(
         result,
-        Status::Available("https://github.com/kvnxiao/circadia/actions/runs/100".into())
+        Outcome::Available("https://github.com/kvnxiao/circadia/actions/runs/100".into())
     );
 }
 
@@ -224,11 +224,11 @@ fn preview_does_not_offer_expired_deleted_or_malformed_artifacts() {
     assert_eq!(
         preview_packages(runs(), |id| Ok(Some(artifact(id, true))), ahead)
             .expect("expired packages"),
-        Status::Unpublished
+        Outcome::Unpublished
     );
     assert_eq!(
         preview_packages(runs(), |_| Ok(None), ahead).expect("deleted packages"),
-        Status::Unpublished
+        Outcome::Unpublished
     );
     let result = preview_packages(
         runs(),
@@ -244,7 +244,7 @@ fn preview_does_not_offer_expired_deleted_or_malformed_artifacts() {
         |_| panic!("invalid source must not be requested"),
     )
     .expect("invalid source suffix");
-    assert_eq!(result, Status::Unpublished);
+    assert_eq!(result, Outcome::Unpublished);
 }
 
 #[test]
@@ -260,7 +260,7 @@ fn identical_rebuilds_are_current_and_divergent_sources_are_not_offered() {
         },
     )
     .expect("identical source");
-    assert_eq!(result, Status::Current);
+    assert_eq!(result, Outcome::Current);
     let result = preview_packages(
         runs(),
         |id| Ok(Some(artifact(id, false))),
@@ -272,7 +272,7 @@ fn identical_rebuilds_are_current_and_divergent_sources_are_not_offered() {
         },
     )
     .expect("divergent source");
-    assert_eq!(result, Status::Failed);
+    assert_eq!(result, Outcome::Failed);
 }
 
 #[test]
@@ -297,7 +297,7 @@ fn a_divergent_rerun_does_not_hide_an_available_descendant() {
     .expect("mixed source history");
     assert_eq!(
         result,
-        Status::Available("https://github.com/kvnxiao/circadia/actions/runs/110".into())
+        Outcome::Available("https://github.com/kvnxiao/circadia/actions/runs/110".into())
     );
 }
 
@@ -318,7 +318,7 @@ fn preview_rejects_untrusted_runs_and_propagates_network_failures() {
     assert_eq!(
         preview_packages(invalid, |_| panic!("excluded runs need no lookup"), ahead)
             .expect("excluded"),
-        Status::Unpublished
+        Outcome::Unpublished
     );
     let error = preview_packages(
         runs(),
@@ -332,12 +332,7 @@ fn preview_rejects_untrusted_runs_and_propagates_network_failures() {
 #[test]
 fn manual_checks_coalesce_and_shutdown_discards_in_flight_results() {
     let shared = Arc::new((
-        Mutex::new(Shared {
-            automatic: false,
-            requested: false,
-            stopped: false,
-            state: State::default(),
-        }),
+        Mutex::new(Shared::new(false, Instant::now())),
         Condvar::new(),
     ));
     let client = Client {
@@ -352,9 +347,10 @@ fn manual_checks_coalesce_and_shutdown_discards_in_flight_results() {
             &|| {
                 notified.send(()).expect("notification listener");
             },
+            &Instant::now,
             || {
                 finishes.recv().expect("controlled check completion");
-                Ok(Status::Current)
+                Ok(Outcome::Current)
             },
         );
     });
@@ -363,16 +359,16 @@ fn manual_checks_coalesce_and_shutdown_discards_in_flight_results() {
         .recv_timeout(Duration::from_secs(2))
         .expect("checking notification");
     client.check();
-    assert!(!shared.0.lock().expect("state lock").requested);
+    assert!(!matches!(
+        shared.0.lock().expect("state lock").phase,
+        Phase::Requested
+    ));
     assert_eq!(client.status().status, Status::Checking);
     drop(client);
     finish.send(()).expect("release network fixture");
     worker.join().expect("worker exits");
     assert!(notifications.try_recv().is_err());
-    assert_eq!(
-        shared.0.lock().expect("state lock").state.status,
-        Status::Checking
-    );
+    assert_eq!(shared.0.lock().expect("state lock").result, None);
 }
 
 #[test_case(429, None, None, None, "", Some(60); "429 without timing")]
@@ -425,18 +421,18 @@ fn network_and_unexpected_failures_have_distinct_statuses() {
     ] {
         assert_eq!(
             failure_status(&io::Error::other(error)),
-            Status::ConnectionFailed
+            Outcome::ConnectionFailed
         );
     }
     assert_eq!(
         failure_status(&io::Error::from(io::ErrorKind::TimedOut)),
-        Status::ConnectionFailed
+        Outcome::ConnectionFailed
     );
     for error in [
         io::Error::other(ureq::Error::StatusCode(503)),
         io::Error::other("invalid release metadata"),
     ] {
-        assert_eq!(failure_status(&error), Status::Failed);
+        assert_eq!(failure_status(&error), Outcome::Failed);
     }
 }
 
@@ -447,12 +443,9 @@ fn dismissing_a_rate_limit_does_not_allow_another_request() {
         shared: Arc::new((
             Mutex::new(Shared {
                 automatic: false,
-                requested: false,
-                stopped: false,
-                state: State {
-                    status: Status::RateLimited(Some(until)),
-                    dismissed: false,
-                },
+                phase: Phase::Cooldown { until, due: until },
+                result: Some(Outcome::RateLimited),
+                dismissed: false,
             }),
             Condvar::new(),
         )),
@@ -466,7 +459,10 @@ fn dismissing_a_rate_limit_does_not_allow_another_request() {
             dismissed: true
         }
     );
-    assert!(!client.shared.0.lock().expect("state lock").requested);
+    assert!(!matches!(
+        client.shared.0.lock().expect("state lock").phase,
+        Phase::Requested
+    ));
 }
 
 #[test]
@@ -474,12 +470,12 @@ fn cooldown_expiry_notifies_without_checking_and_preserves_dismissal() {
     let shared = Arc::new((
         Mutex::new(Shared {
             automatic: false,
-            requested: false,
-            stopped: false,
-            state: State {
-                status: Status::RateLimited(Some(Instant::now())),
-                dismissed: true,
+            phase: Phase::Cooldown {
+                until: Instant::now(),
+                due: Instant::now(),
             },
+            result: Some(Outcome::RateLimited),
+            dismissed: true,
         }),
         Condvar::new(),
     ));
@@ -494,6 +490,7 @@ fn cooldown_expiry_notifies_without_checking_and_preserves_dismissal() {
             &|| {
                 notified.send(()).expect("listener");
             },
+            &Instant::now,
             || panic!("expiry must not request an update"),
         );
     });
@@ -510,4 +507,186 @@ fn cooldown_expiry_notifies_without_checking_and_preserves_dismissal() {
     assert!(client.status().can_check());
     drop(client);
     worker.join().expect("worker exits");
+}
+
+struct Automatic {
+    client: Client,
+    started: Instant,
+    clock: Arc<Mutex<Instant>>,
+    checks: std::sync::mpsc::Receiver<Instant>,
+    results: std::sync::mpsc::Sender<io::Result<Outcome>>,
+    notifications: std::sync::mpsc::Receiver<()>,
+}
+
+impl Automatic {
+    fn start(automatic: bool) -> Self {
+        let started = Instant::now();
+        let clock = Arc::new(Mutex::new(started));
+        let (checked, checks) = std::sync::mpsc::channel();
+        let (results, replies) = std::sync::mpsc::channel();
+        let (notified, notifications) = std::sync::mpsc::channel();
+        let now = Arc::clone(&clock);
+        let check_clock = Arc::clone(&clock);
+        let client = Client::start(
+            automatic,
+            move || {
+                let _listener = notified.send(());
+            },
+            move || *now.lock().expect("clock lock"),
+            move || {
+                let _listener = checked.send(*check_clock.lock().expect("clock lock"));
+                replies
+                    .recv()
+                    .unwrap_or_else(|_closed| Err(io::Error::other("fixture closed")))
+            },
+        )
+        .expect("update worker starts");
+        Self {
+            client,
+            started,
+            clock,
+            checks,
+            results,
+            notifications,
+        }
+    }
+
+    fn advance(&self, by: Duration) {
+        let shared = &self.client.shared;
+        let _worker = shared.0.lock().expect("state lock");
+        *self.clock.lock().expect("clock lock") += by;
+        shared.1.notify_all();
+    }
+
+    fn notified(&self) {
+        self.notifications
+            .recv_timeout(Duration::from_secs(2))
+            .expect("worker notification");
+    }
+
+    fn expect_check(&self, at: Duration) {
+        let checked = self
+            .checks
+            .recv_timeout(Duration::from_secs(2))
+            .expect("a check starts");
+        assert_eq!(checked, self.started + at);
+        self.notified();
+    }
+
+    fn expect_no_check(&self) {
+        assert!(
+            self.checks
+                .recv_timeout(Duration::from_millis(100))
+                .is_err(),
+            "no check is due"
+        );
+    }
+
+    fn finish(&self, result: io::Result<Outcome>) {
+        self.results.send(result).expect("check reply");
+        self.notified();
+    }
+}
+
+fn rate_limited(seconds: u64) -> io::Result<Outcome> {
+    Err(io::Error::other(RateLimit(Duration::from_secs(seconds))))
+}
+
+#[test]
+fn an_enabled_preference_checks_at_start_and_again_24_hours_later() {
+    let worker = Automatic::start(true);
+    worker.expect_check(Duration::ZERO);
+    worker.finish(Ok(Outcome::Current));
+    worker.advance(Duration::from_hours(23));
+    worker.expect_no_check();
+    worker.advance(Duration::from_hours(1));
+    worker.expect_check(DAILY);
+}
+
+#[test]
+fn a_manual_check_restarts_the_automatic_interval() {
+    let worker = Automatic::start(true);
+    worker.expect_check(Duration::ZERO);
+    worker.finish(Ok(Outcome::Current));
+    worker.advance(Duration::from_hours(12));
+    worker.client.check();
+    worker.expect_check(Duration::from_hours(12));
+    worker.finish(Ok(Outcome::Current));
+    worker.advance(Duration::from_hours(12));
+    worker.expect_no_check();
+    worker.advance(Duration::from_hours(12));
+    worker.expect_check(Duration::from_hours(36));
+}
+
+#[test]
+fn disabling_the_preference_stops_future_checks_and_lets_the_in_flight_check_finish() {
+    let worker = Automatic::start(true);
+    worker.expect_check(Duration::ZERO);
+    worker.client.configure(false);
+    worker.finish(Ok(Outcome::Current));
+    assert_eq!(worker.client.status().status, Status::Current);
+    worker.advance(DAILY * 2);
+    worker.expect_no_check();
+}
+
+#[test]
+fn cooldown_expiry_adds_no_check_and_the_next_automatic_check_keeps_its_schedule() {
+    let worker = Automatic::start(true);
+    worker.expect_check(Duration::ZERO);
+    worker.finish(rate_limited(60));
+    assert_eq!(
+        worker.client.status().status,
+        Status::RateLimited(Some(worker.started + Duration::from_secs(60)))
+    );
+    worker.advance(Duration::from_secs(60));
+    worker.notified();
+    assert_eq!(worker.client.status().status, Status::RateLimited(None));
+    worker.expect_no_check();
+    worker.advance(Duration::from_mins(23 * 60 + 59));
+    worker.expect_check(DAILY);
+}
+
+#[test]
+fn a_rate_limit_blocks_the_due_automatic_check_until_its_cooldown_ends() {
+    let worker = Automatic::start(true);
+    worker.expect_check(Duration::ZERO);
+    worker.finish(rate_limited(25 * 60 * 60));
+    worker.advance(DAILY);
+    worker.expect_no_check();
+    worker.advance(Duration::from_hours(1));
+    worker.notified();
+    worker.expect_check(Duration::from_hours(25));
+    worker.finish(Ok(Outcome::Current));
+    worker.expect_no_check();
+}
+
+#[test]
+fn each_update_check_state_change_writes_one_transition_record() {
+    let log = crate::log::capture(tracing::Level::DEBUG, || {
+        let worker = Automatic::start(false);
+        worker.client.check();
+        worker.expect_check(Duration::ZERO);
+        worker.finish(Ok(Outcome::Current));
+        worker.client.check();
+        worker.expect_check(Duration::ZERO);
+        worker.finish(rate_limited(60));
+        worker.client.dismiss();
+        worker.advance(Duration::from_secs(60));
+        worker.notified();
+    });
+    let transitions: Vec<_> = log
+        .iter()
+        .filter(|record| record.contains("state transition"))
+        .collect();
+    assert_eq!(
+        transitions,
+        [
+            r#"DEBUG circadia_app::log: state transition activity="update check" from="Start" to="No result""#,
+            r#"DEBUG circadia_app::log: state transition activity="update check" from="No result" to="Checking""#,
+            r#"DEBUG circadia_app::log: state transition activity="update check" from="Checking" to="Result available""#,
+            r#"DEBUG circadia_app::log: state transition activity="update check" from="Result available" to="Checking""#,
+            r#"DEBUG circadia_app::log: state transition activity="update check" from="Checking" to="Rate-limit cooldown""#,
+            r#"DEBUG circadia_app::log: state transition activity="update check" from="Rate-limit cooldown" to="Result available""#,
+        ]
+    );
 }

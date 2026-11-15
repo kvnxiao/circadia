@@ -412,7 +412,47 @@ struct Desktop {
     held_location: Option<crate::Coordinates>,
     preview: PreviewRequest,
     logged_preview: &'static str,
-    updates: Option<crate::updates::Client>,
+    updates: Updates,
+}
+
+enum Updates {
+    Running(crate::updates::Client),
+    Unavailable,
+    Stopped,
+}
+
+impl Updates {
+    fn new(client: io::Result<crate::updates::Client>) -> Self {
+        match client {
+            Ok(client) => Self::Running(client),
+            Err(error) => {
+                tracing::warn!(%error, "starting update checker");
+                crate::log::transition("update check", "Start", "Unavailable");
+                Self::Unavailable
+            }
+        }
+    }
+
+    fn client(&self) -> Option<&crate::updates::Client> {
+        match self {
+            Self::Running(client) => Some(client),
+            Self::Unavailable | Self::Stopped => None,
+        }
+    }
+
+    fn state(&self) -> crate::updates::State {
+        match self {
+            Self::Running(client) => client.status(),
+            Self::Unavailable => crate::updates::State {
+                status: crate::updates::Status::Unavailable,
+                dismissed: false,
+            },
+            Self::Stopped => crate::updates::State {
+                status: crate::updates::Status::Failed,
+                dismissed: false,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -568,13 +608,7 @@ impl Application for Desktop {
                     icons: self.icons.view(),
                     sign_in: self.sign_in.status(),
                     location: self.location.status(),
-                    updates: self.updates.as_ref().map_or(
-                        crate::updates::State {
-                            status: crate::updates::Status::Failed,
-                            dismissed: false,
-                        },
-                        crate::updates::Client::status,
-                    ),
+                    updates: self.updates.state(),
                     contrast: self.contrast,
                     visual_revision: self.visual_revision,
                     exiting: self.exiting,
@@ -638,7 +672,7 @@ impl Desktop {
             held_location: None,
             preview: PreviewRequest::Idle,
             logged_preview: "Start",
-            updates: None,
+            updates: Updates::Stopped,
         }
     }
 
@@ -785,11 +819,12 @@ impl Desktop {
         ) {
             Ok(session) => {
                 let update_wake = session.wake.clone();
-                self.updates = crate::updates::Client::spawn(self.automatic_updates(), move || {
-                    let _notified = update_wake.notify();
-                })
-                .inspect_err(|error| tracing::warn!(%error, "starting update checker"))
-                .ok();
+                self.updates = Updates::new(crate::updates::Client::spawn(
+                    self.automatic_updates(),
+                    move || {
+                        let _notified = update_wake.notify();
+                    },
+                ));
                 let wake = session.wake.clone();
                 self.file_info = FileInfoClient::spawn(file_info::WindowsFiles, move || {
                     let _notified = wake.notify();
@@ -834,12 +869,12 @@ impl Desktop {
         }
         match command {
             settings::Command::DismissUpdate => {
-                if let Some(updates) = &self.updates {
+                if let Some(updates) = self.updates.client() {
                     updates.dismiss();
                 }
             }
             settings::Command::CheckUpdates => {
-                if let Some(updates) = &self.updates {
+                if let Some(updates) = self.updates.client() {
                     updates.check();
                 }
             }
@@ -1081,7 +1116,7 @@ impl Desktop {
     }
 
     fn configure(&mut self, changed: Option<Arc<crate::Config>>) {
-        if let Some(updates) = &self.updates {
+        if let Some(updates) = self.updates.client() {
             updates.configure(self.automatic_updates());
         }
         if let Some(config) = changed {
@@ -1379,7 +1414,7 @@ impl Desktop {
     }
 
     fn begin_exit(&mut self) {
-        self.updates = None;
+        self.updates = Updates::Stopped;
         self.cancel_location();
         self.preview = PreviewRequest::Idle;
         self.log_preview();

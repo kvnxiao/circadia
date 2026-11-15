@@ -173,14 +173,19 @@ fn links(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
         .into()
 }
 
-fn banner(settings: &Settings, context: &ViewContext<'_, Settings>) -> Option<View> {
-    let text = &settings.input.text;
+#[derive(Debug, PartialEq)]
+pub(super) struct UpdateBanner {
+    pub(super) title: String,
+    pub(super) severity: InfoBarSeverity,
+    pub(super) closable: bool,
+}
+
+pub(super) fn update_banner(state: &updates::State, text: &Text) -> Option<UpdateBanner> {
     bind_text!(fl, text);
-    if settings.input.updates.dismissed {
+    if state.dismissed {
         return None;
     }
-    let checking = settings.input.updates.status == Status::Checking;
-    let (title, severity) = match &settings.input.updates.status {
+    let (title, severity) = match &state.status {
         Status::Idle => return None,
         Status::Checking => (fl!("updates-checking"), InfoBarSeverity::Informational),
         Status::Current => (fl!("updates-current"), InfoBarSeverity::Success),
@@ -190,16 +195,28 @@ fn banner(settings: &Settings, context: &ViewContext<'_, Settings>) -> Option<Vi
         Status::RateLimited(_) => (fl!("updates-rate-limited"), InfoBarSeverity::Warning),
         Status::ConnectionFailed => (fl!("updates-connection-failed"), InfoBarSeverity::Error),
         Status::Failed => (fl!("updates-failed"), InfoBarSeverity::Error),
+        Status::Unavailable => (fl!("updates-unavailable"), InfoBarSeverity::Error),
     };
+    Some(UpdateBanner {
+        title,
+        severity,
+        closable: !matches!(state.status, Status::Checking | Status::Unavailable),
+    })
+}
+
+fn banner(settings: &Settings, context: &ViewContext<'_, Settings>) -> Option<View> {
+    let text = &settings.input.text;
+    bind_text!(fl, text);
+    let banner = update_banner(&settings.input.updates, text)?;
     let mut children: Vec<View> = vec![
         InfoBar::new()
             .automation_id(automation_id::UPDATE_STATUS)
             .automation_live_setting(AutomationLiveSetting::Polite)
             .is_open(true)
-            .is_closable(!checking)
+            .is_closable(banner.closable)
             .on_closed(context.message(Message::Command(Command::DismissUpdate)))
-            .severity(severity)
-            .title(title)
+            .severity(banner.severity)
+            .title(banner.title)
             .into(),
     ];
     if let Status::Available(url) = &settings.input.updates.status {

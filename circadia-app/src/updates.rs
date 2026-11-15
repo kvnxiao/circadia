@@ -23,6 +23,7 @@ pub(crate) enum Status {
     RateLimited(Option<Instant>),
     ConnectionFailed,
     Failed,
+    Unavailable,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -33,7 +34,10 @@ pub(crate) struct State {
 
 impl State {
     pub(crate) fn can_check(&self) -> bool {
-        !matches!(self.status, Status::Checking | Status::RateLimited(Some(_)))
+        !matches!(
+            self.status,
+            Status::Checking | Status::RateLimited(Some(_)) | Status::Unavailable
+        )
     }
 }
 
@@ -41,12 +45,27 @@ impl State {
 #[error("update checks rate limited for {0:?}")]
 struct RateLimit(Duration);
 
-fn failure_status(error: &io::Error) -> Status {
-    if let Some(limit) = error
+#[derive(Debug, PartialEq, Eq)]
+enum Outcome {
+    Current,
+    Available(String),
+    Unpublished,
+    Development,
+    RateLimited,
+    ConnectionFailed,
+    Failed,
+}
+
+fn retry_delay(error: &io::Error) -> Option<Duration> {
+    error
         .get_ref()
         .and_then(|source| source.downcast_ref::<RateLimit>())
-    {
-        return Status::RateLimited(Some(Instant::now() + limit.0));
+        .map(|limit| limit.0)
+}
+
+fn failure_status(error: &io::Error) -> Outcome {
+    if retry_delay(error).is_some() {
+        return Outcome::RateLimited;
     }
     let network = error
         .get_ref()
@@ -61,9 +80,9 @@ fn failure_status(error: &io::Error) -> Status {
         )
     ) || error.kind() == io::ErrorKind::TimedOut
     {
-        Status::ConnectionFailed
+        Outcome::ConnectionFailed
     } else {
-        Status::Failed
+        Outcome::Failed
     }
 }
 
@@ -76,15 +95,72 @@ pub(crate) fn version() -> String {
     format!("{}{suffix}", env!("CARGO_PKG_VERSION"))
 }
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "the UI thread sets automatic, requested, and stopped, and the update worker clears requested, both under one lock"
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    Waiting { due: Instant },
+    Requested,
+    Checking,
+    Cooldown { until: Instant, due: Instant },
+    Stopped,
+}
+
 struct Shared {
     automatic: bool,
-    requested: bool,
-    stopped: bool,
-    state: State,
+    phase: Phase,
+    result: Option<Outcome>,
+    dismissed: bool,
+}
+
+impl Shared {
+    fn new(automatic: bool, now: Instant) -> Self {
+        Self {
+            automatic,
+            phase: Phase::Waiting { due: now },
+            result: None,
+            dismissed: false,
+        }
+    }
+
+    fn state(&self) -> State {
+        let status = match self.phase {
+            Phase::Requested | Phase::Checking => Status::Checking,
+            Phase::Cooldown { until, .. } => Status::RateLimited(Some(until)),
+            Phase::Waiting { .. } | Phase::Stopped => match &self.result {
+                None => Status::Idle,
+                Some(Outcome::Current) => Status::Current,
+                Some(Outcome::Available(url)) => Status::Available(url.clone()),
+                Some(Outcome::Unpublished) => Status::Unpublished,
+                Some(Outcome::Development) => Status::Development,
+                Some(Outcome::RateLimited) => Status::RateLimited(None),
+                Some(Outcome::ConnectionFailed) => Status::ConnectionFailed,
+                Some(Outcome::Failed) => Status::Failed,
+            },
+        };
+        State {
+            status,
+            dismissed: self.dismissed,
+        }
+    }
+
+    fn diagram_state(&self) -> Option<&'static str> {
+        match self.phase {
+            Phase::Waiting { .. } if self.result.is_none() => Some("No result"),
+            Phase::Waiting { .. } => Some("Result available"),
+            Phase::Requested | Phase::Checking => Some("Checking"),
+            Phase::Cooldown { .. } => Some("Rate-limit cooldown"),
+            Phase::Stopped => None,
+        }
+    }
+
+    fn change(&mut self, apply: impl FnOnce(&mut Self)) {
+        let from = self.diagram_state();
+        apply(self);
+        if let (Some(from), Some(to)) = (from, self.diagram_state())
+            && from != to
+        {
+            crate::log::transition("update check", from, to);
+        }
+    }
 }
 
 pub(crate) struct Client {
@@ -93,21 +169,32 @@ pub(crate) struct Client {
 
 impl Client {
     pub(crate) fn spawn(automatic: bool, wake: impl Fn() + Send + 'static) -> io::Result<Self> {
-        let shared = Arc::new((
-            Mutex::new(Shared {
-                automatic,
-                requested: false,
-                stopped: false,
-                state: State::default(),
-            }),
-            Condvar::new(),
-        ));
+        Self::start(automatic, wake, Instant::now, check)
+    }
+
+    fn start(
+        automatic: bool,
+        wake: impl Fn() + Send + 'static,
+        now: impl Fn() -> Instant + Send + 'static,
+        check: impl FnMut() -> io::Result<Outcome> + Send + 'static,
+    ) -> io::Result<Self> {
+        let shared = Arc::new((Mutex::new(Shared::new(automatic, now())), Condvar::new()));
         let worker = Arc::clone(&shared);
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        // The worker waits for this lock, so the initial transition record
+        // precedes every record the worker writes.
+        let started = shared
+            .0
+            .lock()
+            .map_err(|error| io::Error::other(error.to_string()))?;
         thread::Builder::new()
             .name("update-check".into())
             .spawn(move || {
-                run(&worker, &wake, check);
+                let _log = tracing::dispatcher::set_default(&dispatch);
+                run(&worker, &wake, &now, check);
             })?;
+        crate::log::transition("update check", "Start", "No result");
+        drop(started);
         Ok(Self { shared })
     }
 
@@ -117,15 +204,15 @@ impl Client {
                 status: Status::Failed,
                 dismissed: false,
             },
-            |shared| shared.state.clone(),
+            |shared| shared.state(),
         )
     }
 
     pub(crate) fn dismiss(&self) {
         if let Ok(mut shared) = self.shared.0.lock()
-            && !matches!(shared.state.status, Status::Idle | Status::Checking)
+            && !matches!(shared.state().status, Status::Idle | Status::Checking)
         {
-            shared.state.dismissed = true;
+            shared.dismissed = true;
         }
     }
 
@@ -139,15 +226,13 @@ impl Client {
     }
 
     pub(crate) fn check(&self) {
-        if let Ok(mut shared) = self.shared.0.lock() {
-            if !shared.state.can_check() {
-                return;
-            }
-            shared.requested = true;
-            shared.state = State {
-                status: Status::Checking,
-                dismissed: false,
-            };
+        if let Ok(mut shared) = self.shared.0.lock()
+            && shared.state().can_check()
+        {
+            shared.change(|shared| {
+                shared.phase = Phase::Requested;
+                shared.dismissed = false;
+            });
             self.shared.1.notify_one();
         }
     }
@@ -156,7 +241,7 @@ impl Client {
 impl Drop for Client {
     fn drop(&mut self) {
         if let Ok(mut shared) = self.shared.0.lock() {
-            shared.stopped = true;
+            shared.change(|shared| shared.phase = Phase::Stopped);
             self.shared.1.notify_one();
         }
         // An in-flight read has a deadline and cannot modify application data.
@@ -168,78 +253,83 @@ impl Drop for Client {
 fn run(
     shared: &(Mutex<Shared>, Condvar),
     wake: &impl Fn(),
-    mut check: impl FnMut() -> io::Result<Status>,
+    now: &impl Fn() -> Instant,
+    mut check: impl FnMut() -> io::Result<Outcome>,
 ) {
-    let mut due = Instant::now();
     loop {
         let Ok(mut state) = shared.0.lock() else {
             return;
         };
-        if let Status::RateLimited(Some(until)) = state.state.status
-            && Instant::now() >= until
-        {
-            state.state.status = Status::RateLimited(None);
-            drop(state);
-            wake();
-            continue;
-        }
-        let cooldown = match state.state.status {
-            Status::RateLimited(Some(until)) => Some(until),
-            Status::Idle
-            | Status::Checking
-            | Status::Current
-            | Status::Available(_)
-            | Status::Unpublished
-            | Status::Development
-            | Status::RateLimited(None)
-            | Status::ConnectionFailed
-            | Status::Failed => None,
+        let time = now();
+        let deadline = match state.phase {
+            Phase::Stopped => return,
+            Phase::Cooldown { until, due } if time >= until => {
+                state.change(|state| state.phase = Phase::Waiting { due });
+                drop(state);
+                wake();
+                continue;
+            }
+            Phase::Cooldown { until, .. } => Some(until),
+            Phase::Waiting { due } if !state.automatic || time < due => {
+                state.automatic.then_some(due)
+            }
+            Phase::Waiting { .. } | Phase::Requested | Phase::Checking => {
+                state.change(|state| {
+                    state.phase = Phase::Checking;
+                    state.dismissed = false;
+                });
+                drop(state);
+                wake();
+                if !run_check(shared, now, &mut check) {
+                    return;
+                }
+                wake();
+                continue;
+            }
         };
-        if !(state.stopped
-            || state.requested
-            || state.automatic && Instant::now() >= due && cooldown.is_none())
-        {
-            let deadline = cooldown.or(state.automatic.then_some(due));
-            let waited = if let Some(deadline) = deadline {
-                shared
-                    .1
-                    .wait_timeout(state, deadline.saturating_duration_since(Instant::now()))
-                    .map(|(state, _)| state)
-                    .ok()
-            } else {
-                shared.1.wait(state).ok()
-            };
-            let Some(next) = waited else {
-                return;
-            };
-            drop(next);
-            continue;
-        }
-        if state.stopped {
+        let waited = if let Some(deadline) = deadline {
+            shared
+                .1
+                .wait_timeout(state, deadline.saturating_duration_since(time))
+                .map(|(state, _)| state)
+                .ok()
+        } else {
+            shared.1.wait(state).ok()
+        };
+        if waited.is_none() {
             return;
         }
-        state.requested = false;
-        state.state = State {
-            status: Status::Checking,
-            dismissed: false,
-        };
-        drop(state);
-        wake();
-        let result = check().unwrap_or_else(|error| {
-            tracing::warn!(%error, "checking for application updates failed");
-            failure_status(&error)
-        });
-        let Ok(mut state) = shared.0.lock() else {
-            return;
-        };
-        if state.stopped {
-            return;
-        }
-        state.state.status = result;
-        due = Instant::now() + DAILY;
-        drop(state);
-        wake();
     }
+}
+
+fn run_check(
+    shared: &(Mutex<Shared>, Condvar),
+    now: &impl Fn() -> Instant,
+    check: &mut impl FnMut() -> io::Result<Outcome>,
+) -> bool {
+    let (outcome, cooldown) = match check() {
+        Ok(outcome) => (outcome, None),
+        Err(error) => {
+            tracing::warn!(%error, "checking for application updates failed");
+            (failure_status(&error), retry_delay(&error))
+        }
+    };
+    let Ok(mut state) = shared.0.lock() else {
+        return false;
+    };
+    if state.phase == Phase::Stopped {
+        return false;
+    }
+    let time = now();
+    let due = time + DAILY;
+    state.change(|state| {
+        state.result = Some(outcome);
+        state.phase = cooldown.map_or(Phase::Waiting { due }, |delay| Phase::Cooldown {
+            until: time + delay,
+            due,
+        });
+    });
+    true
 }
 
 struct Api {
@@ -334,7 +424,7 @@ impl Api {
     }
 }
 
-fn check() -> io::Result<Status> {
+fn check() -> io::Result<Outcome> {
     let api = Api {
         agent: ureq::Agent::config_builder()
             .https_only(true)
@@ -351,7 +441,7 @@ fn check() -> io::Result<Status> {
             stable(release.as_ref(), env!("CARGO_PKG_VERSION"))
         }
         "preview" => preview(&api),
-        _ => Ok(Status::Development),
+        _ => Ok(Outcome::Development),
     }
 }
 
@@ -369,9 +459,9 @@ struct Asset {
     size: u64,
 }
 
-fn stable(release: Option<&Release>, installed: &str) -> io::Result<Status> {
+fn stable(release: Option<&Release>, installed: &str) -> io::Result<Outcome> {
     let Some(release) = release.filter(|release| !release.draft && !release.prerelease) else {
-        return Ok(Status::Unpublished);
+        return Ok(Outcome::Unpublished);
     };
     let tag = release
         .tag_name
@@ -380,10 +470,10 @@ fn stable(release: Option<&Release>, installed: &str) -> io::Result<Status> {
     let latest = semver::Version::parse(tag).map_err(io::Error::other)?;
     let installed = semver::Version::parse(installed).map_err(io::Error::other)?;
     if !latest.pre.is_empty() {
-        return Ok(Status::Unpublished);
+        return Ok(Outcome::Unpublished);
     }
     if latest <= installed {
-        return Ok(Status::Current);
+        return Ok(Outcome::Current);
     }
     let package = release.assets.iter().find(|asset| {
         asset.size > 0
@@ -397,9 +487,9 @@ fn stable(release: Option<&Release>, installed: &str) -> io::Result<Status> {
             .any(|asset| asset.size > 0 && asset.name == format!("{}.sha256", package.name))
     });
     Ok(if complete {
-        Status::Available(format!("{REPOSITORY}/releases/tag/{}", release.tag_name))
+        Outcome::Available(format!("{REPOSITORY}/releases/tag/{}", release.tag_name))
     } else {
-        Status::Unpublished
+        Outcome::Unpublished
     })
 }
 
@@ -427,12 +517,12 @@ struct Artifact {
     size_in_bytes: u64,
 }
 
-fn preview(api: &Api) -> io::Result<Status> {
+fn preview(api: &Api) -> io::Result<Outcome> {
     let Some(runs) = api.get::<Runs>(
         "actions/workflows/preview.yml/runs?event=push&status=success&branch=main&per_page=20",
     )?
     else {
-        return Ok(Status::Unpublished);
+        return Ok(Outcome::Unpublished);
     };
     preview_packages(
         runs,
@@ -466,7 +556,7 @@ fn preview_packages(
     mut runs: Runs,
     mut artifacts: impl FnMut(u64) -> io::Result<Option<Artifacts>>,
     mut compare: impl FnMut(&str) -> io::Result<Comparison>,
-) -> io::Result<Status> {
+) -> io::Result<Outcome> {
     runs.workflow_runs
         .sort_by_key(|run| std::cmp::Reverse(run.number));
     let mut inspected = std::collections::BTreeSet::new();
@@ -524,13 +614,13 @@ fn preview_packages(
         }
     }
     Ok(if let Some((_, id)) = newest {
-        Status::Available(format!("{REPOSITORY}/actions/runs/{id}"))
+        Outcome::Available(format!("{REPOSITORY}/actions/runs/{id}"))
     } else if diverged {
-        Status::Failed
+        Outcome::Failed
     } else if current {
-        Status::Current
+        Outcome::Current
     } else {
-        Status::Unpublished
+        Outcome::Unpublished
     })
 }
 
