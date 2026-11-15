@@ -1,7 +1,6 @@
 use crate::Coordinates;
 use crate::DiagnosticCategory;
 use crate::DiagnosticFailure;
-use windows::Devices::Geolocation::GeolocationAccessStatus;
 use windows::Devices::Geolocation::Geolocator;
 use windows::Devices::Geolocation::Geoposition;
 use windows::Security::Authorization::AppCapabilityAccess::AppCapability;
@@ -20,30 +19,6 @@ impl Request {
             .and_then(|capability| capability.CheckAccess())
             .map_err(|error| failure(&error))
             .and_then(permission_result)
-    }
-
-    pub(crate) fn access(
-        completed: impl Fn(Result<(), DiagnosticFailure>) + Send + 'static,
-    ) -> Result<Option<Self>, DiagnosticFailure> {
-        let foreground =
-            winsafe::HWND::GetForegroundWindow().map(|window| window.GetWindowThreadProcessId());
-        if foreground != Some((winsafe::GetCurrentThreadId(), std::process::id())) {
-            return Ok(None);
-        }
-        let operation = Geolocator::RequestAccessAsync().map_err(|error| failure(&error))?;
-        let request = Self(operation.cast().map_err(|error| failure(&error))?);
-        operation
-            .SetCompleted(&AsyncOperationCompletedHandler::new(move |operation, _| {
-                let result = operation
-                    .ok()
-                    .and_then(IAsyncOperation::GetResults)
-                    .map_err(|error| failure(&error))
-                    .and_then(access_result);
-                completed(result);
-                Ok(())
-            }))
-            .map_err(|error| failure(&error))?;
-        Ok(Some(request))
     }
 
     pub(crate) fn position(
@@ -94,18 +69,6 @@ impl Drop for Request {
     fn drop(&mut self) {
         drop(self.0.Cancel());
     }
-}
-
-fn access_result(access: GeolocationAccessStatus) -> Result<(), DiagnosticFailure> {
-    let category = match access {
-        GeolocationAccessStatus::Allowed => return Ok(()),
-        GeolocationAccessStatus::Denied => DiagnosticCategory::AccessDenied,
-        _ => DiagnosticCategory::Windows,
-    };
-    Err(DiagnosticFailure {
-        category,
-        code: None,
-    })
 }
 
 // A stopped or disabled Geolocation service fails the position request with
@@ -166,22 +129,6 @@ mod tests {
         fn Close(&self) -> windows::core::Result<()> {
             Ok(())
         }
-    }
-
-    #[test_case(GeolocationAccessStatus::Allowed, None)]
-    #[test_case(
-        GeolocationAccessStatus::Denied,
-        Some(DiagnosticCategory::AccessDenied)
-    )]
-    #[test_case(
-        GeolocationAccessStatus::Unspecified,
-        Some(DiagnosticCategory::Windows)
-    )]
-    fn permission_outcomes(access: GeolocationAccessStatus, expected: Option<DiagnosticCategory>) {
-        assert_eq!(
-            access_result(access).err().map(|failure| failure.category),
-            expected
-        );
     }
 
     #[test_case(AppCapabilityAccessStatus::Allowed, None)]

@@ -134,6 +134,7 @@ pub(super) fn sign_in_view(
             severity: Severity::Warning,
             text,
             retry: None,
+            link: None,
         })
     };
     let message = match (status.failure, status.effective) {
@@ -145,11 +146,13 @@ pub(super) fn sign_in_view(
                 failure,
             ),
             retry: Some(fl!("action-retry")),
+            link: None,
         }),
         (None, Some(Err(failure))) => Some(FeatureMessage {
             severity: Severity::Error,
             text: problems::with_code(text, fl!("sign-in-read-failed"), failure),
             retry: None,
+            link: None,
         }),
         (None, Some(Ok(Effective::DisabledByWindows))) if preference == Some(true) => {
             warning(fl!("sign-in-disabled-by-windows"))
@@ -443,6 +446,7 @@ fn sign_in_card(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
                 .model
                 .editable()
                 .then(|| context.message(Message::Command(Command::RetrySignIn))),
+            None,
             settings.stacked(),
         ));
     }

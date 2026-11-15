@@ -50,6 +50,7 @@ pub(super) struct FeatureMessage {
     pub(super) severity: Severity,
     pub(super) text: String,
     pub(super) retry: Option<String>,
+    pub(super) link: Option<(String, &'static str)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

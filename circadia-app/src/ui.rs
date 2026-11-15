@@ -546,9 +546,7 @@ impl Application for Desktop {
             Message::Closed => self.settings_closed(),
             Message::Edit(edits) => self.edit(edits),
             Message::Write => self.configuration.borrow_mut().write(),
-            Message::RequestLocation => {
-                self.request_location(settings::location::RequestMode::Foreground);
-            }
+            Message::RequestLocation => self.request_location(),
             Message::Command(command) => self.command(command),
             Message::Native(event) => self.native_event(event, context),
             Message::Menu(key) => self.menu(&key, context),
@@ -743,28 +741,23 @@ impl Desktop {
         self.held_location = None;
     }
 
-    fn deliver_location(
-        &self,
-    ) -> Option<impl Fn(settings::location::Event) + Clone + Send + 'static> {
-        let wake = self.session.as_ref()?.wake.clone();
+    fn request_location(&mut self) {
+        if self.exiting || !self.location_enabled() || self.location.status().requesting {
+            return;
+        }
+        let Some(session) = &self.session else {
+            return;
+        };
+        let wake = session.wake.clone();
+        self.location_event = Arc::default();
         let completed = Arc::clone(&self.location_event);
-        Some(move |event| {
+        let deliver = move |event| {
             if let Ok(mut completed) = completed.lock() {
                 *completed = Some(event);
             }
             let _notified = wake.notify();
-        })
-    }
-
-    fn request_location(&mut self, mode: settings::location::RequestMode) {
-        if self.exiting || !self.location_enabled() || self.location.status().requesting {
-            return;
-        }
-        self.location_event = Arc::default();
-        let Some(deliver) = self.deliver_location() else {
-            return;
         };
-        if let Some(result) = self.location.start(&*self.location_source, mode, deliver) {
+        if let Some(result) = self.location.start(&*self.location_source, deliver) {
             self.located(result);
         }
     }
@@ -776,13 +769,7 @@ impl Desktop {
             .ok()
             .and_then(|mut event| event.take());
         let Some(event) = event else { return };
-        let Some(deliver) = self.deliver_location() else {
-            return;
-        };
-        if let Some(result) = self
-            .location
-            .receive(event, &*self.location_source, deliver)
-        {
+        if let Some(result) = self.location.receive(event) {
             self.located(result);
         }
     }
@@ -844,7 +831,7 @@ impl Desktop {
                 if self.configuration.borrow().opens_settings_at_launch() {
                     context.show_window("settings");
                 } else {
-                    self.request_location(settings::location::RequestMode::Background);
+                    self.request_location();
                 }
             }
             Err(error) => {
@@ -909,9 +896,9 @@ impl Desktop {
                 crash_notice::dismiss(&self.directory);
                 self.crash = None;
             }
-            settings::Command::Report(url) => {
+            settings::Command::OpenPage(url) => {
                 if let Err(error) = crate::platform::settings_window::open_page(&url) {
-                    tracing::warn!(%error, "opening the new-issue page failed");
+                    tracing::warn!(%error, "opening a page failed");
                 }
             }
             settings::Command::RetrySignIn => self.retry_sign_in(),

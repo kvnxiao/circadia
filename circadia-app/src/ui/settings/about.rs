@@ -120,7 +120,7 @@ pub(super) fn view(settings: &Settings, context: &ViewContext<'_, Settings>) -> 
         )
         .external_button()
         .automation_id(automation_id::REPORT_BUG)
-        .on_click(context.message(Message::Command(Command::Report(format!(
+        .on_click(context.message(Message::Command(Command::OpenPage(format!(
             "{}/issues/new?template=bug_report.md",
             updates::REPOSITORY
         )))))
@@ -161,7 +161,7 @@ fn links(settings: &Settings, context: &ViewContext<'_, Settings>) -> View {
                 HyperlinkButton::new()
                     .automation_id(id)
                     .horizontal_alignment(HorizontalAlignment::Left)
-                    .on_click(context.message(Message::Command(Command::Report(format!(
+                    .on_click(context.message(Message::Command(Command::OpenPage(format!(
                         "{}{path}",
                         updates::REPOSITORY
                     )))))
@@ -227,7 +227,7 @@ fn banner(settings: &Settings, context: &ViewContext<'_, Settings>) -> Option<Vi
             HyperlinkButton::new()
                 .automation_id(automation_id::UPDATE_DOWNLOAD)
                 .horizontal_alignment(HorizontalAlignment::Left)
-                .on_click(context.message(Message::Command(Command::Report(url.clone()))))
+                .on_click(context.message(Message::Command(Command::OpenPage(url.clone()))))
                 .content(widgets::body(fl!("updates-download")))
                 .into(),
         );

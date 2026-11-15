@@ -15,6 +15,7 @@ use windows_reactor::FontWeight;
 use windows_reactor::Grid;
 use windows_reactor::GridLength;
 use windows_reactor::HorizontalAlignment;
+use windows_reactor::HyperlinkButton;
 use windows_reactor::Image;
 use windows_reactor::Orientation;
 use windows_reactor::ProgressRing;
@@ -330,6 +331,7 @@ pub(super) fn feature_row(
     message: FeatureMessage,
     name: &str,
     retry: Option<Callback<()>>,
+    open: Option<Callback<()>>,
     stacked: bool,
 ) -> View {
     let glyph = match message.severity {
@@ -348,17 +350,22 @@ pub(super) fn feature_row(
             None => button.into(),
         }
     });
-    nested_row(
-        glyph,
-        vec![
-            body(message.text)
-                .automation_id(automation_id::message(name))
+    let mut text: Vec<View> = vec![
+        body(message.text)
+            .automation_id(automation_id::message(name))
+            .into(),
+    ];
+    if let (Some((label, _)), Some(open)) = (message.link, open) {
+        text.push(
+            HyperlinkButton::new()
+                .automation_id(automation_id::link(name))
+                .horizontal_alignment(HorizontalAlignment::Left)
+                .on_click(open)
+                .content(body(label))
                 .into(),
-        ],
-        action,
-        &automation_id::row(name),
-        stacked,
-    )
+        );
+    }
+    nested_row(glyph, text, action, &automation_id::row(name), stacked)
 }
 
 pub(super) fn group(cards: Vec<View>) -> View {

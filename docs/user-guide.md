@@ -42,13 +42,15 @@ Valid edits apply and save automatically. A conflicting edit, such as equal Wake
 
 ## Solar timing and location
 
-Turn on Follow sunrise and sunset to use one or both solar events. Enter latitude and longitude, or enable Use my Windows location after reading its explanation. Solar timing requires coordinates; a pending change applies once a complete position is available.
+Turn on Follow sunrise and sunset to use one or both solar events. Enter latitude and longitude, or turn on Use my Windows location after reading the explanation that appears when you turn it on. Solar timing requires coordinates; a solar timing change that is waiting for coordinates applies once both latitude and longitude are available.
 
-Windows location is a saved preference separate from Windows' permission. When enabled, Circadia requests one position on enablement, startup, and opening Settings. Overlapping requests share one acquisition. It can finish with Settings closed, but requests for Windows consent require foreground Settings. It does not track your location continuously.
+Use my Windows location is a Circadia setting, separate from the location settings in Windows. While it is on, Circadia requests one position when you turn it on, at startup, and when Settings opens. A request that starts while another is running uses that request instead of starting a second one. A request can finish after Settings closes. It does not track your location continuously.
 
-A failed request keeps the preference and saved coordinates. Manual coordinate fields are unavailable while Windows location is enabled. Turn it off to enter a position yourself. A position received during Preview applies when playback ends.
+Each request first checks whether Windows allows Circadia to use your location. Circadia never asks Windows to show its location permission prompt, because that prompt can turn on a Windows location setting that you turned off. When Windows allows access, the setting shows **Finding your location** while Windows determines the position. Otherwise, for example when location services are off in Windows Settings, the request fails at once and an error message appears under Follow sunrise and sunset. The message asks you to turn on location in Windows Settings, and its **Open Windows location settings** link opens the Location page of Windows Settings.
 
-Solar calculations run locally. Sunrise and sunset are used only when eligible between Wake and the following Bedtime. Missing events are omitted. A calculation failure uses Wake and Bedtime only and shows the error; conflicting solar ordering also omits the affected solar targets.
+A failed request keeps the preference and saved coordinates. The Latitude and Longitude fields are unavailable while Use my Windows location is on. Turn it off to enter a position yourself. A position received during Preview applies when playback ends.
+
+Solar calculations run locally. Sunrise and sunset are used only when they fall between Wake and the following Bedtime. A sunrise or sunset that does not occur on a date, such as during polar night, is skipped. A calculation failure uses Wake and Bedtime only and shows the error. When sunset does not follow sunrise between Wake and the following Bedtime, Circadia also skips the affected sunrise and sunset.
 
 ## App suppression
 
@@ -119,7 +121,7 @@ General → Logs → Open folder opens the data directory's `logs` subfolder. `c
 - Each Night light temperature change and how long it took.
 - Each change of the focused window and its title.
 - Each save of the settings file.
-- Each change of state of Preview and of update checking, with the previous and next state. Preview's states are `Not previewing`, `Starting`, and `Playing`; for example, a record names the move from `Starting` to `Playing` when playback begins. State names are the same in every interface language.
+- Each change of state of Preview, of update checking, and of Windows location requests, with the previous and next state. Preview's states are `Not previewing`, `Starting`, and `Playing`; for example, a record names the move from `Starting` to `Playing` when playback begins. A location request's states are `No request` and `Finding your location`. A location request that fails at once writes a `request started` record and then a move from `No request` to `No request`, because it fails before Windows starts finding a position. State names are the same in every interface language.
 - Each step Circadia takes to turn Night light off when it exits: when the step starts, and whether it `succeeded` or `failed`. The steps are:
   - `exit fade`: the fade toward 6500 K after Quit.
   - `preview cleanup`: turning off the Windows Night light preview mode, which Circadia turns on to apply changing temperatures at once. This mode is separate from Circadia's Preview command.

@@ -59,47 +59,40 @@ This duration is separate from the ordinary fade for suppression changes, recomp
 
 Solar timing requires valid latitude and longitude. Settings offers manual coordinate entry and a saved Use my Windows location setting, initially off. Turning that setting on opens a confirmation dialog explaining that Circadia requests location through Windows, that Windows can use network-backed positioning, and that requests also run when Circadia starts with only its tray icon. Confirming enables and saves the preference; cancelling keeps it off and makes no location request.
 
-While the setting is on, Circadia requests one position after confirmation, at each process startup, and each time the settings window opens, whether or not solar timing is on. A foreground startup makes one request, and overlapping requests are coalesced. Changing the settings page does not request location. Circadia does not continuously track location or periodically refresh it. A request can finish after settings closes. Its result applies to the configuration's coordinates as a settings edit and is saved; a result that arrives during Preview waits until logical playback ends. Manual coordinate entry is unavailable while the setting is on. Turning it off cancels pending requests and discards held or late results. Reset and exit also cancel pending requests. With the setting off, manual coordinates apply and Circadia does not request location access.
+While the setting is on, Circadia requests one position after confirmation, at each process startup, and each time the settings window opens, whether or not solar timing is on. A startup that opens settings makes one request, and overlapping requests are coalesced. Switching between settings pages does not request location. Circadia does not continuously track location or periodically refresh it. A request can finish after settings closes. Its result applies to the configuration's coordinates as a settings edit and is saved; a result that arrives during Preview waits until logical playback ends. Manual coordinate entry is unavailable while the setting is on. Turning it off cancels pending requests and discards positions held for Preview and results that arrive after cancellation. Reset to default settings and exit also cancel pending requests. With the setting off, manual coordinates apply and Circadia does not request location access.
 
-The saved preference survives app restarts and does not require repeated Circadia confirmation. Windows permission is checked separately. Requests from tray-only operation do not display a Windows permission prompt. Windows consent is requested only while settings is in the foreground. Preview ends at its captured deadline or an earlier stop, even when a native call delays cleanup; this is the logical end of playback.
+The saved preference survives app restarts and does not require repeated Circadia confirmation. Windows permission is checked separately. Circadia does not ask Windows to show a location permission prompt, in the foreground or from the tray, because that prompt can turn on a Windows location setting that the user turned off. Preview ends at its captured deadline or an earlier stop, even when a native call delays cleanup; this is the logical end of playback.
 
 Latitude must be finite and within -90 through +90 degrees; longitude must be finite and within -180 through +180 degrees. Settings shows and accepts coordinates with the decimal separator of the user's regional format; the configuration file stores them independently of locale. The accepted configuration's coordinates remain in use until a settings edit or a successful location request changes them. Circadia does not infer the computer's time zone from coordinates or offer city/address search in the MVP.
 
-If permission is denied, location services are disabled, or a position cannot be obtained, Circadia keeps the saved preference and existing coordinates. It records the failure and shows it at the location setting when settings is open. An unfinished request does not prevent the active schedule from running. A new request does not clear a failure until it succeeds or reports a different failure.
+If permission is denied, location services (the system-wide Windows location switch) are disabled, or a position cannot be obtained, Circadia keeps the saved preference and existing coordinates. It records the failure and shows it at the location setting when settings is open. When permission is denied or location services are disabled, the failure tells the user to turn on location in Windows Settings and offers a link that opens the Location page of Windows Settings. An unfinished request does not prevent the active schedule from running. A new request does not clear a failure until it succeeds or reports a different failure.
 
-A request first checks Windows permission, which does not wait for the user. When Windows allows access, the request acquires one position. When Windows needs the user's consent because the user has not yet answered Windows' location permission for Circadia, and settings is in the foreground, the request asks Windows for consent and waits for the answer before acquiring a position. When the user or the system has denied access, or location services are off, the request fails at once. While settings is open, the location setting shows the phase of a pending request: Waiting for Windows permission while Windows asks for consent, then Finding your location while Windows acquires the position. The diagram lists every transition of a request; a position held for Preview under the rules above is separate from the request and does not block a new one.
+A request first checks Windows permission, which does not prompt or wait for the user. When Windows allows access, the request acquires one position. When Windows reports any status other than allowed, such as a denial or a status that needs the user's answer, the request fails at once. While Windows acquires the position, the location setting shows Finding your location whenever settings is open. The diagram lists every transition of a request; a position held for Preview under the rules above is separate from the request and does not block a new one.
 
 ```mermaid
 stateDiagram-v2
   state "No request" as Idle
-  state "Waiting for Windows permission" as Consent
   state "Finding your location" as Locating
   [*] --> Idle
   Idle --> Locating: Request starts; Windows allows access
-  Idle --> Consent: Request starts while settings is in the foreground; Windows needs the user's consent
-  Idle --> Idle: Request fails at once; access is denied or location services are off, Windows needs consent outside foreground settings, the consent request cannot start, or acquisition cannot start
-  Consent --> Locating: Windows reports access allowed
-  Consent --> Idle: Windows reports access allowed; acquisition cannot start
-  Consent --> Idle: Windows reports access denied, or the consent request fails
+  Idle --> Idle: Request fails at once; Windows does not allow access, the permission check fails, or acquisition cannot start
   Locating --> Idle: Position obtained or acquisition fails
-  Consent --> Idle: Setting turned off, Reset to default settings, or exit
   Locating --> Idle: Setting turned off, Reset to default settings, or exit
 ```
 
 **Scenarios:**
 
 - The user turns solar timing on and manually enters 40.7128, -74.0060: the coordinates apply and are saved without Windows location permission.
-- The user turns Use my Windows location on, confirms Circadia's explanation, and grants Windows access: the saved preference is on, the detected coordinates replace the manual ones, and the coordinate fields become unavailable.
+- The user turns Use my Windows location on and confirms Circadia's explanation while Windows allows location access: the saved preference is on, the detected coordinates replace the manual ones, and the coordinate fields become unavailable.
 - The user cancels the confirmation dialog: the preference stays off, manual coordinates remain available, and no Windows location operation runs.
 - Use my Windows location is on and the user opens settings a week later after traveling: Circadia requests one new position and applies it.
 - Use my Windows location was saved on and Circadia starts at sign-in with settings closed: it silently checks Windows permission and requests one position when access is allowed, without another Circadia confirmation.
 - Use my Windows location is on and Start minimized is off: startup and settings opening produce one position request, even with solar timing off.
 - Settings opens while the startup request is pending: the existing request continues without starting a second one.
-- Windows permission is denied or requires consent at tray-only startup: no permission prompt opens, the preference and coordinates remain saved, and the failure appears when settings next opens. Foreground settings can request Windows consent.
+- Windows does not allow location access at tray-only startup: no permission prompt opens, the preference and coordinates remain saved, and the failure appears when settings next opens.
 - Windows revokes access between the permission check and acquisition: the failed request keeps the saved preference and coordinates and reports the failure.
-- The user turns Use my Windows location on, confirms, and Windows asks for consent: the location setting shows Waiting for Windows permission. After the user allows access, it shows Finding your location until the position arrives.
-- Windows already allows access when settings opens: the location setting shows Finding your location, without first showing Waiting for Windows permission.
-- The user previously denied Circadia location access in Windows, and settings opens: the location failure appears without Waiting for Windows permission.
+- Windows allows access when settings opens: the location setting shows Finding your location until the position arrives.
+- Location services are off, and settings opens: no Windows prompt opens, location services stay off, and the location setting shows the failure without first showing Finding your location. The failure's link opens the Location page of Windows Settings.
 - A position arrives after settings closes: it applies and is saved. If Preview is still logically active, it waits until playback ends.
 - The setting is turned off, Reset to default settings runs, or the app exits with a pending request: the request is cancelled, and a late result does not change coordinates.
 - A position waits for Preview to end and the location setting turns off: the held position is discarded.
@@ -211,5 +204,5 @@ Solar events remain their actual instants. Clock changes do not move them or rem
 | Design decision or requirement | Evidence |
 | :-- | :-- |
 | Local dates and clock times mapped to actual instants | [Clock conversion fixtures](../research/windows-clock-conversion.md), [host-setting checks](../research/windows-clock-conversion.md#host-setting-exercise), and [elapsed-interval reasoning](../research/clock-change-intervals.md); the target-adjustment policy is not exercised by the recorded clock conversion probe. |
-| Optional solar timing and coordinate acquisition | [Local solar calculation](../research/solar-calculation.md) and [tray-only location requests](../research/background-location.md); desktop permission outcomes remain implementation and release checks. |
+| Optional solar timing and coordinate acquisition | [Local solar calculation](../research/solar-calculation.md) and [Windows location requests](../research/background-location.md), which measured permission statuses on one Windows build with Windows location services and app location access each turned on and off; other builds remain implementation and release checks. |
 | Local calculation without persistent solar caches | [Measured per-date calculation cost](../research/solar-performance.md); four dates on one desktop do not establish a universal latency bound. |

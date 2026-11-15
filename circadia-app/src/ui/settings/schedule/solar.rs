@@ -134,6 +134,7 @@ pub(in crate::ui::settings) fn solar_messages(
                 severity: Severity::Warning,
                 text: fl!("solar-fallback"),
                 retry: Some(fl!("action-retry")),
+                link: None,
             },
         ));
     }
@@ -154,6 +155,7 @@ pub(in crate::ui::settings) fn solar_messages(
                             bedtime = clock(conflict.local_bedtime)
                         ),
                         retry: None,
+                        link: None,
                     },
                 )
             }),
@@ -161,11 +163,7 @@ pub(in crate::ui::settings) fn solar_messages(
     if let Some(failure) = location {
         messages.push((
             automation_id::LOCATION.to_owned(),
-            FeatureMessage {
-                severity: Severity::Error,
-                text: location::failure_message(text, failure),
-                retry: None,
-            },
+            location::failure_message(text, failure),
         ));
     }
     messages
@@ -465,7 +463,9 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
     bind_text!(fl, text);
     let title = fl!("location-title");
     let on = switch(model, Field::UseWindowsLocation);
-    let lines: Vec<View> = vec![
+    let requesting = settings.input.location.requesting;
+    let finding = fl!("location-finding");
+    let mut lines: Vec<View> = vec![
         widgets::body(&title).into(),
         widgets::caption(if on {
             fl!("location-on")
@@ -474,6 +474,9 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
         })
         .into(),
     ];
+    if requesting {
+        lines.push(widgets::caption(&finding).into());
+    }
     widgets::nested(&automation_id::row(automation_id::USE_WINDOWS_LOCATION))
         .padding(Thickness::new(
             52.0,
@@ -494,9 +497,8 @@ fn location_row(settings: &Settings, context: &ViewContext<'_, Settings>) -> Vie
                         .children(lines),
                     widgets::action_group(vec![
                         widgets::pending_indicator(
-                            settings.input.location.requesting
-                                && settings.visibility == super::super::Visibility::Shown,
-                            &fl!("location-requesting"),
+                            requesting && settings.visibility == super::super::Visibility::Shown,
+                            &finding,
                             automation_id::LOCATION_REQUESTING,
                         )
                         .into(),
@@ -664,11 +666,15 @@ pub(super) fn solar_card(settings: &Settings, context: &ViewContext<'_, Settings
         )
         .into_iter()
         .map(|(name, message)| {
+            let open = message.link.as_ref().map(|&(_, page)| {
+                context.message(Message::Command(Command::OpenPage(page.to_owned())))
+            });
             widgets::feature_row(
                 message,
                 &name,
                 (model.editable() && model.management.is_on() && !model.retrying)
                     .then(|| context.message(Message::Command(Command::RetryNative))),
+                open,
                 settings.stacked(),
             )
         }),

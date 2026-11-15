@@ -207,6 +207,7 @@ fn a_failed_registration_keeps_the_preference_and_offers_retry_without_retrying_
                        \u{2068}off\u{2069}. Error \u{2068}0x00000005\u{2069}"
                     .to_owned(),
                 retry: Some("Retry".to_owned()),
+                link: None,
             }),
         }
     );
@@ -249,6 +250,7 @@ fn a_failed_registration_with_an_unreadable_state_shows_startup_off() {
                        \u{2068}off\u{2069}. Error \u{2068}0x00000005\u{2069}"
                     .to_owned(),
                 retry: Some("Retry".to_owned()),
+                link: None,
             }),
         }
     );
@@ -322,6 +324,7 @@ fn startup_disabled_by_windows_after_an_opt_in_shows_off_with_the_mismatch_expla
                        sign in, turn it on in Windows Settings > Apps > Startup."
                     .to_owned(),
                 retry: None,
+                link: None,
             }),
         }
     );
