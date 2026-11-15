@@ -88,6 +88,28 @@ pub(crate) fn transition(activity: &'static str, from: &'static str, to: &'stati
     tracing::debug!(activity, from, to, "state transition");
 }
 
+pub(crate) fn exit_step_started(step: &'static str) {
+    tracing::debug!(step, "exit step started");
+}
+
+pub(crate) fn exit_step_finished(step: &'static str, succeeded: bool) {
+    let outcome = if succeeded { "succeeded" } else { "failed" };
+    tracing::debug!(step, outcome, "exit step finished");
+}
+
+pub(crate) fn exit_step_record(step: &str, finished: Option<bool>) -> String {
+    let fields = match finished {
+        None => format!("exit step started step={step:?}"),
+        Some(true) => format!("exit step finished step={step:?} outcome=\"succeeded\""),
+        Some(false) => format!("exit step finished step={step:?} outcome=\"failed\""),
+    };
+    format!(
+        "{:.6} DEBUG circadia_app::log: {fields}
+",
+        jiff::Timestamp::now()
+    )
+}
+
 #[cfg(test)]
 pub(crate) fn capture(level: Level, run: impl FnOnce()) -> Vec<String> {
     // While at most one dispatcher is registered, tracing-core caches a
@@ -413,6 +435,27 @@ mod tests {
             ]
         );
         assert_eq!(capture(Level::INFO, record), Vec::<String>::new());
+    }
+
+    #[test]
+    fn panic_cleanup_records_use_the_exit_step_format() {
+        let records = [None, Some(true), Some(false)].map(|finished| {
+            let record = exit_step_record("panic cleanup", finished);
+            let (timestamp, rest) = record.split_once(' ').expect("timestamp separator");
+            assert!(timestamp.parse::<jiff::Timestamp>().is_ok(), "{record}");
+            rest.to_owned()
+        });
+        assert_eq!(
+            records,
+            [
+                "DEBUG circadia_app::log: exit step started step=\"panic cleanup\"
+",
+                "DEBUG circadia_app::log: exit step finished step=\"panic cleanup\" outcome=\"succeeded\"
+",
+                "DEBUG circadia_app::log: exit step finished step=\"panic cleanup\" outcome=\"failed\"
+",
+            ]
+        );
     }
 
     #[test_case(Level::INFO, &["INFO circadia_app::log::tests: native failure code=5"]; "info")]

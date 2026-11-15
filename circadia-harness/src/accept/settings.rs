@@ -482,6 +482,53 @@ fn check_preview(
     Ok(())
 }
 
+pub(crate) fn check_verbose_log(directory: &Path, exit_steps: &[(&str, &str)]) -> io::Result<()> {
+    let log = crate::support::log::read(directory)?;
+    let transitions = crate::support::log::transitions(&log, "preview");
+    require(
+        transitions.first() == Some(&("Start", "Not previewing")),
+        &format!(
+            "the first Preview transition is not from Start to Not previewing: {transitions:?}"
+        ),
+    )?;
+    let diagram = [
+        ("Not previewing", "Starting"),
+        ("Starting", "Playing"),
+        ("Starting", "Not previewing"),
+        ("Playing", "Not previewing"),
+    ];
+    let unexpected: Vec<_> = transitions
+        .iter()
+        .skip(1)
+        .filter(|transition| !diagram.contains(transition))
+        .collect();
+    require(
+        unexpected.is_empty(),
+        &format!("Preview transitions outside the diagram: {unexpected:?}"),
+    )?;
+    let missing: Vec<_> = [
+        ("Not previewing", "Starting"),
+        ("Starting", "Playing"),
+        ("Playing", "Not previewing"),
+    ]
+    .into_iter()
+    .filter(|transition| !transitions.contains(transition))
+    .collect();
+    require(
+        missing.is_empty(),
+        &format!("the log lacks the Preview transitions {missing:?}"),
+    )?;
+    let recorded = crate::support::log::exit_steps(&log);
+    require(
+        recorded == exit_steps,
+        &format!("the log records the exit steps {recorded:?} instead of {exit_steps:?}"),
+    )?;
+    report(
+        "PASS: the verbose log records the Preview transitions and each exit step with the diagram and step names",
+    );
+    Ok(())
+}
+
 pub(crate) fn preview_length(
     automation: &Automation,
     settings: &HWND,

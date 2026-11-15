@@ -206,10 +206,19 @@ fn start_log(directory: &Path, verbose: bool) -> io::Result<Arc<OnceLock<Control
     let controller = Arc::new(OnceLock::<ControllerClient>::new());
     let hooked = Arc::clone(&controller);
     let deadline = OnceLock::new();
+    // The panicking thread can hold the tracing writer's lock, so the cleanup
+    // records use the same non-blocking append as the panic record.
+    let cleanup_writer = writer.clone();
+    let record_cleanup = move |finished: Option<bool>| {
+        if verbose {
+            cleanup_writer
+                .append_record(crate::log::exit_step_record("panic cleanup", finished).as_bytes());
+        }
+    };
     std::panic::set_hook(Box::new(move |info| {
         writer.append_record(crate::log::panic_record(info).as_bytes());
         if let Some(client) = hooked.get() {
-            client.finish_after_panic(&deadline, Duration::from_secs(2));
+            client.finish_after_panic(&deadline, Duration::from_secs(2), &record_cleanup);
         }
         std::process::abort();
     }));

@@ -36,6 +36,8 @@ The checks find the settings window by its title and every settings control by t
 
 Most scenarios that launch `circadia.exe` accept `--language TAG`, which the harness passes to every Circadia launch. For example, `just accept settings --language qps-Ploc` uses the pseudo-locale. `accept paths` and `capture translation` select that expanded debug text automatically. `capture readme`, `accept deployment`, `accept recovery`, `accept location`, `measure output`, `measure activity`, and `measure graph` reject `--language`. The checks of `capture layout` and `measure resources` are written for English text.
 
+`accept settings` and `accept shutdown` start Circadia with `-V` (`--verbose`), which adds detailed records to its log in the temporary data directory, including state transitions and the steps Circadia takes to turn Night light off when it exits. The [user guide](../docs/user-guide.md#logs-and-crash-reports) lists those records. The checks read `circadia.1.log` and `circadia.log` in that order and compare the names in those records (the activity, such as Preview, and its state and step names), which Circadia writes the same in every interface language. Run these recipes with and without `--language qps-Ploc` to check that the names do not change with the language. A second launch that only opens settings in the running process does not pass `-V`, because the flag does not change the log detail of a process that is already running.
+
 Each recipe that changes Night light starts Circadia with `manage_night_light = true` in its configuration file, which Circadia reads at startup, so Circadia controls Night light without first asking the user to allow it. The startup and picker recipes start with management off and do not change Night light. Circadia reads its configuration file only at startup, so the checks change settings through the settings controls and read the file to confirm each write.
 
 ## Acceptance scenarios
@@ -113,6 +115,8 @@ This recipe runs the lifecycle checks and exercises the settings controls with b
 - A focused test window appears under Recently focused; its Add command writes a suppression entry. Focusing that window during Preview keeps Preview running until completion, then requests automatic 6500 K suppression. Returning focus to settings restores the schedule after the focus delay, and Remove writes the removal.
 - Stop, synthetic clock changes, and synthetic session lock end Preview and restore the schedule. Synthetic suspend stops Preview, and resume does not restart it.
 - Quit and confirmed session end during a changing Preview clear the native preview flag and turn Night light off.
+- The verbose log's first Preview transition is from `Start`, the name the log uses before Preview has a state, to `Not previewing`. Every later Preview transition is one of the transitions in [the specification's Preview state diagram](../docs/specs/application.md#req-preview-temperature-curve--preview-a-complete-daily-cycle). The log has the transitions from Not previewing to Starting, from Starting to Playing, and from Playing to Not previewing.
+- The verbose log records the start and outcome of each exit step, and each step succeeds. Quit, in the run that starts minimized, records the exit fade, preview cleanup, and the off attempt in that order; confirmed session end, in the run that does not start minimized, records preview cleanup and the off attempt.
 
 These checks use live Night light and the same cleanup behavior as `accept lifecycle`.
 
@@ -197,7 +201,7 @@ The recipe runs five application instances in sequence with isolated configurati
 - Confirmed session end with the file picker open.
 - Confirmed session end with the Wake time flyout open.
 
-Each case requires that the child process exits successfully and that native readback shows the preview flag cleared and Night light off. Each other case also requires that the configuration file has the Sleep edit. The recipe runs every case and then reports the failed ones. The startup case exercises early shutdown but does not force every ordering of Windows events. The recipe does not check Quit with the file picker open.
+Each case requires that the child process exits successfully and that native readback shows the preview flag cleared and Night light off. Each other case also requires that the configuration file has the Sleep edit. Each case requires that the verbose log records the start and success of preview cleanup and then of the off attempt; Quit records the exit fade first. Session end during startup can arrive before Circadia begins Night light access, and exit then makes neither attempt, so that case also accepts a log without exit steps. The recipe runs every case and then reports the failed ones. The startup case exercises early shutdown but does not force every ordering of Windows events. The recipe does not check Quit with the file picker open.
 
 Session end uses synthetic messages; the recipe does not sign out or shut down Windows. The tray case sends keyboard and mouse input to open the tray menu and choose Quit Circadia; the other cases use UI Automation without input. Its windows can take focus, and it changes live Night light with the same cleanup behavior as the lifecycle checks. On failure, it prints the retained temporary configuration directory.
 
@@ -437,7 +441,7 @@ The application's `graph-measurement` feature, which the harness feature of the 
 
 - `src/main.rs` parses `<group> <scenario>`, lists scenarios, starts the run directory, and writes its results.
 - `src/accept/`, `src/capture/`, and `src/measure/` have one module per scenario. Shared steps of a scenario stay in its module; for example, the settings scenario's helpers in `accept/settings.rs` also serve other scenarios.
-- `src/support/` has the shared launch, cleanup, and wait helpers (`app.rs`), UI Automation access (`automation.rs`), screen capture (`capture.rs`), window sizing (`responsive.rs`), the tray (`tray.rs`), environment reports (`environment.rs`), and the run directory (`run.rs`).
+- `src/support/` has the shared launch, cleanup, and wait helpers (`app.rs`), UI Automation access (`automation.rs`), screen capture (`capture.rs`), window sizing (`responsive.rs`), the tray (`tray.rs`), environment reports (`environment.rs`), reading Circadia's log records (`log.rs`), and the run directory (`run.rs`).
 
 The `graph-measurement` and `output-measurement` features enable the application features of the same names. The `self-contained` feature stages the bundled Windows App SDK runtime and embeds its deployment manifest in the harness executable, which scenarios that run the application inside the harness process need; the application crate's build script embeds that manifest only in `circadia.exe`. A scenario reports the required feature when the harness was built without it.
 
