@@ -12,7 +12,7 @@ use crate::l10n::bind_text;
 use crate::platform::location::Request;
 use std::any::Any;
 
-pub(in crate::ui) type Completed<T> = Box<dyn Fn(Result<T, DiagnosticFailure>) + Send>;
+pub(in crate::ui) type Completed<T> = Box<dyn Fn(Result<T, DiagnosticFailure>) + Send + Sync>;
 
 pub(in crate::ui) trait Locate {
     fn permission(&self) -> Result<(), DiagnosticFailure>;
@@ -82,7 +82,7 @@ impl Location {
     pub(in crate::ui) fn start(
         &mut self,
         source: &dyn Locate,
-        deliver: impl Fn(Event) + Send + 'static,
+        deliver: impl Fn(Event) + Send + Sync + 'static,
     ) -> Option<Result<Coordinates, DiagnosticFailure>> {
         if !matches!(self.pending, Pending::Idle) {
             return None;

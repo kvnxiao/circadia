@@ -22,7 +22,7 @@ impl Request {
     }
 
     pub(crate) fn position(
-        completed: impl Fn(Result<Coordinates, DiagnosticFailure>) + Send + 'static,
+        completed: impl Fn(Result<Coordinates, DiagnosticFailure>) + Send + Sync + 'static,
     ) -> Result<Self, DiagnosticFailure> {
         let operation = Geolocator::new()
             .and_then(|locator| locator.GetGeopositionAsync())
@@ -96,7 +96,6 @@ fn failure(error: &windows::core::Error) -> DiagnosticFailure {
 #[cfg(test)]
 #[expect(
     unsafe_code,
-    clippy::ref_as_ptr,
     clippy::inline_always,
     reason = "generated COM interface for the cancellation test"
 )]

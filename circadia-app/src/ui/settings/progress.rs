@@ -25,7 +25,7 @@ use windows_reactor::View;
 use windows_reactor::ViewContext;
 
 fn on_rendering(
-    callback: impl Fn(std::time::Instant) + 'static,
+    callback: impl Fn(std::time::Instant) + Send + Sync + 'static,
 ) -> windows_core::Result<windows_core::EventRevoker> {
     api::CompositionTarget::Rendering(move |_, _| {
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -354,15 +354,15 @@ impl Progress {
                 .StartAnimation("TrimEnd", &animation)?;
             return Ok(true);
         }
-        let failed = std::cell::Cell::new(false);
+        let failed = std::sync::atomic::AtomicBool::new(false);
         self.rendering = Some(on_rendering(move |at| {
-            if failed.get() {
+            if failed.load(std::sync::atomic::Ordering::Relaxed) {
                 return;
             }
             if let Err(error) =
                 base.SetTrimEnd(narrow(frame.fraction(at.saturating_duration_since(now))))
             {
-                failed.set(true);
+                failed.store(true, std::sync::atomic::Ordering::Relaxed);
                 tracing::warn!(%error, "updating Preview phase progress");
             }
         })?);

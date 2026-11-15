@@ -1,5 +1,5 @@
 ---
-date: 2026-11-05
+date: 2026-11-14
 questions:
   - Which published windows-rs and Reactor versions support Circadia's settings and tray requirements?
   - Can Rust code draw and edit a temperature curve with native WinUI 3 controls?
@@ -8,6 +8,8 @@ questions:
   - Can the graph support point insertion, reanchoring (changing the reference time that a point's signed offset is measured from), 10 K point increments, and a temperature background?
   - Which Reactor behavior at the current reference pin affects Circadia, how does its failure policy end the process, and when do its text inputs report edits?
 observed-in:
+  - microsoft/windows-rs master f37e2f9046cf9710fe00285436c4d22ad6053d72 (committed 2026-11-14); source inspection, regenerated Circadia composition bindings, automated workspace checks, and failed simulated graph startup on Windows 11 build 26300.9711, x86_64, on 2026-11-14
+  - Circadia 49a3e41 with windows-rs 27abacf; simulated graph completion check on Windows 11 build 26300.9711, x86_64, on 2026-11-14
   - microsoft/windows-rs master 27abacf80e4d3e60de129d32c559b618faeb1fec (committed 2026-11-05); source inspection, regenerated composition bindings, and Circadia automated checks on 2026-11-05
   - Circadia 0.1.0 log built with windows-rs 73c74c0 on Windows 11 build 26300, panic record of 2026-11-05
   - microsoft/windows-rs master 73c74c0d79282e1295af1856e6c8987c51b7ccdd (committed 2026-11-01); automated checks of both Reactor probes and the graph/lifecycle probe's UI Automation smoke test on 2026-11-02
@@ -30,25 +32,42 @@ recheck-when: Each bump of the reference windows-rs commit, and when Microsoft p
 
 The inspected Git versions of Reactor support an application-owned tray icon and settings windows that can close and reopen without ending the process. Published 0.100.0 ends its window runner when the last window closes. Earlier Git revisions also declared 0.100.0, so a 0.100.0 manifest version does not distinguish the published crate from development source.
 
-Circadia's reference pin is `27abacf80e4d3e60de129d32c559b618faeb1fec`, with Windows App SDK runtime 2.6.4. Desktop observations below apply to their stated revisions on Windows 11 build 26300.9711. The [compatibility assessment](windows-compatibility.md) supports an intended build 22000 floor; execution on that minimum is unverified.
+Circadia's update candidate is `f37e2f9046cf9710fe00285436c4d22ad6053d72`, with Windows App SDK runtime 2.6.4. It passes automated workspace checks but aborts during settings startup. Keep the previous `27abacf` pin in the integration branch until this failure is resolved. Desktop observations below apply to their stated revisions on Windows 11 build 26300.9711. The [compatibility assessment](windows-compatibility.md) supports an intended build 22000 floor; execution on that minimum is unverified.
 
 An experimental probe tested Reactor graph editing with fixed Sunrise 06:00, Sunset 18:00, and Wake 07:00 fixtures and arbitrary point editing. Its scope is controls and pointer behavior. Circadia's generated schedule, automatic saving, and Preview require application checks. Preview plays the daily schedule through Night light and animates its graph. [Settings design support](settings-design-support.md) covers the four-page design, segmented time entry, composition drawing, and finite animations. The [spec](../specs/SPEC.md) defines product behavior.
 
 ## Versions and evidence boundaries
 
-### Reference pin `27abacf`
+### Update candidate `f37e2f9`
+
+**Source inspection of windows-rs `f37e2f9` and Circadia call sites:** the [50-commit comparison](https://github.com/microsoft/windows-rs/compare/27abacf80e4d3e60de129d32c559b618faeb1fec...f37e2f9046cf9710fe00285436c4d22ad6053d72) includes these compatibility changes:
+
+- Generated delegate constructors and event wrappers require `Send + Sync` captures. Circadia propagates those bounds through location completion and progress rendering, and uses an atomic flag to stop ring updates after a drawing error.
+- Generated COM interfaces use shared macros and revised ownership machinery. Circadia regenerates its private composition bindings and removes the unused pointer-cast lint expectation from its cancellation test.
+- `Rect` is defined by `windows-numerics` and remains re-exported by `windows-canvas`. Canvas no longer re-exports text types; Circadia does not import those types. Its graph uses the unchanged Canvas composition extension API.
+- Animated Canvas device injection uses `device_factory` instead of `animated_with_device`. Circadia draws through a composition surface and does not call the removed constructor. The new submitted-frame and routed-pointer APIs are not needed for its graph, which has no point editing.
+- Reactor permits a component to return another component as its root view without panicking. It also fixes callbacks triggered by its own property writes and crashes when a realized row changes control type. Declaration expansion uses copy-on-write to reduce copying. These changes affect framework behavior; they do not establish a measured Circadia performance improvement.
+- Canvas propagates drawing-completion errors through render targets and swap chains. Changes to `windows-core` and `windows-future` repair COM ownership, delegate capture, and async-waker lifetime problems.
+- The setup helper resolves custom-profile deployment paths from Cargo output directories. Circadia declares a `testrelease` profile. The staged Windows App SDK runtime remains 2.6.4, and WebView2 remains 1.0.4078.44.
+- Reactor and Canvas still declare 0.101.0; the setup helper declares 0.100.1. The revision identifies this update even where package versions did not change.
+- The notification-icon module and application-layer tray calls are identical to `27abacf`. The documented tray failure policy still applies.
+
+**Automated checks at `f37e2f9`:** `just check` passes, including workspace and release-mode tests, Clippy, documentation, dependency checks, and composition-binding freshness. Cargo audit reports five warnings allowed by the existing policy. The self-contained debug build also succeeds.
+
+**Desktop checks at `f37e2f9`:** both `just measure graph` and `just measure graph --completion-only` abort before measurements. Reactor applies native UI properties, then panics at `native/winui/adapter.rs:118` with `HRESULT 0x80000011`, "Typename has an invalid format." The process exits with `0xC0000409`. The same completion-only scenario passes at Circadia `49a3e41` with `27abacf`. These checks use a simulated backend and do not change Night light.
+
+**Inferred cause from source inspection at `f37e2f9`:** Reactor uses bindings generated in windows-rs minimal mode, which omits runtime names for structs and enums. When Reactor boxes these values, the revised COM implementation reports the first implemented interface's runtime name even through the separate `IPropertyValue` interface. That name is an `IReference` with an empty type argument, which WinUI cannot interpret. The previous implementation reported the property-value interface name. This mechanism needs an upstream regression test and fix; the passing workspace checks do not establish native UI compatibility.
+
+Desktop results and API findings below remain limited to their labeled revisions unless explicitly rechecked at this pin. Clean-machine deployment, hardware suspend/resume, Explorer restart, and optical Night light behavior require separate validation.
+
+### Findings last checked at `27abacf`
 
 **Source inspection of windows-rs `27abacf`:**
 
 - `ComponentContext` has a lifetime parameter and an `input` accessor that returns the input passed to the current `create`, `input_changed`, or `update` call. Circadia writes `ComponentContext<'_, Self>` because the workspace warns on elided lifetimes in paths.
 - `TitleBar` turns on WinUI's `AutoRefreshDragRegions` when it attaches, so its drag regions follow content updates. Circadia's settings window declares a `TitleBar`.
 - A bitmap loaded from bytes decodes once its control is live, at the control's rendered size, and each image source serves one control at a time. Circadia shows app icons from PNG bytes.
-- `windows-canvas` depends on `windows-text` and re-exports its `Rect` and text types, so Circadia's `windows_canvas::Rect` use compiles unchanged.
 - Generated Win32 buffer parameters take a pointer and a count, and generated Win32 COM implementation traits return `HRESULT`. Circadia's `windows-canvas`, `windows`, and `windows-sys` calls compile unchanged; the only interface Circadia implements is the WinRT `IAsyncInfo`.
-- `windows` and `windows-sys` declare version 0.100.0. The other crates resolved from the pinned windows-rs revision declare 0.100.1 or 0.101.0, including `windows-reactor` 0.101.0.
-- The setup helper stages Windows App SDK runtime 2.6.4.
-- The notification-icon module and the tray calls in Reactor's application layer match the code that the [failure policy](#failure-policy) describes.
-- Composition bindings regenerated from this pin are identical to the committed bindings, and Circadia's automated checks pass.
 
 **Not rechecked at `27abacf`:**
 
@@ -107,7 +126,7 @@ The application uses one explicit Git pin while Reactor is in preview. [Dependen
 - An internal bug panics.
 - An unexpected native failure panics. Reactor does not roll back or poison state.
 - Startup through the `App::run_*` entry points returns a `Result`.
-- An imperative completion, such as a focus request, receives an error value.
+- The completion callback for an explicit operation, such as a focus request, receives an error value.
 - Work that a shutting-down dispatcher rejects is dropped.
 
 **Source inspection of windows-rs `27abacf`:** the native application layer drops notification-icon events beyond its queue capacity.

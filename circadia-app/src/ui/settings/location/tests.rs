@@ -65,7 +65,7 @@ impl Locate for FakeSource {
 struct Events(Arc<Mutex<Vec<Event>>>);
 
 impl Events {
-    fn deliver(&self) -> impl Fn(Event) + Send + 'static {
+    fn deliver(&self) -> impl Fn(Event) + Send + Sync + 'static {
         let events = Arc::clone(&self.0);
         move |event| events.lock().expect("event list").push(event)
     }
