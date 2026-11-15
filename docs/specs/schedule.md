@@ -67,6 +67,25 @@ Latitude must be finite and within -90 through +90 degrees; longitude must be fi
 
 If permission is denied, location services are disabled, or a position cannot be obtained, Circadia keeps the saved preference and existing coordinates. It records the failure and shows it at the location setting when settings is open. An unfinished request does not prevent the active schedule from running. A new request does not clear a failure until it succeeds or reports a different failure.
 
+A request first checks Windows permission, which does not wait for the user. When Windows allows access, the request acquires one position. When Windows needs the user's consent because the user has not yet answered Windows' location permission for Circadia, and settings is in the foreground, the request asks Windows for consent and waits for the answer before acquiring a position. When the user or the system has denied access, or location services are off, the request fails at once. While settings is open, the location setting shows the phase of a pending request: Waiting for Windows permission while Windows asks for consent, then Finding your location while Windows acquires the position. The diagram lists every transition of a request; a position held for Preview under the rules above is separate from the request and does not block a new one.
+
+```mermaid
+stateDiagram-v2
+  state "No request" as Idle
+  state "Waiting for Windows permission" as Consent
+  state "Finding your location" as Locating
+  [*] --> Idle
+  Idle --> Locating: Request starts; Windows allows access
+  Idle --> Consent: Request starts while settings is in the foreground; Windows needs the user's consent
+  Idle --> Idle: Request fails at once; access is denied or location services are off, Windows needs consent outside foreground settings, the consent request cannot start, or acquisition cannot start
+  Consent --> Locating: Windows reports access allowed
+  Consent --> Idle: Windows reports access allowed; acquisition cannot start
+  Consent --> Idle: Windows reports access denied, or the consent request fails
+  Locating --> Idle: Position obtained or acquisition fails
+  Consent --> Idle: Setting turned off, Reset to default settings, or exit
+  Locating --> Idle: Setting turned off, Reset to default settings, or exit
+```
+
 **Scenarios:**
 
 - The user turns solar timing on and manually enters 40.7128, -74.0060: the coordinates apply and are saved without Windows location permission.
@@ -78,6 +97,9 @@ If permission is denied, location services are disabled, or a position cannot be
 - Settings opens while the startup request is pending: the existing request continues without starting a second one.
 - Windows permission is denied or requires consent at tray-only startup: no permission prompt opens, the preference and coordinates remain saved, and the failure appears when settings next opens. Foreground settings can request Windows consent.
 - Windows revokes access between the permission check and acquisition: the failed request keeps the saved preference and coordinates and reports the failure.
+- The user turns Use my Windows location on, confirms, and Windows asks for consent: the location setting shows Waiting for Windows permission. After the user allows access, it shows Finding your location until the position arrives.
+- Windows already allows access when settings opens: the location setting shows Finding your location, without first showing Waiting for Windows permission.
+- The user previously denied Circadia location access in Windows, and settings opens: the location failure appears without Waiting for Windows permission.
 - A position arrives after settings closes: it applies and is saved. If Preview is still logically active, it waits until playback ends.
 - The setting is turned off, Reset to default settings runs, or the app exits with a pending request: the request is cancelled, and a late result does not change coordinates.
 - A position waits for Preview to end and the location setting turns off: the held position is discarded.

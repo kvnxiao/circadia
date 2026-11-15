@@ -14,7 +14,7 @@ Read [SPEC.md](SPEC.md), [temperature control](control.md), and the [settings wi
 Circadia appends records to a local log in a per-user folder. Each record has a timestamp. At the default level, the log records:
 
 - Each start: Circadia's version, the Windows build, the reference commit of its UI library, and how startup selected its configuration: a backup restore with the replaced file's content, each value or list entry marked under REQ-recover-invalid-fields, each missing or unknown key, or a configuration error.
-- Lifecycle events: management turning on or off, Preview starting and ending, suppression starting and ending, settings opening and closing, suspend and resume, confirmed session end, and exit, including the settings that were not saved because saving was paused.
+- Lifecycle events: management turning on or off, a Preview run starting playback and ending, a Preview selection that the controller did not start, suppression starting and ending, settings opening and closing, suspend and resume, confirmed session end, and exit, including the settings that were not saved because saving was paused.
 - Failures of native, configuration, schedule, location, and sign-in registration operations: the first failure of each operation, a change of its error category (such as missing data, access denied, or invalid data) or code, and its recovery. Identical consecutive failures do not append records.
 - Crash records under REQ-crash-records.
 
@@ -37,14 +37,26 @@ The user decides what to share from the log. The personal-data reminder states t
 
 ### REQ-verbose-logging — Log detail on request
 
-Starting Circadia with `--verbose` or `-V` raises that process's log detail. It then also records each temperature operation and its duration, each foreground change and each window-title change that Circadia receives with the executable name and window title, each suppression decision, and each configuration write. The flags affect only the process they start: when Circadia is already running, a launch with either flag activates the existing instance without changing its detail. The size bound of REQ-local-log still applies.
+Starting Circadia with `--verbose` or `-V` raises that process's log detail. It then also records:
+
+- Each temperature operation and its duration.
+- Each foreground change and each window-title change that Circadia receives, with the executable name and window title.
+- Each suppression decision and each configuration write.
+- Each state transition of Preview, update checking, and Windows location requests.
+- The start and outcome of each exit step.
+
+The exit steps are the exit fade, preview cleanup, and the off attempt of [REQ-exit-night-light-off](control.md#req-exit-night-light-off--clear-native-preview-and-turn-night-light-off-on-graceful-exit), including steps that Quit shares with the turn-off sequence of [REQ-manage-night-light](control.md#req-manage-night-light--opt-in-to-managing-night-light) when management is turning off, and the cleanup after an internal error under [REQ-panic-cleanup](control.md#req-panic-cleanup--turn-night-light-off-after-an-internal-error). A transition record names the activity, its previous state, and its next state, using the state names of that activity's diagram. An exit-step record names the step and whether it succeeded or failed. These names stay the same across runs and interface languages. A location request that fails at once records its start and its failure. The flags affect only the process they start: when Circadia is already running, a launch with either flag activates the existing instance without changing its detail. The size bound of REQ-local-log still applies.
 
 **Scenarios:**
 
 - Circadia starts with `-V` and runs a one-hour scheduled transition: the log records each temperature operation.
 - Circadia is running without the flag, and the user launches it with `--verbose`: settings opens in the running instance, and its log detail does not change.
 - Circadia starts with `-V` and focus moves to a `javaw.exe` window titled "Minecraft 1.21.4": the log records the executable name and that title.
-- Circadia starts without either flag: the log has no per-operation records.
+- Circadia starts with `-V` and the user starts Preview and lets it finish: the log records the transitions to Starting, to Playing, and back to Not previewing, with the same names under every interface language.
+- Circadia starts with `-V`, Windows asks for location consent, and the user allows it: the log records the request moving from No request to Waiting for Windows permission, to Finding your location, and back to No request.
+- Circadia starts with `-V` and automatic update checks off, and the user checks for updates: the log records the transitions from No result to Checking and from Checking to Result available.
+- Circadia starts with `-V` and the user quits at 2400 K: the log records the start and outcome of the exit fade, preview cleanup, and the off attempt.
+- Circadia starts without either flag: the log has no per-operation or state-transition records beyond the lifecycle events of REQ-local-log.
 
 ## Crashes
 

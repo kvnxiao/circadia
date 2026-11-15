@@ -35,7 +35,8 @@ The distributed executable and bundled runtime support direct launch and a user-
 - The user changes Bedtime and closes settings at once: the window closes without a prompt, and the change is in the configuration file.
 - A keyboard-only user changes Wake, starts and stops Preview, and starts manual suppression: each action is reachable and announced with its state.
 - A scheduled transition changes temperature while its mode and phase stay the same: the temperature remains readable on demand without repeated status announcements. Entering the destination phase produces an announcement.
-- Preview starts, advances through clock and temperature values, then ends: its start and end are announced without announcing every changing value.
+- Preview starts, advances through clock and temperature values, then ends: its start is announced when the starting state begins and its end when the run ends, without announcing every changing value.
+- The controller does not start a selected Preview: the end of the run is announced together with the reason Preview is unavailable.
 - Settings is displayed at 100% scaling: every page and dialog can be scrolled through its full content, with readable labels and operable action targets.
 - Settings opens on a 1280×720 or 1366×768 display at 100% scaling: its title bar and window controls fit the available desktop area, and scrolling reaches every setting and dialog action.
 - The client width changes from 800 to 799 effective pixels: the expanded pane becomes a hamburger menu; opening its overlay preserves the page's width and scroll position.
