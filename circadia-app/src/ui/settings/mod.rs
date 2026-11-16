@@ -584,7 +584,7 @@ pub(super) struct Settings {
     graph: Option<Calculation>,
     graphics: graph::Graphics,
     #[cfg(feature = "graph-measurement")]
-    _rendering: Option<windows_reactor::test::LiveRenderingSubscription>,
+    _rendering: Option<windows_core::EventRevoker>,
 }
 
 pub(super) fn contrast_colors() -> Option<crate::platform::contrast::ContrastColors> {

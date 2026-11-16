@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [features]
 self-contained = ["dep:windows-reactor-setup"]
-graph-measurement = ["windows-reactor/test"]
+graph-measurement = []
 output-measurement = []
 
 [dependencies]

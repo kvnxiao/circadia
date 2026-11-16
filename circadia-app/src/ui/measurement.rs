@@ -1,5 +1,6 @@
 use crate::Config;
 use crate::Native;
+use crate::ui::composition::bindings as api;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
-use windows_reactor::test::LiveRenderingSubscription;
+use windows_core::EventRevoker;
 
 mod location;
 mod native;
@@ -359,9 +360,9 @@ pub(super) fn drawn(config: &Config) {
     }
 }
 
-pub(super) fn subscribe() -> Option<LiveRenderingSubscription> {
+pub(super) fn subscribe() -> Option<EventRevoker> {
     let active = ACTIVE.get()?;
-    match windows_reactor::test::subscribe_live_rendering(rendering) {
+    match api::CompositionTarget::Rendering(|_, _| rendering()) {
         Ok(subscription) => Some(subscription),
         Err(error) => {
             if let Ok(mut frames) = active.0.frames.lock() {

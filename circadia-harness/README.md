@@ -207,7 +207,7 @@ Session end uses synthetic messages; the recipe does not sign out or shut down W
 
 ### Copied runtime deployment (`accept deployment`)
 
-Build the bundled runtime with `just build-self-contained`. From `target/debug`, copy `circadia.exe`, `circadia.ico`, `Microsoft.Web.WebView2.Core.dll`, and the files listed in the [pinned runtime manifest](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor-setup/assets/runtime.txt) to a separate directory. Preserve their relative paths, including resource subdirectories. Close any running Circadia instance and pass the copied executable to:
+Run `just build-self-contained`, which stages the Windows App SDK runtime beside the executable. From `target/debug`, copy `circadia.exe`, `circadia.ico`, `Microsoft.Web.WebView2.Core.dll`, and the files listed in the [pinned runtime manifest](https://github.com/microsoft/windows-rs/blob/dedbc8b2efb869cca8bd7e3635668c273a304c8e/crates/libs/reactor-setup/assets/runtime.txt) to a separate directory. Preserve their relative paths, including resource subdirectories. Close any running Circadia instance and pass the copied executable to:
 
 ```bash
 just accept deployment "path/to/copied/Circadia/circadia.exe"
@@ -407,6 +407,8 @@ just measure graph
 ```
 
 The recipe builds an optimized application with its bundled runtime and measurement instrumentation. It opens the real settings window with isolated configuration and a simulated Night light backend. It sets the temperature number fields through their UI Automation range-value pattern, selects pages through the selection pattern of the navigation items, and scrolls the graph into view. It does not change Windows Night light.
+
+The fixture uses latitude 40 and longitude -74, a 05:00 Wake time, and a 23:00 Bedtime. The graph shows a Sunrise target only when sunrise falls at or after Wake; at these coordinates in an Eastern time zone, sunrise is after 05:00 in every season. Solar events use the current date and system time zone; use an Eastern time zone for this fixture.
 
 Each sample starts when settings applies the edit of a number field. It ends at the first XAML `CompositionTarget.Rendering` callback after settings draws the graph surface from a calculation of the edited configuration. The graph must be visible. This measures application rendering readiness, not physical display presentation or visible Night light response.
 
