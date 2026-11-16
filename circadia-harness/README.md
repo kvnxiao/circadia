@@ -207,7 +207,7 @@ Session end uses synthetic messages; the recipe does not sign out or shut down W
 
 ### Copied runtime deployment (`accept deployment`)
 
-Build the bundled runtime with `just build-self-contained`. From `target/debug`, copy `circadia.exe`, `circadia.ico`, `Microsoft.Web.WebView2.Core.dll`, and the files listed in the [pinned runtime manifest](https://github.com/microsoft/windows-rs/blob/27abacf80e4d3e60de129d32c559b618faeb1fec/crates/libs/reactor-setup/assets/runtime.txt) to a separate directory. Preserve their relative paths, including resource subdirectories. Close any running Circadia instance and pass the copied executable to:
+Run `just build-self-contained`, which stages the Windows App SDK runtime beside the executable. From `target/debug`, copy `circadia.exe`, `circadia.ico`, `Microsoft.Web.WebView2.Core.dll`, and the files listed in the [pinned runtime manifest](https://github.com/microsoft/windows-rs/blob/dedbc8b2efb869cca8bd7e3635668c273a304c8e/crates/libs/reactor-setup/assets/runtime.txt) to a separate directory. Preserve their relative paths, including resource subdirectories. Close any running Circadia instance and pass the copied executable to:
 
 ```bash
 just accept deployment "path/to/copied/Circadia/circadia.exe"

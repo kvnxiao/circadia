@@ -59,6 +59,8 @@ impl windows_core::imp::TypeKind for Color {
 impl windows_core::RuntimeType for Color {
     const SIGNATURE: windows_core::imp::ConstBuffer =
         windows_core::imp::ConstBuffer::from_slice(b"struct(Windows.UI.Color;u1;u1;u1;u1)");
+    const NAME: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"Windows.UI.Color");
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -197,6 +199,9 @@ impl windows_core::imp::TypeKind for CompositionColorSpace {
 impl windows_core::RuntimeType for CompositionColorSpace {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
         b"enum(Microsoft.UI.Composition.CompositionColorSpace;i4)",
+    );
+    const NAME: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
+        b"Microsoft.UI.Composition.CompositionColorSpace",
     );
 }
 #[repr(transparent)]
@@ -425,6 +430,9 @@ impl windows_core::imp::TypeKind for CompositionStrokeCap {
 impl windows_core::RuntimeType for CompositionStrokeCap {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
         b"enum(Microsoft.UI.Composition.CompositionStrokeCap;i4)",
+    );
+    const NAME: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
+        b"Microsoft.UI.Composition.CompositionStrokeCap",
     );
 }
 #[repr(transparent)]

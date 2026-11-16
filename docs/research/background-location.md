@@ -31,7 +31,7 @@ The application needs to retain a user's decision to use Windows location across
 
 **Observed in Microsoft documentation:** `GetGeopositionAsync` obtains one position and documents permission failures and timeouts without a separate foreground requirement. Its default timeout is 60 seconds, or seven seconds during Connected Standby. `LocationStatus` is not a complete permission check: outside active tracking it reports only NotInitialized or Disabled. Microsoft recommends one-time acquisition when repeated updates are unnecessary. [GetGeopositionAsync](https://learn.microsoft.com/en-us/uwp/api/windows.devices.geolocation.geolocator.getgeopositionasync?view=winrt-26100), [LocationStatus](https://learn.microsoft.com/en-us/uwp/api/windows.devices.geolocation.geolocator.locationstatus?view=winrt-26100), [location performance guidance](https://learn.microsoft.com/en-us/windows/uwp/maps-and-location/guidelines-and-checklist-for-detecting-location).
 
-**Observed in `windows` 0.100.0 bindings at windows-rs `27abacf`:** `AppCapability::Create` and `CheckAccess` are available with the `Security_Authorization_AppCapabilityAccess` feature. Circadia's `windows` dependency is pinned to this revision; the harness run below used the earlier revision `8786f59`.
+**Observed in `windows` 0.100.0 bindings at windows-rs `27abacf`:** `AppCapability::Create` and `CheckAccess` are available with the `Security_Authorization_AppCapabilityAccess` feature. The harness run below used the earlier revision `8786f59`.
 
 ## Recommended request lifecycle
 
