@@ -408,6 +408,8 @@ just measure graph
 
 The recipe builds an optimized application with its bundled runtime and measurement instrumentation. It opens the real settings window with isolated configuration and a simulated Night light backend. It sets the temperature number fields through their UI Automation range-value pattern, selects pages through the selection pattern of the navigation items, and scrolls the graph into view. It does not change Windows Night light.
 
+The fixture uses latitude 40 and longitude -74, a 05:00 Wake time, and a 23:00 Bedtime. The graph shows a Sunrise target only when sunrise falls at or after Wake; at these coordinates in an Eastern time zone, sunrise is after 05:00 in every season. Solar events use the current date and system time zone; use an Eastern time zone for this fixture.
+
 Each sample starts when settings applies the edit of a number field. It ends at the first XAML `CompositionTarget.Rendering` callback after settings draws the graph surface from a calculation of the edited configuration. The graph must be visible. This measures application rendering readiness, not physical display presentation or visible Night light response.
 
 The tool records 15 graph-latency samples:

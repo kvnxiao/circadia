@@ -55,6 +55,7 @@ pub(crate) fn run(arguments: &[OsString]) -> io::Result<()> {
         );
     }
     let input = ConfigInput {
+        wake: "05:00".into(),
         start_minimized: false,
         manage_night_light: true,
         preview_seconds: 2,
