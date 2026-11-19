@@ -1,5 +1,6 @@
 ---
 spec: SPEC.md
+depends-on: [focus.md]
 ---
 
 # Automatic and manual suppression
@@ -10,13 +11,13 @@ Read the shared terms and invariants in [SPEC.md](SPEC.md) before this area. Aut
 
 ### REQ-executable-list-match — Match listed foreground executables
 
-An entry on the suppression or exclusion list matches the foreground window when all of its conditions hold:
+An entry on the suppression or exclusion list matches the focused window when all of its conditions hold:
 
 - The window's executable file name equals the entry's file name, compared case-insensitively.
 - If the entry has an installation-path restriction, the executable's normalized absolute path equals that restriction.
 - If the entry has a title condition, the window title satisfies it.
 
-The foreground app matches when at least one suppression entry matches the window and no exclusion entry does. A rule without a path restriction covers every installation with that filename. A restricted rule covers only the saved location, even if another executable has the same filename. A moved or missing executable keeps its restriction; updating a file at the same path preserves the match.
+The focused app matches when at least one suppression entry matches the window and no exclusion entry does. A rule without a path restriction covers every installation with that filename. A restricted rule covers only the saved location, even if another executable has the same filename. A moved or missing executable keeps its restriction; updating a file at the same path preserves the match.
 
 Path comparison ignores case and slash direction and resolves `.` and `..` lexically. It does not inspect filesystem aliases or search for moved files. Supported restrictions follow these syntax rules, without checking whether the file exists or is accessible:
 
@@ -28,22 +29,22 @@ Path comparison ignores case and slash direction and resolves `.` and `..` lexic
 
 An empty restriction is invalid; it never means an unrestricted rule.
 
-Listed apps match in every window mode. An unlisted app does not match, even in fullscreen. A listed app running in the background does not trigger suppression.
+Listed apps match in every window mode. An unlisted app does not match, even in fullscreen. A listed app does not trigger suppression unless it owns the focused window.
 
 A title condition is optional text. An entry whose text is empty, with zero characters, has no title condition, whatever its regular-expression option. A window title satisfies a condition as follows, comparing case-insensitively with Unicode simple case folding:
 
 - With the entry's regular-expression option off, the title contains the text, with every character taken literally.
 - With the option on, the text is a regular expression in the syntax of Rust's `regex` crate, and it matches anywhere in the title. The crate has no lookaround or backreferences and matches in time linear in the title's length. The inline flag `(?-i)` makes the rest of its enclosing group, or of the whole expression, case-sensitive; other inline flags do not change case sensitivity.
 
-Circadia checks title conditions when a window gains focus and again when the foreground window's title changes. It receives title-change events only for the foreground window, and only while an entry with a title condition on either list covers that window's filename and installation path.
+Circadia checks title conditions when a window becomes the focused window and again when the focused window's title changes. It receives title-change events only for the focused window, and only while an entry with a title condition on either list covers that window's filename and installation path.
 
 For a window created by the supported shared host `ApplicationFrameHost.exe`, identity is the hosted application's executable path, resolved through window metadata and limited-query process identity. Candidates with the same filename at different paths remain distinct. The shared host executable never substitutes for the application. No other executable name is implicitly classified as a shared host; additional supported hosts require an explicit contract change. Runtime matching and recent-app selection use the same resolution rule. A title condition uses the title of the `ApplicationFrameHost.exe` frame window that hosts the application. An unresolved or ambiguous hosted identity is nonmatching and cannot be added from recent apps.
 
-**Failure behavior:** The app attempts identity lookup within its permitted access rights. If it cannot identify the executable, it treats the foreground app as nonmatching. It does not infer an executable from a window title or request elevation. If it cannot read the focused window's title, entries with a title condition do not match that window. Any alternative identity lookup preserves these access and matching rules.
+**Failure behavior:** The app attempts identity lookup within its permitted access rights. If it cannot identify the executable, it treats the focused app as nonmatching. It does not infer an executable from a window title or request elevation. If it cannot read the focused window's title, entries with a title condition do not match that window. Any alternative identity lookup preserves these access and matching rules.
 
 **Scenarios:**
 
-- `VLC.EXE` is listed and a foreground window belongs to `vlc.exe`: it matches.
+- `VLC.EXE` is listed and the focused window belongs to `vlc.exe`: it matches.
 - A listed game gains focus in windowed, borderless fullscreen, or exclusive fullscreen mode: it matches in each mode.
 - An unlisted game gains focus in fullscreen: it does not match.
 - The list is empty: no application triggers suppression.
@@ -67,11 +68,11 @@ For a window created by the supported shared host `ApplicationFrameHost.exe`, id
 
 The suppression list starts empty. Settings also provides an exclusion list: two fixed exclusions plus user-added rules. The fixed exclusions cover every installation named `ApplicationFrameHost.exe` or the executable file name of the running Circadia binary, including a renamed binary. They cannot be removed or narrowed. User exclusions start empty and use the same filename, optional path restriction, and title-condition controls as suppression rules. List changes are settings edits that apply and persist under [REQ-settings-autosave](application.md#req-settings-autosave--apply-and-persist-settings-edits).
 
-An exclusion overrides inclusion for the windows it matches, without deleting the inclusion entry. Settings labels a suppression entry as inactive only when a valid, title-free exclusion covers its entire scope: a filename-only exclusion covers all rules with that filename, while a path-restricted exclusion covers only a suppression rule restricted to the same path. Exclusions affect automatic suppression only; manual one-hour suppression remains available. Exclusion matching uses the resolved application identity, so excluding `ApplicationFrameHost.exe` does not exclude every hosted application.
+An exclusion overrides inclusion for the windows it matches, without deleting the inclusion entry. Settings labels a suppression entry as inactive when it names a shell host executable under [REQ-skip-transient-windows](focus.md#req-skip-transient-windows--skip-transient-windows-when-tracking-focus), and otherwise only when a valid, title-free exclusion covers its entire scope: a filename-only exclusion covers all rules with that filename, while a path-restricted exclusion covers only a suppression rule restricted to the same path. Exclusions affect automatic suppression only; manual one-hour suppression remains available. Exclusion matching uses the resolved application identity, so excluding `ApplicationFrameHost.exe` does not exclude every hosted application.
 
 The user adds applications explicitly: with a tray toggle, by choosing recent apps in settings, or by selecting an executable file in settings. Filename-only matching is the default. Settings offers “Only this installation” when adding or editing a rule; enabling it fills the path from the selected recent app or executable file. A user can select a replacement executable with the same filename to update a restriction. Cancelling leaves the saved rule unchanged. Settings displays the folder for restricted rules and for recent apps that share a filename, with wrapping at narrow widths. The user can choose a path restriction even when a filename-only rule already exists.
 
-Each entry has a display name read from its executable's version information and an optional title condition under REQ-executable-list-match. When the file has no readable description, the filename serves as the display name. Reading a display name does not delay output or settings input. Until the read finishes, the filename serves as the display name, and an entry added meanwhile records the result if it still refers to that file. Replies for one installation cannot update another installation with the same filename. Filename-only entries use the latest known path under REQ-app-icons. Settings and the tray show the display name and filename, for example “Counter-Strike 2 (cs2.exe)”; a rule with a title condition uses its title text instead, for example “Minecraft (javaw.exe)”. Recent tray items with the same filename also identify their folders.
+Each entry has a display name read from its executable's version information and an optional title condition under REQ-executable-list-match. When the file has no readable description, the filename serves as the display name. Reading a display name does not delay output or settings input. Until the read finishes, the filename serves as the display name, and an entry added meanwhile records the result if it still refers to that file. A display-name read for one installation cannot update another installation with the same filename. Filename-only entries use the latest known path under REQ-app-icons. Settings and the tray show the display name and filename, for example “Counter-Strike 2 (cs2.exe)”; a rule with a title condition uses its title text instead, for example “Minecraft (javaw.exe)”. Recent tray items with the same filename also identify their folders.
 
 Each list has at most one user entry per rule scope. Filename-only rules and distinct path-restricted rules may coexist. Adding the same scope again adds nothing and explains that it is already on the list; one rule can match several window titles with a regular expression such as `minecraft|terraria`. Editing a restriction into another rule's scope reports the conflict and keeps Save unavailable. The same scope can appear in both lists, with exclusion precedence and neither entry deleted. Delayed Add, Remove, edit, and tray actions retain the rule or installation they originally identified and recheck the accepted configuration before mutation; a reordered list cannot redirect them to a different installation.
 
@@ -79,9 +80,11 @@ A tray toggle shows whether any suppression rule covers its filename and path, i
 
 Settings lets the user set, change, or clear a user entry's path restriction, title condition, and regular-expression option. Fixed exclusions have none of these editable conditions. For a restricted rule, the title suggestion comes only from the same path in recent history; for a filename-only rule, it comes from the most recently focused installation with that name. Adding an app leaves its title condition empty. A regular expression is invalid when the `regex` crate rejects it with its default size limits. An invalid expression is reported at the field, and Save stays unavailable while it remains, so the entry keeps its previous condition. Invalid restrictions, expressions, and loaded duplicates follow [REQ-recover-invalid-fields](application.md#req-recover-invalid-fields--recover-invalid-configuration-values-field-by-field). Settings also lets the user remove entries. The MVP does not expose an automatic fullscreen suppression option or fullscreen-specific lists.
 
-Circadia keeps the five most recent distinct normalized executable paths in most-recent-first order, so two installations with the same filename remain separate. Each records its filename, path, display name, and time since focus left it. It also records the window title when focus moves to a different installation, or the title at focus gain if the window closed before that read. Settings lists all five; the tray offers the three most recent. Closed apps remain candidates; the history resets when Circadia exits. Merely detecting an app does not add it to a list. Circadia's own UI and desktop/taskbar interactions do not replace the application candidate the user switched away from.
+Circadia keeps the five most recent distinct normalized executable paths in most-recent-first order, so two installations with the same filename remain separate. Each records its filename, path, display name, and time since focus left it. It also records the window title when focus moves to a different installation. If the window closed before that read, it records the title from when the window gained focus. Settings lists all five; the tray offers the three most recent. Closed apps remain candidates; the history resets when Circadia exits. Merely detecting an app does not add it to a list. Transient windows, the desktop, and Circadia's own windows do not enter the history, so they do not replace the application candidate the user switched away from.
 
 The fixed excluded names cannot be added through a tray toggle or manual selection. If the configuration file lists a fixed excluded name for suppression, the entry remains inactive and cannot trigger suppression; it does not invalidate unrelated settings. User-list overlap follows the same exclusion precedence. A configuration file cannot remove a fixed exclusion.
+
+The shell host executables named in [REQ-skip-transient-windows](focus.md#req-skip-transient-windows--skip-transient-windows-when-tracking-focus) cannot be added to either list through manual selection, because their windows never become the focused window; settings explains this. They never enter the recent-app history, so they have no tray toggle. An entry for one of them in the configuration file remains in its list without effect and does not invalidate unrelated settings, and settings marks such a suppression entry as inactive.
 
 **Failure behavior:** If the app cannot identify a foreground application's executable, that application does not enter the recent-app history. Manual executable selection remains available; runtime matching still requires successful identity lookup. A display name that cannot be read falls back to the file name and does not prevent adding the app.
 
@@ -99,6 +102,9 @@ The fixed excluded names cannot be added through a tray toggle or manual selecti
 - The user selects `ApplicationFrameHost.exe` or Circadia's own executable for inclusion: the UI explains its fixed exclusion. An inclusion of that name in the configuration file remains inactive without rejecting unrelated configuration.
 - `browser.exe` has filename-only, title-free entries in both user lists: it does not suppress automatically. Removing its exclusion makes its retained inclusion effective.
 - Circadia is renamed to `night-colors.exe`: that running executable name is still fixed-excluded, so focusing settings does not start automatic suppression.
+- The user selects `SearchHost.exe` in Add app or Add exclusion: nothing is added, and the dialog explains that its windows never become the focused window.
+- The configuration file lists `searchhost.exe` as an exclusion and `gamebar.exe` for suppression: both entries remain without effect, the suppression entry is marked inactive, and unrelated settings load.
+- The user holds Alt+Tab over a game and releases it on a browser: the history lists the browser first and the game second, without an `explorer.exe` entry.
 - A browser is excluded from automatic suppression: manual one-hour suppression can still request 6500 K while that browser has focus.
 - The user sets the title text "Minecraft" on a `javaw.exe` suppression entry: the entry reads "Minecraft (javaw.exe)", and settings suggests the last seen title, such as "Minecraft 1.21.4".
 - "Minecraft (javaw.exe)" is listed with a title condition and `javaw.exe` is among the recent apps: its tray toggle shows a check mark with "Minecraft (javaw.exe)" and is unavailable.
@@ -142,7 +148,7 @@ When settings displays an app row, it reuses the cached icon if the file's size 
 
 ### REQ-suppress-on-focus — Suppress while focused
 
-After startup, matching focus starts automatic suppression after the focus delay; nonmatching focus ends that source after the focus delay. If focus returns to the matching or nonmatching state that established the current automatic state before the delay expires, the pending change is canceled. Moving directly between matching apps preserves automatic suppression. Every foreground change updates the controller's current foreground identity, including a change between two nonmatching apps. A title change of the foreground window that changes whether it matches counts as a foreground change and waits for the focus delay. Foreground changes do not bypass a pending native recovery delay.
+After startup, matching focus starts automatic suppression after the focus delay; nonmatching focus ends that source after the focus delay. If focus returns to the matching or nonmatching state that established the current automatic state before the delay expires, the pending change is canceled. Moving directly between matching apps preserves automatic suppression. Every focus change updates the controller's focused-window identity, including a change between two nonmatching apps. A title change of the focused window that changes whether it matches counts as a focus change and waits for the focus delay. Focus changes do not bypass a pending native recovery delay.
 
 When startup prerequisites first pass, and when time-zone evaluation recovers without a last scheduled temperature, automatic suppression is initialized directly from current focus without the focus delay. The two sources combine with logical OR: either source requests 6500 K. Adding or ending one source while the other remains active does not request a redundant temperature change. Ending the last source selects the target temperature without suppression; it does not restore a temperature captured before suppression. Starting or ending the override uses an ordinary fade.
 
@@ -154,14 +160,14 @@ Preview takes precedence over suppression:
 
 When suppression is active as Preview ends, output fades from the last Preview value toward 6500 K without first writing a schedule temperature. Automatic focus detection and pending focus delays continue throughout manual suppression. While management is off, neither source affects output; focus tracking continues for the recent-app history.
 
-The focus delay filters brief foreground changes. It does not add hysteresis or temperature bands to the scheduled curve. The user configures one global focus delay, initially 250 ms, within the inclusive range 0–5000 ms. A zero delay changes suppression immediately.
+The focus delay filters brief focus changes. It does not add hysteresis or temperature bands to the scheduled curve. The user configures one global focus delay, initially 250 ms, within the inclusive range 0–5000 ms. A zero delay changes suppression immediately.
 
 **Scenarios:**
 
 - A listed game remains focused beyond the focus delay: the temperature fades toward 6500 K.
 - The game keeps running while an unlisted browser on another monitor remains focused beyond the delay: the temperature fades toward the current scheduled value.
 - During suppression, focus leaves the game and returns within the delay: suppression continues without a temperature change caused by that interruption.
-- Focus moves directly between two listed apps: suppression continues, without a redundant temperature operation caused solely by that foreground change.
+- Focus moves directly between two listed apps: suppression continues, without a redundant temperature operation caused solely by that focus change.
 - A listed game changes window mode without losing focus: suppression continues.
 - With the default 250 ms delay, focus leaves a listed app for 200 ms and returns: suppression continues without a new fade.
 - A modded Minecraft window gains focus titled "Minecraft* 1.20.1", and the only entry for `javaw.exe` has the title text "DeceasedCraft": suppression starts one focus delay after the window renames itself "DeceasedCraft".
@@ -169,8 +175,8 @@ The focus delay filters brief foreground changes. It does not add hysteresis or 
 - A retained Sunset target is 3400 K and occurs at least 60 minutes before Bedtime; Sleep is 2200 K and the scheduled duration is 60 minutes. Suppression ends 30 minutes before Bedtime: the schedule evaluates to 2800 K at that instant and continues toward 2200 K. Night light remains enabled throughout.
 - A game closes or focus moves to an unlisted application after several scheduled transitions have passed: once the focus delay expires, the controller evaluates the current instant without replaying those transitions.
 - A delay of 0 or 5000 ms is accepted. Typing a negative delay gives 0 ms, and 5001 ms gives 5000 ms when the field commits.
-- Startup prerequisites pass with a listed game focused and a 5000 ms focus delay: automatic suppression becomes active immediately. Subsequent foreground changes use the configured delay.
-- A read error is pending and focus switches between two unlisted applications: the current foreground identity updates, while automatic recovery retains its existing deadline.
+- Startup prerequisites pass with a listed game focused and a 5000 ms focus delay: automatic suppression becomes active immediately. Subsequent focus changes use the configured delay.
+- A read error is pending and focus switches between two unlisted applications: the focused-window identity updates, while automatic recovery retains its existing deadline.
 - Automatic suppression is active and the user switches to settings and starts Preview at once: playback starts without waiting for the source to end. The source ends after the nonmatching focus delay, so output returns to the schedule when playback ends.
 - During Preview, the user switches to a listed game and stays beyond the focus delay: playback continues to its deadline, then output fades from the last Preview value to 6500 K without first applying a schedule temperature.
 - During Preview, the user switches to an unlisted browser: playback continues, and no suppression starts.

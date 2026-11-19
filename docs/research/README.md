@@ -35,6 +35,7 @@ These documents record evidence for Circadia's design and implementation. Each t
 | [Resource and UI measurements](resource-measurement.md) | CPU and memory baseline, counter methodology, graph latency, and rendered Preview motion. |
 | [Executable matching](executable-matching.md) | Filename and installation-path rules, normalization, and identity boundaries. |
 | [Hosted application identity](hosted-application-identity.md) | Resolving an application behind a shared Windows host with limited-query access. |
+| [Transient foreground windows](transient-foreground-windows.md) | Alt+Tab, shell surfaces, and game overlays that receive the foreground without the user leaving an app, their window styles and host executables, and when to call `GetForegroundWindow` during a switch, on one Windows build. |
 | [Executable icons and names](executable-icons.md) | File-read cost, icon resources, cache validity, and generic-icon fallbacks. |
 | [f.lux interaction references](flux-behavior.md) | Documented and observed comparison behavior; not a definition of Circadia's product rules. |
 

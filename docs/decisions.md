@@ -116,6 +116,42 @@ Evaluated directions that affected Circadia's behavior or feasibility. The [spec
 
 **Reevaluate when:** A documented, limited-access identity API distinguishes these applications without reading process memory or exposing command-line credentials.
 
+### DEC-user-transient-list — Let users name more apps whose windows do not change the focused app
+
+**Disposition:** Not selected
+
+**Requirement impact:** Which windows Circadia skips when it tracks the focused app, so that automatic suppression (the 6500 K override while an app on the suppression list has focus) continues while they have the foreground.
+
+**Reason:** Two built-in rules cover every shell surface and separate overlay window that was observed or reported. One rule matches top-level windows with both the tool-window and topmost styles, and the other matches the windows of five shell host executables. A user-editable list of such apps, in addition to the suppression and exclusion lists, would add a settings section, tray handling, and configuration fields for cases that the built-in rules already cover.
+
+**Basis:** The [transient foreground windows research](research/transient-foreground-windows.md#recognition-rule-and-getforegroundwindow-timing) compares the style rule, the host executables, and the observed overlays.
+
+**Reevaluate when:** An overlay or shell surface that users open over an app on the suppression list takes the foreground without both styles and outside the five shell host executables.
+
+### DEC-transient-desktop — Keep automatic suppression on while the desktop has focus
+
+**Disposition:** Not selected
+
+**Requirement impact:** Whether focusing the desktop ends automatic suppression, the 6500 K override while an app on the suppression list has focus.
+
+**Reason:** Pressing Win+D or clicking the desktop usually means the user has left the app, which is often minimized by then. Keeping suppression only while the last app's window is not minimized would make the suppression-list match depend on whether a window is minimized.
+
+**Basis:** The product preference is that focusing the desktop ends automatic suppression, the same as switching to an app that is not on the suppression list. The desktop window has the tool-window style without the topmost style, as the [transient foreground windows research](research/transient-foreground-windows.md#shell-surfaces) records, so the style rule treats the desktop as an ordinary focused window without an exception.
+
+**Reevaluate when:** Users need a desktop click on another monitor to keep suppression on for a game that stays visible there, and whether a window is minimized becomes an accepted input to matching.
+
+### DEC-listed-window-style-exemption — Exempt suppression-list apps from the window-style rule
+
+**Disposition:** Not selected
+
+**Requirement impact:** Whether an app on the suppression list starts automatic suppression when its own window has both the tool-window and topmost styles, which otherwise mark a window as one that never becomes the focused window.
+
+**Reason:** Exempting windows that a suppression entry matches would make window classification depend on the configuration, a narrower form of letting list entries override classification. That direction was also not selected for the five shell host executables.
+
+**Basis:** The one game window observed in the [transient foreground windows research](research/transient-foreground-windows.md#recognition-rule-and-getforegroundwindow-timing) has neither style.
+
+**Reevaluate when:** A user reports an app on the suppression list whose window has both styles. The fix then amends the specification and the code together in its own change.
+
 ## Native code ownership
 
 ### DEC-first-party-wrappers-for-maintained-crates — Wrap Windows operations that maintained crates already provide
