@@ -693,6 +693,43 @@ fn browsing_to_a_fixed_exclusion_adds_nothing_and_explains_it(list: Field, execu
     );
 }
 
+#[test_case(Field::Suppression, "SearchHost.exe"; "search in add app")]
+#[test_case(Field::Exclusions, "gamebar.exe"; "game bar in add exclusion")]
+fn browsing_to_a_shell_host_adds_nothing_and_explains_it(list: Field, executable: &str) {
+    let fixture = Fixture::new(None);
+    let model = fixture.model(Vec::new());
+    let mut dialog = AddDialog::new(list);
+    assert!(!dialog.browsed(&model, file(executable)));
+    let view = dialog_view(&model, &english(), &region(), &dialog);
+    assert_eq!(view.rows, []);
+    assert_eq!(
+        view.message.as_deref().map(plain),
+        Some(format!(
+            "{executable} shows Windows panels over other apps and never becomes the focused app, so it can't be added to either list."
+        ))
+    );
+}
+
+#[test]
+fn a_shell_host_suppression_entry_is_inactive() {
+    let fixture = Fixture::new(Some(&entries_file(
+        &["gamebar.exe", "game.exe"],
+        &["searchhost.exe"],
+    )));
+    let model = fixture.model(Vec::new());
+    let inactive: Vec<Option<String>> = entry_rows(&model, &english(), Field::Suppression)
+        .into_iter()
+        .map(|row| row.inactive)
+        .collect();
+    assert_eq!(
+        inactive,
+        [
+            Some("Inactive because this app never becomes the focused app.".to_owned()),
+            None
+        ]
+    );
+}
+
 #[test]
 fn the_own_executable_is_a_locked_fixed_exclusion_without_a_remove_command() {
     let fixture = Fixture::new(Some(&entries_file(&[], &["browser.exe"])));
@@ -965,11 +1002,17 @@ fn only_an_exclusion_without_a_title_condition_makes_an_entry_inactive_or_exclud
         recent_app("javaw.exe", None),
         recent_app("game.exe", None),
     ]);
-    let inactive: Vec<bool> = entry_rows(&model, &english(), Field::Suppression)
+    let inactive: Vec<Option<String>> = entry_rows(&model, &english(), Field::Suppression)
         .into_iter()
         .map(|row| row.inactive)
         .collect();
-    assert_eq!(inactive, [false, true]);
+    assert_eq!(
+        inactive,
+        [
+            None,
+            Some("Inactive because this app is excluded.".to_owned())
+        ]
+    );
     let excluded: Vec<bool> = recent_rows(&model, &english(), &region(), Duration::ZERO)
         .into_iter()
         .map(|row| row.excluded)

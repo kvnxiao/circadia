@@ -669,6 +669,8 @@ pub enum FieldErrorKind {
     AlreadyListed,
     /// The added executable is a fixed exclusion.
     FixedExclusion,
+    /// The added executable is a shell host whose windows are transient.
+    TransientHost,
     /// The interface language is neither `windows` nor a shipped language.
     Language,
 }
@@ -1220,12 +1222,14 @@ impl Config {
             .any(|entry| !entry.title.is_empty() && entry.covers(executable, path))
     }
 
-    /// Report whether a title-free exclusion covers the rule's complete scope.
+    /// Report whether the rule names a fixed exclusion or a shell host, or a
+    /// title-free exclusion covers its complete scope.
     pub fn inactive(&self, entry: &AppEntry, running_executable: &str) -> bool {
         let Some((name, path)) = entry.scope() else {
             return false;
         };
         is_fixed_exclusion(name.as_str(), running_executable)
+            || is_transient_host(name.as_str())
             || self
                 .entries(Field::Exclusions)
                 .iter()
@@ -1319,6 +1323,8 @@ impl Config {
     /// - [`FieldErrorKind::Executable`] when the file name is not a plain
     ///   executable file name.
     /// - [`FieldErrorKind::FixedExclusion`] for a fixed exclusion.
+    /// - [`FieldErrorKind::TransientHost`] for a shell host whose windows are
+    ///   transient.
     /// - [`FieldErrorKind::AlreadyListed`] when the list, including an entry
     ///   added before it, has the same filename and installation restriction.
     pub fn add_entries(
@@ -1335,6 +1341,9 @@ impl Config {
                 .map_err(|_error| FieldErrorKind::Executable)?;
             if is_fixed_exclusion(&name, running_executable) {
                 return Err(FieldErrorKind::FixedExclusion);
+            }
+            if is_transient_host(&name) {
+                return Err(FieldErrorKind::TransientHost);
             }
             if entries
                 .iter()

@@ -1480,6 +1480,54 @@ fn adding_a_fixed_exclusion_reports_it_without_a_change(list: Field, executable:
     );
 }
 
+#[test_case(Field::Suppression, "StartMenuExperienceHost.exe"; "start to suppression")]
+#[test_case(Field::Exclusions, "searchhost.exe"; "search to exclusions")]
+#[test_case(Field::Suppression, "SHELLEXPERIENCEHOST.EXE"; "notification center to suppression")]
+#[test_case(Field::Exclusions, "ShellHost.exe"; "quick settings to exclusions")]
+#[test_case(Field::Suppression, "gamebar.exe"; "game bar to suppression")]
+#[test_case(Field::Exclusions, "GameBar.exe"; "game bar to exclusions")]
+fn adding_a_shell_host_reports_it_without_a_change(list: Field, executable: &str) {
+    assert_eq!(
+        Config::default().add_entries(
+            list,
+            [
+                AppEntry::new("other.exe", "Other"),
+                AppEntry::new(executable, executable)
+            ],
+            "circadia.exe"
+        ),
+        Err(FieldErrorKind::TransientHost)
+    );
+}
+
+#[test]
+fn a_loaded_shell_host_entry_stays_and_its_suppression_entry_is_inactive() {
+    let file = toml::to_string(&ConfigInput {
+        suppression: vec![
+            AppEntry::new("gamebar.exe", "Game Bar"),
+            AppEntry::new("game.exe", "Game"),
+        ],
+        exclusions: vec![AppEntry::new("searchhost.exe", "Search")],
+        ..ConfigInput::default()
+    })
+    .expect("fixture serializes");
+    let (config, report) = load(&file, None).expect("shell host entries load");
+    assert!(report.marks.is_empty(), "{:?}", report.marks);
+    assert_eq!(
+        config.entries(Field::Suppression),
+        [
+            AppEntry::new("gamebar.exe", "Game Bar"),
+            AppEntry::new("game.exe", "Game")
+        ]
+    );
+    assert_eq!(
+        config.entries(Field::Exclusions),
+        [AppEntry::new("searchhost.exe", "Search")]
+    );
+    assert!(config.inactive(&AppEntry::new("gamebar.exe", "Game Bar"), "circadia.exe"));
+    assert!(!config.inactive(&AppEntry::new("game.exe", "Game"), "circadia.exe"));
+}
+
 #[test]
 fn adding_a_path_reports_an_invalid_file_name() {
     assert_eq!(

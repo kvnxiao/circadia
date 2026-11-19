@@ -532,6 +532,7 @@ fn error_message(
         | FieldErrorKind::Executable
         | FieldErrorKind::AlreadyListed
         | FieldErrorKind::FixedExclusion
+        | FieldErrorKind::TransientHost
         | FieldErrorKind::Language
         | FieldErrorKind::Inconsistent => fl!("error-invalid", field = field_name),
     }
@@ -588,6 +589,7 @@ fn mark_message(
         | FieldErrorKind::Executable
         | FieldErrorKind::AlreadyListed
         | FieldErrorKind::FixedExclusion
+        | FieldErrorKind::TransientHost
         | FieldErrorKind::Language => fl!(
             "mark-invalid",
             field = field_name,

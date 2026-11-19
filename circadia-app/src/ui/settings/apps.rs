@@ -390,7 +390,7 @@ pub(super) struct EntryRow {
     pub(super) expected: AppEntry,
     pub(super) id: String,
     pub(super) detail: String,
-    pub(super) inactive: bool,
+    pub(super) inactive: Option<String>,
     pub(super) error: Option<String>,
 }
 
@@ -450,8 +450,18 @@ pub(super) fn entry_rows(model: &Model, text: &Text, list: Field) -> Vec<EntryRo
                     },
                 )
             },
-            inactive: list == Field::Suppression
-                && config.inactive(entry, &model.running_executable),
+            inactive: (list == Field::Suppression
+                && config.inactive(entry, &model.running_executable))
+            .then(|| {
+                if entry
+                    .file_name()
+                    .is_some_and(|name| crate::is_transient_host(&name))
+                {
+                    fl!("entry-inactive-transient-host")
+                } else {
+                    fl!("entry-inactive")
+                }
+            }),
             error: problem.map(|problem| match problem {
                 EntryProblem::Invalid => fl!("entry-invalid"),
                 EntryProblem::Expression => fl!("entry-expression"),
@@ -497,6 +507,7 @@ pub(super) struct AddDialog {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Browse {
     Fixed(String),
+    TransientHost(String),
     File(crate::ExecutablePath),
 }
 
@@ -588,6 +599,10 @@ impl AddDialog {
         };
         if crate::is_fixed_exclusion(&file.executable, &model.running_executable) {
             self.last_browse = Some(Browse::Fixed(file.executable));
+            return false;
+        }
+        if crate::is_transient_host(&file.executable) {
+            self.last_browse = Some(Browse::TransientHost(file.executable));
             return false;
         }
         if self.available(&path, model) {
@@ -745,6 +760,10 @@ pub(super) fn dialog_view(
             Browse::Fixed(executable) => {
                 Some(fl!("dialog-fixed", executable = executable.as_str()))
             }
+            Browse::TransientHost(executable) => Some(fl!(
+                "dialog-transient-host",
+                executable = executable.as_str()
+            )),
             Browse::File(path) => matches!(
                 model.config().add_entries(
                     dialog.list,
@@ -1163,11 +1182,9 @@ fn list_header(settings: &Settings, context: &ViewContext<'_, Settings>) -> View
 }
 
 fn entry_card(row: &EntryRow, settings: &Settings, controls: Vec<View>, id: String) -> View {
-    let text = &settings.input.text;
-    bind_text!(fl, text);
     let mut detail: Vec<View> = vec![widgets::caption(&row.detail).into()];
-    if row.inactive {
-        detail.push(widgets::caption(fl!("entry-inactive")).into());
+    if let Some(inactive) = &row.inactive {
+        detail.push(widgets::caption(inactive).into());
     }
     if let Some(error) = &row.error {
         detail.push(widgets::field_error(error, &automation_id::message(&id)));
