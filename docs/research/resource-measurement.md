@@ -1,11 +1,11 @@
 ---
-date: 2026-11-02
+date: 2026-11-19
 questions:
   - How can a separate harness measure the release application's CPU, memory, and context switches?
   - What limits apply to sampled thread counters and the Windows metadata layout?
   - How long does the redesigned settings window take to show a schedule edit in its graph?
   - How much CPU, memory, and background activity does the redesigned settings window add while open, and what remains after it closes?
-  - Does the compositor move the rendered Preview marker between native calls and stop animation in inactive views?
+  - Does Preview's time line and dot on the graph move between native calls as fast as elapsed playback time requires, and does their animation stop when the graph is hidden or Preview ends?
   - Do Preview progress pixels follow the captured clock continuously through completion?
 observed-in:
   - Circadia measure-output on Windows 11 x64 build 26300.9711, 2026-10-29, windows-rs 8786f59, working tree based on c453c2f
@@ -17,6 +17,7 @@ observed-in:
   - Circadia measure-graph and measure-activity on Windows 11 x64 build 26300.9711, 2026-10-29, windows-rs 8786f59, working tree based on c453c2f
   - Circadia measure-graph and completion-only captures on Windows 11 x64 build 26300.9711, 2026-10-30, windows-rs 3b6bea5, working tree based on a0bf3e2
   - Circadia Preview progress timing on the same machine and runtime, 2026-10-30, working tree based on f036f95
+  - Circadia measure-graph and completion-only captures on Windows 11 x64 build 26300.9974, 2026-11-19, Rust 1.100.0, windows-rs dedbc8b, bundled Windows App SDK runtime 2.6.4, base revision b9ccf58 in builds that move the marker on each rendered frame and with compositor keyframes
 recheck-when: Windows versions, target architecture, metadata bindings, sampling intervals, measurement scenarios, the graph renderer, or the settings window change.
 ---
 
@@ -80,7 +81,7 @@ The capture detected both the moving vertical line and its dot. A two-second Pre
 
 The checks also exercised resize, return from another page, restore after minimize, and Stop while output was blocked. During separate 600 ms observations, completed, off-page, minimized, stopped, and closed states recorded zero graph-animation starts and zero status/text timer callbacks. These counters establish application activity during those intervals; they do not count compositor frames. The 15 graph-edit latency samples had a maximum of 23.624 ms.
 
-Screen-capture overhead limits sampling frequency. Changed pixels establish visible movement between native calls, but do not establish the monitor's presentation rate or frame-time distribution. These results precede the additional progress-bar, phase-ring, and dot-color interpolation checks below.
+Screen-capture overhead limits sampling frequency. Changed pixels establish visible movement between native calls, but do not establish the monitor's presentation rate or frame-time distribution. These results precede the additional progress-bar, phase-ring, and dot-color interpolation checks below. They and the marker counts in the next two subsections measured a marker moved by compositor keyframes (motion that Windows interpolates between fixed values without application callbacks). [Preview marker speed](#preview-marker-speed) measures the marker that settings moves on each rendered frame.
 
 ### Progress bar, phase ring, and marker color
 
@@ -100,11 +101,19 @@ With a compositor keyframe fill, one capture reached only 621 of 633 pixels befo
 
 **Continuity measured with a build based on `f036f95`:** with the compositor keyframe fill and the static full-width replacement, separate capture timestamps exposed a terminal jump from 599 to 633 pixels in a one-second run. A ten-second run reached 606 of 633 pixels near the 9.9-second visual deadline, then changed to static full width. The sampled animated fill advanced at approximately 96% of the expected speed in both durations. Animation setup took microseconds after the monotonic clock sample used to calculate its remaining duration, and the captured host width was 633 pixels. These observations establish a duration-dependent discrepancy; they do not establish its cause inside Windows. Reading the animation controller's progress returned zero throughout visible motion and therefore did not measure the running animation.
 
-The application now updates the retained bar and Preview phase-ring visuals from monotonic elapsed time on the public [XAML Rendering event](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.media.compositiontarget.rendering). The callbacks update visual properties without rebuilding the settings tree or requesting Night light writes. Each callback is removed when its indicator is removed or hidden. Leaving Schedule removes the bar and page ring; a visible navigation ring continues on other pages. Completion, Stop, minimize, and close remove all Preview progress callbacks. Ordinary schedule rings retain finite compositor keyframes. The bar retains its 100 ms early completion rule; each phase ring retains the fraction of its scheduled transition.
+The application updates the bar and Preview phase-ring visuals in place from monotonic elapsed time on the public [XAML Rendering event](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.media.compositiontarget.rendering). The callbacks update visual properties without rebuilding the settings tree or requesting Night light writes. Each callback is removed when its indicator is removed or hidden. Leaving Schedule removes the bar and the Schedule page's ring; a visible navigation ring continues on other pages. Completion, Stop, minimize, and close remove all Preview progress callbacks. Phase rings outside Preview use finite compositor keyframes. The bar reaches full width up to 100 ms before the playback deadline; each phase ring shows the fraction of its scheduled transition.
 
 The clock-driven runs observed full width 85.321 ms before the one-second deadline and 95.364 ms before the ten-second deadline. The ten-second terminal samples advanced through 630, 631, 632, and 633 pixels. The continuity check failed the static-replacement captures and passed both clock-driven runs. The full graph check captured 17 bar extents, 21 ring extents, and 28 dot colors during 900 ms with simulated output blocked; maximum graph-edit latency was 22.924 ms. These observations use the 480 Hz reference display at 100% scaling and do not guarantee every displayed frame or other refresh rates.
 
 The full graph regression passed all 15 latency samples, with a maximum of 23.172 ms. It captured 13 bar extents, 22 ring extents, and 25 marker colors during 900 ms of blocked output. The 1 Hz native-rate case captured 71 changed marker positions in 0.903 seconds. Inactive-view observations recorded zero animation starts, status/text timer callbacks, and settings UI rebuilds over their 600 ms intervals. These checks did not change Windows Night light.
+
+### Preview marker speed
+
+**Measured at windows-rs `dedbc8b`, base revision `b9ccf58`:** after its bar check, the `--completion-only` graph measurement fits the Preview marker's speed from its captured positions. It uses the longest interval in which the graph shows one day's view. Elapsed playback time requires the graph's width divided by the Preview duration, 76.10 pixels per second across the 761-pixel graph in a ten-second Preview. Settings sets the marker's position and dot color from the monotonic clock on each Rendering callback and removes the callback with the marker. The marker advanced 76.10 pixels per second over 9.572 seconds; in a one-second Preview, it advanced 760.57 of the required 761.00 pixels per second over 0.895 seconds. The full graph check passed its motion, lifecycle, and inactive-view checks and captured 20 dot colors in 900 ms with simulated output blocked.
+
+Linear compositor keyframes are unsuitable for the marker: in the same ten-second check they advanced 73.07 pixels per second (96.0%), so the marker ended about 30 pixels short of the marker for the actual current time that replaces it when Preview ends.
+
+These runs used the release measurement build, the simulated Night light backend, and the 480 Hz reference display at 100% scaling. They do not establish how fast keyframe motion runs at other refresh rates, or why it runs slower than elapsed time.
 
 ## Resource use and settings activity in the redesigned window
 

@@ -1,5 +1,5 @@
 Microsoft.UI.Composition.Compositor
-Microsoft.UI.Composition.ICompositor::{CreateColorKeyFrameAnimation, CreateScalarKeyFrameAnimation, CreateColorBrushWithColor, CreateLinearEasingFunction}
+Microsoft.UI.Composition.ICompositor::{CreateScalarKeyFrameAnimation, CreateColorBrushWithColor, CreateLinearEasingFunction}
 Microsoft.UI.Composition.ICompositor5::{CreateEllipseGeometry, CreateSpriteShapeWithGeometry}
 Microsoft.UI.Composition.CompositionObject
 Microsoft.UI.Composition.ICompositionObject::{get_Compositor, StartAnimation, StopAnimation}
@@ -13,13 +13,10 @@ Microsoft.UI.Composition.ICompositionEllipseGeometry::{put_Radius, put_Center}
 Microsoft.UI.Composition.CompositionGeometry
 Microsoft.UI.Composition.ICompositionGeometry::{put_TrimStart, put_TrimEnd, put_TrimOffset}
 Microsoft.UI.Composition.CompositionSpriteShape
-Microsoft.UI.Composition.ICompositionSpriteShape::{put_FillBrush, get_FillBrush, put_StrokeBrush, put_StrokeThickness, put_StrokeStartCap, put_StrokeEndCap}
+Microsoft.UI.Composition.ICompositionSpriteShape::{put_FillBrush, put_StrokeBrush, put_StrokeThickness, put_StrokeStartCap, put_StrokeEndCap}
 Microsoft.UI.Composition.CompositionStrokeCap
 Microsoft.UI.Composition.CompositionColorBrush
 Microsoft.UI.Composition.ICompositionColorBrush::{put_Color, get_Color}
-Microsoft.UI.Composition.ColorKeyFrameAnimation
-Microsoft.UI.Composition.IColorKeyFrameAnimation::{InsertKeyFrameWithEasingFunction, put_InterpolationColorSpace}
-Microsoft.UI.Composition.CompositionColorSpace
 Microsoft.UI.Composition.ScalarKeyFrameAnimation
 Microsoft.UI.Composition.IScalarKeyFrameAnimation::{InsertKeyFrameWithEasingFunction}
 Microsoft.UI.Composition.KeyFrameAnimation

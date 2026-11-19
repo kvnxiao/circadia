@@ -1,5 +1,5 @@
 ---
-date: 2026-11-05
+date: 2026-11-19
 questions:
   - How does windows-reactor at windows-rs ebc5a99 support each element of Circadia's settings window, tray menu, and icon design?
   - Which elements have no direct Reactor equivalent, and which approach was selected for each gap?
@@ -148,6 +148,8 @@ Two-second idle, removed, and completed samples each recorded zero additional pr
 The subsequent verification run passed independent assertions for forward movement, replacement direction, the bend, removal, and the stable endpoint. Its cancelled batches completed at 3.896 and 3.863 seconds from setup, and finite completion was reported at 4.170 seconds. The removed two-second sample recorded 0.03125 CPU seconds; idle and completed samples recorded zero. The interval from the final idle sample through both capture sets recorded 0.859375 CPU seconds. This variation prevents attributing a CPU reduction to the animation approach from these samples.
 
 At `8786f59`, the dependency wrapper exposes keyframes, `start_animation`, and visual removal. It does not expose `StopAnimation` or `Close`; the later generated bindings described below add the required stop operation. Microsoft separately documents [CompositionObject.Close](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.composition.compositionobject.close) as releasing resources through `Windows.Foundation.IClosable`; the tested cleanup did not need that operation. Recheck removal and completion after a dependency or runtime upgrade.
+
+The phase ring outside Preview uses these keyframes and this removal. Preview's graph marker does not, because keyframe motion covered about 96% of the distance that elapsed time requires in [Preview marker speed](resource-measurement.md#preview-marker-speed).
 
 ### Progress and color animation
 

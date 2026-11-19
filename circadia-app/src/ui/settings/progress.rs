@@ -24,7 +24,7 @@ use windows_reactor::Grid;
 use windows_reactor::View;
 use windows_reactor::ViewContext;
 
-fn on_rendering(
+pub(super) fn on_rendering(
     callback: impl Fn(std::time::Instant) + Send + Sync + 'static,
 ) -> windows_core::Result<windows_core::EventRevoker> {
     api::CompositionTarget::Rendering(move |_, _| {
@@ -38,7 +38,8 @@ fn on_rendering(
     })
 }
 
-pub(super) const MIN_ANIMATION_DURATION: Duration = Duration::from_millis(1);
+// The compositor rejects animation durations below one millisecond.
+const MIN_ANIMATION_DURATION: Duration = Duration::from_millis(1);
 
 pub(super) fn bar_duration(playback: Duration) -> Duration {
     playback.saturating_sub((playback / 10).min(Duration::from_millis(100)))
