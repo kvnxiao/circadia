@@ -222,7 +222,7 @@ Circadia reads only window metadata, process identity, and the size, last-write 
 
 - A game has focus while its executable is identified: an access-rights trace shows no process handle requesting memory access or modification rights.
 - An elevated game selected for compatibility testing runs during suppression testing: Circadia uses the same limited-query behavior and does not load code into the game.
-- Circadia shows a running app's display name and icon: it reads them from the executable file, not from the running process.
+- Circadia shows a running app's display name and icon: it reads them from the executable file and, when the file has no version description, reads the display name from the window title. It does not read them from the running process.
 
 ### REQ-unelevated-operation — Run without administrator rights
 
@@ -251,7 +251,7 @@ The [design documents](../design/README.md) describe the intended visual design 
 
 ## Security
 
-Wake and Bedtime clocks, temperature levels, coordinates, list entries (executable names, optional installation paths, display names, and title conditions), cached application icons with their file paths, and preferences are stored per user. Circadia does not upload them or call a daily solar service. Enabling Use my Windows location requires confirmation that Circadia requests positions through Windows, including at tray-only startup; that operating-system service can use network-backed positioning. The saved preference authorizes the requests defined by REQ-configure-solar-location, subject to current Windows permission. Manual coordinates do not require location permission.
+Wake and Bedtime clocks, temperature levels, coordinates, list entries (executable names, optional installation paths, display names, and title conditions), cached application icons with their file paths, window titles recorded as display names, and preferences are stored per user. Circadia does not upload them or call a daily solar service. Enabling Use my Windows location requires confirmation that Circadia requests positions through Windows, including at tray-only startup; that operating-system service can use network-backed positioning. The saved preference authorizes the requests defined by REQ-configure-solar-location, subject to current Windows permission. Manual coordinates do not require location permission.
 
 The local log stays on the computer and can include personal data; [REQ-local-log](diagnostics.md#req-local-log--keep-a-local-rotating-log) and [REQ-crash-notice](diagnostics.md#req-crash-notice--offer-to-report-a-crash) govern its content and how the user shares it.
 

@@ -1193,6 +1193,7 @@ fn circadias_own_fixed_exclusion_shows_circadias_icon() {
             images(1),
         )]),
         sources: BTreeMap::new(),
+        titles: BTreeMap::new(),
         generic: Some(images(0)),
     };
     let own = fixed_rows(&model, &english())

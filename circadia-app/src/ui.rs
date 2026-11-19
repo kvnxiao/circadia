@@ -585,15 +585,12 @@ impl Application for Desktop {
         );
         let manual = self.manual_command();
         let sources = &self.icons.view().sources;
-        let empty_names = std::collections::BTreeMap::new();
         let model = settings::Model::new(
             &configuration,
             self.snapshot.as_deref(),
             self.retrying(),
             line.clone(),
-            self.file_info
-                .as_ref()
-                .map_or(&empty_names, FileInfoClient::names),
+            &self.display_names(),
         )
         .with_sources(sources)
         .with_preview(preview)
@@ -958,12 +955,18 @@ impl Desktop {
 
     fn entry(&self, selected: &file_info::AppSelection) -> crate::AppEntry {
         let file = &selected.file;
-        let name = self
-            .file_info
-            .as_ref()
-            .and_then(|file_info| file.identity().and_then(|path| file_info.name(&path)))
-            .map(str::to_owned);
+        let name = file
+            .identity()
+            .and_then(|path| self.display_names().remove(&path));
         selected.entry(name.unwrap_or_else(|| file.executable.clone()))
+    }
+
+    fn display_names(&self) -> BTreeMap<crate::ExecutablePath, String> {
+        self.file_info
+            .as_ref()
+            .map_or_else(BTreeMap::new, |client| {
+                file_info::display_names(client.names(), &self.icons.view().titles)
+            })
     }
 
     fn add(&mut self, list: Field, files: &[file_info::AppSelection]) {
@@ -1002,10 +1005,11 @@ impl Desktop {
     }
 
     fn record_names(&mut self) {
+        self.record_titles();
         if let Some(client) = &self.file_info {
             let current = (
                 self.configuration.borrow().revision(),
-                self.icons.source_revision(),
+                self.icons.revision(),
                 client.revision(),
             );
             if self.named == Some(current) {
@@ -1014,9 +1018,31 @@ impl Desktop {
             let changed = self
                 .configuration
                 .borrow_mut()
-                .record_names(client.names(), &self.icons.view().sources);
+                .record_names(&self.display_names(), &self.icons.view().sources);
             self.named = Some((self.configuration.borrow().revision(), current.1, current.2));
             self.configure(changed);
+        }
+    }
+
+    // The icon index writes titles to disk, so a title is recorded only for an
+    // executable without a version description, where it serves as the name.
+    fn record_titles(&mut self) {
+        let (Some(client), Some(snapshot)) = (&self.file_info, &self.snapshot) else {
+            return;
+        };
+        for recent in &snapshot.recent {
+            let file = AppFile {
+                executable: recent.executable.clone(),
+                path: recent.path.clone(),
+            };
+            let title = recent.title.as_deref().map(str::trim);
+            if let (Some(path), Some(title)) = (file.identity(), title)
+                && recent.focus_ended.is_some()
+                && !title.is_empty()
+                && client.names().get(&path) == Some(&None)
+            {
+                self.icons.record_title(&path, title);
+            }
         }
     }
 
@@ -1285,17 +1311,14 @@ impl Desktop {
         let Ok(executable) = crate::ExecutableName::new(path.file_name()) else {
             return;
         };
+        let names = self.display_names();
         let name = self
-            .file_info
-            .as_ref()
-            .and_then(|file_info| {
-                self.icons
-                    .view()
-                    .sources
-                    .get(&executable)
-                    .and_then(|path| file_info.name(path))
-            })
-            .unwrap_or(executable.as_str());
+            .icons
+            .view()
+            .sources
+            .get(&executable)
+            .and_then(|path| names.get(path))
+            .map_or(executable.as_str(), String::as_str);
         let entry = crate::AppEntry::new(executable.as_str(), name).with_title("", regex == "1");
         let changed = self
             .configuration

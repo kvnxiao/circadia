@@ -84,7 +84,13 @@ fn run(folder: &Path, shared: &(Mutex<Work>, Condvar)) {
         .ok()
         .and_then(|text| toml::from_str::<Index>(&text).ok())
         .and_then(super::valid_index)
-        .map(|(entries, _)| entries.into_values().map(|entry| entry.image).collect())
+        .map(|index| {
+            index
+                .entries
+                .into_values()
+                .map(|entry| entry.image)
+                .collect()
+        })
         .unwrap_or_default();
     let mut failure = None;
     loop {

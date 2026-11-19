@@ -152,6 +152,30 @@ Evaluated directions that affected Circadia's behavior or feasibility. The [spec
 
 **Reevaluate when:** A user reports an app on the suppression list whose window has both styles. The fix then amends the specification and the code together in its own change.
 
+### DEC-store-manifest-names — Read game names from game store files
+
+**Disposition:** Not selected
+
+**Requirement impact:** The display name of an executable without a version description, such as `cs2.exe`.
+
+**Reason:** Steam's `appmanifest_730.acf` has the game's name, but each store would need its own parser, and the spec would have to let Circadia read store files. The window title gives the same name once the game has had focus.
+
+**Basis:** [Names for executables without a version description](research/executable-icons.md#names-for-executables-without-a-version-description) compares the version resource, Windows' friendly-name cache, window properties, the window title, and Steam's records.
+
+**Reevaluate when:** Users often add games that have never had focus, so the games show their filenames.
+
+### DEC-stable-title-names — Require the same window title at focus gain and focus loss
+
+**Disposition:** Not selected
+
+**Requirement impact:** Which window title becomes the display name of an executable without a version description.
+
+**Reason:** The check would reject titles that change while the app has focus. But a game closed while it has focus would get no name, because Circadia never reads its title at focus loss. A wrong name affects only the label, not matching. The next recorded title replaces it.
+
+**Basis:** [REQ-edit-executable-list](specs/suppression.md#req-edit-executable-list--edit-the-suppression-list) defines which title the recent-app history records.
+
+**Reevaluate when:** Apps without a version description often get a document name or a status message as their name.
+
 ## Native code ownership
 
 ### DEC-first-party-wrappers-for-maintained-crates — Wrap Windows operations that maintained crates already provide

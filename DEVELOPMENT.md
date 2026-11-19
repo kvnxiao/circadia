@@ -161,7 +161,7 @@ The controller is the only component requesting Night light writes. It serialize
 
 The controller uses one Night light handle for its lifetime and distinguishes successful temperature storage from clearing Windows' native preview flag after an immediate temperature change. Windows stores settings and on/off state separately, so exit cleanup makes independent best-effort requests. See [native access](docs/specs/native-access.md) and [lifecycle](docs/specs/control.md) for failure and ordering guarantees.
 
-Foreground inspection uses window metadata and limited-query process identity. Display names and icons come from executable files on a separate worker. Circadia does not read other processes' memory, inject code, or request elevation. The [matching research](docs/research/executable-matching.md) explains identity and path limits.
+Foreground inspection uses window metadata and limited-query process identity. Display names and icons come from executable files on a separate worker. When a file has no version description, its display name is the window title that foreground inspection recorded. Circadia does not read other processes' memory, inject code, or request elevation. The [matching research](docs/research/executable-matching.md) explains identity and path limits.
 
 ## Localization
 

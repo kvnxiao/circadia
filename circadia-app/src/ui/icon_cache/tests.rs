@@ -461,6 +461,52 @@ fn a_deleted_icons_folder_shows_no_cached_icon_until_the_app_is_seen_again() {
 }
 
 #[test]
+fn a_recorded_title_reloads_after_a_restart_and_is_pruned_with_its_path() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let game = ExecutablePath::new(CS2).expect("fixture path");
+    let other = ExecutablePath::new(r"C:\Apps\other.exe").expect("fixture path");
+    let mut cache = load_shown(directory.path());
+    cache.record_title(&game, "Counter-Strike 2");
+    cache.record_title(&other, "notes.txt - Other");
+    let revision = cache.revision();
+    cache.record_title(&game, "Counter-Strike 2");
+    assert_eq!(cache.revision(), revision);
+    flush(&mut cache);
+    let mut restarted = load_shown(directory.path());
+    assert_eq!(
+        restarted.view().titles,
+        BTreeMap::from([
+            (game.clone(), "Counter-Strike 2".to_owned()),
+            (other, "notes.txt - Other".to_owned()),
+        ])
+    );
+    restarted.prune(&BTreeSet::from([game.clone()]), &BTreeSet::new());
+    flush(&mut restarted);
+    assert_eq!(
+        load_shown(directory.path()).view().titles,
+        BTreeMap::from([(game, "Counter-Strike 2".to_owned())])
+    );
+}
+
+#[test]
+fn an_index_without_titles_loads_its_icons_and_sources() {
+    let directory = tempfile::tempdir().expect("temporary data folder");
+    let folder = directory.path().join("icons");
+    fs_err::create_dir(&folder).expect("cache folder");
+    fs_err::write(
+        folder.join("index.toml"),
+        "version = 1\napps = []\n[sources]\n\"cs2.exe\" = 'C:\\Games\\cs2.exe'\n",
+    )
+    .expect("index");
+    let cache = load_shown(directory.path());
+    assert_eq!(
+        cache.view().sources.values().collect::<Vec<_>>(),
+        [&ExecutablePath::new(CS2).expect("fixture path")]
+    );
+    assert!(cache.view().titles.is_empty());
+}
+
+#[test]
 fn an_unknown_app_without_a_path_is_not_read() {
     let directory = tempfile::tempdir().expect("temporary data folder");
     assert_eq!(load_shown(directory.path()).request("game.exe", None), None);
