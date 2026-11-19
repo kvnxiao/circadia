@@ -424,12 +424,19 @@ The tool fails if any sample exceeds 100 ms. A simulated temperature operation f
 
 Preview motion is checked from captured screen pixels. The harness identifies changes in the rendered time line and dot, and keeps its test window on top during capture. A two-second Preview must advance through at least eight changed rendered positions while its native output call remains blocked. Editing must return at the logical deadline before the harness releases that call.
 
-A separate Preview uses a 1 Hz native rate limit. The capture must observe more than ten changed positions in about 900 ms, and temperature-call timestamps must respect the configured interval. The harness also checks these lifecycle transitions:
+A separate Preview uses a 1 Hz native rate limit. The capture must observe more than ten changed positions in about 900 ms. The harness also checks these lifecycle transitions:
 
 - Navigating away and minimizing stop the animation; returning and restoring resume it.
 - Resizing rebuilds the time line and dot at the current playback position.
 - Stop restores editing while a native call remains blocked.
-- Completed, stopped, hidden, and closed states record no animation starts during short activity observations.
+- In completed, stopped, hidden, and closed states, settings does not start an animation during a 600 ms observation.
+
+After Stop, the harness plays a complete five-second Preview with the 1 Hz rate limit, so it always covers every transition in the day. Each temperature write that the rate limit governs must start at least one second after the preceding temperature write. The limit does not govern these writes:
+
+- The write that starts Preview and other application refreshes, which make Windows apply a temperature even when its stored value already matches.
+- The first write of each transition, which turns on the native preview flag.
+
+The check fails if the Preview makes no governed write.
 
 The captures are saved as `preview-motion-blocked.png` and `preview-motion-one-hz.png` in the run directory. Their sampling rate depends on screen capture and harness overhead. They establish visible movement between native calls, not the monitor's presentation rate or frame-time distribution.
 

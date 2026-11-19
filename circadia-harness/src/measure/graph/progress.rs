@@ -87,7 +87,7 @@ pub(crate) fn completion(
     Ok(())
 }
 
-fn start(
+pub(super) fn start(
     measurement: &GraphMeasurement,
     automation: &Automation,
     settings: &HWND,
