@@ -1,6 +1,6 @@
 use crate::Config;
 use crate::Native;
-use crate::ui::composition::bindings as api;
+use circadia_bindings as api;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;

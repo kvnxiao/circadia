@@ -18,17 +18,11 @@ impl Drop for ActivePicker {
     }
 }
 
-#[expect(
-    unsafe_code,
-    reason = "IFileDialog::Close requires an HRESULT cancellation value"
-)]
 pub(crate) fn cancel() -> io::Result<()> {
     let Some(dialog) = ACTIVE.with_borrow_mut(Option::take) else {
         return Ok(());
     };
-    // SAFETY: Close forwards the raw value as HRESULT despite accepting ERROR.
-    let cancelled = unsafe { co::ERROR::from_raw(co::ERROR::CANCELLED.to_hresult().raw()) };
-    dialog.Close(cancelled).map_err(io::Error::other)
+    circadia_winsafe::dialog::cancel(&dialog)
 }
 
 pub(crate) fn executable(

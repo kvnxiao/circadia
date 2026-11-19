@@ -9,6 +9,7 @@ license = "MIT"
 repository = "https://github.com/kvnxiao/circadia"
 
 [workspace.dependencies]
+circadia-bindings = { path = "circadia-bindings", version = "0.1.0" }
 circadia-app = { path = "circadia-app", version = "0.1.0" }
 circadia-winsafe = { path = "circadia-winsafe", version = "0.1.0" }
 fs-err = "3.3"

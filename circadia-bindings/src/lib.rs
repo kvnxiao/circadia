@@ -1,3 +1,7 @@
+//! Windows composition and XAML interfaces used by Circadia.
+
+#![cfg(windows)]
+
 #[expect(
     clippy::allow_attributes,
     reason = "scope generated projection lint exceptions"
@@ -18,4 +22,6 @@
     clippy::multiple_unsafe_ops_per_block,
     reason = "metadata-generated WinRT projection"
 )]
-pub(crate) mod bindings;
+mod bindings;
+
+pub use bindings::*;

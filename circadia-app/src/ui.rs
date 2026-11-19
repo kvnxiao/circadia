@@ -1,4 +1,3 @@
-mod composition;
 mod configuration;
 mod crash_notice;
 mod file_info;

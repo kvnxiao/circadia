@@ -390,6 +390,8 @@ dependencies = [
 name = "circadia-app"
 version = "0.1.0"
 dependencies = [
+ "circadia-bindings",
+ "circadia-winsafe",
  "embed-resource",
  "fluent-bundle",
  "fluent-pseudo",
@@ -418,16 +420,13 @@ dependencies = [
  "win-nightlight-watch",
  "windows 0.100.0",
  "windows-canvas",
- "windows-collections 0.101.0",
  "windows-composition",
  "windows-core 0.101.0",
  "windows-future 0.101.0",
- "windows-numerics 0.101.0",
  "windows-reactor",
  "windows-reactor-setup",
  "windows-result 0.100.1",
  "windows-sys 0.100.0",
- "windows-time",
  "windows-version",
  "windows-window",
  "winsafe",
@@ -441,6 +440,10 @@ dependencies = [
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
  "windows-bindgen",
+ "windows-collections 0.101.0",
+ "windows-core 0.101.0",
+ "windows-numerics 0.101.0",
+ "windows-time",
 ]
 
 [[package]]
@@ -474,7 +477,11 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "syn 2.0.119",
+ "windows-core 0.101.0",
+ "windows-future 0.101.0",
+ "windows-result 0.100.1",
  "windows-sys 0.100.0",
+ "windows-window",
  "winsafe",
 ]
 

@@ -8,8 +8,6 @@ pub struct ExecutableName {
     text: String,
     #[cfg(windows)]
     wide: Vec<u16>,
-    #[cfg(windows)]
-    length: i32,
 }
 
 /// Report a malformed executable filename.
@@ -28,13 +26,11 @@ impl ExecutableName {
         #[cfg(windows)]
         let wide: Vec<u16> = text.encode_utf16().collect();
         #[cfg(windows)]
-        let length = i32::try_from(wide.len()).map_err(|_error| InvalidExecutableName)?;
+        i32::try_from(wide.len()).map_err(|_error| InvalidExecutableName)?;
         Ok(Self {
             text,
             #[cfg(windows)]
             wide,
-            #[cfg(windows)]
-            length,
         })
     }
 
@@ -59,12 +55,7 @@ impl Ord for ExecutableName {
     fn cmp(&self, other: &Self) -> Ordering {
         #[cfg(windows)]
         {
-            crate::platform::executable_path::compare(
-                &self.wide,
-                self.length,
-                &other.wide,
-                other.length,
-            )
+            crate::platform::executable_path::compare(&self.wide, &other.wide)
         }
         #[cfg(not(windows))]
         {

@@ -8,8 +8,6 @@ pub struct ExecutablePath {
     text: String,
     #[cfg(windows)]
     wide: Vec<u16>,
-    #[cfg(windows)]
-    length: i32,
 }
 
 /// Report an unsupported or malformed absolute executable path.
@@ -63,16 +61,13 @@ impl ExecutablePath {
         crate::normalize_executable(name).map_err(|_error| InvalidExecutablePath)?;
         let text = format!("{root}{}", parts.join("\\"));
         #[cfg(windows)]
-        let length =
-            i32::try_from(text.encode_utf16().count()).map_err(|_error| InvalidExecutablePath)?;
+        let wide: Vec<u16> = text.encode_utf16().collect();
         #[cfg(windows)]
-        let wide = text.encode_utf16().collect();
+        i32::try_from(wide.len()).map_err(|_error| InvalidExecutablePath)?;
         Ok(Self {
             text,
             #[cfg(windows)]
             wide,
-            #[cfg(windows)]
-            length,
         })
     }
 
@@ -161,12 +156,7 @@ impl Ord for ExecutablePath {
     fn cmp(&self, other: &Self) -> Ordering {
         #[cfg(windows)]
         {
-            crate::platform::executable_path::compare(
-                &self.wide,
-                self.length,
-                &other.wide,
-                other.length,
-            )
+            crate::platform::executable_path::compare(&self.wide, &other.wide)
         }
         #[cfg(not(windows))]
         {

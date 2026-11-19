@@ -15,16 +15,16 @@ build-self-contained:
     cargo +stable build --package circadia-app --bin circadia --features self-contained --locked
 
 composition-bindings checkout:
-    cargo +stable run --package circadia-bindings --locked -- "{{checkout}}"
+    cargo +stable run --package circadia-bindings --features generator --locked -- "{{checkout}}"
 
 check-composition-bindings:
     #!/usr/bin/env bash
     set -euo pipefail
-    metadata=$(cargo +stable metadata --manifest-path circadia-bindings/Cargo.toml --format-version 1 --locked)
+    metadata=$(cargo +stable metadata --features circadia-bindings/generator --manifest-path circadia-bindings/Cargo.toml --format-version 1 --locked)
     manifest=$(jq -er '.packages[] | select(.name == "windows-bindgen") | .manifest_path' <<< "$metadata")
     manifest=${manifest//\\//}
     checkout=${manifest%/crates/libs/bindgen/Cargo.toml}
-    cargo +stable run --package circadia-bindings --locked -- "$checkout" --check
+    cargo +stable run --package circadia-bindings --features generator --locked -- "$checkout" --check
 
 # Run an acceptance scenario against the built application; `just accept --list` lists them.
 [positional-arguments]

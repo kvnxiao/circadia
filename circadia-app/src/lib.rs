@@ -1,5 +1,6 @@
 //! Validate Circadia settings and provide application domain logic.
 
+#![forbid(unsafe_code)]
 #[cfg(all(windows, feature = "graph-measurement"))]
 mod activity;
 pub mod automation_id;

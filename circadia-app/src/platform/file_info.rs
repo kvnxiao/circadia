@@ -1,133 +1,16 @@
+use circadia_winsafe::icon;
 use std::io;
-use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
-use windows_sys::Win32::shlobj_core::SHDefExtractIconW;
-use windows_sys::Win32::verrsrc::FILE_VER_GET_LOCALISED;
-use windows_sys::Win32::windef::HBITMAP;
-use windows_sys::Win32::windef::HICON;
-use windows_sys::Win32::winerror::ERROR_RESOURCE_DATA_NOT_FOUND;
-use windows_sys::Win32::winerror::ERROR_RESOURCE_TYPE_NOT_FOUND;
-use windows_sys::Win32::winerror::S_FALSE;
-use windows_sys::Win32::wingdi::BI_RGB;
-use windows_sys::Win32::wingdi::BITMAP;
-use windows_sys::Win32::wingdi::BITMAPINFO;
-use windows_sys::Win32::wingdi::BITMAPINFOHEADER;
-use windows_sys::Win32::wingdi::DIB_RGB_COLORS;
-use windows_sys::Win32::wingdi::DeleteObject;
-use windows_sys::Win32::wingdi::GetDIBits;
-use windows_sys::Win32::wingdi::GetObjectW;
-use windows_sys::Win32::winuser::DestroyIcon;
-use windows_sys::Win32::winuser::GetIconInfo;
-use windows_sys::Win32::winuser::ICONINFO;
-use windows_sys::Win32::winver::GetFileVersionInfoExW;
-use windows_sys::Win32::winver::GetFileVersionInfoSizeExW;
-use windows_sys::Win32::winver::VerQueryValueW;
 use winsafe::co;
-use winsafe::guard::DeleteDCGuard;
 use winsafe::prelude::Handle;
 
-const ENGLISH_UNICODE: &str = "040904B0";
-
-fn wide(path: &Path) -> Vec<u16> {
-    path.as_os_str().encode_wide().chain([0]).collect()
-}
-
-/// Read the `FileDescription` of an executable's version information.
-///
-/// - Uses the first translation that the file lists, else US English with the
-///   Unicode code page.
-/// - Returns none for a file without a version resource, an empty description,
-///   or a read failure.
-#[expect(
-    unsafe_code,
-    reason = "read the version resource into a buffer of the size Windows reports"
-)]
+/// Read the first translation's file description, defaulting to US English.
 pub(crate) fn display_name(path: &Path) -> Option<String> {
-    let path = wide(path);
-    let mut handle = 0_u32;
-    // SAFETY: The path is NUL-terminated and outlives the call, and the
-    // handle is writable.
-    let size = unsafe {
-        GetFileVersionInfoSizeExW(
-            FILE_VER_GET_LOCALISED.cast_unsigned(),
-            path.as_ptr(),
-            &raw mut handle,
-        )
-    };
-    if size == 0 {
-        return None;
-    }
-    let mut data = vec![0_u8; usize::try_from(size).ok()?];
-    // SAFETY: The buffer is writable for `size` bytes, the size that the
-    // previous call reported for this file.
-    let read = unsafe {
-        GetFileVersionInfoExW(
-            FILE_VER_GET_LOCALISED.cast_unsigned(),
-            path.as_ptr(),
-            0,
-            size,
-            data.as_mut_ptr().cast(),
-        )
-    };
-    if read == 0 {
-        return None;
-    }
-    let translation = query(&data, "\\VarFileInfo\\Translation")
-        .filter(|(_, bytes)| *bytes >= 4)
-        .and_then(|(value, _)| value.get(..4))
-        .and_then(|value| <[u8; 4]>::try_from(value).ok())
-        .map_or_else(
-            || ENGLISH_UNICODE.to_owned(),
-            |[language_low, language_high, page_low, page_high]| {
-                format!(
-                    "{:04X}{:04X}",
-                    u16::from_le_bytes([language_low, language_high]),
-                    u16::from_le_bytes([page_low, page_high])
-                )
-            },
-        );
-    let (value, characters) = query(
-        &data,
-        &format!("\\StringFileInfo\\{translation}\\FileDescription"),
-    )?;
-    let units: Vec<u16> = value
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .take(characters)
-        .map(|unit| u16::from_le_bytes(*unit))
-        .take_while(|unit| *unit != 0)
-        .collect();
-    let description = String::from_utf16_lossy(&units).trim().to_owned();
+    let version = circadia_winsafe::version::VersionInfo::read(path).ok()?;
+    let translation = version.first_translation().unwrap_or((0x0409, 1200));
+    let description = version.string(translation, "FileDescription")?;
+    let description = description.trim().to_owned();
     (!description.is_empty()).then_some(description)
-}
-
-// VerQueryValueW reports a string's length in UTF-16 units and other values'
-// lengths in bytes, so the caller interprets the length.
-#[expect(
-    unsafe_code,
-    reason = "VerQueryValueW returns a pointer into the caller's version buffer"
-)]
-fn query<'a>(data: &'a [u8], key: &str) -> Option<(&'a [u8], usize)> {
-    let key: Vec<u16> = key.encode_utf16().chain([0]).collect();
-    let mut value = std::ptr::null_mut();
-    let mut length = 0_u32;
-    // SAFETY: The buffer holds the version information that
-    // GetFileVersionInfoExW wrote, the key is NUL-terminated, and both outputs
-    // are writable.
-    let found = unsafe {
-        VerQueryValueW(
-            data.as_ptr().cast(),
-            key.as_ptr(),
-            &raw mut value,
-            &raw mut length,
-        )
-    };
-    if found == 0 || value.is_null() {
-        return None;
-    }
-    let start = value.addr().checked_sub(data.as_ptr().addr())?;
-    Some((data.get(start..)?, usize::try_from(length).ok()?))
 }
 
 /// Size and last-write time of a file, which change when an update replaces it.
@@ -167,8 +50,8 @@ pub(crate) fn stamp(path: &Path) -> io::Result<FileStamp> {
 /// Returns an error when the file cannot be read, is not an executable image,
 /// or its icon cannot be converted.
 pub(crate) fn read_icon(path: &Path, pixels: u16) -> io::Result<Option<Vec<u8>>> {
-    Icon::extract(path, 0, pixels)?
-        .map(|icon| icon.png())
+    icon::extract(path, 0, pixels)?
+        .map(|icon| icon_png(&icon))
         .transpose()
 }
 
@@ -181,9 +64,9 @@ pub(crate) fn read_icon(path: &Path, pixels: u16) -> io::Result<Option<Vec<u8>>>
 pub(crate) fn generic_icon(pixels: u16) -> io::Result<Vec<u8>> {
     let info = winsafe::SHGetStockIconInfo(co::SIID::APPLICATION, co::SHGSI::ICONLOCATION)
         .map_err(|error| io::Error::from_raw_os_error(error.raw().cast_signed()))?;
-    Icon::extract(Path::new(&info.szPath()), info.iIcon, pixels)?
-        .ok_or_else(|| io::Error::other("the generic application icon is missing"))?
-        .png()
+    let icon = icon::extract(Path::new(&info.szPath()), info.iIcon, pixels)?
+        .ok_or_else(|| io::Error::other("the generic application icon is missing"))?;
+    icon_png(&icon)
 }
 
 fn encode(width: u32, height: u32, rgba: &[u8]) -> io::Result<Vec<u8>> {
@@ -216,180 +99,26 @@ fn rgba(bgra: &[u8], mask: Option<&[u8]>) -> Vec<u8> {
         .collect()
 }
 
-struct Icon(HICON);
-
-impl Icon {
-    // SHDefExtractIconW returns S_FALSE both for an executable without icon
-    // resources and for a file that is not an executable image; only the
-    // former leaves a missing-resource error as the thread's last error.
-    #[expect(
-        unsafe_code,
-        reason = "extract an icon handle that this type destroys on drop"
-    )]
-    fn extract(path: &Path, index: i32, pixels: u16) -> io::Result<Option<Self>> {
-        let path = wide(path);
-        let mut icon: HICON = std::ptr::null_mut();
-        winsafe::SetLastError(co::ERROR::SUCCESS);
-        // SAFETY: The path is NUL-terminated and outlives the call, the
-        // large-icon output is writable, and the documented small-icon output
-        // may be null.
-        let result = unsafe {
-            SHDefExtractIconW(
-                path.as_ptr(),
-                index,
-                0,
-                &raw mut icon,
-                std::ptr::null_mut(),
-                u32::from(pixels),
-            )
-        };
-        match result {
-            S_FALSE => {
-                let error = io::Error::last_os_error();
-                let missing = [ERROR_RESOURCE_TYPE_NOT_FOUND, ERROR_RESOURCE_DATA_NOT_FOUND]
-                    .into_iter()
-                    .any(|code| error.raw_os_error() == Some(code));
-                if missing {
-                    Ok(None)
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "the file is not an executable image",
-                    ))
-                }
-            }
-            0 if !icon.is_null() => Ok(Some(Self(icon))),
-            0 => Err(io::Error::other("icon extraction returned no icon")),
-            error => Err(io::Error::from_raw_os_error(error)),
+fn icon_png(icon: &winsafe::HICON) -> io::Result<Vec<u8>> {
+    let (color, mask) = icon::bitmaps(icon)?;
+    let color = color.ok_or_else(|| io::Error::other("monochrome icons are not converted"))?;
+    let context = winsafe::HDC::NULL
+        .CreateCompatibleDC()
+        .map_err(io::Error::other)?;
+    let (width, height, pixels) = color.pixels(&context)?;
+    // Icons without an alpha channel mark transparency in their mask instead.
+    let mask = if pixels.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0) {
+        let (mask_width, mask_height, mask) = mask.pixels(&context)?;
+        if (mask_width, mask_height) != (width, height) {
+            return Err(io::Error::other(
+                "icon mask dimensions differ from the color bitmap",
+            ));
         }
-    }
-
-    #[expect(
-        unsafe_code,
-        reason = "read the icon's bitmaps, which this function deletes on return"
-    )]
-    fn png(&self) -> io::Result<Vec<u8>> {
-        let mut info = ICONINFO::default();
-        // SAFETY: The icon handle is live until drop, and the structure is
-        // writable.
-        if unsafe { GetIconInfo(self.0, &raw mut info) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let mask = Bitmap(info.hbmMask);
-        let color = Bitmap(info.hbmColor);
-        if color.0.is_null() {
-            return Err(io::Error::other("monochrome icons are not converted"));
-        }
-        let (width, height) = color.size()?;
-        let context = DeviceContext::new()?;
-        let pixels = context.pixels(&color, width, height)?;
-        // Icons without an alpha channel mark transparency in their mask
-        // instead.
-        let mask = pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .all(|pixel| pixel[3] == 0)
-            .then(|| context.pixels(&mask, width, height))
-            .transpose()?;
-        encode(
-            width.unsigned_abs(),
-            height.unsigned_abs(),
-            &rgba(&pixels, mask.as_deref()),
-        )
-    }
-}
-
-impl Drop for Icon {
-    #[expect(unsafe_code, reason = "destroy the icon handle this value owns")]
-    fn drop(&mut self) {
-        // SAFETY: The handle came from SHDefExtractIconW, which documents
-        // DestroyIcon as its release, and is destroyed once.
-        unsafe { DestroyIcon(self.0) };
-    }
-}
-
-struct Bitmap(HBITMAP);
-
-impl Bitmap {
-    #[expect(unsafe_code, reason = "read a bitmap header into a local structure")]
-    fn size(&self) -> io::Result<(i32, i32)> {
-        let mut bitmap = BITMAP::default();
-        let size = i32::try_from(size_of::<BITMAP>()).map_err(io::Error::other)?;
-        // SAFETY: The bitmap handle is live until drop, and the structure is
-        // writable for `size` bytes.
-        let written = unsafe { GetObjectW(self.0.cast(), size, (&raw mut bitmap).cast()) };
-        if written == 0 {
-            return Err(io::Error::other("reading the icon bitmap size failed"));
-        }
-        Ok((bitmap.bmWidth, bitmap.bmHeight))
-    }
-}
-
-impl Drop for Bitmap {
-    #[expect(unsafe_code, reason = "delete the bitmap handle this value owns")]
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            // SAFETY: GetIconInfo transfers ownership of its bitmaps to the
-            // caller, and each is deleted once.
-            unsafe { DeleteObject(self.0.cast()) };
-        }
-    }
-}
-
-struct DeviceContext(DeleteDCGuard);
-
-impl DeviceContext {
-    fn new() -> io::Result<Self> {
-        winsafe::HDC::NULL
-            .CreateCompatibleDC()
-            .map(Self)
-            .map_err(io::Error::other)
-    }
-
-    #[expect(
-        unsafe_code,
-        reason = "copy bitmap rows into a buffer of the requested size"
-    )]
-    fn pixels(&self, bitmap: &Bitmap, width: i32, height: i32) -> io::Result<Vec<u8>> {
-        let lines = u32::try_from(height).map_err(io::Error::other)?;
-        let length = usize::try_from(width)
-            .ok()
-            .zip(usize::try_from(height).ok())
-            .and_then(|(width, height)| width.checked_mul(height)?.checked_mul(4))
-            .ok_or_else(|| io::Error::other("icon bitmap size is out of range"))?;
-        let mut info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: u32::try_from(size_of::<BITMAPINFOHEADER>()).map_err(io::Error::other)?,
-                biWidth: width,
-                biHeight: -height,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.cast_unsigned(),
-                ..BITMAPINFOHEADER::default()
-            },
-            ..BITMAPINFO::default()
-        };
-        let mut pixels = vec![0_u8; length];
-        // SAFETY: The context and bitmap are live, the bitmap is not selected
-        // into a context, and the buffer holds `height` top-down rows of
-        // `width` 32-bit pixels, the format the header requests.
-        let copied = unsafe {
-            GetDIBits(
-                self.0.ptr().cast(),
-                bitmap.0,
-                0,
-                lines,
-                pixels.as_mut_ptr().cast(),
-                &raw mut info,
-                DIB_RGB_COLORS.cast_unsigned(),
-            )
-        };
-        if copied != height {
-            return Err(io::Error::other("reading the icon bitmap failed"));
-        }
-        Ok(pixels)
-    }
+        Some(mask)
+    } else {
+        None
+    };
+    encode(width, height, &rgba(&pixels, mask.as_deref()))
 }
 
 #[cfg(test)]

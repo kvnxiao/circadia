@@ -1,17 +1,11 @@
 use std::io;
-use std::os::windows::io::FromRawHandle;
 use std::os::windows::io::OwnedHandle;
-use windows_sys::Win32::synchapi::CreateMutexW;
-use windows_sys::Win32::winerror::ERROR_ALREADY_EXISTS;
-use windows_sys::Win32::winuser::PostMessageW;
-use windows_sys::Win32::winuser::WM_APP;
 use winsafe::HEVENT;
 use winsafe::HWND;
 use winsafe::co;
 use winsafe::guard::CloseHandleGuard;
 
 pub(crate) const EVENT_WINDOW_TITLE: &str = "Circadia event receiver";
-pub(crate) const ACTIVATE_SETTINGS: u32 = WM_APP.cast_unsigned() + 1;
 
 /// Distinguish the session's controller owner from a subsequent invocation.
 #[derive(Debug)]
@@ -53,28 +47,15 @@ impl InstanceClaim {
         Self::acquire_named("Local\\Circadia.Instance.v1")
     }
 
-    #[expect(unsafe_code, reason = "create and own a named Windows mutex")]
     pub(crate) fn acquire_named(name: &str) -> io::Result<Self> {
-        let wide: Vec<_> = name.encode_utf16().chain(Some(0)).collect();
-        // SAFETY: The terminated name remains live, and null security
-        // attributes select a noninheritable handle with the caller's
-        // default security.
-        let mutex = unsafe { CreateMutexW(std::ptr::null_mut(), 0, wide.as_ptr()) };
-        let status = winsafe::GetLastError().raw();
-        if mutex.is_null() {
-            return Err(io::Error::from_raw_os_error(status.cast_signed()));
-        }
-        // SAFETY: CreateMutexW returned a new CloseHandle-owned handle,
-        // including when it opened an existing object. This transfers
-        // ownership once.
-        let mutex = unsafe { OwnedHandle::from_raw_handle(mutex) };
+        let (mutex, existed) = circadia_winsafe::sync::named_mutex(name)?;
         let ready = HEVENT::CreateEvent(None, true, false, Some(&format!("{name}.Ready")))
             .map_err(io::Error::other)?;
         let handles = InstanceHandles {
             _mutex: mutex,
             ready,
         };
-        if status == ERROR_ALREADY_EXISTS.cast_unsigned() {
+        if existed {
             Ok(Self::Existing(ExistingInstance(handles)))
         } else {
             handles.ready.ResetEvent().map_err(io::Error::other)?;
@@ -103,7 +84,6 @@ impl ExistingInstance {
     /// # Errors
     /// Report startup timeout, a missing receiver, or rejected message
     /// delivery.
-    #[expect(unsafe_code, reason = "post a pointer-free activation message")]
     pub fn activate(&self) -> io::Result<()> {
         self.wait_ready(10_000)?;
         let window = HWND::FindWindow(None, Some(EVENT_WINDOW_TITLE))
@@ -115,12 +95,7 @@ impl ExistingInstance {
         if process != 0 {
             let _foreground_permission = winsafe::AllowSetForegroundWindow(Some(process));
         }
-        // SAFETY: Both parameters are immediate zero values, so asynchronous
-        // delivery retains no pointers. A stale HWND is reported by Windows.
-        if unsafe { PostMessageW(window.ptr().cast(), ACTIVATE_SETTINGS, 0, 0) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
+        circadia_winsafe::message::AppMessage::ActivateSettings.post(&window)
     }
 
     fn wait_ready(&self, milliseconds: u32) -> io::Result<()> {

@@ -50,7 +50,7 @@ fn main() -> io::Result<()> {
     }
     let crate_directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let root = crate_directory.join("..");
-    let expected = root.join("circadia-app/src/ui/composition/bindings.rs");
+    let expected = crate_directory.join("src/bindings.rs");
     let temporary = check
         .then(|| tempfile::tempdir_in(root.join("target")))
         .transpose()?;

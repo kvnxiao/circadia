@@ -39,21 +39,20 @@ tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "registry"] }
 
 [target.'cfg(windows)'.dependencies]
+circadia-bindings.workspace = true
+circadia-winsafe.workspace = true
 win-nightlight-lib.workspace = true
 win-nightlight-watch = "0.5.0"
 windows-result.workspace = true
 windows = { workspace = true, features = ["Devices_Geolocation", "Foundation", "Security_Authorization_AppCapabilityAccess", "UI_ViewManagement"] }
 windows-future.workspace = true
 windows-core.workspace = true
-windows-collections.workspace = true
-windows-numerics.workspace = true
-windows-time.workspace = true
 windows-version.workspace = true
 windows-canvas = { workspace = true, features = ["composition", "reactor"] }
 windows-composition = { workspace = true, features = ["reactor"] }
 windows-reactor.workspace = true
 windows-window.workspace = true
-windows-sys = { workspace = true, features = ["datetimeapi", "errhandlingapi", "minwinbase", "minwindef", "ntstatus", "powerbase", "processthreadsapi", "realtimeapiset", "shellapi", "shlobj_core", "stringapiset", "synchapi", "timezoneapi", "verrsrc", "winbase", "windef", "winerror", "winevt", "wingdi", "winnls", "winnt", "winuser", "winver", "wtsapi32"] }
+windows-sys = { workspace = true, features = ["minwinbase", "timezoneapi", "winerror", "winuser"] }
 winsafe.workspace = true
 
 [build-dependencies]
@@ -64,6 +63,9 @@ resvg = { version = "0.49", default-features = false }
 
 [target.'cfg(windows)'.build-dependencies]
 windows-reactor-setup = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+circadia-winsafe = { workspace = true, features = ["test-fixtures"] }
 
 [dev-dependencies]
 fluent-syntax = "0.12"

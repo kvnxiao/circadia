@@ -1,5 +1,6 @@
 //! Run the Circadia tray application in the current Windows session.
 
+#![forbid(unsafe_code)]
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]

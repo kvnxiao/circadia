@@ -10,8 +10,8 @@ The repository is a Cargo workspace. Each crate's directory has its package name
 | :-- | :-- |
 | [circadia-app](circadia-app) | The application library, the `circadia.exe` binary, its Fluent catalogs, and its icons. |
 | [circadia-harness](circadia-harness/README.md) | End-to-end acceptance, screenshot capture, and performance measurement against the built application. |
-| [circadia-bindings](circadia-bindings/README.md) | The generator for the application's private Windows composition bindings. |
-| [circadia-winsafe](circadia-winsafe/README.md) | Safe functions for the Windows operations that have no safe dependency API. It is the only crate that may contain `unsafe` code. |
+| [circadia-bindings](circadia-bindings/README.md) | The application's generated Windows composition and XAML bindings and their generator. |
+| [circadia-winsafe](circadia-winsafe/README.md) | Safe functions for the Windows operations that have no safe dependency API. Only this crate may use handwritten `unsafe` code. |
 
 The root `Cargo.toml` stores shared package metadata, lint policy, profiles, and dependency versions, including the windows-rs revision. Every crate inherits the workspace lints. The application crate is named `circadia-app` because the `circadia` name on crates.io belongs to an unrelated crate; its binary remains `circadia.exe`.
 
@@ -119,7 +119,7 @@ Superseded runs are cancelled, and a failed Rust matrix job does not cancel the 
 
 CI runs unit tests, including tests of harness helpers, but does not launch the desktop application. Desktop automation, screenshots, live Night light checks, and performance measurements remain explicit local tasks. Minimum-Rust-version checks also remain local. Hosted Windows checks do not establish Windows 11 desktop compatibility.
 
-The [Preview workflow](.github/workflows/preview.yml) packages each push to `main` independently of CI. It skips a push that only changes files the installer build does not read: top-level Markdown guides, documentation, the README screenshot, agent skills, the issue template, CI and release configuration, the harness, and the bindings generator. Both workflows use the same Cargo Git source cache key and fetch locked dependencies on a cache miss; a cold cache can cause concurrent downloads. Compiled installer outputs use a separate cache from tests and lint. CI's **All required checks** covers its checks; Preview reports **Build Windows x64 installer** separately. Preview update checks offer artifacts from successful Preview runs, regardless of CI's result.
+The [Preview workflow](.github/workflows/preview.yml) packages each push to `main` independently of CI. It skips a push that only changes files the installer build does not read: top-level Markdown guides, documentation, the README screenshot, agent skills, the issue template, CI and release configuration, the harness, and the bindings generator source, API list, and README. Changes to the bindings library trigger an installer build. Both workflows use the same Cargo Git source cache key and fetch locked dependencies on a cache miss; a cold cache can cause concurrent downloads. Compiled installer outputs use a separate cache from tests and lint. CI's **All required checks** covers its checks; Preview reports **Build Windows x64 installer** separately. Preview update checks offer artifacts from successful Preview runs, regardless of CI's result.
 
 The installer job uploads `Circadia-windows-x64-unsigned-<commit>`, a ZIP with the installer and checksum. Matching PDBs are uploaded separately as **Circadia-windows-x64-symbols** for crash investigation. Both artifacts are retained for 90 days; downloading them requires GitHub sign-in. Pull requests, merge-queue runs, and manual CI dispatch do not build a preview installer.
 
@@ -151,7 +151,7 @@ just composition-bindings /path/to/windows-rs
 just check-composition-bindings
 ```
 
-The [generator crate](circadia-bindings/README.md) builds independently of the application. It reads [circadia-bindings/api.txt](circadia-bindings/api.txt) and writes the private composition bindings. Its `windows-bindgen` dependency uses the workspace windows-rs revision. The freshness check is part of `just check`; [animation research](docs/research/settings-design-support.md#progress-and-color-animation) explains the API need.
+The app uses the [circadia-bindings library](circadia-bindings/README.md). The regeneration recipes enable its `generator` feature to build the command that reads [circadia-bindings/api.txt](circadia-bindings/api.txt) and writes [the bindings source](circadia-bindings/src/bindings.rs). Its `windows-bindgen` dependency uses the workspace windows-rs revision. The freshness check is part of `just check`; [animation research](docs/research/settings-design-support.md#progress-and-color-animation) explains the API need.
 
 ## Implementation boundaries
 

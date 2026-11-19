@@ -16,6 +16,35 @@ use windows_sys::Win32::winuser::WM_WTSSESSION_CHANGE;
 use windows_sys::Win32::winuser::WTS_SESSION_LOCK;
 use winsafe::HWND;
 
+/// Circadia's private window messages, each with zero parameters.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppMessage {
+    /// Ask the running instance to open settings.
+    ActivateSettings = windows_sys::Win32::winuser::WM_APP.cast_unsigned() + 1,
+    /// Notify the event receiver that worker results are available.
+    WorkerChanged = windows_sys::Win32::winuser::WM_APP.cast_unsigned() + 2,
+}
+
+impl AppMessage {
+    /// Post the message for asynchronous delivery.
+    ///
+    /// # Errors
+    /// Returns the Windows error if posting fails.
+    #[expect(unsafe_code, reason = "post a private message with zero parameters")]
+    pub fn post(self, window: &HWND) -> io::Result<()> {
+        // SAFETY: Both messages take zero parameters and borrow no storage
+        // after return.
+        if unsafe {
+            windows_sys::Win32::winuser::PostMessageW(window.ptr().cast(), self as u32, 0, 0)
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
 /// Window message that passes only integer parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Message {
@@ -34,6 +63,12 @@ pub enum Message {
     TimeChange,
     /// `WM_WTSSESSION_CHANGE` for a session lock.
     SessionLock,
+    /// A private application message.
+    App(AppMessage),
+    /// The system colors changed.
+    SystemColorChange,
+    /// The session unlocked.
+    SessionUnlock,
     /// The registered `TaskbarCreated` message that Explorer sends after it
     /// restarts.
     TaskbarCreated,
@@ -83,6 +118,15 @@ pub fn send(window: &HWND, message: Message, timeout: Duration) -> io::Result<us
         Message::SessionLock => (
             WM_WTSSESSION_CHANGE.cast_unsigned(),
             WTS_SESSION_LOCK as usize,
+        ),
+        Message::App(message) => (message as u32, 0),
+        Message::SystemColorChange => (
+            windows_sys::Win32::winuser::WM_SYSCOLORCHANGE.cast_unsigned(),
+            0,
+        ),
+        Message::SessionUnlock => (
+            WM_WTSSESSION_CHANGE.cast_unsigned(),
+            windows_sys::Win32::winuser::WTS_SESSION_UNLOCK as usize,
         ),
         Message::TaskbarCreated => (
             winsafe::RegisterWindowMessage("TaskbarCreated").map_err(io::Error::other)?,

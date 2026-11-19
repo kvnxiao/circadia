@@ -3,7 +3,7 @@ use super::palette::Palette;
 use super::palette::Theme;
 use super::schedule::Playing;
 use crate::TimeInterval;
-use crate::ui::composition::bindings as api;
+use circadia_bindings as api;
 use jiff::Timestamp;
 use std::time::Duration;
 use std::time::Instant;

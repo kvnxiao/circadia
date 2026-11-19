@@ -46,21 +46,8 @@ fn run_child(test: &str) -> ChildRun {
 
 fn child_directory() -> Option<PathBuf> {
     let directory = std::env::var_os(PANIC_CHILD_DIRECTORY).map(PathBuf::from)?;
-    suppress_crash_reporting();
+    circadia_winsafe::test_support::suppress_crash_reporting();
     Some(directory)
-}
-
-#[expect(
-    unsafe_code,
-    reason = "keep the intentional child abort out of Windows Error Reporting"
-)]
-fn suppress_crash_reporting() {
-    use windows_sys::Win32::errhandlingapi::SetErrorMode;
-    use windows_sys::Win32::winbase::SEM_FAILCRITICALERRORS;
-    use windows_sys::Win32::winbase::SEM_NOGPFAULTERRORBOX;
-    // SAFETY: SetErrorMode changes only this child process's error mode
-    // and takes no pointers.
-    unsafe { SetErrorMode((SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX).cast_unsigned()) };
 }
 
 fn crash_record(run: &ChildRun) -> &str {
@@ -185,7 +172,7 @@ fn a_controller_thread_panic_ends_without_a_cleanup_request() {
 fn an_unhandled_native_exception_records_its_code_and_module() {
     if let Some(directory) = child_directory() {
         start_log(&directory, false).expect("child log");
-        raise_native_exception();
+        circadia_winsafe::test_support::raise_native_exception();
         return;
     }
     let run = run_child("ui::tests::an_unhandled_native_exception_records_its_code_and_module");
@@ -406,19 +393,6 @@ fn a_reused_icon_reply_after_pruning_triggers_a_fresh_icon_read(reload: bool) {
         .expect("fresh icon reply");
     desktop.receive_files();
     assert_eq!(desktop.icons.view().apps.get(&path), Some(&images));
-}
-
-#[expect(
-    unsafe_code,
-    reason = "raise a native exception that no handler catches"
-)]
-fn raise_native_exception() {
-    // SAFETY: The exception has no arguments, so the argument pointer may
-    // be null; the call does not return because no handler
-    // continues it.
-    unsafe {
-        windows_sys::Win32::errhandlingapi::RaiseException(0xE000_0001, 0, 0, std::ptr::null());
-    };
 }
 
 #[test]

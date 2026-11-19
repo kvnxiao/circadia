@@ -1,4 +1,5 @@
 use crate::ScheduleError;
+use circadia_winsafe::clock::Zone;
 use jiff::SignedDuration;
 use jiff::Timestamp;
 use jiff::civil::Date;
@@ -10,10 +11,6 @@ use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
 use windows_sys::Win32::minwinbase::SYSTEMTIME;
-use windows_sys::Win32::timezoneapi::DYNAMIC_TIME_ZONE_INFORMATION;
-use windows_sys::Win32::timezoneapi::GetDynamicTimeZoneInformation;
-use windows_sys::Win32::timezoneapi::GetTimeZoneInformationForYear;
-use windows_sys::Win32::timezoneapi::TIME_ZONE_ID_INVALID;
 use windows_sys::Win32::timezoneapi::TIME_ZONE_INFORMATION;
 
 /// Read boot-relative elapsed time, including sleep and hibernation.
@@ -24,7 +21,7 @@ pub fn elapsed_since_boot() -> Duration {
 /// Resolve clocks using one snapshot of the Windows zone and adjustment
 /// setting.
 pub struct WindowsZone {
-    zone: DYNAMIC_TIME_ZONE_INFORMATION,
+    zone: Zone,
     years: BTreeMap<i16, TIME_ZONE_INFORMATION>,
 }
 
@@ -34,19 +31,9 @@ impl WindowsZone {
     /// # Errors
     ///
     /// Report failure to read the Windows setting.
-    #[expect(
-        unsafe_code,
-        reason = "Windows writes a caller-owned initialized structure without retaining its pointer"
-    )]
     pub fn current() -> Result<Self, ScheduleError> {
-        let mut zone = DYNAMIC_TIME_ZONE_INFORMATION::default();
-        // SAFETY: The output structure is writable, initialized, and lives
-        // through the synchronous call.
-        if unsafe { GetDynamicTimeZoneInformation(&raw mut zone) } == TIME_ZONE_ID_INVALID {
-            return Err(ScheduleError::windows(io::Error::last_os_error()));
-        }
         Ok(Self {
-            zone,
+            zone: Zone::current().map_err(ScheduleError::windows)?,
             years: BTreeMap::new(),
         })
     }
@@ -184,10 +171,6 @@ impl WindowsZone {
         Ok(instants)
     }
 
-    #[expect(
-        unsafe_code,
-        reason = "the synchronous Windows rule query uses live initialized input and output structures"
-    )]
     fn rules(&mut self, year: i16) -> Result<TIME_ZONE_INFORMATION, ScheduleError> {
         if !(1601..=9999).contains(&year) {
             return Err(ScheduleError::rules());
@@ -195,16 +178,11 @@ impl WindowsZone {
         if let Some(rules) = self.years.get(&year) {
             return Ok(*rules);
         }
-        let mut rules = TIME_ZONE_INFORMATION::default();
-        // SAFETY: Both structures are initialized and valid for the call, which
-        // retains neither pointer.
-        if unsafe {
-            GetTimeZoneInformationForYear(u16::try_from(year)?, &raw mut self.zone, &raw mut rules)
-        } == 0
-        {
-            return Err(ScheduleError::windows(io::Error::last_os_error()));
-        }
-        if self.zone.DynamicDaylightTimeDisabled != 0 {
+        let mut rules = self
+            .zone
+            .rules_for_year(u16::try_from(year)?)
+            .map_err(ScheduleError::windows)?;
+        if self.zone.information().DynamicDaylightTimeDisabled != 0 {
             rules.Bias = rules
                 .Bias
                 .checked_add(rules.StandardBias)
@@ -219,35 +197,20 @@ impl WindowsZone {
     }
 
     #[cfg(test)]
-    #[expect(
-        unsafe_code,
-        reason = "enumeration writes only the caller-owned output structure"
-    )]
     pub(crate) fn named(name: &str, disabled: bool) -> Result<Self, ScheduleError> {
-        use windows_sys::Win32::timezoneapi::EnumDynamicTimeZoneInformation;
-        use windows_sys::Win32::winerror::ERROR_NO_MORE_ITEMS;
-
         for index in 0..u32::MAX {
-            let mut zone = DYNAMIC_TIME_ZONE_INFORMATION::default();
-            // SAFETY: The initialized output structure remains valid throughout
-            // synchronous enumeration.
-            let status = unsafe { EnumDynamicTimeZoneInformation(index, &raw mut zone) };
-            if status == ERROR_NO_MORE_ITEMS.cast_unsigned() {
+            let Some(mut zone) = Zone::at(index).map_err(ScheduleError::windows)? else {
                 break;
-            }
-            if status != 0 {
-                return Err(ScheduleError::windows(io::Error::from_raw_os_error(
-                    i32::try_from(status)?,
-                )));
-            }
+            };
             let key: Vec<_> = zone
+                .information()
                 .TimeZoneKeyName
                 .iter()
                 .copied()
                 .take_while(|character| *character != 0)
                 .collect();
             if String::from_utf16_lossy(&key) == name {
-                zone.DynamicDaylightTimeDisabled = u8::from(disabled);
+                zone.set_daylight_disabled(disabled);
                 return Ok(Self {
                     zone,
                     years: BTreeMap::new(),
