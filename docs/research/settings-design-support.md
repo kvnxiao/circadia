@@ -163,13 +163,13 @@ The generation inputs from that windows-rs checkout are:
 | `crates/tools/reactor-metadata/winmd/Microsoft.Graphics.winmd` | `1c03e7417160d5cced840295da2b9b47e80079aee5ccdfd8f04d85665d36bf3f` |
 | `crates/libs/default/Windows.winmd` | `06cbb9a5febd5f5d9d06a31f2643bb95f7935a5a43f7d287c6f356ef1dd45ac8` |
 
-The application stores these bindings in [`circadia-app/src/ui/composition/bindings.rs`](../../circadia-app/src/ui/composition/bindings.rs). From the repository root, regenerate it with a windows-rs checkout at the reference commit:
+The probe used color and scalar animations. The application selects scalar animation in [its API list](../../circadia-bindings/api.txt). To regenerate [the application bindings](../../circadia-bindings/src/bindings.rs), run this command from the repository root with a windows-rs checkout at the revision pinned in `Cargo.toml`.
 
 ```bash
 just composition-bindings /path/to/windows-rs
 ```
 
-The generator rejects a checkout at a different commit. [`circadia-bindings/api.txt`](../../circadia-bindings/api.txt) selects the required APIs. `just check-composition-bindings` locates Cargo's pinned checkout, regenerates into a temporary directory, and compares bytes without changing the checked-in file. `just check` includes this check.
+The generator rejects a checkout at a different commit. `just check-composition-bindings` locates Cargo's pinned checkout, regenerates into a temporary directory, and compares bytes without changing the checked-in file. `just check` includes this check.
 
 **Measured:** an experimental probe of progress ring and color animation captured intermediate bar widths, ring arcs, and dot colors over six seconds. Native ProgressBar and ProgressRing controls at zero opacity retained their UI Automation range patterns, including updated values, and were reported as on-screen. The finite batch completed after 6.256 seconds. Explicit stop and removal ended a separate 20-second batch after 0.514 seconds; all rendered pixels disappeared and batch subscriptions returned to zero.
 

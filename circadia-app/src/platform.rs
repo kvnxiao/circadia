@@ -13,4 +13,3 @@ pub(crate) mod picker;
 pub(crate) mod settings_window;
 pub(crate) mod startup;
 pub(crate) mod wake;
-pub(crate) mod win_event;

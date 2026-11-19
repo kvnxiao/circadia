@@ -1,74 +1,8 @@
+use circadia_winsafe::nls::LocaleField;
+pub(crate) use circadia_winsafe::nls::prefer_ui_language;
+pub(crate) use circadia_winsafe::nls::preferred_ui_languages;
 use std::io;
-use windows_sys::Win32::datetimeapi::GetTimeFormatEx;
 use windows_sys::Win32::minwinbase::SYSTEMTIME;
-use windows_sys::Win32::winnls::GetLocaleInfoEx;
-use windows_sys::Win32::winnls::GetUserPreferredUILanguages;
-use windows_sys::Win32::winnls::LOCALE_ILZERO;
-use windows_sys::Win32::winnls::LOCALE_INEGNUMBER;
-use windows_sys::Win32::winnls::LOCALE_S1159;
-use windows_sys::Win32::winnls::LOCALE_S2359;
-use windows_sys::Win32::winnls::LOCALE_SDECIMAL;
-use windows_sys::Win32::winnls::LOCALE_SNEGATIVESIGN;
-use windows_sys::Win32::winnls::LOCALE_SSHORTTIME;
-use windows_sys::Win32::winnls::MUI_LANGUAGE_NAME;
-use windows_sys::Win32::winnls::SetProcessPreferredUILanguages;
-
-#[expect(unsafe_code, reason = "read the user's preferred UI language list")]
-pub(crate) fn preferred_ui_languages() -> io::Result<Vec<String>> {
-    let mut count = 0_u32;
-    let mut length = 0_u32;
-    // SAFETY: A null buffer with a zero length requests only the required
-    // length; both counters are writable.
-    let sized = unsafe {
-        GetUserPreferredUILanguages(
-            MUI_LANGUAGE_NAME.cast_unsigned(),
-            &raw mut count,
-            std::ptr::null_mut(),
-            &raw mut length,
-        )
-    };
-    if sized == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let mut buffer = vec![0_u16; usize::try_from(length).map_err(io::Error::other)?];
-    // SAFETY: The buffer is writable for `length` UTF-16 units, the length
-    // that the previous call reported.
-    let read = unsafe {
-        GetUserPreferredUILanguages(
-            MUI_LANGUAGE_NAME.cast_unsigned(),
-            &raw mut count,
-            buffer.as_mut_ptr(),
-            &raw mut length,
-        )
-    };
-    if read == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(buffer
-        .split(|unit| *unit == 0)
-        .filter(|name| !name.is_empty())
-        .map(String::from_utf16_lossy)
-        .collect())
-}
-
-#[expect(unsafe_code, reason = "pass a NUL-terminated language list to MUI")]
-pub(crate) fn prefer_ui_language(tag: &str) -> io::Result<()> {
-    let list: Vec<u16> = tag.encode_utf16().chain([0, 0]).collect();
-    let mut count = 0_u32;
-    // SAFETY: The list is double-NUL-terminated and outlives the call, and
-    // the count is writable.
-    if unsafe {
-        SetProcessPreferredUILanguages(
-            MUI_LANGUAGE_NAME.cast_unsigned(),
-            list.as_ptr(),
-            &raw mut count,
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ClockLayout {
@@ -86,7 +20,7 @@ const LONG_DESIGNATOR: char = '\u{e001}';
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RegionalFormat {
-    locale: Option<Vec<u16>>,
+    locale: Option<String>,
     time: String,
     am: String,
     pm: String,
@@ -125,24 +59,24 @@ impl RegionalFormat {
 
     #[cfg(test)]
     pub(crate) fn capture(locale: &str) -> io::Result<Self> {
-        Self::capture_locale(Some(locale.encode_utf16().chain(Some(0)).collect()))
+        Self::capture_locale(Some(locale.to_owned()))
     }
 
-    fn capture_locale(locale: Option<Vec<u16>>) -> io::Result<Self> {
-        let info = |kind: i32| locale_info(locale.as_deref(), kind.cast_unsigned());
+    fn capture_locale(locale: Option<String>) -> io::Result<Self> {
+        let info = |kind| circadia_winsafe::nls::locale_info(locale.as_deref(), kind);
         let number = |kind| {
             info(kind)?
                 .parse::<u32>()
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
         };
         Ok(Self {
-            time: mark_designators(&info(LOCALE_SSHORTTIME)?),
-            am: info(LOCALE_S1159)?,
-            pm: info(LOCALE_S2359)?,
-            decimal: info(LOCALE_SDECIMAL)?,
-            negative: info(LOCALE_SNEGATIVESIGN)?,
-            leading_zero: number(LOCALE_ILZERO)?,
-            negative_order: number(LOCALE_INEGNUMBER)?,
+            time: mark_designators(&info(LocaleField::ShortTime)?),
+            am: info(LocaleField::Am)?,
+            pm: info(LocaleField::Pm)?,
+            decimal: info(LocaleField::Decimal)?,
+            negative: info(LocaleField::NegativeSign)?,
+            leading_zero: number(LocaleField::LeadingZero)?,
+            negative_order: number(LocaleField::NegativeOrder)?,
             locale,
         })
     }
@@ -196,27 +130,13 @@ impl RegionalFormat {
         self.format_with(&without_minutes(&self.time), hour.saturating_mul(60))
     }
 
-    #[expect(unsafe_code, reason = "format a local SYSTEMTIME with NLS")]
     fn format_with(&self, pattern: &str, minutes: u16) -> io::Result<String> {
         let time = SYSTEMTIME {
             wHour: minutes / 60,
             wMinute: minutes % 60,
             ..SYSTEMTIME::default()
         };
-        let pattern: Vec<u16> = pattern.encode_utf16().chain(Some(0)).collect();
-        // SAFETY: The locale is null or NUL-terminated, the time and pattern
-        // outlive the call, and the buffer is writable for `length` UTF-16
-        // units.
-        let text = read_text(|buffer, length| unsafe {
-            GetTimeFormatEx(
-                self.locale_pointer(),
-                0,
-                &raw const time,
-                pattern.as_ptr(),
-                buffer,
-                length,
-            )
-        })?;
+        let text = circadia_winsafe::nls::format_time(self.locale.as_deref(), &time, pattern)?;
         let designator = if minutes < 12 * 60 {
             &self.am
         } else {
@@ -311,10 +231,6 @@ impl RegionalFormat {
             _ => (sign.to_owned(), String::new()),
         }
     }
-
-    fn locale_pointer(&self) -> *const u16 {
-        self.locale.as_ref().map_or(std::ptr::null(), Vec::as_ptr)
-    }
 }
 
 fn mark_designators(pattern: &str) -> String {
@@ -346,36 +262,6 @@ fn mark_designators(pattern: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("'")
-}
-
-#[expect(unsafe_code, reason = "read one NLS locale string into a local buffer")]
-fn locale_info(locale: Option<&[u16]>, kind: u32) -> io::Result<String> {
-    // SAFETY: The locale is null or NUL-terminated, and the buffer is
-    // writable for `length` UTF-16 units.
-    read_text(|buffer, length| unsafe {
-        GetLocaleInfoEx(
-            locale.map_or(std::ptr::null(), <[u16]>::as_ptr),
-            kind,
-            buffer,
-            length,
-        )
-    })
-}
-
-fn read_text(call: impl FnOnce(*mut u16, i32) -> i32) -> io::Result<String> {
-    let mut buffer = [0_u16; 128];
-    let written = call(
-        buffer.as_mut_ptr(),
-        i32::try_from(buffer.len()).map_err(io::Error::other)?,
-    );
-    if written == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let length = usize::try_from(written).map_err(io::Error::other)?;
-    buffer
-        .get(..length.saturating_sub(1))
-        .map(String::from_utf16_lossy)
-        .ok_or_else(|| io::Error::other("NLS reported more text than its buffer holds"))
 }
 
 #[cfg(test)]

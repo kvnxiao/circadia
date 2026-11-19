@@ -1,3 +1,5 @@
+//! Receive Windows accessibility events on the registering thread.
+
 use std::cell::RefCell;
 use std::io;
 use std::ops::RangeInclusive;
@@ -8,12 +10,17 @@ use windows_sys::Win32::winuser::SetWinEventHook;
 use windows_sys::Win32::winuser::UnhookWinEvent;
 use windows_sys::Win32::winuser::WINEVENT_OUTOFCONTEXT;
 
+/// An out-of-context accessibility event from Windows.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct WinEvent {
-    pub(crate) event: u32,
-    pub(crate) window: RawWindow,
-    pub(crate) object: i32,
-    pub(crate) child: i32,
+pub struct WinEvent {
+    /// Windows event identifier.
+    pub event: u32,
+    /// Window associated with the event.
+    pub window: RawWindow,
+    /// Accessible object identifier.
+    pub object: i32,
+    /// Accessible child identifier.
+    pub child: i32,
 }
 
 type Callback = Rc<dyn Fn(WinEvent)>;
@@ -22,18 +29,21 @@ thread_local! {
     static CALLBACKS: RefCell<Vec<(HWINEVENTHOOK, Callback)>> = const { RefCell::new(Vec::new()) };
 }
 
-pub(crate) struct WinEventHook {
+/// A hook removed on the registering thread when dropped.
+pub struct WinEventHook {
     handle: HWINEVENTHOOK,
 }
 
 impl WinEventHook {
-    // Out-of-context events arrive through the registering thread's message
-    // loop, so that thread must pump messages while it keeps the guard.
+    /// Install an out-of-context hook on the calling thread's message loop.
+    ///
+    /// # Errors
+    /// Returns the Windows error if registration fails.
     #[expect(
         unsafe_code,
         reason = "the static callback remains valid until this thread removes its hook"
     )]
-    pub(crate) fn listen(
+    pub fn listen(
         events: RangeInclusive<i32>,
         process: u32,
         thread: u32,

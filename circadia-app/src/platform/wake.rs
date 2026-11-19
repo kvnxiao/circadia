@@ -1,21 +1,12 @@
+use circadia_winsafe::sync::Event;
+use circadia_winsafe::sync::WaitEvent;
 use std::io;
-use std::os::windows::io::AsHandle;
-use std::os::windows::io::AsRawHandle;
-use std::os::windows::io::BorrowedHandle;
-use std::os::windows::io::FromRawHandle;
-use std::os::windows::io::OwnedHandle;
 use std::time::Duration;
-use windows_sys::Win32::synchapi::SetEvent;
-use windows_sys::Win32::synchapi::WaitForMultipleObjects;
-use windows_sys::Win32::winbase::INFINITE;
-use windows_sys::Win32::winbase::WAIT_FAILED;
-use windows_sys::Win32::winbase::WAIT_OBJECT_0;
-use windows_sys::Win32::winerror::WAIT_TIMEOUT;
 
 /// Wake a native worker for commands while preserving watcher notification
 /// state.
 #[derive(Debug)]
-pub struct NativeWake(OwnedHandle);
+pub struct NativeWake(Event);
 
 /// Identify the reason a native worker resumed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,30 +25,16 @@ impl NativeWake {
     ///
     /// # Errors
     /// Report failed Windows event creation.
-    #[expect(
-        unsafe_code,
-        reason = "transfer a uniquely owned winsafe event to OwnedHandle"
-    )]
     pub fn new() -> io::Result<Self> {
-        let mut event = winsafe::HEVENT::CreateEvent(None, false, false, None)
-            .map_err(|error| io::Error::from_raw_os_error(error.raw().cast_signed()))?;
-        let raw = event.leak().ptr();
-        // SAFETY: leak transfers the valid CloseHandle-owned event exactly
-        // once.
-        Ok(Self(unsafe { OwnedHandle::from_raw_handle(raw) }))
+        Event::new(false).map(Self)
     }
 
     /// Signal pending work without acquiring a lock held by the native worker.
     ///
     /// # Errors
     /// Report a failed Windows event operation.
-    #[expect(unsafe_code, reason = "signal an event owned for the entire call")]
     pub fn signal(&self) -> io::Result<()> {
-        // SAFETY: The owned event remains valid throughout this call.
-        if unsafe { SetEvent(self.0.as_raw_handle()) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
+        self.0.set()
     }
 
     /// Wait for commands, watcher readiness, or the earliest actual deadline.
@@ -70,57 +47,17 @@ impl NativeWake {
     /// # Errors
     /// Reject duplicate or excessive handles and unsupported timeouts; report
     /// failed Windows waits.
-    #[expect(unsafe_code, reason = "wait while every borrowed event remains owned")]
     pub fn wait(
         &self,
-        watchers: &[BorrowedHandle<'_>],
+        watchers: &[WaitEvent<'_>],
         timeout: Option<Duration>,
     ) -> io::Result<WakeReason> {
-        let handles: Vec<_> = std::iter::once(self.0.as_handle())
-            .chain(watchers.iter().copied())
-            .map(|handle| handle.as_raw_handle())
-            .collect();
-        if handles.len() > 64
-            || handles
-                .iter()
-                .enumerate()
-                .any(|(index, handle)| handles.iter().take(index).any(|earlier| earlier == handle))
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "wait requires distinct handles within the Windows limit",
-            ));
-        }
-        let milliseconds = match timeout {
-            Some(duration) => u32::try_from(duration.as_nanos().div_ceil(1_000_000))
-                .ok()
-                .filter(|value| *value < INFINITE)
-                .ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "wait timeout exceeds the finite Windows range",
-                    )
-                })?,
-            None => INFINITE,
-        };
-        let count = u32::try_from(handles.len())
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-        // SAFETY: The nonempty array has distinct, borrowed, live event
-        // handles. Their owners cannot drop or replace them while this
-        // call borrows them.
-        let status = unsafe { WaitForMultipleObjects(count, handles.as_ptr(), 0, milliseconds) };
-        match status {
-            value if value == WAIT_OBJECT_0.cast_unsigned() => Ok(WakeReason::Command),
-            value if value == WAIT_TIMEOUT.cast_unsigned() => Ok(WakeReason::Deadline),
-            WAIT_FAILED => Err(io::Error::last_os_error()),
-            other
-                if other > WAIT_OBJECT_0.cast_unsigned()
-                    && other - WAIT_OBJECT_0.cast_unsigned() < count =>
-            {
-                Ok(WakeReason::Observation)
-            }
-            _ => Err(io::Error::other("unexpected Windows event wait result")),
-        }
+        let handles = std::iter::once(WaitEvent::Event(&self.0)).chain(watchers.iter().copied());
+        Ok(match circadia_winsafe::sync::wait_any(handles, timeout)? {
+            Some(0) => WakeReason::Command,
+            Some(_) => WakeReason::Observation,
+            None => WakeReason::Deadline,
+        })
     }
 }
 
@@ -162,16 +99,12 @@ mod tests {
 
     #[test]
     fn manual_reset_observation_is_not_consumed_by_external_waits() {
-        let mut event = winsafe::HEVENT::CreateEvent(None, true, true, None).expect("manual event");
-        let raw = event.leak().ptr();
-        // SAFETY: The uniquely owned event transfers to OwnedHandle exactly
-        // once.
-        #[expect(unsafe_code, reason = "own the test event transferred from winsafe")]
-        let event = unsafe { OwnedHandle::from_raw_handle(raw) };
+        let event = Event::new(true).expect("manual event");
+        event.set().expect("signal observation");
         let wake = NativeWake::new().expect("command event");
         for _ in 0..2 {
             assert_eq!(
-                wake.wait(&[event.as_handle()], Some(Duration::ZERO))
+                wake.wait(&[WaitEvent::Event(&event)], Some(Duration::ZERO))
                     .expect("ready observation"),
                 WakeReason::Observation
             );
@@ -182,7 +115,7 @@ mod tests {
     fn invalid_wait_inputs_are_rejected_before_windows_access() {
         let wake = NativeWake::new().expect("event");
         assert_eq!(
-            wake.wait(&[wake.0.as_handle()], Some(Duration::ZERO))
+            wake.wait(&[WaitEvent::Event(&wake.0)], Some(Duration::ZERO))
                 .expect_err("duplicate")
                 .kind(),
             io::ErrorKind::InvalidInput

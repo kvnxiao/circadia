@@ -8,8 +8,16 @@ license.workspace = true
 description = "Safe wrappers for the Windows operations that Circadia calls without a safe dependency API"
 repository.workspace = true
 
+[features]
+test-fixtures = ["dep:windows-core", "dep:windows-future"]
+
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["ntstatus", "winternl", "winuser"] }
+windows-core = { workspace = true, optional = true }
+windows-future = { workspace = true, optional = true }
+windows-window.workspace = true
+windows-result.workspace = true
+windows-sys = { workspace = true, features = ["datetimeapi", "errhandlingapi", "minwinbase", "ntstatus", "powerbase", "realtimeapiset", "shared", "shellapi", "shlobj_core", "stringapiset", "synchapi", "timezoneapi", "verrsrc", "winbase", "windef", "winerror", "winevt", "winnls", "winnt", "winternl", "winuser", "winver", "wtsapi32"] }
+win-nightlight-watch.workspace = true
 winsafe.workspace = true
 
 [dev-dependencies]

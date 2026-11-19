@@ -9,6 +9,7 @@ license = "MIT"
 repository = "https://github.com/kvnxiao/circadia"
 
 [workspace.dependencies]
+circadia-bindings = { path = "circadia-bindings", version = "0.1.0" }
 circadia-app = { path = "circadia-app", version = "0.1.0" }
 circadia-winsafe = { path = "circadia-winsafe", version = "0.1.0" }
 fs-err = "3.3"
@@ -20,6 +21,7 @@ tempfile = "3"
 thiserror = "2.0"
 toml = "1.1"
 win-nightlight-lib = "0.5.0"
+win-nightlight-watch = "0.5.0"
 winsafe = { version = "0.0.29", features = ["user", "shell", "advapi", "gdi"] }
 windows = { git = "https://github.com/microsoft/windows-rs", rev = "dedbc8b2efb869cca8bd7e3635668c273a304c8e" }
 windows-bindgen = { git = "https://github.com/microsoft/windows-rs", rev = "dedbc8b2efb869cca8bd7e3635668c273a304c8e" }

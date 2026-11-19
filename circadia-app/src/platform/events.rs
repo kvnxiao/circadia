@@ -1,19 +1,15 @@
-use super::instance::ACTIVATE_SETTINGS;
 use super::instance::EVENT_WINDOW_TITLE;
+use circadia_winsafe::message::AppMessage;
+use circadia_winsafe::notification::PowerRegistration;
+use circadia_winsafe::notification::SessionRegistration;
 use std::fmt;
 use std::io;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
-use windows_sys::Win32::windef::HWND;
-use windows_sys::Win32::winuser::DEVICE_NOTIFY_WINDOW_HANDLE;
-use windows_sys::Win32::winuser::HPOWERNOTIFY;
 use windows_sys::Win32::winuser::PBT_APMRESUMEAUTOMATIC;
 use windows_sys::Win32::winuser::PBT_APMRESUMESUSPEND;
 use windows_sys::Win32::winuser::PBT_APMSUSPEND;
-use windows_sys::Win32::winuser::PostMessageW;
-use windows_sys::Win32::winuser::RegisterSuspendResumeNotification;
-use windows_sys::Win32::winuser::UnregisterSuspendResumeNotification;
-use windows_sys::Win32::winuser::WM_APP;
 use windows_sys::Win32::winuser::WM_CLOSE;
 use windows_sys::Win32::winuser::WM_ENDSESSION;
 use windows_sys::Win32::winuser::WM_POWERBROADCAST;
@@ -24,12 +20,8 @@ use windows_sys::Win32::winuser::WM_TIMECHANGE;
 use windows_sys::Win32::winuser::WM_WTSSESSION_CHANGE;
 use windows_sys::Win32::winuser::WTS_SESSION_LOCK;
 use windows_sys::Win32::winuser::WTS_SESSION_UNLOCK;
-use windows_sys::Win32::wtsapi32::NOTIFY_FOR_THIS_SESSION;
-use windows_sys::Win32::wtsapi32::WTSRegisterSessionNotification;
-use windows_sys::Win32::wtsapi32::WTSUnRegisterSessionNotification;
 use windows_window::Window;
-
-const WORKER_CHANGED: u32 = WM_APP.cast_unsigned() + 2;
+use winsafe::HWND;
 
 /// Identify an application-lifetime Windows event on the UI thread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,7 +57,7 @@ pub struct UiWake(Arc<Mutex<WakeTarget>>);
 
 #[derive(Debug, Default)]
 struct WakeTarget {
-    window: Option<usize>,
+    window: Option<HWND>,
     posted: bool,
 }
 
@@ -75,10 +67,6 @@ impl UiWake {
     /// # Errors
     /// Report a closed receiver, poisoned synchronization, or rejected
     /// delivery.
-    #[expect(
-        unsafe_code,
-        reason = "post pointer-free work while the window owner is live"
-    )]
     pub fn notify(&self) -> io::Result<()> {
         let mut target = self
             .0
@@ -86,13 +74,10 @@ impl UiWake {
             .map_err(|_poison| io::Error::other("UI wake lock poisoned"))?;
         let window = target
             .window
+            .as_ref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "UI receiver is closed"))?;
         if !target.posted {
-            // SAFETY: The owner cannot destroy the window while this lock is
-            // held. The asynchronous message retains no pointers.
-            if unsafe { PostMessageW(window as HWND, WORKER_CHANGED, 0, 0) } == 0 {
-                return Err(io::Error::last_os_error());
-            }
+            AppMessage::WorkerChanged.post(window)?;
             target.posted = true;
         }
         Ok(())
@@ -101,10 +86,9 @@ impl UiWake {
 
 /// Receive native lifecycle messages independently of the settings window.
 pub struct LifecycleWindow {
-    // Registrations must drop before their receiving window.
     _power: PowerRegistration,
     _session: SessionRegistration,
-    window: Window,
+    window: Rc<Window>,
     wake: UiWake,
 }
 
@@ -168,7 +152,7 @@ impl LifecycleWindow {
                 if ended {
                     return None;
                 }
-                if message == WORKER_CHANGED {
+                if message == (AppMessage::WorkerChanged as u32) {
                     match received.0.lock() {
                         Ok(mut target) => target.posted = false,
                         Err(poisoned) => poisoned.into_inner().posted = false,
@@ -183,12 +167,13 @@ impl LifecycleWindow {
             })
             .create()
             .map_err(io::Error::other)?;
-        let power = PowerRegistration::new(&window)?;
-        let session = SessionRegistration::new(&window)?;
+        let window = Rc::new(window);
+        let power = PowerRegistration::new(Rc::clone(&window))?;
+        let session = SessionRegistration::new(Rc::clone(&window))?;
         wake.0
             .lock()
             .map_err(|_poison| io::Error::other("UI wake lock poisoned"))?
-            .window = Some(window.hwnd() as usize);
+            .window = Some(super::settings_window::thread_window(window.hwnd())?);
         Ok(Self {
             _power: power,
             _session: session,
@@ -215,8 +200,12 @@ impl Drop for LifecycleWindow {
 
 fn event(message: u32, wparam: usize, taskbar: u32) -> Option<DesktopEvent> {
     match message.cast_signed() {
-        other if other == ACTIVATE_SETTINGS.cast_signed() => Some(DesktopEvent::Activate),
-        other if other == WORKER_CHANGED.cast_signed() => Some(DesktopEvent::WorkerChanged),
+        other if other == (AppMessage::ActivateSettings as u32).cast_signed() => {
+            Some(DesktopEvent::Activate)
+        }
+        other if other == (AppMessage::WorkerChanged as u32).cast_signed() => {
+            Some(DesktopEvent::WorkerChanged)
+        }
         WM_TIMECHANGE => Some(DesktopEvent::ClockChanged),
         WM_SETTINGCHANGE | WM_SYSCOLORCHANGE => Some(DesktopEvent::SettingsChanged),
         WM_WTSSESSION_CHANGE => match i32::try_from(wparam).ok()? {
@@ -235,90 +224,18 @@ fn event(message: u32, wparam: usize, taskbar: u32) -> Option<DesktopEvent> {
     }
 }
 
-struct PowerRegistration(HPOWERNOTIFY);
-
-impl PowerRegistration {
-    #[expect(
-        unsafe_code,
-        reason = "register a live window for native power messages"
-    )]
-    fn new(window: &Window) -> io::Result<Self> {
-        // SAFETY: The owner keeps this window alive until the registration
-        // drops.
-        let registration = unsafe {
-            RegisterSuspendResumeNotification(
-                window.hwnd(),
-                DEVICE_NOTIFY_WINDOW_HANDLE.cast_unsigned(),
-            )
-        };
-        if registration.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(Self(registration))
-    }
-}
-
-impl Drop for PowerRegistration {
-    #[expect(unsafe_code, reason = "release a uniquely owned power registration")]
-    fn drop(&mut self) {
-        // SAFETY: The registration and its receiving window are still live.
-        unsafe { UnregisterSuspendResumeNotification(self.0) };
-    }
-}
-
-struct SessionRegistration(HWND);
-
-impl SessionRegistration {
-    #[expect(
-        unsafe_code,
-        reason = "register a live window for its own session messages"
-    )]
-    fn new(window: &Window) -> io::Result<Self> {
-        // SAFETY: The owner unregisters before destroying the receiving window.
-        if unsafe {
-            WTSRegisterSessionNotification(
-                window.hwnd().cast(),
-                NOTIFY_FOR_THIS_SESSION.cast_unsigned(),
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(Self(window.hwnd().cast()))
-    }
-}
-
-impl Drop for SessionRegistration {
-    #[expect(unsafe_code, reason = "release a uniquely owned session registration")]
-    fn drop(&mut self) {
-        // SAFETY: The registered window is still live and this runs on its
-        // thread.
-        unsafe { WTSUnRegisterSessionNotification(self.0) };
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use circadia_winsafe::message::Message;
+    use circadia_winsafe::message::PowerEvent;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use windows_sys::Win32::winuser::SendMessageW;
-
-    #[expect(
-        unsafe_code,
-        reason = "send pointer-free test messages to an owned hidden window"
-    )]
-    fn send(window: &LifecycleWindow, message: i32, wparam: usize) -> isize {
-        // SAFETY: The target lives on this thread, and both parameters are
-        // values.
-        unsafe {
-            SendMessageW(
-                window.window.hwnd().cast(),
-                message.cast_unsigned(),
-                wparam,
-                0,
-            )
-        }
+    fn send(window: &LifecycleWindow, message: Message) -> usize {
+        let hwnd = super::super::settings_window::thread_window(window.window.hwnd())
+            .expect("hidden window");
+        circadia_winsafe::message::send(&hwnd, message, std::time::Duration::from_secs(1))
+            .expect("message delivery")
     }
 
     #[test]
@@ -336,12 +253,12 @@ mod tests {
             move || cleanup.borrow_mut().push("cleanup completed"),
         )
         .expect("hidden lifecycle window");
-        assert_eq!(send(&window, WM_QUERYENDSESSION, 0), 1);
-        assert_eq!(send(&window, WM_ENDSESSION, 0), 0);
+        assert_eq!(send(&window, Message::QueryEndSession), 1);
+        assert_eq!(send(&window, Message::EndSession { ending: false }), 0);
         assert!(operations.borrow().is_empty());
-        assert_eq!(send(&window, WM_ENDSESSION, 1), 0);
+        assert_eq!(send(&window, Message::EndSession { ending: true }), 0);
         assert_eq!(*operations.borrow(), ["cleanup completed", "session ended"]);
-        send(&window, WM_ENDSESSION, 1);
+        send(&window, Message::EndSession { ending: true });
         assert_eq!(operations.borrow().len(), 2);
     }
 
@@ -355,21 +272,15 @@ mod tests {
             || {},
         )
         .expect("hidden lifecycle window");
-        send(&window, ACTIVATE_SETTINGS.cast_signed(), 0);
-        send(&window, WM_TIMECHANGE, 0);
-        send(&window, WM_SYSCOLORCHANGE, 0);
-        send(&window, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK as usize);
-        send(&window, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK as usize);
-        send(&window, WM_POWERBROADCAST, PBT_APMSUSPEND as usize);
-        send(&window, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC as usize);
-        send(&window, WM_POWERBROADCAST, PBT_APMRESUMESUSPEND as usize);
-        send(
-            &window,
-            winsafe::RegisterWindowMessage("TaskbarCreated")
-                .expect("taskbar message")
-                .cast_signed(),
-            0,
-        );
+        send(&window, Message::App(AppMessage::ActivateSettings));
+        send(&window, Message::TimeChange);
+        send(&window, Message::SystemColorChange);
+        send(&window, Message::SessionLock);
+        send(&window, Message::SessionUnlock);
+        send(&window, Message::Power(PowerEvent::Suspend));
+        send(&window, Message::Power(PowerEvent::ResumeAutomatic));
+        send(&window, Message::Power(PowerEvent::ResumeSuspend));
+        send(&window, Message::TaskbarCreated);
         assert_eq!(
             *events.borrow(),
             [

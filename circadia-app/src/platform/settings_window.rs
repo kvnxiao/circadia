@@ -1,4 +1,4 @@
-use crate::platform::win_event::WinEventHook;
+use circadia_winsafe::win_event::WinEventHook;
 use std::io;
 use std::path::Path;
 use windows_reactor::WindowHandle;
@@ -43,15 +43,19 @@ pub(crate) fn open_page(target: &str) -> io::Result<()> {
 }
 
 pub(crate) fn native_window(window: &WindowHandle<'_>) -> io::Result<winsafe::HWND> {
+    thread_window(window.as_raw())
+}
+
+pub(super) fn thread_window(raw: *mut std::ffi::c_void) -> io::Result<winsafe::HWND> {
     let mut found = None;
     winsafe::EnumThreadWindows(winsafe::GetCurrentThreadId(), |candidate| {
-        if candidate.ptr() == window.as_raw() {
+        if candidate.ptr() == raw {
             found = Some(candidate);
         }
         true
     })
     .map_err(io::Error::other)?;
-    found.ok_or_else(|| io::Error::other("settings window is unavailable"))
+    found.ok_or_else(|| io::Error::other("window is unavailable"))
 }
 
 pub(crate) fn dpi(window: &WindowHandle<'_>) -> u32 {

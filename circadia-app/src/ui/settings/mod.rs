@@ -573,7 +573,7 @@ pub(super) struct Settings {
     visibility: Visibility,
     dpi: u32,
     icon_requests: apps::IconRequests,
-    _minimize_events: Option<crate::platform::win_event::WinEventHook>,
+    _minimize_events: Option<circadia_winsafe::win_event::WinEventHook>,
     consent: Option<Consent>,
     dialog: Option<apps::AddDialog>,
     title_dialog: Option<apps::TitleDialog>,
@@ -1533,7 +1533,7 @@ impl Drop for Settings {
 }
 
 pub(super) fn configure_background() -> windows_core::Result<()> {
-    use super::composition::bindings as api;
+    use circadia_bindings as api;
     use windows_core::Interface;
 
     let resources = api::XamlReader::Load(

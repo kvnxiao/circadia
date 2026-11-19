@@ -92,7 +92,7 @@ impl NativeBackend for Scripted {
         }
     }
 
-    fn handles(&self) -> Vec<BorrowedHandle<'_>> {
+    fn handles(&self) -> Vec<WaitEvent<'_>> {
         Vec::new()
     }
 

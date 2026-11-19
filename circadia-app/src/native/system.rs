@@ -7,9 +7,8 @@ use super::TemperatureMode;
 use crate::DiagnosticCategory;
 use crate::DiagnosticFailure;
 use crate::DiagnosticOperation;
+use circadia_winsafe::sync::WaitEvent;
 use std::error::Error;
-use std::os::windows::io::AsHandle;
-use std::os::windows::io::BorrowedHandle;
 #[cfg(feature = "output-measurement")]
 use std::time::Instant;
 use win_nightlight_lib::ColorTemperature;
@@ -75,11 +74,11 @@ impl NativeBackend for SystemBackend {
         report
     }
 
-    fn handles(&self) -> Vec<BorrowedHandle<'_>> {
+    fn handles(&self) -> Vec<WaitEvent<'_>> {
         self.settings
             .iter()
             .chain(self.state.iter())
-            .map(AsHandle::as_handle)
+            .map(WaitEvent::Watcher)
             .collect()
     }
 

@@ -1,5 +1,6 @@
 //! Validate Circadia settings and provide application domain logic.
 
+#![forbid(unsafe_code)]
 #[cfg(all(windows, feature = "graph-measurement"))]
 mod activity;
 pub mod automation_id;
@@ -111,6 +112,7 @@ pub use controller::OutputRate;
 pub use controller::OutputTarget;
 #[cfg(windows)]
 pub use controller::OutputUpdate;
+pub use controller::PreviewSelection;
 #[cfg(windows)]
 pub use controller::Recompute;
 #[cfg(windows)]

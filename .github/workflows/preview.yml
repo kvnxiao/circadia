@@ -13,7 +13,9 @@ on:
       - .github/workflows/ci.yml
       - .github/workflows/release.yml
       - circadia-harness/**
-      - circadia-bindings/**
+      - circadia-bindings/api.txt
+      - circadia-bindings/src/main.rs
+      - circadia-bindings/README.md
 
 permissions:
   contents: read

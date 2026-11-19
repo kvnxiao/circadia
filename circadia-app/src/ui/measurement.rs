@@ -1,6 +1,6 @@
 use crate::Config;
 use crate::Native;
-use crate::ui::composition::bindings as api;
+use circadia_bindings as api;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -90,7 +90,7 @@ pub struct SettingsMeasurement {
 }
 
 impl GraphMeasurement {
-    /// Return the latest Preview command's queue-admission time.
+    /// Return the selection time of the latest Preview admitted to the queue.
     ///
     /// # Errors
     /// Report poisoned measurement synchronization.

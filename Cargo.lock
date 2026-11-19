@@ -390,6 +390,8 @@ dependencies = [
 name = "circadia-app"
 version = "0.1.0"
 dependencies = [
+ "circadia-bindings",
+ "circadia-winsafe",
  "embed-resource",
  "fluent-bundle",
  "fluent-pseudo",
@@ -399,6 +401,7 @@ dependencies = [
  "i18n-embed-fl",
  "ico",
  "jiff",
+ "os-memlock",
  "png",
  "regex",
  "resvg",
@@ -418,16 +421,13 @@ dependencies = [
  "win-nightlight-watch",
  "windows 0.100.0",
  "windows-canvas",
- "windows-collections 0.101.0",
  "windows-composition",
  "windows-core 0.101.0",
  "windows-future 0.101.0",
- "windows-numerics 0.101.0",
  "windows-reactor",
  "windows-reactor-setup",
  "windows-result 0.100.1",
  "windows-sys 0.100.0",
- "windows-time",
  "windows-version",
  "windows-window",
  "winsafe",
@@ -441,6 +441,10 @@ dependencies = [
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
  "windows-bindgen",
+ "windows-collections 0.101.0",
+ "windows-core 0.101.0",
+ "windows-numerics 0.101.0",
+ "windows-time",
 ]
 
 [[package]]
@@ -474,7 +478,12 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "syn 2.0.119",
+ "win-nightlight-watch",
+ "windows-core 0.101.0",
+ "windows-future 0.101.0",
+ "windows-result 0.100.1",
  "windows-sys 0.100.0",
+ "windows-window",
  "winsafe",
 ]
 
@@ -1900,6 +1909,16 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "os-memlock"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3aa44f4e322c4388383b6fb5a6808bbfd4446edc3737e2b27903a620a0414242"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

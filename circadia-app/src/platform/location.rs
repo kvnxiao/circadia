@@ -94,41 +94,12 @@ fn failure(error: &windows::core::Error) -> DiagnosticFailure {
 }
 
 #[cfg(test)]
-#[expect(
-    unsafe_code,
-    clippy::inline_always,
-    reason = "generated COM interface for the cancellation test"
-)]
 mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
     use test_case::test_case;
-    use windows_future::AsyncStatus;
-    use windows_future::IAsyncInfo_Impl;
-
-    #[windows::core::implement(IAsyncInfo)]
-    struct Cancellation(Arc<AtomicUsize>);
-
-    impl IAsyncInfo_Impl for Cancellation_Impl {
-        fn Id(&self) -> windows::core::Result<u32> {
-            Ok(1)
-        }
-        fn Status(&self) -> windows::core::Result<AsyncStatus> {
-            Ok(AsyncStatus::Started)
-        }
-        fn ErrorCode(&self) -> windows::core::Result<windows::core::HRESULT> {
-            Ok(windows::core::HRESULT(0))
-        }
-        fn Cancel(&self) -> windows::core::Result<()> {
-            self.0.fetch_add(1, Ordering::Relaxed);
-            Ok(())
-        }
-        fn Close(&self) -> windows::core::Result<()> {
-            Ok(())
-        }
-    }
 
     #[test_case(AppCapabilityAccessStatus::Allowed, None)]
     #[test_case(
@@ -176,7 +147,9 @@ mod tests {
     #[test]
     fn dropping_request_asks_windows_to_cancel_once() {
         let cancelled = Arc::new(AtomicUsize::new(0));
-        let request = Request(Cancellation(cancelled.clone()).into());
+        let request = Request(circadia_winsafe::test_support::counting_cancellation(
+            cancelled.clone(),
+        ));
         drop(request);
         assert_eq!(cancelled.load(Ordering::Relaxed), 1);
     }

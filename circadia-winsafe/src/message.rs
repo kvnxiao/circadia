@@ -2,19 +2,34 @@
 
 use std::io;
 use std::time::Duration;
-use windows_sys::Win32::winuser::PBT_APMRESUMEAUTOMATIC;
-use windows_sys::Win32::winuser::PBT_APMRESUMESUSPEND;
-use windows_sys::Win32::winuser::PBT_APMSUSPEND;
-use windows_sys::Win32::winuser::SMTO_ABORTIFHUNG;
-use windows_sys::Win32::winuser::SendMessageTimeoutW;
-use windows_sys::Win32::winuser::WM_CLOSE;
-use windows_sys::Win32::winuser::WM_ENDSESSION;
-use windows_sys::Win32::winuser::WM_POWERBROADCAST;
-use windows_sys::Win32::winuser::WM_QUERYENDSESSION;
-use windows_sys::Win32::winuser::WM_TIMECHANGE;
-use windows_sys::Win32::winuser::WM_WTSSESSION_CHANGE;
-use windows_sys::Win32::winuser::WTS_SESSION_LOCK;
 use winsafe::HWND;
+use winsafe::co;
+use winsafe::msg::Wm;
+
+/// Circadia's private window messages, each with zero parameters.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppMessage {
+    /// Ask the running instance to open settings.
+    ActivateSettings = co::WM::APP.raw() + 1,
+    /// Notify the event receiver that worker results are available.
+    WorkerChanged = co::WM::APP.raw() + 2,
+}
+
+impl AppMessage {
+    /// Post the message for asynchronous delivery.
+    ///
+    /// # Errors
+    /// Returns the Windows error if posting fails.
+    #[expect(unsafe_code, reason = "post a private message with zero parameters")]
+    pub fn post(self, window: &HWND) -> io::Result<()> {
+        let message = Wm::new(dynamic_message_id(self as u32), 0, 0);
+        // SAFETY: Both private messages have zero parameters. Posting them
+        // borrows no memory.
+        unsafe { window.PostMessage(message) }
+            .map_err(|error| io::Error::from_raw_os_error(error.raw().cast_signed()))
+    }
+}
 
 /// Window message that passes only integer parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +49,12 @@ pub enum Message {
     TimeChange,
     /// `WM_WTSSESSION_CHANGE` for a session lock.
     SessionLock,
+    /// A private application message.
+    App(AppMessage),
+    /// The system colors changed.
+    SystemColorChange,
+    /// The session unlocked.
+    SessionUnlock,
     /// The registered `TaskbarCreated` message that Explorer sends after it
     /// restarts.
     TaskbarCreated,
@@ -48,6 +69,16 @@ pub enum PowerEvent {
     ResumeSuspend,
     /// `PBT_APMRESUMEAUTOMATIC`.
     ResumeAutomatic,
+}
+
+#[expect(
+    unsafe_code,
+    reason = "winsafe requires a typed ID for private and registered messages"
+)]
+fn dynamic_message_id(id: u32) -> co::WM {
+    // SAFETY: Callers pass an AppMessage ID or a successful
+    // RegisterWindowMessage result.
+    unsafe { co::WM::from_raw(id) }
 }
 
 /// Send `message` to `window` and return the window procedure's result.
@@ -67,49 +98,43 @@ pub enum PowerEvent {
 )]
 pub fn send(window: &HWND, message: Message, timeout: Duration) -> io::Result<usize> {
     let (id, parameter) = match message {
-        Message::Close => (WM_CLOSE.cast_unsigned(), 0),
-        Message::QueryEndSession => (WM_QUERYENDSESSION.cast_unsigned(), 0),
-        Message::EndSession { ending } => (WM_ENDSESSION.cast_unsigned(), usize::from(ending)),
+        Message::Close => (co::WM::CLOSE, 0),
+        Message::QueryEndSession => (co::WM::QUERYENDSESSION, 0),
+        Message::EndSession { ending } => (co::WM::ENDSESSION, usize::from(ending)),
         Message::Power(event) => (
-            WM_POWERBROADCAST.cast_unsigned(),
+            co::WM::POWERBROADCAST,
             match event {
-                PowerEvent::Suspend => PBT_APMSUSPEND,
-                PowerEvent::ResumeSuspend => PBT_APMRESUMESUSPEND,
-                PowerEvent::ResumeAutomatic => PBT_APMRESUMEAUTOMATIC,
+                PowerEvent::Suspend => co::PBT::APMSUSPEND,
+                PowerEvent::ResumeSuspend => co::PBT::APMRESUMESUSPEND,
+                PowerEvent::ResumeAutomatic => co::PBT::APMRESUMEAUTOMATIC,
             }
-            .cast_unsigned() as usize,
+            .raw() as usize,
         ),
-        Message::TimeChange => (WM_TIMECHANGE.cast_unsigned(), 0),
+        Message::TimeChange => (co::WM::TIMECHANGE, 0),
         Message::SessionLock => (
-            WM_WTSSESSION_CHANGE.cast_unsigned(),
-            WTS_SESSION_LOCK as usize,
+            co::WM::WTSSESSION_CHANGE,
+            usize::from(co::WTS::SESSION_LOCK.raw()),
+        ),
+        Message::App(message) => (dynamic_message_id(message as u32), 0),
+        Message::SystemColorChange => (co::WM::SYSCOLORCHANGE, 0),
+        Message::SessionUnlock => (
+            co::WM::WTSSESSION_CHANGE,
+            usize::from(co::WTS::SESSION_UNLOCK.raw()),
         ),
         Message::TaskbarCreated => (
-            winsafe::RegisterWindowMessage("TaskbarCreated").map_err(io::Error::other)?,
+            dynamic_message_id(
+                winsafe::RegisterWindowMessage("TaskbarCreated").map_err(io::Error::other)?,
+            ),
             0,
         ),
     };
+    let message = Wm::new(id, parameter, 0);
     let timeout = u32::try_from(timeout.as_millis()).map_err(io::Error::other)?;
-    let mut result = 0;
-    // SAFETY: Every `Message` passes an integer `wParam` and a zero `lParam`,
-    // so the receiver does not get a pointer into this process. `result`
-    // stays writable for this synchronous call, including on timeout.
-    let delivered = unsafe {
-        SendMessageTimeoutW(
-            window.ptr().cast(),
-            id,
-            parameter,
-            0,
-            SMTO_ABORTIFHUNG.cast_unsigned(),
-            timeout,
-            &raw mut result,
-        )
-    };
-    if delivered == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(result)
-    }
+    // SAFETY: Every allowed message passes an integer wParam and a zero lParam.
+    // The receiver cannot retain a pointer into the sender.
+    unsafe { window.SendMessageTimeout(message, co::SMTO::ABORTIFHUNG, timeout) }
+        .map(isize::cast_unsigned)
+        .map_err(|error| io::Error::from_raw_os_error(error.raw().cast_signed()))
 }
 
 #[cfg(test)]

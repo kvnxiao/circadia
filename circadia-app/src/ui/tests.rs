@@ -4,7 +4,7 @@ use crate::NativeSettings;
 use crate::ObservationMode;
 use crate::TemperatureMode;
 use crate::native::NativeBackend;
-use std::os::windows::io::BorrowedHandle;
+use circadia_winsafe::sync::WaitEvent;
 use std::time::Instant;
 use win_nightlight_lib::ColorTemperature;
 
@@ -46,21 +46,11 @@ fn run_child(test: &str) -> ChildRun {
 
 fn child_directory() -> Option<PathBuf> {
     let directory = std::env::var_os(PANIC_CHILD_DIRECTORY).map(PathBuf::from)?;
-    suppress_crash_reporting();
+    os_memlock::set_windows_error_mode(
+        os_memlock::SEM_FAILCRITICALERRORS | os_memlock::SEM_NOGPFAULTERRORBOX,
+    )
+    .expect("disable Windows fault dialogs in the crash-test child");
     Some(directory)
-}
-
-#[expect(
-    unsafe_code,
-    reason = "keep the intentional child abort out of Windows Error Reporting"
-)]
-fn suppress_crash_reporting() {
-    use windows_sys::Win32::errhandlingapi::SetErrorMode;
-    use windows_sys::Win32::winbase::SEM_FAILCRITICALERRORS;
-    use windows_sys::Win32::winbase::SEM_NOGPFAULTERRORBOX;
-    // SAFETY: SetErrorMode changes only this child process's error mode
-    // and takes no pointers.
-    unsafe { SetErrorMode((SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX).cast_unsigned()) };
 }
 
 fn crash_record(run: &ChildRun) -> &str {
@@ -185,7 +175,7 @@ fn a_controller_thread_panic_ends_without_a_cleanup_request() {
 fn an_unhandled_native_exception_records_its_code_and_module() {
     if let Some(directory) = child_directory() {
         start_log(&directory, false).expect("child log");
-        raise_native_exception();
+        circadia_winsafe::test_support::raise_native_exception();
         return;
     }
     let run = run_child("ui::tests::an_unhandled_native_exception_records_its_code_and_module");
@@ -406,19 +396,6 @@ fn a_reused_icon_reply_after_pruning_triggers_a_fresh_icon_read(reload: bool) {
         .expect("fresh icon reply");
     desktop.receive_files();
     assert_eq!(desktop.icons.view().apps.get(&path), Some(&images));
-}
-
-#[expect(
-    unsafe_code,
-    reason = "raise a native exception that no handler catches"
-)]
-fn raise_native_exception() {
-    // SAFETY: The exception has no arguments, so the argument pointer may
-    // be null; the call does not return because no handler
-    // continues it.
-    unsafe {
-        windows_sys::Win32::errhandlingapi::RaiseException(0xE000_0001, 0, 0, std::ptr::null());
-    };
 }
 
 #[test]
@@ -1377,6 +1354,104 @@ fn a_tray_toggle_while_saving_is_paused_changes_nothing() {
 }
 
 #[test]
+fn a_controller_failure_closes_settings_and_reports_the_worker_error() {
+    let (directory, mut desktop) = desktop_with(None);
+    crate::log::run::begin(directory.path(), "circadia.exe");
+    desktop.set_settings_open(true);
+    let (notify, notified) = std::sync::mpsc::channel();
+    let fail = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let fail_worker = Arc::clone(&fail);
+    let controller = ControllerWorker::with_native(
+        "circadia.exe",
+        None,
+        move || {
+            let failing = fail_worker.load(std::sync::atomic::Ordering::Acquire);
+            notify.send(()).map_err(io::Error::other)?;
+            if failing {
+                return Err(io::Error::other("injected publication failure"));
+            }
+            Ok(())
+        },
+        crate::Native::with_backend(RecordingBackend(directory.path().join("native-calls.txt"))),
+        || crate::Foreground::Unknown,
+    )
+    .expect("controller");
+    let client = controller.client();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    notified
+        .recv_timeout(Duration::from_secs(5))
+        .expect("controller started");
+    assert!(desktop.accepts_message(&Message::Open, client.is_stopping()));
+    fail.store(true, std::sync::atomic::Ordering::Release);
+    client.submit(ControllerCommand::Lock).expect("wake worker");
+    while !client.is_finished() {
+        notified
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("worker exit notification");
+    }
+    assert!(!desktop.accepts_message(&Message::Edit(Vec::new()), client.is_stopping()));
+    assert!(desktop.exiting);
+    assert!(!desktop.exit_ready());
+    assert!(desktop.accepts_message(&Message::Closed, client.is_stopping()));
+    desktop.settings_closed();
+    assert!(desktop.exit_ready());
+    let runtime = Runtime {
+        controller,
+        directory: directory.path().to_owned(),
+    };
+    let error = runtime.shutdown(ExitKind::Quit).expect_err("worker failed");
+    assert_eq!(error.to_string(), "injected publication failure");
+    assert!(directory.path().join("logs/run.marker").exists());
+}
+
+#[test]
+fn a_calculation_worker_failure_preserves_the_abnormal_run_marker() {
+    let directory = tempfile::tempdir().expect("fixture directory");
+    crate::log::run::begin(directory.path(), "circadia.exe");
+    let (failed, notification) = std::sync::mpsc::channel();
+    let controller = ControllerWorker::with_native(
+        "circadia.exe",
+        None,
+        move || {
+            if std::thread::current().name() == Some("circadia-calculation") {
+                failed.send(()).map_err(io::Error::other)?;
+                return Err(io::Error::other(
+                    "injected calculation notification failure",
+                ));
+            }
+            Ok(())
+        },
+        crate::Native::with_backend(RecordingBackend(directory.path().join("native-calls.txt"))),
+        || crate::Foreground::Unknown,
+    )
+    .expect("controller");
+    controller
+        .client()
+        .calculations()
+        .submit(crate::CalculationRequest {
+            config: crate::Config::default(),
+            at: jiff::Timestamp::now(),
+            purpose: crate::CalculationPurpose::Schedule,
+        })
+        .expect("request calculation");
+    notification
+        .recv_timeout(Duration::from_secs(5))
+        .expect("calculation completed");
+    let runtime = Runtime {
+        controller,
+        directory: directory.path().to_owned(),
+    };
+    let error = runtime
+        .shutdown(ExitKind::Quit)
+        .expect_err("calculation failed");
+    assert_eq!(
+        error.to_string(),
+        "injected calculation notification failure"
+    );
+    assert!(directory.path().join("logs/run.marker").exists());
+}
+
+#[test]
 fn exit_waits_for_open_settings_to_close() {
     let (_directory, mut desktop) = desktop_with(None);
     desktop.set_settings_open(true);
@@ -1445,7 +1520,7 @@ impl NativeBackend for RecordingBackend {
         NativeNotifications::default()
     }
 
-    fn handles(&self) -> Vec<BorrowedHandle<'_>> {
+    fn handles(&self) -> Vec<WaitEvent<'_>> {
         Vec::new()
     }
 

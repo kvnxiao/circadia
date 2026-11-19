@@ -2,7 +2,7 @@ use crate::ExecutablePath;
 use crate::Foreground;
 use crate::PreviousWindow;
 use crate::normalize_executable;
-use crate::platform::win_event::WinEventHook;
+use circadia_winsafe::win_event::WinEventHook;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io;
