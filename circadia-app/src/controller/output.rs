@@ -258,6 +258,8 @@ pub struct OutputDeadlines {
     pub cleanup: Option<Duration>,
     /// Indicate that the changing request is a required discrete application.
     pub discrete: bool,
+    /// Earliest required preview setup, independent of the output ceiling.
+    pub setup: Option<Duration>,
 }
 
 /// Select due outputs while preserving fade and playback deadlines.
@@ -505,11 +507,8 @@ impl TemperatureOutput {
             let boundary = target.preview_boundary(now)?;
             if expected {
                 deadlines.cleanup = minimum(deadlines.cleanup, boundary);
-            } else if let Some(boundary) = boundary
-                && deadlines.change.is_none_or(|change| boundary < change)
-            {
-                deadlines.change = Some(boundary);
-                deadlines.discrete = true;
+            } else {
+                deadlines.setup = boundary;
             }
         } else if self.held {
             deadlines.cleanup = Some(now.elapsed);

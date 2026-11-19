@@ -138,11 +138,12 @@ impl NativeDriver {
                 .map_err(|_error| ControlError::timing())?
                 .ok_or_else(ControlError::timing)?;
             let eligible = self.rate.eligible(now.output.elapsed, hertz)?;
-            deadlines.output = if output.discrete {
+            let change = if output.discrete {
                 output.change
             } else {
                 output.change.map(|change| change.max(eligible))
             };
+            deadlines.output = change.into_iter().chain(output.setup).min();
             if self.correction {
                 deadlines.output = Some(deadlines.output.map_or(eligible, |due| due.min(eligible)));
             }

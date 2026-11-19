@@ -27,6 +27,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
+use test_case::test_case;
 use win_nightlight_lib::ColorTemperature;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1199,8 +1200,46 @@ fn previewing_3000_k() -> Fixture {
     fixture
 }
 
-#[test]
-fn preview_starts_each_changing_segment_at_once_and_rate_limits_its_later_steps() {
+#[test_case(
+    [(-1440, 2300), (60, 2300), (90, 3400), (150, 3400), (270, 5400), (1800, 5400)],
+    &[
+        (1000, Call::Temperature(2300, TemperatureMode::Apply)),
+        (2000, Call::Temperature(2300, TemperatureMode::Hold)),
+        (2500, Call::Cleanup),
+        (3000, Call::Temperature(3400, TemperatureMode::Set)),
+        (3500, Call::Temperature(3400, TemperatureMode::Hold)),
+        (4500, Call::Temperature(4400, TemperatureMode::Hold)),
+    ];
+    "after a constant segment longer than the rate interval"
+)]
+#[test_case(
+    [(-1440, 2300), (60, 2300), (90, 3400), (96, 3400), (246, 5400), (1800, 5400)],
+    &[
+        (1000, Call::Temperature(2300, TemperatureMode::Apply)),
+        (2000, Call::Temperature(2300, TemperatureMode::Hold)),
+        (2500, Call::Cleanup),
+        (2600, Call::Temperature(3400, TemperatureMode::Hold)),
+        (3600, Call::Temperature(4200, TemperatureMode::Hold)),
+        (4600, Call::Temperature(5000, TemperatureMode::Hold)),
+    ];
+    "after a constant segment shorter than the rate interval"
+)]
+#[test_case(
+    [(-1440, 2300), (60, 2300), (90, 3400), (96, 3400), (102, 3600), (1800, 3600)],
+    &[
+        (1000, Call::Temperature(2300, TemperatureMode::Apply)),
+        (2000, Call::Temperature(2300, TemperatureMode::Hold)),
+        (2500, Call::Cleanup),
+        (2600, Call::Temperature(3400, TemperatureMode::Hold)),
+        (2700, Call::Cleanup),
+        (3600, Call::Temperature(3600, TemperatureMode::Set)),
+    ];
+    "when the changing segment ends within the rate interval"
+)]
+fn preview_starts_each_changing_segment_at_once_and_rate_limits_its_later_steps(
+    targets: [(i64, u16); 6],
+    expected: &[(u64, Call)],
+) {
     let mut fixture = Fixture::with_config(
         ConfigInput {
             output_rate_hz: 1,
@@ -1215,40 +1254,23 @@ fn preview_starts_each_changing_segment_at_once_and_rate_limits_its_later_steps(
         Timestamp::from_millisecond(1000 + minutes * 60_000).expect("Preview curve instant")
     };
     let curve = Curve::new(
-        [
-            (-1440, 2300),
-            (60, 2300),
-            (90, 3400),
-            (150, 3400),
-            (270, 5400),
-            (1800, 5400),
-        ]
-        .into_iter()
-        .map(|(minutes, kelvin)| Target {
-            instant: minutes_after_start(minutes),
-            kelvin,
-        })
-        .collect(),
-        120,
+        targets
+            .into_iter()
+            .map(|(minutes, kelvin)| Target {
+                instant: minutes_after_start(minutes),
+                kelvin,
+            })
+            .collect(),
+        180,
     )
-    .expect("curve with a 30-minute and a two-hour transition");
+    .expect("curve with two transitions of at most three hours");
     start_preview(&mut fixture, 1000, curve);
     let writes: Vec<_> = fixture
         .run(1000, 5000)
         .into_iter()
         .filter(|(_, call)| matches!(call, Call::Temperature(..) | Call::Cleanup))
         .collect();
-    assert_eq!(
-        writes,
-        [
-            (1000, Call::Temperature(2300, TemperatureMode::Apply)),
-            (2000, Call::Temperature(2300, TemperatureMode::Hold)),
-            (2500, Call::Cleanup),
-            (3000, Call::Temperature(3400, TemperatureMode::Set)),
-            (3500, Call::Temperature(3400, TemperatureMode::Hold)),
-            (4500, Call::Temperature(4400, TemperatureMode::Hold)),
-        ]
-    );
+    assert_eq!(writes, expected);
 }
 
 fn assert_fades_from_3000_k(fixture: &mut Fixture) {

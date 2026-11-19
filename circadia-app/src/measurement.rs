@@ -195,6 +195,7 @@ impl Records {
             .change
             .map(|due| (due, deadlines.discrete))
             .into_iter()
+            .chain(deadlines.setup.map(|due| (due, true)))
             .chain(correction.map(|due| (due, false)));
         let mut first = None;
         for (due, discrete) in candidates {
@@ -652,6 +653,29 @@ mod tests {
         let attempt = records.attempt.expect("correlated attempt");
         assert_eq!(attempt.eligible, Duration::from_nanos(eligible));
         assert_eq!(attempt.discrete, discrete);
+        assert!(records.error.is_none(), "{:?}", records.error);
+    }
+
+    #[test]
+    fn preview_setup_precedes_a_rate_limited_change() {
+        let mut records = Records {
+            last_attempt: Some(Duration::from_millis(100)),
+            last_call: Duration::from_millis(101),
+            ..Records::default()
+        };
+        records.begin_due(
+            Duration::from_millis(102),
+            OutputDeadlines {
+                change: Some(Duration::from_millis(101)),
+                setup: Some(Duration::from_millis(102)),
+                ..OutputDeadlines::default()
+            },
+            None,
+            240,
+        );
+        let attempt = records.attempt.expect("correlated attempt");
+        assert_eq!(attempt.due, Duration::from_millis(102));
+        assert!(attempt.discrete);
         assert!(records.error.is_none(), "{:?}", records.error);
     }
 
