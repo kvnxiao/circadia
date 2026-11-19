@@ -1122,64 +1122,71 @@ fn quit_fades_to_6500_k_over_the_default_duration_before_cleanup_and_off() {
     assert_eq!(fixture.take_calls(), [Call::Cleanup, Call::Activate(false)]);
 }
 
-fn previewing_3000_k() -> Fixture {
-    let mut fixture = at_kelvin(3400);
+const PREVIEW_VALID: TimeInterval = TimeInterval {
+    start: Timestamp::constant(-86_400, 0),
+    end: Timestamp::constant(172_800, 0),
+};
+
+fn start_preview(fixture: &mut Fixture, milliseconds: u64, curve: Curve) {
     let request = fixture
         .driver
         .runtime_mut()
-        .preview_request(at(100).output, at(100))
+        .preview_request(at(milliseconds).output, at(milliseconds))
         .expect("Preview available");
     let mut zone = WindowsZone::named("UTC", false).expect("UTC");
     let playback =
         Arc::new(Playback::capture(&request.config, &mut zone, request.at).expect("playback"));
-    let valid = TimeInterval {
-        start: Timestamp::from_second(-86_400).expect("start"),
-        end: Timestamp::from_second(172_800).expect("end"),
-    };
-    let curve = Arc::new(
-        Curve::new(
-            vec![
-                Target {
-                    instant: valid.start,
-                    kelvin: 3000,
-                },
-                Target {
-                    instant: valid.end,
-                    kelvin: 3000,
-                },
-            ],
-            60,
-        )
-        .expect("curve"),
-    );
-    fixture.driver.runtime_mut().expect_calculation(2);
+    fixture.revision += 1;
+    fixture
+        .driver
+        .runtime_mut()
+        .expect_calculation(fixture.revision);
     fixture
         .driver
         .runtime_mut()
         .calculated(
             Arc::new(CalculationResult {
-                revision: 2,
+                revision: fixture.revision,
                 request,
                 result: Ok(CalculatedSchedule {
-                    curve,
+                    curve: Arc::new(curve),
                     events: Vec::new(),
                     transition_starts: std::collections::BTreeMap::new(),
                     today_wake: "2026-10-27T07:00:00".parse().expect("fixture Wake"),
                     today_bedtime: "2026-10-27T23:00:00".parse().expect("fixture Bedtime"),
                     gridlines: Vec::new(),
-                    valid,
-                    graph: valid,
-                    views: vec![valid],
+                    valid: PREVIEW_VALID,
+                    graph: PREVIEW_VALID,
+                    views: vec![PREVIEW_VALID],
                     preview: Some(playback),
-                    next_date: valid.end,
+                    next_date: PREVIEW_VALID.end,
                     solar_error: None,
                     conflicts: Vec::new(),
                     today: None,
                 }),
             }),
-            at(100),
+            at(milliseconds),
         )
         .expect("Preview calculation");
+}
+
+fn previewing_3000_k() -> Fixture {
+    let mut fixture = at_kelvin(3400);
+    let curve = Curve::new(
+        vec![
+            Target {
+                instant: PREVIEW_VALID.start,
+                kelvin: 3000,
+            },
+            Target {
+                instant: PREVIEW_VALID.end,
+                kelvin: 3000,
+            },
+        ],
+        60,
+    )
+    .expect("curve");
+    start_preview(&mut fixture, 100, curve);
     fixture.cycle(100);
     assert_eq!(
         fixture.take_calls(),
@@ -1190,6 +1197,58 @@ fn previewing_3000_k() -> Fixture {
         ]
     );
     fixture
+}
+
+#[test]
+fn preview_starts_each_changing_segment_at_once_and_rate_limits_its_later_steps() {
+    let mut fixture = Fixture::with_config(
+        ConfigInput {
+            output_rate_hz: 1,
+            preview_seconds: 24,
+            ..managed()
+        },
+        2300,
+    );
+    fixture.cycle(0);
+    fixture.take_calls();
+    let minutes_after_start = |minutes: i64| {
+        Timestamp::from_millisecond(1000 + minutes * 60_000).expect("Preview curve instant")
+    };
+    let curve = Curve::new(
+        [
+            (-1440, 2300),
+            (60, 2300),
+            (90, 3400),
+            (150, 3400),
+            (270, 5400),
+            (1800, 5400),
+        ]
+        .into_iter()
+        .map(|(minutes, kelvin)| Target {
+            instant: minutes_after_start(minutes),
+            kelvin,
+        })
+        .collect(),
+        120,
+    )
+    .expect("curve with a 30-minute and a two-hour transition");
+    start_preview(&mut fixture, 1000, curve);
+    let writes: Vec<_> = fixture
+        .run(1000, 5000)
+        .into_iter()
+        .filter(|(_, call)| matches!(call, Call::Temperature(..) | Call::Cleanup))
+        .collect();
+    assert_eq!(
+        writes,
+        [
+            (1000, Call::Temperature(2300, TemperatureMode::Apply)),
+            (2000, Call::Temperature(2300, TemperatureMode::Hold)),
+            (2500, Call::Cleanup),
+            (3000, Call::Temperature(3400, TemperatureMode::Set)),
+            (3500, Call::Temperature(3400, TemperatureMode::Hold)),
+            (4500, Call::Temperature(4400, TemperatureMode::Hold)),
+        ]
+    );
 }
 
 fn assert_fades_from_3000_k(fixture: &mut Fixture) {

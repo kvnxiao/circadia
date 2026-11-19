@@ -10,9 +10,11 @@ use circadia_app::ActivityMeasurement;
 use circadia_app::ConfigInput;
 use circadia_app::ConfigStore;
 use circadia_app::Coordinates;
+use circadia_app::DiagnosticOperation;
 use circadia_app::GraphMeasurement;
 use circadia_app::SimulatedNativeCall;
 use circadia_app::SimulatedNativeFault;
+use circadia_app::TemperatureMode;
 use circadia_app::automation_id;
 use circadia_winsafe::message::Message;
 use circadia_winsafe::message::PowerEvent;
@@ -321,7 +323,7 @@ fn motion_lifecycle(
     wait("compositor animation started", || {
         Ok(animation_active(activity)?.then_some(()))
     })?;
-    native_cadence(measurement, automation, settings, activity)?;
+    native_cadence(automation, settings, activity)?;
     crate::support::app::show_page(automation, settings, process, automation_id::NAV_GENERAL)?;
     inactive(activity, "off-page Preview")?;
     let client = settings.GetClientRect().map_err(io::Error::other)?;
@@ -381,18 +383,14 @@ fn motion_lifecycle(
     )?;
     inactive(activity, "stopped Preview")?;
     measurement.hold_output(false)?;
-    Ok(())
+    native_rate(measurement, automation, settings)
 }
 
 fn native_cadence(
-    measurement: &GraphMeasurement,
     automation: &Automation,
     settings: &HWND,
     activity: &ActivityMeasurement,
 ) -> io::Result<()> {
-    let submitted = measurement
-        .preview_submitted_at()?
-        .ok_or_else(|| io::Error::other("Preview was not submitted"))?;
     let mut capture = Capture::new(automation, settings)?;
     let mark = activity.records()?.len();
     let began = Instant::now();
@@ -427,47 +425,95 @@ fn native_cadence(
         .skip(mark)
         .filter(|record| matches!(record.event, ActivityEvent::SettingsView))
         .count();
-    let output = wait("two changing native calls during 1 Hz Preview", || {
-        let calls = changing_calls(&measurement.native_calls()?, submitted);
-        Ok((calls.len() >= 2).then_some(calls))
+    report(&format!(
+        "PASS: {} distinct captured positions in {:.3}s with 1 Hz native output; semantic/text timer wakes={ticks}; settings views={views}",
+        positions.len(),
+        observed.as_secs_f64(),
+    ));
+    Ok(())
+}
+
+fn native_rate(
+    measurement: &GraphMeasurement,
+    automation: &Automation,
+    settings: &HWND,
+) -> io::Result<()> {
+    let process = std::process::id();
+    let duration = Duration::from_secs(5);
+    crate::support::app::show_page(
+        automation,
+        settings,
+        process,
+        automation_id::NAV_TRANSITIONS,
+    )?;
+    automation.set_number(
+        settings,
+        process,
+        automation_id::PREVIEW_LENGTH_NUMBER,
+        duration.as_secs_f64(),
+    )?;
+    crate::support::app::show_page(automation, settings, process, automation_id::NAV_SCHEDULE)?;
+    let submitted = progress::start(measurement, automation, settings)?;
+    let deadline = submitted + duration;
+    wait("complete 1 Hz Preview", || {
+        Ok((Instant::now() >= deadline
+            && automation.enabled(settings, process, automation_id::WAKE)? == Some(true))
+        .then_some(()))
     })?;
-    let spacing = output
+    let calls: Vec<_> = measurement
+        .native_calls()?
+        .into_iter()
+        .filter(|call| (submitted..deadline).contains(&call.started))
+        .collect();
+    let paced = rate_limited_writes(&calls);
+    let spacing = paced
         .iter()
-        .zip(output.iter().skip(1))
-        .map(|(first, next)| next.started.duration_since(first.started))
+        .map(|(_, spacing)| *spacing)
         .min()
-        .ok_or_else(|| io::Error::other("missing native call interval"))?;
+        .ok_or_else(|| io::Error::other("1 Hz Preview made no rate-limited temperature write"))?;
     require(
         spacing >= Duration::from_secs(1),
         &format!(
-            "1 Hz Preview exceeded its native rate limit: minimum spacing {spacing:?}; calls {output:?}"
+            "1 Hz Preview exceeded its native rate limit: minimum spacing {spacing:?}; calls {calls:?}"
         ),
     )?;
     report(&format!(
-        "PASS: {} distinct captured positions in {:.3}s with 1 Hz native output; semantic/text timer wakes={ticks}; settings views={views}; {} changing temperature calls observed with minimum spacing {:.3}s",
-        positions.len(),
-        observed.as_secs_f64(),
-        output.len(),
+        "PASS: complete 1 Hz Preview made {} rate-limited temperature writes with minimum spacing {:.3}s",
+        paced.len(),
         spacing.as_secs_f64()
     ));
     Ok(())
 }
 
-fn changing_calls(calls: &[SimulatedNativeCall], submitted: Instant) -> Vec<SimulatedNativeCall> {
+// The output-rate ceiling exempts discrete actions: Preview entry, application
+// refreshes, and the held write that turns on the native preview flag at the
+// start of each changing segment. Preview cleanup turns the flag off without a
+// temperature write, so it is not an output attempt.
+fn rate_limited_writes(calls: &[SimulatedNativeCall]) -> Vec<(SimulatedNativeCall, Duration)> {
+    let mut held = false;
     let mut previous = None;
-    let mut changing = Vec::new();
-    for call in calls.iter().filter(|call| call.started >= submitted) {
-        let Some((kelvin, _)) = call.temperature else {
+    let mut paced = Vec::new();
+    for call in calls {
+        let Some((_, mode)) = call.temperature else {
+            if matches!(call.operation, DiagnosticOperation::PreviewCleanup) {
+                held = false;
+            }
             continue;
         };
-        if previous
-            .replace(kelvin)
-            .is_some_and(|previous| previous != kelvin)
+        let exempt = match mode {
+            TemperatureMode::Apply | TemperatureMode::ApplyHeld => true,
+            TemperatureMode::Hold => !held,
+            TemperatureMode::Set | TemperatureMode::FinishHeld => false,
+        };
+        if let Some(started) = previous
+            && !exempt
         {
-            changing.push(*call);
+            paced.push((*call, call.started.duration_since(started)));
         }
+        held = matches!(mode, TemperatureMode::Hold | TemperatureMode::ApplyHeld);
+        previous = Some(call.started);
     }
-    changing
+    paced
 }
 
 fn measure_solar_failure(
@@ -817,54 +863,97 @@ fn environment() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use circadia_app::DiagnosticOperation;
     use circadia_app::NativeSettings;
     use circadia_app::NativeSnapshot;
-    use circadia_app::TemperatureMode;
+
+    fn calls(
+        began: Instant,
+        writes: &[(u64, Option<(u16, TemperatureMode)>)],
+    ) -> Vec<SimulatedNativeCall> {
+        writes
+            .iter()
+            .map(|&(milliseconds, temperature)| SimulatedNativeCall {
+                operation: if temperature.is_some() {
+                    DiagnosticOperation::TemperatureWrite
+                } else {
+                    DiagnosticOperation::PreviewCleanup
+                },
+                started: began + Duration::from_millis(milliseconds),
+                completed: began + Duration::from_millis(milliseconds),
+                temperature,
+                failure: None,
+                snapshot: NativeSnapshot {
+                    settings: NativeSettings {
+                        schedule_enabled: false,
+                        temperature: None,
+                        previewing: false,
+                    },
+                    active: true,
+                },
+            })
+            .collect()
+    }
+
+    fn paced(began: Instant, calls: &[SimulatedNativeCall]) -> Vec<(u128, u128)> {
+        rate_limited_writes(calls)
+            .iter()
+            .map(|(call, spacing)| {
+                (
+                    call.started.duration_since(began).as_millis(),
+                    spacing.as_millis(),
+                )
+            })
+            .collect()
+    }
 
     #[test]
-    fn changing_steps_exclude_the_initial_value_and_same_temperature_setup() {
+    fn preview_entry_and_segment_setup_writes_are_exempt_from_the_rate_limit() {
         let began = Instant::now();
-        let calls: Vec<_> = [
-            (0, 6500, TemperatureMode::Apply),
-            (100, 3400, TemperatureMode::Apply),
-            (887, 3400, TemperatureMode::Hold),
-            (1887, 2800, TemperatureMode::Hold),
-            (1900, 2800, TemperatureMode::ApplyHeld),
-            (2887, 2400, TemperatureMode::Hold),
-            (2900, 2400, TemperatureMode::FinishHeld),
-        ]
-        .into_iter()
-        .map(|(milliseconds, kelvin, mode)| SimulatedNativeCall {
-            operation: DiagnosticOperation::TemperatureWrite,
-            started: began + Duration::from_millis(milliseconds),
-            completed: began + Duration::from_millis(milliseconds),
-            temperature: Some((kelvin, mode)),
-            failure: None,
-            snapshot: NativeSnapshot {
-                settings: NativeSettings {
-                    schedule_enabled: false,
-                    temperature: None,
-                    previewing: false,
-                },
-                active: true,
-            },
-        })
-        .collect();
-        let changing = changing_calls(&calls, began + Duration::from_millis(100));
-        assert_eq!(
-            changing
-                .iter()
-                .map(|call| (
-                    call.started.duration_since(began).as_millis(),
-                    call.temperature
-                ))
-                .collect::<Vec<_>>(),
-            [
-                (1887, Some((2800, TemperatureMode::Hold))),
-                (2887, Some((2400, TemperatureMode::Hold))),
-            ]
+        let observed = calls(
+            began,
+            &[
+                (1, Some((2300, TemperatureMode::Apply))),
+                (815, Some((2300, TemperatureMode::Hold))),
+                (1652, None),
+                (1824, Some((3400, TemperatureMode::Set))),
+                (2291, Some((3430, TemperatureMode::Hold))),
+                (3291, Some((3600, TemperatureMode::Hold))),
+                (3400, Some((3600, TemperatureMode::ApplyHeld))),
+            ],
         );
-        assert!(changing_calls(&calls[1..3], began).is_empty());
+        assert_eq!(paced(began, &observed), [(1824, 1009), (3291, 1000)]);
+    }
+
+    #[test]
+    fn a_held_write_after_preview_cleanup_starts_an_exempt_segment() {
+        let began = Instant::now();
+        let observed = calls(
+            began,
+            &[
+                (0, Some((3400, TemperatureMode::ApplyHeld))),
+                (180, None),
+                (360, Some((3420, TemperatureMode::Hold))),
+                (1360, Some((4000, TemperatureMode::Hold))),
+                (1500, None),
+                (1700, Some((4100, TemperatureMode::Hold))),
+            ],
+        );
+        assert_eq!(paced(began, &observed), [(1360, 1000)]);
+    }
+
+    #[test]
+    fn held_steps_sets_and_finishing_writes_are_measured_from_the_preceding_write() {
+        let began = Instant::now();
+        let observed = calls(
+            began,
+            &[
+                (0, Some((6500, TemperatureMode::Set))),
+                (100, Some((6000, TemperatureMode::Hold))),
+                (600, Some((5500, TemperatureMode::Hold))),
+                (700, Some((5000, TemperatureMode::FinishHeld))),
+                (750, Some((4900, TemperatureMode::Set))),
+            ],
+        );
+        assert_eq!(paced(began, &observed), [(600, 500), (700, 100), (750, 50)]);
     }
 }
