@@ -152,29 +152,29 @@ Evaluated directions that affected Circadia's behavior or feasibility. The [spec
 
 **Reevaluate when:** A user reports an app on the suppression list whose window has both styles. The fix then amends the specification and the code together in its own change.
 
-### DEC-store-manifest-names — Read game names from the files a game store writes for each installed game
+### DEC-store-manifest-names — Read game names from game store files
 
 **Disposition:** Not selected
 
-**Requirement impact:** The display name of an executable that has no version description, such as `cs2.exe`.
+**Requirement impact:** The display name of an executable without a version description, such as `cs2.exe`.
 
-**Reason:** Steam writes a file for each installed game that has the game's name, such as `appmanifest_730.acf`, so reading it would name a game before the game has had focus. Reading such files needs parsing code for each store and a wider spec rule for which files Circadia reads. Games from a store that Circadia does not parse would still show their filenames. The game's window title gives the same name once the game has had focus, through window metadata that Circadia already reads.
+**Reason:** Steam's `appmanifest_730.acf` has the game's name, but each store would need its own parser, and the spec would have to let Circadia read store files. The window title gives the same name once the game has had focus.
 
 **Basis:** [Names for executables without a version description](research/executable-icons.md#names-for-executables-without-a-version-description) compares the version resource, Windows' friendly-name cache, window properties, the window title, and Steam's records.
 
-**Reevaluate when:** Users commonly add games that have never had focus and then see their filenames as names.
+**Reevaluate when:** Users often add games that have never had focus, so the games show their filenames.
 
-### DEC-stable-title-names — Use a window title as a name only when it is the same at focus gain and focus loss
+### DEC-stable-title-names — Require the same window title at focus gain and focus loss
 
 **Disposition:** Not selected
 
-**Requirement impact:** Which recorded window title becomes the display name of an executable without a version description.
+**Requirement impact:** Which window title becomes the display name of an executable without a version description.
 
-**Reason:** Requiring the same title when the window gains focus and when it loses focus rejects titles that change while the app has focus. It also gives no name to a game whose window closes while it has focus, because Circadia then has no focus-loss title to compare. A wrong name changes only the label in settings and the tray, not which windows match a rule. A newer title replaces a wrong name the next time the app loses focus.
+**Reason:** The check would reject titles that change while the app has focus. But a game closed while it has focus would get no name, because Circadia never reads its title at focus loss. A wrong name affects only the label, not matching. The next recorded title replaces it.
 
 **Basis:** [REQ-edit-executable-list](specs/suppression.md#req-edit-executable-list--edit-the-suppression-list) defines which title the recent-app history records.
 
-**Reevaluate when:** Apps without a version description commonly show a document name or a status message as their names.
+**Reevaluate when:** Apps without a version description often get a document name or a status message as their name.
 
 ## Native code ownership
 
