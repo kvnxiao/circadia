@@ -26,7 +26,7 @@ The table counts `unsafe` keywords written in Rust source, including macro argum
 | `src/nls.rs` | 5 |
 | `src/notification.rs` | 4 |
 | `src/ordinal.rs` | 1 |
-| `src/process.rs` | 1 |
+| `src/process.rs` | 4 |
 | `src/sync.rs` | 4 |
 | `src/test_support.rs` | 1 |
 | `src/version.rs` | 3 |
@@ -39,7 +39,7 @@ The table counts `unsafe` keywords written in Rust source, including macro argum
 | Module | Windows operation | Caller | Why Circadia needs the wrapper |
 | --- | --- | --- | --- |
 | `message` | Send integer-parameter window messages and post settings activation and worker notifications | Application and harness lifecycle messages | Upstream `PostMessage` and `SendMessageTimeout` accept messages with pointers and require `unsafe`. Circadia accepts only the integer parameters defined by [its message enums](src/message.rs). |
-| `process` | Read process and thread records with `NtQuerySystemInformation` | Harness resource measurement | A `wmi` query takes about 1.9 s, longer than the sampler's 1 s interval, and `winprocinfo` leaks its buffer on every call. |
+| `process` | Launch a shortcut and read process and thread records | Deployment checks and resource measurement | Upstream `ShellExecuteEx` returns only success or failure. The deployment check needs the process handle for cleanup. A `wmi` query takes about 1.9 s, longer than the sampler's 1 s interval, and `winprocinfo` leaks its buffer on every call. |
 | `clock` | Read dynamic time-zone rules, the last wake time, and precise interrupt counters | Scheduling and resume handling | Upstream lacks the dynamic time-zone and last-wake queries. Circadia uses `QueryInterruptTimePrecise` and `QueryUnbiasedInterruptTimePrecise` to measure elapsed time with and without sleep. Upstream exposes only the lower-resolution `QueryUnbiasedInterruptTime`. |
 | `crash` | Install a process exception filter and capture return addresses | Crash reporting | Upstream has no unhandled-exception filter or stack-address capture API. |
 | `dialog` | Close a file picker with `HRESULT_FROM_WIN32(ERROR_CANCELLED)` | Settings file picker | `winsafe` takes a Win32 error code where the COM method requires an HRESULT. |

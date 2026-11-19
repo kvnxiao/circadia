@@ -10,6 +10,7 @@ The [harness README](../../../circadia-harness/README.md) documents each scenari
 ## Adding a scenario
 
 - Add each end-to-end desktop check as an `accept`, `capture`, or `measure` scenario, and run it with `just accept <scenario>`, `just capture <scenario>`, or `just measure <scenario>`. For example, a check whose main output is screenshots for review is a `capture` scenario.
+- Retain the handle returned by each process launch and use it to clean up the child if its readiness check fails. For example, test a missing receiver while a second process runs the same executable and verify that only the launched child terminates.
 - Apply the application's lint policy, validation, diagnostics, and test standards to harness code.
 - Write every output into the run's directory under `target/harness/`. For example, save a screenshot through `support::run::image` so the run's `manifest.tsv` lists it and `result.txt` counts it for visual review, instead of writing to a fixed `target/` path.
 - Record raw data and the results of automated checks, and leave judgment to a person or an LLM reading the run directory. For example, write measured samples to the run directory instead of adding a pass threshold that depends on the machine.

@@ -1,10 +1,12 @@
 use crate::support::app::Process;
+use crate::support::app::WAIT_TIMEOUT;
 use crate::support::app::native_message;
 use crate::support::app::report;
 use crate::support::app::require;
 use crate::support::app::settings_window;
 use crate::support::app::wait;
 use crate::support::app::wait_temperature;
+use crate::support::app::wait_until;
 use crate::support::app::window;
 use crate::support::automation::Automation;
 use circadia_app::ConfigInput;
@@ -14,6 +16,8 @@ use circadia_winsafe::message::Message;
 use std::ffi::OsString;
 use std::io;
 use std::path::Path;
+use std::time::Duration;
+use std::time::Instant;
 use win_nightlight_lib::Nightlight;
 use winsafe::HPROCESS;
 use winsafe::HWND;
@@ -51,7 +55,12 @@ pub(crate) fn run(arguments: &[OsString]) -> io::Result<()> {
     let automation = Automation::new()?;
     let native = Nightlight::new();
     let shortcut = directory.path().join("Circadia deployment.lnk");
-    create_shortcut(&executable, directory.path(), &shortcut)?;
+    create_shortcut(
+        &executable,
+        directory.path(),
+        &shortcut,
+        &format!("--data-dir \"{}\"", directory.path().display()),
+    )?;
     let result = direct(
         &executable,
         directory.path(),
@@ -84,7 +93,12 @@ pub(crate) fn run(arguments: &[OsString]) -> io::Result<()> {
     Ok(())
 }
 
-fn create_shortcut(executable: &Path, directory: &Path, shortcut: &Path) -> io::Result<()> {
+fn create_shortcut(
+    executable: &Path,
+    directory: &Path,
+    shortcut: &Path,
+    arguments: &str,
+) -> io::Result<()> {
     let link: winsafe::IShellLink = winsafe::CoCreateInstance(
         &co::CLSID::ShellLink,
         None::<&winsafe::IUnknown>,
@@ -93,7 +107,7 @@ fn create_shortcut(executable: &Path, directory: &Path, shortcut: &Path) -> io::
     .map_err(|error| io::Error::other(format!("create shortcut COM object: {error}")))?;
     link.SetPath(&executable.to_string_lossy())
         .map_err(|error| io::Error::other(format!("set shortcut target: {error}")))?;
-    link.SetArguments(&format!("--data-dir \"{}\"", directory.display()))
+    link.SetArguments(arguments)
         .map_err(|error| io::Error::other(format!("set shortcut arguments: {error}")))?;
     link.SetWorkingDirectory(&directory.to_string_lossy())
         .map_err(|error| io::Error::other(format!("set shortcut working directory: {error}")))?;
@@ -102,51 +116,88 @@ fn create_shortcut(executable: &Path, directory: &Path, shortcut: &Path) -> io::
         .map_err(|error| io::Error::other(format!("save shortcut: {error}")))
 }
 
-fn launch_shortcut(shortcut: &Path) -> io::Result<()> {
-    HWND::NULL
-        .ShellExecute(
-            "open",
-            &shortcut.to_string_lossy(),
-            None,
-            None,
-            co::SW::SHOWNORMAL,
-        )
-        .map_err(io::Error::other)
-}
+struct ShortcutProcess(winsafe::guard::CloseHandleGuard<HPROCESS>);
 
-fn launched(executable: &Path) -> io::Result<Option<winsafe::guard::CloseHandleGuard<HPROCESS>>> {
-    let expected = fs_err::canonicalize(executable)?;
-    let mut receivers = Vec::new();
-    winsafe::EnumWindows(|window| {
-        if !window.IsWindowVisible()
-            && window
-                .GetWindowText()
-                .is_ok_and(|title| title == "Circadia event receiver")
+impl ShortcutProcess {
+    fn launch(shortcut: &Path) -> io::Result<Self> {
+        circadia_winsafe::process::launch_shortcut(shortcut).map(Self)
+    }
+
+    fn exit_code(&self, timeout: Duration) -> io::Result<Option<u32>> {
+        let millis = u32::try_from(timeout.as_millis()).map_err(io::Error::other)?;
+        match self
+            .0
+            .WaitForSingleObject(Some(millis))
+            .map_err(io::Error::other)?
         {
-            receivers.push(window.GetWindowThreadProcessId().1);
-        }
-        true
-    })
-    .map_err(io::Error::other)?;
-    // A receiver's process can exit between enumeration and opening, so a
-    // process that cannot be opened or resolved is not the launched one.
-    for process in receivers {
-        let Ok(handle) = HPROCESS::OpenProcess(
-            co::PROCESS::QUERY_LIMITED_INFORMATION | co::PROCESS::TERMINATE,
-            false,
-            process,
-        ) else {
-            continue;
-        };
-        let image = handle
-            .QueryFullProcessImageName(co::PROCESS_NAME::WIN32)
-            .ok()
-            .and_then(|image| fs_err::canonicalize(image).ok());
-        if image.as_ref() == Some(&expected) {
-            return Ok(Some(handle));
+            co::WAIT::OBJECT_0 => self
+                .0
+                .GetExitCodeProcess()
+                .map(Some)
+                .map_err(io::Error::other),
+            co::WAIT::TIMEOUT => Ok(None),
+            result => Err(io::Error::other(format!(
+                "unexpected process wait result: {result}"
+            ))),
         }
     }
-    Ok(None)
+
+    fn wait_exit(&self) -> io::Result<()> {
+        let code = self.exit_code(WAIT_TIMEOUT)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::TimedOut, "shortcut process did not exit")
+        })?;
+        require(
+            code == 0,
+            &format!("shortcut process exited with code {code}"),
+        )
+    }
+
+    fn receiver(&self, deadline: Instant) -> io::Result<HWND> {
+        let pid = self.0.GetProcessId().map_err(io::Error::other)?;
+        wait_until("deployed shortcut receiver", deadline, || {
+            if let Some(code) = self.exit_code(Duration::ZERO)? {
+                return Ok(Some(Err(code)));
+            }
+            Ok(window(pid, "Circadia event receiver", false)?.map(Ok))
+        })?
+        .map_err(|code| {
+            io::Error::other(format!(
+                "shortcut process exited with code {code} before creating its receiver"
+            ))
+        })
+    }
+}
+
+impl Drop for ShortcutProcess {
+    fn drop(&mut self) {
+        if matches!(self.exit_code(Duration::ZERO), Ok(Some(_))) {
+            return;
+        }
+        let graceful = self
+            .0
+            .GetProcessId()
+            .map_err(io::Error::other)
+            .and_then(|pid| window(pid, "Circadia event receiver", false))
+            .and_then(|receiver| {
+                receiver.ok_or_else(|| io::Error::other("shortcut receiver is unavailable"))
+            })
+            .and_then(|receiver| native_message(&receiver, Message::EndSession { ending: true }))
+            .and_then(|_| self.wait_exit());
+        if let Err(error) = graceful {
+            report(&format!(
+                "Shortcut cleanup failed: {error}. Forced termination skips Night light cleanup."
+            ));
+            if let Err(error) = self
+                .0
+                .TerminateProcess(1)
+                .map_err(io::Error::other)
+                .and_then(|()| self.exit_code(WAIT_TIMEOUT))
+                .and_then(|code| require(code.is_some(), "shortcut process did not terminate"))
+            {
+                report(&format!("Shortcut process termination failed: {error}"));
+            }
+        }
+    }
 }
 
 fn editable(automation: &Automation, process: u32) -> io::Result<()> {
@@ -175,7 +226,7 @@ fn direct(
         settings_window(application.id())?.is_none(),
         "minimized deployment opened settings",
     )?;
-    launch_shortcut(shortcut)?;
+    ShortcutProcess::launch(shortcut)?.wait_exit()?;
     editable(automation, application.id())?;
     wait_temperature(native, 3400)?;
     report(&format!(
@@ -193,50 +244,89 @@ fn primary_shortcut(
     automation: &Automation,
     native: &Nightlight,
 ) -> io::Result<()> {
-    launch_shortcut(shortcut)?;
-    let handle = wait("deployed shortcut receiver", || launched(executable))?;
-    let result = (|| {
-        let process = handle.GetProcessId().map_err(io::Error::other)?;
-        wait_temperature(native, 3400)?;
-        launch_shortcut(shortcut)?;
-        editable(automation, process)?;
-        wait_temperature(native, 3400)?;
-        report(&format!(
-            "PASS: fresh primary shortcut launch and settings, PID {process}"
-        ));
-        Ok(())
-    })();
-    let cleanup = (|| {
-        let code = handle.GetExitCodeProcess().map_err(io::Error::other)?;
-        if code != 259 {
-            return require(code == 0, &format!("shortcut process failed: {code}"));
+    let application = ShortcutProcess::launch(shortcut)?;
+    let image = application
+        .0
+        .QueryFullProcessImageName(co::PROCESS_NAME::WIN32)
+        .map_err(io::Error::other)?;
+    require(
+        fs_err::canonicalize(image)? == fs_err::canonicalize(executable)?,
+        "shortcut launched an unexpected executable",
+    )?;
+    let receiver = application.receiver(Instant::now() + WAIT_TIMEOUT)?;
+    let process = application.0.GetProcessId().map_err(io::Error::other)?;
+    wait_temperature(native, 3400)?;
+    ShortcutProcess::launch(shortcut)?.wait_exit()?;
+    editable(automation, process)?;
+    wait_temperature(native, 3400)?;
+    report(&format!(
+        "PASS: fresh primary shortcut launch and settings, PID {process}"
+    ));
+    native_message(&receiver, Message::EndSession { ending: true })?;
+    application.wait_exit()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_receiver_terminates_only_the_process_launched_by_that_shortcut() {
+        let fixture = Path::new("shortcut-child");
+        if fixture.is_file() {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !Path::new("finish").exists() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            return;
         }
-        let process = handle.GetProcessId().map_err(io::Error::other)?;
-        let receiver = wait("shortcut cleanup receiver", || {
-            window(process, "Circadia event receiver", false)
-        })?;
-        native_message(&receiver, Message::EndSession { ending: true })?;
-        wait("deployed shortcut exit", || {
-            let code = handle.GetExitCodeProcess().map_err(io::Error::other)?;
-            Ok((code != 259).then_some(code))
-        })
-        .and_then(|code| require(code == 0, &format!("shortcut process failed: {code}")))
-    })();
-    if let Err(error) = &cleanup {
-        report(&format!(
-            "Shortcut cleanup failed: {error}; terminating the owned child does not perform Night light cleanup"
-        ));
-        if let Err(error) = handle.TerminateProcess(1) {
-            report(&format!(
-                "Owned shortcut process termination failed: {error}"
-            ));
-        } else if let Err(error) = wait("terminated shortcut process exit", || {
-            Ok((handle.GetExitCodeProcess().map_err(io::Error::other)? != 259).then_some(()))
-        }) {
-            report(&format!(
-                "Owned shortcut process termination did not complete: {error}"
-            ));
-        }
+        let directory = tempfile::tempdir().expect("fixture directory");
+        fs_err::write(directory.path().join(fixture), []).expect("child marker");
+        let _com =
+            winsafe::CoInitializeEx(co::COINIT::MULTITHREADED).expect("initialize shell COM");
+        let shortcut = directory.path().join("owned process.lnk");
+        create_shortcut(
+            &std::env::current_exe().expect("test executable"),
+            directory.path(),
+            &shortcut,
+            "--exact accept::deployment::tests::missing_receiver_terminates_only_the_process_launched_by_that_shortcut",
+        ).expect("test shortcut");
+        let first = ShortcutProcess::launch(&shortcut).expect("first child");
+        let second = ShortcutProcess::launch(&shortcut).expect("concurrent child");
+        let observe = HPROCESS::OpenProcess(
+            co::PROCESS::SYNCHRONIZE | co::PROCESS::QUERY_LIMITED_INFORMATION,
+            false,
+            first.0.GetProcessId().expect("child PID"),
+        )
+        .expect("observe first child");
+        assert_ne!(
+            first.0.GetProcessId().expect("first PID"),
+            second.0.GetProcessId().expect("second PID")
+        );
+        assert_eq!(
+            first
+                .receiver(Instant::now())
+                .expect_err("missing receiver")
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
+        drop(first);
+        assert_eq!(
+            observe
+                .WaitForSingleObject(Some(0))
+                .expect("terminated child"),
+            co::WAIT::OBJECT_0
+        );
+        assert_eq!(observe.GetExitCodeProcess().expect("forced exit code"), 1);
+        assert_eq!(second.exit_code(Duration::ZERO).expect("other child"), None);
+        fs_err::write(directory.path().join("finish"), []).expect("release other child");
+        second.wait_exit().expect("second child exited normally");
+        assert!(
+            second
+                .receiver(Instant::now())
+                .expect_err("early exit")
+                .to_string()
+                .contains("exited with code 0")
+        );
     }
-    result.and(cleanup)
 }
