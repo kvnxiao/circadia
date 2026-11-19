@@ -86,7 +86,7 @@ Steam records the game's name outside Windows' metadata: `steamapps\appmanifest_
 
 **Inference from the other windowed processes running at the time:** apps whose titles follow a document, such as terminals and editors, had a version description, so a title fallback mostly affects games and small tools. The sample was the 12 windowed processes running during the Counter-Strike 2 session on one desktop.
 
-**Applicability:** Circadia uses the window title recorded when focus last left the app as the display name of an executable without a readable description and keeps that title in the icon cache index, as the [suppression list requirement](../specs/suppression.md#req-edit-executable-list--edit-the-suppression-list) defines.
+**Applicability:** Circadia uses the window title recorded when focus last left the app as the display name of an executable without a readable description and stores that title in the icon cache index, as the [suppression list requirement](../specs/suppression.md#req-edit-executable-list--edit-the-suppression-list) defines.
 
 ### Documented extraction functions
 
@@ -129,7 +129,7 @@ Effective pixels (epx) are layout units that Windows converts to physical pixels
 
 A 32 px PNG extracted with `SHDefExtractIconW` matched all 1,024 pixels of a 32 epx `Image` through both in-memory and file sources. A 64 px extraction scaled to 32 epx matched 336 of the 1,024 pixels, with a maximum channel difference of 169. Each source was compared with the 32 px PNG composited over the same black background. The icon resource's separately drawn 32 px image is the inferred cause of the difference; each display scale needs its own extraction.
 
-File sources kept the original image after file deletion or replacement and recreation of the image elements under new Reactor element keys. The experiment did not distinguish Reactor's reuse of an image source with the same URI from WinUI's cache of images loaded by URI. Circadia uses in-memory sources and retains 32, 48, and 64 px extractions. These observations do not establish rendering at 150% or 200% scaling.
+Images loaded from file sources still showed the original image after file deletion or replacement and recreation of the image elements under new Reactor element keys. The experiment did not distinguish Reactor's reuse of an image source with the same URI from WinUI's cache of images loaded by URI. Circadia uses in-memory sources and retains 32, 48, and 64 px extractions. These observations do not establish rendering at 150% or 200% scaling.
 
 ## Gaps
 

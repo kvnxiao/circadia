@@ -158,7 +158,7 @@ Evaluated directions that affected Circadia's behavior or feasibility. The [spec
 
 **Requirement impact:** The display name of an executable that has no version description, such as `cs2.exe`.
 
-**Reason:** A store's records, such as Steam's `appmanifest_730.acf`, name a game before it has had focus, but reading them requires parsing that is specific to each store and a wider rule for which files Circadia reads. They also do not cover games from other stores. The game's window title gives the same name once the game has had focus, through window metadata that Circadia already reads.
+**Reason:** Steam writes a file for each installed game that has the game's name, such as `appmanifest_730.acf`, so reading it would name a game before the game has had focus. Reading such files needs parsing code for each store and a wider spec rule for which files Circadia reads. Games from a store that Circadia does not parse would still show their filenames. The game's window title gives the same name once the game has had focus, through window metadata that Circadia already reads.
 
 **Basis:** [Names for executables without a version description](research/executable-icons.md#names-for-executables-without-a-version-description) compares the version resource, Windows' friendly-name cache, window properties, the window title, and Steam's records.
 
@@ -170,7 +170,7 @@ Evaluated directions that affected Circadia's behavior or feasibility. The [spec
 
 **Requirement impact:** Which recorded window title becomes the display name of an executable without a version description.
 
-**Reason:** Requiring the same title when the window gains focus and when it loses focus rejects titles that change while the app has focus. It also gives no name to a game whose window closes while it has focus, because Circadia then has no focus-loss title to compare. The name changes only the label, not matching, and a newer title replaces a wrong one the next time the app loses focus.
+**Reason:** Requiring the same title when the window gains focus and when it loses focus rejects titles that change while the app has focus. It also gives no name to a game whose window closes while it has focus, because Circadia then has no focus-loss title to compare. A wrong name changes only the label in settings and the tray, not which windows match a rule. A newer title replaces a wrong name the next time the app loses focus.
 
 **Basis:** [REQ-edit-executable-list](specs/suppression.md#req-edit-executable-list--edit-the-suppression-list) defines which title the recent-app history records.
 
