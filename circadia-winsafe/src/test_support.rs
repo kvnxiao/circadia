@@ -44,20 +44,6 @@ mod cancellation {
     }
 }
 
-/// Disable Windows fault dialogs for a crash-test child process.
-#[expect(
-    unsafe_code,
-    reason = "keep the intentional child abort out of Windows Error Reporting"
-)]
-pub fn suppress_crash_reporting() {
-    use windows_sys::Win32::errhandlingapi::SetErrorMode;
-    use windows_sys::Win32::winbase::SEM_FAILCRITICALERRORS;
-    use windows_sys::Win32::winbase::SEM_NOGPFAULTERRORBOX;
-    // SAFETY: SetErrorMode changes only this child process's error mode
-    // and takes no pointers.
-    unsafe { SetErrorMode((SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX).cast_unsigned()) };
-}
-
 /// Raise the test exception on the calling thread.
 #[expect(
     unsafe_code,

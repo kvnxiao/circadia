@@ -666,33 +666,9 @@ windows_core::imp::define_winrt_interface!(
     ICompositionColorBrush_Vtbl,
     0x3f8ffb69_3e71_55a7_8e79_f27a214c56ae
 );
-impl ICompositionColorBrush {
-    pub fn Color(&self) -> windows_core::Result<Color> {
-        unsafe {
-            let mut result__ = core::mem::zeroed();
-            (windows_core::Interface::vtable(self).Color)(
-                windows_core::Interface::as_raw(self),
-                &mut result__,
-            )
-            .map(|| result__)
-        }
-    }
-    pub fn SetColor(&self, value: Color) -> windows_core::Result<()> {
-        unsafe {
-            (windows_core::Interface::vtable(self).SetColor)(
-                windows_core::Interface::as_raw(self),
-                value,
-            )
-            .ok()
-        }
-    }
-}
 #[repr(C)]
 pub struct ICompositionColorBrush_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
-    pub Color:
-        unsafe extern "system" fn(*mut core::ffi::c_void, *mut Color) -> windows_core::HRESULT,
-    pub SetColor: unsafe extern "system" fn(*mut core::ffi::c_void, Color) -> windows_core::HRESULT,
 }
 windows_core::imp::define_winrt_interface!(
     ICompositionEasingFunction,
@@ -757,15 +733,6 @@ impl ICompositionGeometry {
             .ok()
         }
     }
-    pub fn SetTrimOffset(&self, value: f32) -> windows_core::Result<()> {
-        unsafe {
-            (windows_core::Interface::vtable(self).SetTrimOffset)(
-                windows_core::Interface::as_raw(self),
-                value,
-            )
-            .ok()
-        }
-    }
     pub fn SetTrimStart(&self, value: f32) -> windows_core::Result<()> {
         unsafe {
             (windows_core::Interface::vtable(self).SetTrimStart)(
@@ -782,8 +749,7 @@ pub struct ICompositionGeometry_Vtbl {
     TrimEnd: usize,
     pub SetTrimEnd: unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
     TrimOffset: usize,
-    pub SetTrimOffset:
-        unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+    SetTrimOffset: usize,
     TrimStart: usize,
     pub SetTrimStart:
         unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
@@ -860,15 +826,6 @@ impl ICompositionShape {
             .ok()
         }
     }
-    pub fn SetOffset(&self, value: windows_numerics::Vector2) -> windows_core::Result<()> {
-        unsafe {
-            (windows_core::Interface::vtable(self).SetOffset)(
-                windows_core::Interface::as_raw(self),
-                value,
-            )
-            .ok()
-        }
-    }
     pub fn SetRotationAngleInDegrees(&self, value: f32) -> windows_core::Result<()> {
         unsafe {
             (windows_core::Interface::vtable(self).SetRotationAngleInDegrees)(
@@ -888,10 +845,7 @@ pub struct ICompositionShape_Vtbl {
         windows_numerics::Vector2,
     ) -> windows_core::HRESULT,
     Offset: usize,
-    pub SetOffset: unsafe extern "system" fn(
-        *mut core::ffi::c_void,
-        windows_numerics::Vector2,
-    ) -> windows_core::HRESULT,
+    SetOffset: usize,
     RotationAngle: usize,
     SetRotationAngle: usize,
     RotationAngleInDegrees: usize,
@@ -904,18 +858,6 @@ windows_core::imp::define_winrt_interface!(
     0x982138f2_5781_509a_ba5d_112bcb0b98ef
 );
 impl ICompositionSpriteShape {
-    pub fn SetFillBrush<P0>(&self, value: P0) -> windows_core::Result<()>
-    where
-        P0: windows_core::Param<CompositionBrush>,
-    {
-        unsafe {
-            (windows_core::Interface::vtable(self).SetFillBrush)(
-                windows_core::Interface::as_raw(self),
-                value.param().abi(),
-            )
-            .ok()
-        }
-    }
     pub fn SetStrokeBrush<P0>(&self, value: P0) -> windows_core::Result<()>
     where
         P0: windows_core::Param<CompositionBrush>,
@@ -960,10 +902,7 @@ impl ICompositionSpriteShape {
 pub struct ICompositionSpriteShape_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
     FillBrush: usize,
-    pub SetFillBrush: unsafe extern "system" fn(
-        *mut core::ffi::c_void,
-        *mut core::ffi::c_void,
-    ) -> windows_core::HRESULT,
+    SetFillBrush: usize,
     Geometry: usize,
     SetGeometry: usize,
     IsStrokeNonScaling: usize,

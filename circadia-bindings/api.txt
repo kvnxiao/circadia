@@ -7,16 +7,15 @@ Microsoft.UI.Composition.ShapeVisual
 Microsoft.UI.Composition.IShapeVisual::{get_Shapes}
 Microsoft.UI.Composition.CompositionShapeCollection
 Microsoft.UI.Composition.CompositionShape
-Microsoft.UI.Composition.ICompositionShape::{put_Offset, put_CenterPoint, put_RotationAngleInDegrees}
+Microsoft.UI.Composition.ICompositionShape::{put_CenterPoint, put_RotationAngleInDegrees}
 Microsoft.UI.Composition.CompositionEllipseGeometry
 Microsoft.UI.Composition.ICompositionEllipseGeometry::{put_Radius, put_Center}
 Microsoft.UI.Composition.CompositionGeometry
-Microsoft.UI.Composition.ICompositionGeometry::{put_TrimStart, put_TrimEnd, put_TrimOffset}
+Microsoft.UI.Composition.ICompositionGeometry::{put_TrimStart, put_TrimEnd}
 Microsoft.UI.Composition.CompositionSpriteShape
-Microsoft.UI.Composition.ICompositionSpriteShape::{put_FillBrush, put_StrokeBrush, put_StrokeThickness, put_StrokeStartCap, put_StrokeEndCap}
+Microsoft.UI.Composition.ICompositionSpriteShape::{put_StrokeBrush, put_StrokeThickness, put_StrokeStartCap, put_StrokeEndCap}
 Microsoft.UI.Composition.CompositionStrokeCap
 Microsoft.UI.Composition.CompositionColorBrush
-Microsoft.UI.Composition.ICompositionColorBrush::{put_Color, get_Color}
 Microsoft.UI.Composition.ScalarKeyFrameAnimation
 Microsoft.UI.Composition.IScalarKeyFrameAnimation::{InsertKeyFrameWithEasingFunction}
 Microsoft.UI.Composition.KeyFrameAnimation

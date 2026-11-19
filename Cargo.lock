@@ -401,6 +401,7 @@ dependencies = [
  "i18n-embed-fl",
  "ico",
  "jiff",
+ "os-memlock",
  "png",
  "regex",
  "resvg",
@@ -1907,6 +1908,16 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "os-memlock"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3aa44f4e322c4388383b6fb5a6808bbfd4446edc3737e2b27903a620a0414242"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

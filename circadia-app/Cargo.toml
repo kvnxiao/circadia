@@ -65,6 +65,7 @@ resvg = { version = "0.49", default-features = false }
 windows-reactor-setup = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dev-dependencies]
+os-memlock = "0.2.0"
 circadia-winsafe = { workspace = true, features = ["test-fixtures"] }
 
 [dev-dependencies]

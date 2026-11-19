@@ -46,7 +46,10 @@ fn run_child(test: &str) -> ChildRun {
 
 fn child_directory() -> Option<PathBuf> {
     let directory = std::env::var_os(PANIC_CHILD_DIRECTORY).map(PathBuf::from)?;
-    circadia_winsafe::test_support::suppress_crash_reporting();
+    os_memlock::set_windows_error_mode(
+        os_memlock::SEM_FAILCRITICALERRORS | os_memlock::SEM_NOGPFAULTERRORBOX,
+    )
+    .expect("disable Windows fault dialogs in the crash-test child");
     Some(directory)
 }
 
