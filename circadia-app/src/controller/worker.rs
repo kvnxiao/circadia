@@ -77,6 +77,46 @@ pub enum Recompute {
     Retry,
 }
 
+/// A schedule and its playback start, captured together when Preview is
+/// selected.
+#[derive(Clone, Debug)]
+pub struct PreviewSelection {
+    pub(crate) config: Arc<Config>,
+    pub(crate) selected_at: Instant,
+    wall: Timestamp,
+    #[cfg(feature = "graph-measurement")]
+    measured: Option<ControlTime>,
+}
+
+impl PreviewSelection {
+    /// Capture the configuration and both playback clocks before queueing
+    /// Preview.
+    pub fn new(config: Arc<Config>) -> Self {
+        Self {
+            config,
+            selected_at: Instant::now(),
+            wall: Timestamp::now(),
+            #[cfg(feature = "graph-measurement")]
+            measured: crate::activity::clock().map(|time| time.output),
+        }
+    }
+
+    fn entered(&self, origin: Instant) -> Option<ControlTime> {
+        #[cfg(feature = "graph-measurement")]
+        if let Some(time) = self.measured {
+            return Some(time);
+        }
+        Some(ControlTime {
+            wall: self.wall,
+            elapsed: self.selected_at.checked_duration_since(origin)?,
+        })
+    }
+
+    pub(crate) fn deadline(&self) -> Instant {
+        self.selected_at + Duration::from_secs(self.config.input().preview_seconds.unsigned_abs())
+    }
+}
+
 /// Send one ordered state-changing intent to the sole controller worker.
 #[derive(Clone, Debug)]
 pub enum ControllerCommand {
@@ -93,7 +133,7 @@ pub enum ControllerCommand {
     Manual(ManualCommand),
     /// Capture the accepted configuration and start independent calculation.
     /// Recheck it and availability before native playback.
-    Preview(Box<Config>),
+    Preview(PreviewSelection),
     /// Stop playback and restore current live control.
     StopPreview,
     /// Record a UI operation outcome using only sanitized diagnostic data.
@@ -143,7 +183,7 @@ impl ControllerCommand {
 
     pub(crate) fn bytes(&self) -> usize {
         let input = match self {
-            Self::Preview(config) => Some(config.input()),
+            Self::Preview(selection) => Some(selection.config.input()),
             Self::Configure { config, .. } => Some(config.input()),
             Self::Manual(_)
             | Self::StopPreview
@@ -234,7 +274,7 @@ pub enum CommandOutcome {
 pub struct CommandReceipt {
     /// Match the command to published controller state.
     pub id: u64,
-    /// Original admission instant for independent Preview animation.
+    /// Monotonic instant at which the queue admitted this command.
     pub submitted_at: Instant,
     /// Initial calculation revision for Edit or Preview graph results.
     pub calculation: Option<u64>,
@@ -288,7 +328,6 @@ struct Envelope {
     command: ControllerCommand,
     calculation: Option<u64>,
     completion: mpsc::SyncSender<CommandOutcome>,
-    entered: ControlTime,
 }
 
 #[derive(Default)]
@@ -452,18 +491,22 @@ impl ControllerClient {
             .checked_add(1)
             .ok_or_else(|| io::Error::other("controller command sequence exhausted"))?;
         let submitted_at = Instant::now();
-        let entered = ControlTime {
-            wall: Timestamp::now(),
-            elapsed: submitted_at.duration_since(self.0.origin),
-        };
-        #[cfg(feature = "graph-measurement")]
-        let entered = crate::activity::clock().map_or(entered, |time| time.output);
         let request = match &command {
-            ControllerCommand::Preview(config) => {
-                Some((config.as_ref().clone(), CalculationPurpose::Preview))
-            }
+            ControllerCommand::Preview(selection) => selection
+                .entered(self.0.origin)
+                .filter(|_| submitted_at < selection.deadline())
+                .map(|entered| {
+                    (
+                        selection.config.as_ref().clone(),
+                        CalculationPurpose::Preview,
+                        entered.wall,
+                    )
+                }),
             ControllerCommand::Configure { config, .. } => {
-                Some((config.as_ref().clone(), CalculationPurpose::Schedule))
+                let at = Timestamp::now();
+                #[cfg(feature = "graph-measurement")]
+                let at = crate::activity::clock().map_or(at, |time| time.output.wall);
+                Some((config.as_ref().clone(), CalculationPurpose::Schedule, at))
             }
             ControllerCommand::Manual(_)
             | ControllerCommand::StopPreview
@@ -475,10 +518,10 @@ impl ControllerClient {
             | ControllerCommand::Resume { .. } => None,
         };
         let calculation = request
-            .map(|(config, purpose)| {
+            .map(|(config, purpose, at)| {
                 self.0.calculation.submit(CalculationRequest {
                     config,
-                    at: entered.wall,
+                    at,
                     purpose,
                 })
             })
@@ -509,7 +552,6 @@ impl ControllerClient {
             command,
             calculation,
             completion,
-            entered,
         });
         drop(queue);
         self.0.wake.signal()?;
@@ -1325,8 +1367,11 @@ impl<F: FnMut() -> Foreground> Worker<F> {
                     outcome = CommandOutcome::Unavailable;
                 }
             }
-            ControllerCommand::Preview(config) => {
-                expedite = self.preview(&config, envelope.entered, envelope.calculation, now)?;
+            ControllerCommand::Preview(selection) => {
+                if let Some(entered) = selection.entered(self.origin) {
+                    expedite =
+                        self.preview(&selection.config, entered, envelope.calculation, now)?;
+                }
                 if !expedite {
                     tracing::info!("preview not started");
                     outcome = CommandOutcome::Unavailable;

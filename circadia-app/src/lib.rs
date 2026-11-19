@@ -112,6 +112,7 @@ pub use controller::OutputRate;
 pub use controller::OutputTarget;
 #[cfg(windows)]
 pub use controller::OutputUpdate;
+pub use controller::PreviewSelection;
 #[cfg(windows)]
 pub use controller::Recompute;
 #[cfg(windows)]

@@ -43,6 +43,7 @@ pub use worker::ControllerCommand;
 pub use worker::ControllerExit;
 pub use worker::ControllerSnapshot;
 pub use worker::ControllerWorker;
+pub use worker::PreviewSelection;
 pub use worker::Recompute;
 #[cfg(test)]
 pub(crate) use worker::mark_controller_thread;

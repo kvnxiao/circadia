@@ -408,6 +408,14 @@ fn selecting_preview_before_any_snapshot_shows_it_starting_with_preview_and_edit
     let (configuration, mut desktop) = managed_desktop(&directory);
     let before = shown(&configuration, &desktop, Instant::now());
     desktop.command(crate::ui::settings::Command::Preview);
+    let Some(ControllerCommand::Preview(selection)) = desktop.pending.front() else {
+        panic!("expected a queued Preview");
+    };
+    let expected = selection.selected_at + std::time::Duration::from_secs(10);
+    assert_eq!(
+        desktop.preview_view(Instant::now()).deadline(),
+        Some(expected)
+    );
     let starting = shown(&configuration, &desktop, Instant::now());
     assert!(!starting.editable());
     let preview = preview_view(&starting, &english(), &region(), Instant::now());
@@ -697,7 +705,7 @@ fn the_preview_stop_and_manual_commands_queue_their_controller_commands() {
     ));
     let commands: Vec<_> = desktop.pending.drain(..).collect();
     let [
-        ControllerCommand::Preview(config),
+        ControllerCommand::Preview(selection),
         ControllerCommand::StopPreview,
         ControllerCommand::Manual(crate::ManualCommand::Start),
     ] = commands.as_slice()
@@ -705,7 +713,7 @@ fn the_preview_stop_and_manual_commands_queue_their_controller_commands() {
         panic!("Preview, StopPreview, and Manual commands, got {commands:?}");
     };
     assert_eq!(
-        Some(config.as_ref()),
+        Some(selection.config.as_ref()),
         configuration.borrow().accepted().map(AsRef::as_ref)
     );
 }

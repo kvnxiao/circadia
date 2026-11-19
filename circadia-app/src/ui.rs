@@ -478,11 +478,9 @@ enum PreviewRequest {
 
 impl PreviewRequest {
     fn submitted(&mut self, command: &ControllerCommand, id: u64) {
-        if let Self::Requested {
-            receipt: receipt @ None,
-            ..
-        } = self
-            && matches!(command, ControllerCommand::Preview(_))
+        if let Self::Requested { receipt, deadline } = self
+            && let ControllerCommand::Preview(selection) = command
+            && selection.deadline() == *deadline
         {
             *receipt = Some(id);
         }
@@ -905,14 +903,12 @@ impl Desktop {
                 if let Some(config) = config
                     && self.preview_idle()
                 {
+                    let selection = crate::PreviewSelection::new(config);
                     self.preview = PreviewRequest::Requested {
-                        deadline: Instant::now()
-                            + Duration::from_secs(config.input().preview_seconds.unsigned_abs()),
+                        deadline: selection.deadline(),
                         receipt: None,
                     };
-                    self.queue(ControllerCommand::Preview(Box::new(Arc::unwrap_or_clone(
-                        config,
-                    ))));
+                    self.queue(ControllerCommand::Preview(selection));
                 }
             }
             settings::Command::StopPreview => self.queue(ControllerCommand::StopPreview),
@@ -1252,8 +1248,8 @@ impl Desktop {
                     self.retry = Some(receipt.id);
                 }
                 #[cfg(feature = "graph-measurement")]
-                Ok(receipt) if matches!(command, ControllerCommand::Preview(_)) => {
-                    measurement::preview_submitted(receipt.submitted_at);
+                Ok(_) if let ControllerCommand::Preview(selection) = command => {
+                    measurement::preview_submitted(selection.selected_at);
                 }
                 Ok(_receipt) => {}
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,

@@ -90,7 +90,7 @@ pub struct SettingsMeasurement {
 }
 
 impl GraphMeasurement {
-    /// Return the latest Preview command's queue-admission time.
+    /// Return the selection time of the latest Preview admitted to the queue.
     ///
     /// # Errors
     /// Report poisoned measurement synchronization.

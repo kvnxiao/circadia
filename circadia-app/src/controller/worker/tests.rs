@@ -459,10 +459,10 @@ fn preview_calculation_starts_before_a_blocked_native_call_returns() {
     started
         .recv_timeout(Duration::from_secs(10))
         .expect("blocked native call");
+    let selection = PreviewSelection::new(Arc::new(input(3400).validate().expect("config")));
+    let selected_at = selection.selected_at;
     let preview = client
-        .submit(ControllerCommand::Preview(Box::new(
-            input(3400).validate().expect("config"),
-        )))
+        .submit(ControllerCommand::Preview(selection))
         .expect("Preview");
     let deadline = Instant::now() + Duration::from_secs(2);
     let calculated = loop {
@@ -483,10 +483,7 @@ fn preview_calculation_starts_before_a_blocked_native_call_returns() {
         acknowledged(snapshot, &preview) && snapshot.preview.is_some()
     });
     let playback = snapshot.preview.as_ref().expect("native playback");
-    assert_eq!(
-        playback.start,
-        preview.submitted_at.duration_since(client.0.origin)
-    );
+    assert_eq!(playback.start, selected_at.duration_since(client.0.origin));
     assert_eq!(
         playback.end.checked_sub(playback.start),
         Some(Duration::from_secs(10))
@@ -588,9 +585,9 @@ fn cancellation_after_queued_preview_does_not_start_late_playback(command: Contr
         .recv_timeout(Duration::from_secs(10))
         .expect("native call blocked");
     let preview = client
-        .submit(ControllerCommand::Preview(Box::new(
+        .submit(ControllerCommand::Preview(PreviewSelection::new(Arc::new(
             input(3400).validate().expect("config"),
-        )))
+        ))))
         .expect("Preview");
     let suspended = matches!(command, ControllerCommand::Suspend);
     let cancelled = client.submit(command).expect("cancel Preview");
@@ -632,9 +629,9 @@ fn manual_start_after_a_queued_preview_keeps_its_playback() {
         .recv_timeout(Duration::from_secs(10))
         .expect("native call blocked");
     let preview = client
-        .submit(ControllerCommand::Preview(Box::new(
+        .submit(ControllerCommand::Preview(PreviewSelection::new(Arc::new(
             input(3400).validate().expect("config"),
-        )))
+        ))))
         .expect("Preview");
     let manual = client
         .submit(ControllerCommand::Manual(ManualCommand::Start))
@@ -778,7 +775,6 @@ fn a_repeated_resume_epoch_does_not_expedite_a_pending_native_retry() {
                 },
                 calculation: None,
                 completion,
-                entered: time(origin).output,
             })
             .expect("resume");
     };
@@ -959,9 +955,9 @@ fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
         }
         submit(ControllerCommand::Manual(ManualCommand::Start));
         submit(ControllerCommand::Manual(ManualCommand::Stop));
-        submit(ControllerCommand::Preview(Box::new(
+        submit(ControllerCommand::Preview(PreviewSelection::new(Arc::new(
             config.clone().validate().expect("preview config"),
-        )));
+        ))));
         wait_for(&client, &notified, |snapshot| snapshot.preview.is_some());
         submit(ControllerCommand::StopPreview);
         wait_for(&client, &notified, |snapshot| !snapshot.preview_active);
@@ -988,7 +984,9 @@ fn suppression_and_preview_transitions_each_record_once_at_the_default_level() {
 fn ready_worker(config: &Config) -> (Worker<impl FnMut() -> Foreground>, CalculationWorker) {
     let calculation = CalculationWorker::start(|| Ok(())).expect("calculation worker");
     let shared = Arc::new(Shared {
-        origin: Instant::now(),
+        origin: Instant::now()
+            .checked_sub(Duration::from_secs(5))
+            .expect("test clock origin"),
         queue: Mutex::new(Queue::default()),
         latest: Mutex::new(None),
         generation: AtomicU64::new(0),
@@ -1032,14 +1030,12 @@ fn apply_now<F: FnMut() -> Foreground>(
     id: u64,
     command: ControllerCommand,
 ) {
-    let entered = worker.now().output;
     worker
         .apply(Envelope {
             id,
             command,
             calculation: None,
             completion: mpsc::sync_channel(1).0,
-            entered,
         })
         .expect("command applied");
 }
@@ -1061,6 +1057,87 @@ fn one_second_preview() -> Config {
 }
 
 #[test]
+fn delayed_admission_uses_the_selected_schedule_instant_and_remaining_duration() {
+    let config = input(3400)
+        .validate()
+        .expect("ten-second Preview configuration");
+    let (mut worker, calculation) = ready_worker(&config);
+    let client = ControllerClient(Arc::clone(&worker.shared));
+    let mut selection = PreviewSelection::new(Arc::new(config.clone()));
+    selection.selected_at = worker.origin + Duration::from_secs(3);
+    let wall = "2026-11-19T12:00:00Z"
+        .parse()
+        .expect("selected UTC instant");
+    selection.wall = wall;
+    let receipt = client
+        .submit(ControllerCommand::Preview(selection))
+        .expect("late admission");
+    let envelope = worker
+        .shared
+        .queue
+        .lock()
+        .expect("queue")
+        .commands
+        .pop_front()
+        .expect("Preview");
+    worker.apply(envelope).expect("process Preview");
+    apply_calculations(&mut worker, |runtime| runtime.preview().is_some());
+    let playback = worker.driver.runtime().preview().expect("playing Preview");
+    assert_eq!(playback.start, Duration::from_secs(3));
+    assert_eq!(playback.end, Duration::from_secs(13));
+    let calculated = client
+        .calculations()
+        .latest()
+        .expect("calculation status")
+        .expect("schedule");
+    assert_eq!(Some(calculated.revision), receipt.calculation);
+    assert_eq!(calculated.request.at, wall);
+    calculation.shutdown().expect("calculation shutdown");
+}
+
+#[test]
+fn a_full_queue_cannot_restart_an_expired_preview_when_admission_resumes() {
+    let config = one_second_preview();
+    let (mut worker, calculation) = ready_worker(&config);
+    let client = ControllerClient(Arc::clone(&worker.shared));
+    for _ in 0..super::super::COMMAND_QUEUE_CAPACITY {
+        client.submit(ControllerCommand::Lock).expect("fill queue");
+    }
+    let mut selection = PreviewSelection::new(Arc::new(config.clone()));
+    selection.selected_at = worker.origin + Duration::from_secs(1);
+    let command = ControllerCommand::Preview(selection);
+    assert_eq!(
+        client
+            .submit(command.clone())
+            .expect_err("full queue")
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    {
+        let mut queue = worker.shared.queue.lock().expect("queue");
+        queue.commands.clear();
+        queue.bytes = 0;
+    }
+    let retry = client.submit(command).expect("admitted retry");
+    assert_eq!(retry.calculation, None);
+    let envelope = worker
+        .shared
+        .queue
+        .lock()
+        .expect("queue")
+        .commands
+        .pop_front()
+        .expect("retry");
+    worker.apply(envelope).expect("process retry");
+    assert_eq!(
+        retry.completion.try_recv().expect("command outcome"),
+        CommandOutcome::Unavailable
+    );
+    assert!(!worker.driver.runtime().preview_active());
+    calculation.shutdown().expect("calculation shutdown");
+}
+
+#[test]
 fn preview_while_management_is_off_records_that_it_did_not_start() {
     let config = unmanaged(3400).validate().expect("config");
     let log = crate::log::capture(tracing::Level::INFO, || {
@@ -1068,7 +1145,7 @@ fn preview_while_management_is_off_records_that_it_did_not_start() {
         apply_now(
             &mut worker,
             1,
-            ControllerCommand::Preview(Box::new(config.clone())),
+            ControllerCommand::Preview(PreviewSelection::new(Arc::new(config.clone()))),
         );
         worker.publish().expect("publication");
         calculation.shutdown().expect("calculation shutdown");
@@ -1088,7 +1165,7 @@ fn a_pending_preview_whose_deadline_passes_before_its_calculation_records_that_i
         apply_now(
             &mut worker,
             1,
-            ControllerCommand::Preview(Box::new(config.clone())),
+            ControllerCommand::Preview(PreviewSelection::new(Arc::new(config.clone()))),
         );
         worker.publish().expect("pending publication");
         assert!(worker.driver.runtime().preview_active());
@@ -1117,7 +1194,7 @@ fn a_stop_processed_with_its_preview_before_any_publication_records_that_it_did_
         apply_now(
             &mut worker,
             1,
-            ControllerCommand::Preview(Box::new(config.clone())),
+            ControllerCommand::Preview(PreviewSelection::new(Arc::new(config.clone()))),
         );
         apply_now(&mut worker, 2, ControllerCommand::StopPreview);
         worker.publish().expect("publication");
@@ -1137,7 +1214,7 @@ fn preview_started_is_recorded_when_playback_begins_not_when_the_run_is_pending(
         apply_now(
             &mut worker,
             1,
-            ControllerCommand::Preview(Box::new(config.clone())),
+            ControllerCommand::Preview(PreviewSelection::new(Arc::new(config.clone()))),
         );
         worker.publish().expect("pending publication");
         tracing::info!("preview pending published");
@@ -1279,9 +1356,9 @@ fn resume_after_a_preview_interrupted_by_suspension_restores_the_accepted_schedu
     let client = worker.client();
     wait_for(&client, &notified, scheduled);
     client
-        .submit(ControllerCommand::Preview(Box::new(
+        .submit(ControllerCommand::Preview(PreviewSelection::new(Arc::new(
             input(3400).validate().expect("config"),
-        )))
+        ))))
         .expect("preview");
     wait_for(&client, &notified, |snapshot| snapshot.preview.is_some());
     client
@@ -1323,9 +1400,9 @@ fn configure_after_a_queued_preview_keeps_its_playback() {
     let client = worker.client();
     wait_for(&client, &notified, scheduled);
     let preview = client
-        .submit(ControllerCommand::Preview(Box::new(
+        .submit(ControllerCommand::Preview(PreviewSelection::new(Arc::new(
             input(3400).validate().expect("config"),
-        )))
+        ))))
         .expect("preview");
     wait_for(&client, &notified, |snapshot| {
         acknowledged(snapshot, &preview)
@@ -1364,7 +1441,9 @@ fn preview_plays_over_automatic_suppression_and_a_lock_fades_from_its_last_value
         snapshot.suppression.automatic && temperatures(&records).last() == Some(&6500)
     });
     let preview = client
-        .submit(ControllerCommand::Preview(Box::new(config)))
+        .submit(ControllerCommand::Preview(PreviewSelection::new(Arc::new(
+            config,
+        ))))
         .expect("Preview");
     wait_for(&client, &notified, |snapshot| {
         acknowledged(snapshot, &preview)
@@ -1912,7 +1991,9 @@ fn management_off_rejects_preview_manual_suppression_and_retry_without_native_ca
     });
     assert_eq!(snapshot.management, ManagementState::Off);
     for command in [
-        ControllerCommand::Preview(Box::new(unmanaged(3400).validate().expect("config"))),
+        ControllerCommand::Preview(PreviewSelection::new(Arc::new(
+            unmanaged(3400).validate().expect("config"),
+        ))),
         ControllerCommand::Manual(ManualCommand::Start),
         ControllerCommand::Recompute(Recompute::Retry),
     ] {
