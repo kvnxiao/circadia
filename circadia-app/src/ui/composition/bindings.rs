@@ -64,40 +64,6 @@ impl windows_core::RuntimeType for Color {
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ColorKeyFrameAnimation(windows_core::IUnknown);
-windows_core::imp::interface_hierarchy!(
-    ColorKeyFrameAnimation,
-    windows_core::IUnknown,
-    windows_core::IInspectable
-);
-windows_core::imp::required_hierarchy!(
-    ColorKeyFrameAnimation,
-    KeyFrameAnimation,
-    CompositionAnimation,
-    CompositionObject
-);
-impl windows_core::RuntimeType for ColorKeyFrameAnimation {
-    const SIGNATURE: windows_core::imp::ConstBuffer =
-        windows_core::imp::ConstBuffer::for_class::<Self, IColorKeyFrameAnimation>();
-}
-unsafe impl windows_core::Interface for ColorKeyFrameAnimation {
-    type Vtable = <IColorKeyFrameAnimation as windows_core::Interface>::Vtable;
-    const IID: windows_core::GUID = <IColorKeyFrameAnimation as windows_core::Interface>::IID;
-    const INSPECTABLE: bool = true;
-}
-impl core::ops::Deref for ColorKeyFrameAnimation {
-    type Target = IColorKeyFrameAnimation;
-    fn deref(&self) -> &Self::Target {
-        unsafe { core::mem::transmute(self) }
-    }
-}
-impl windows_core::RuntimeName for ColorKeyFrameAnimation {
-    const NAME: &'static str = "Microsoft.UI.Composition.ColorKeyFrameAnimation";
-}
-unsafe impl Send for ColorKeyFrameAnimation {}
-unsafe impl Sync for ColorKeyFrameAnimation {}
-#[repr(transparent)]
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompositionAnimation(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(
     CompositionAnimation,
@@ -183,27 +149,6 @@ impl windows_core::RuntimeName for CompositionColorBrush {
 }
 unsafe impl Send for CompositionColorBrush {}
 unsafe impl Sync for CompositionColorBrush {}
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct CompositionColorSpace(pub i32);
-impl CompositionColorSpace {
-    pub const Auto: Self = Self(0);
-    pub const Hsl: Self = Self(1);
-    pub const Rgb: Self = Self(2);
-    pub const HslLinear: Self = Self(3);
-    pub const RgbLinear: Self = Self(4);
-}
-impl windows_core::imp::TypeKind for CompositionColorSpace {
-    type TypeKind = windows_core::imp::CopyType;
-}
-impl windows_core::RuntimeType for CompositionColorSpace {
-    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
-        b"enum(Microsoft.UI.Composition.CompositionColorSpace;i4)",
-    );
-    const NAME: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
-        b"Microsoft.UI.Composition.CompositionColorSpace",
-    );
-}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompositionEasingFunction(windows_core::IUnknown);
@@ -699,60 +644,6 @@ pub struct IApplicationStatics_Vtbl {
     ) -> windows_core::HRESULT,
 }
 windows_core::imp::define_winrt_interface!(
-    IColorKeyFrameAnimation,
-    IColorKeyFrameAnimation_Vtbl,
-    0xf0237928_353c_5867_be93_71547e989f44
-);
-impl IColorKeyFrameAnimation {
-    pub fn SetInterpolationColorSpace(
-        &self,
-        value: CompositionColorSpace,
-    ) -> windows_core::Result<()> {
-        unsafe {
-            (windows_core::Interface::vtable(self).SetInterpolationColorSpace)(
-                windows_core::Interface::as_raw(self),
-                value,
-            )
-            .ok()
-        }
-    }
-    pub fn InsertKeyFrameWithEasingFunction<P2>(
-        &self,
-        normalizedprogresskey: f32,
-        value: Color,
-        easingfunction: P2,
-    ) -> windows_core::Result<()>
-    where
-        P2: windows_core::Param<CompositionEasingFunction>,
-    {
-        unsafe {
-            (windows_core::Interface::vtable(self).InsertKeyFrameWithEasingFunction)(
-                windows_core::Interface::as_raw(self),
-                normalizedprogresskey,
-                value,
-                easingfunction.param().abi(),
-            )
-            .ok()
-        }
-    }
-}
-#[repr(C)]
-pub struct IColorKeyFrameAnimation_Vtbl {
-    pub base__: windows_core::IInspectable_Vtbl,
-    InterpolationColorSpace: usize,
-    pub SetInterpolationColorSpace: unsafe extern "system" fn(
-        *mut core::ffi::c_void,
-        CompositionColorSpace,
-    ) -> windows_core::HRESULT,
-    InsertKeyFrame: usize,
-    pub InsertKeyFrameWithEasingFunction: unsafe extern "system" fn(
-        *mut core::ffi::c_void,
-        f32,
-        Color,
-        *mut core::ffi::c_void,
-    ) -> windows_core::HRESULT,
-}
-windows_core::imp::define_winrt_interface!(
     ICompositionAnimation,
     ICompositionAnimation_Vtbl,
     0xa829ccc8_6fde_5b90_ad37_efd307e1b631
@@ -1013,16 +904,6 @@ windows_core::imp::define_winrt_interface!(
     0x982138f2_5781_509a_ba5d_112bcb0b98ef
 );
 impl ICompositionSpriteShape {
-    pub fn FillBrush(&self) -> windows_core::Result<CompositionBrush> {
-        unsafe {
-            let mut result__ = core::mem::zeroed();
-            (windows_core::Interface::vtable(self).FillBrush)(
-                windows_core::Interface::as_raw(self),
-                &mut result__,
-            )
-            .and_then(|| windows_core::imp::Type::from_abi(result__))
-        }
-    }
     pub fn SetFillBrush<P0>(&self, value: P0) -> windows_core::Result<()>
     where
         P0: windows_core::Param<CompositionBrush>,
@@ -1078,10 +959,7 @@ impl ICompositionSpriteShape {
 #[repr(C)]
 pub struct ICompositionSpriteShape_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
-    pub FillBrush: unsafe extern "system" fn(
-        *mut core::ffi::c_void,
-        *mut *mut core::ffi::c_void,
-    ) -> windows_core::HRESULT,
+    FillBrush: usize,
     pub SetFillBrush: unsafe extern "system" fn(
         *mut core::ffi::c_void,
         *mut core::ffi::c_void,
@@ -1149,16 +1027,6 @@ windows_core::imp::define_winrt_interface!(
     0x95213c13_c4cb_57de_b267_d21ab901ae38
 );
 impl ICompositor {
-    pub fn CreateColorKeyFrameAnimation(&self) -> windows_core::Result<ColorKeyFrameAnimation> {
-        unsafe {
-            let mut result__ = core::mem::zeroed();
-            (windows_core::Interface::vtable(self).CreateColorKeyFrameAnimation)(
-                windows_core::Interface::as_raw(self),
-                &mut result__,
-            )
-            .and_then(|| windows_core::imp::Type::from_abi(result__))
-        }
-    }
     pub fn CreateColorBrushWithColor(
         &self,
         color: Color,
@@ -1197,10 +1065,7 @@ impl ICompositor {
 #[repr(C)]
 pub struct ICompositor_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
-    pub CreateColorKeyFrameAnimation: unsafe extern "system" fn(
-        *mut core::ffi::c_void,
-        *mut *mut core::ffi::c_void,
-    ) -> windows_core::HRESULT,
+    CreateColorKeyFrameAnimation: usize,
     CreateColorBrush: usize,
     pub CreateColorBrushWithColor: unsafe extern "system" fn(
         *mut core::ffi::c_void,

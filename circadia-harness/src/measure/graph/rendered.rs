@@ -38,6 +38,10 @@ impl Capture {
         })
     }
 
+    pub(crate) fn width(&self) -> usize {
+        self.width
+    }
+
     pub(crate) fn colored_pixels(&mut self, color: [u8; 3]) -> io::Result<usize> {
         self.previous = self.screen.read()?;
         Ok(self

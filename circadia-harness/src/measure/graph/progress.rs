@@ -37,7 +37,7 @@ pub(crate) fn completion(
     wait("completion graph visible", || {
         Ok(automation.show_graph(&settings, process)?.then_some(()))
     })?;
-    let _graph = Capture::new(&automation, &settings)?;
+    let mut graph = Capture::new(&automation, &settings)?;
     let captures = format!("completion-{}s-", duration.as_secs());
     std::thread::sleep(Duration::from_millis(300));
     automation.focus(&settings, process)?;
@@ -73,6 +73,14 @@ pub(crate) fn completion(
     report(
         "PASS: natural completion presents full-width pixels while editing remains locked, then removes the bar and unlocks editing at the real deadline while native output remains blocked",
     );
+    marker_speed(
+        measurement,
+        &automation,
+        &settings,
+        &mut graph,
+        duration,
+        &captures,
+    )?;
     if duration == Duration::from_secs(1) {
         completion_lifecycle(measurement, &automation, &settings, activity)?;
     }
@@ -96,7 +104,87 @@ fn start(
             .enabled(settings, std::process::id(), automation_id::WAKE)?
             .filter(|enabled| !enabled))
     })?;
-    Ok(submitted + Duration::from_secs(1))
+    Ok(submitted)
+}
+
+fn marker_speed(
+    measurement: &GraphMeasurement,
+    automation: &Automation,
+    settings: &HWND,
+    graph: &mut Capture,
+    duration: Duration,
+    captures: &str,
+) -> io::Result<()> {
+    let bounds = settings.GetWindowRect().map_err(io::Error::other)?;
+    let started = start(measurement, automation, settings)?;
+    let width = f64::from(u32::try_from(graph.width()).map_err(io::Error::other)?);
+    let mut samples = Vec::new();
+    let mut located = 0;
+    while started.elapsed() < duration {
+        require_capture(settings, &bounds)?;
+        let capture_start = Instant::now();
+        if let Some((count, x, _)) = graph.position()?
+            && count != located
+        {
+            located = count;
+            samples.push((
+                capture_start
+                    .saturating_duration_since(started)
+                    .as_secs_f64(),
+                x * width,
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(8));
+    }
+    fs_err::write(
+        run::file(&format!("{captures}marker.tsv"))?,
+        samples
+            .iter()
+            .map(|(seconds, x)| format!("{seconds:.6}\t{x:.1}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )?;
+    let result = steady_speed(&samples, width, duration)?;
+    absent(automation, settings)?;
+    report(&format!("PASS: {result}"));
+    Ok(())
+}
+
+fn steady_speed(samples: &[(f64, f64)], width: f64, duration: Duration) -> io::Result<String> {
+    let run = samples
+        .chunk_by(|before, after| after.1 > before.1 - width / 2.0)
+        .filter(|run| span(run) > 0.0)
+        .max_by(|first, second| span(first).total_cmp(&span(second)))
+        .ok_or_else(|| io::Error::other("Preview marker was not observed moving"))?;
+    let count = f64::from(u32::try_from(run.len()).map_err(io::Error::other)?);
+    let (time, position) = run.iter().fold((0.0, 0.0), |(time, position), (t, x)| {
+        (time + t, position + x)
+    });
+    let (time, position) = (time / count, position / count);
+    let (covariance, variance) = run
+        .iter()
+        .fold((0.0, 0.0), |(covariance, variance), (t, x)| {
+            (
+                covariance + (t - time) * (x - position),
+                variance + (t - time) * (t - time),
+            )
+        });
+    let measured = covariance / variance;
+    let expected = width / duration.as_secs_f64();
+    let allowed = (expected * 0.016 + 2.0) / span(run);
+    let result = format!(
+        "Preview marker advanced {measured:.2} pixels per second over {:.3} s without a view change; elapsed playback time requires {expected:.2} ± {allowed:.2}",
+        span(run)
+    );
+    require((measured - expected).abs() <= allowed, &result)?;
+    Ok(result)
+}
+
+fn span(run: &[(f64, f64)]) -> f64 {
+    match (run.first(), run.last()) {
+        (Some(first), Some(last)) => last.0 - first.0,
+        _ => 0.0,
+    }
 }
 
 fn absent(automation: &Automation, settings: &HWND) -> io::Result<()> {
@@ -121,7 +209,7 @@ fn completion_lifecycle(
     activity: &ActivityMeasurement,
 ) -> io::Result<()> {
     let process = std::process::id();
-    let deadline = start(measurement, automation, settings)?;
+    let deadline = start(measurement, automation, settings)? + Duration::from_secs(1);
     let capture = bar_capture(automation, settings)?;
     require(
         fill_extent(&capture.read()?, capture.width, &accents()?) + 1 < capture.width,
@@ -134,7 +222,7 @@ fn completion_lifecycle(
         "Stop was observed only after natural completion",
     )?;
     for minimize in [false, true] {
-        let deadline = start(measurement, automation, settings)?;
+        let deadline = start(measurement, automation, settings)? + Duration::from_secs(1);
         if minimize {
             automation.minimize(settings, process)?;
             wait("minimized progress animation stops", || {
@@ -644,7 +732,36 @@ fn image(captures: &str, name: &str, description: &str) -> io::Result<std::path:
 mod tests {
     use super::continuous_step;
     use super::fill_extent;
+    use super::steady_speed;
     use std::time::Duration;
+
+    fn marker(pixels_per_second: f64, start: f64) -> Vec<(f64, f64)> {
+        (1..950)
+            .map(|step| {
+                let seconds = f64::from(step) / 95.0;
+                (
+                    seconds,
+                    ((start + seconds * pixels_per_second) % 760.0).round(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn marker_speed_accepts_elapsed_time_motion_across_a_view_change() {
+        let checked = steady_speed(&marker(76.0, 456.0), 760.0, Duration::from_secs(10));
+        assert!(checked.is_ok(), "{checked:?}");
+    }
+
+    #[test]
+    fn marker_speed_rejects_the_measured_compositor_keyframe_rate() {
+        assert!(steady_speed(&marker(73.1, 0.0), 760.0, Duration::from_secs(10)).is_err());
+    }
+
+    #[test]
+    fn marker_speed_requires_observed_motion() {
+        assert!(steady_speed(&[(0.5, 100.0)], 760.0, Duration::from_secs(10)).is_err());
+    }
 
     #[test]
     fn continuity_rejects_the_measured_terminal_snap() {
