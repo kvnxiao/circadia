@@ -1,5 +1,6 @@
 //! Own synchronization objects and wait on borrowed handles.
 
+use std::fmt;
 use std::io;
 use std::os::windows::io::AsHandle;
 use std::os::windows::io::AsRawHandle;
@@ -8,7 +9,6 @@ use std::os::windows::io::FromRawHandle;
 use std::os::windows::io::OwnedHandle;
 use std::time::Duration;
 use windows_sys::Win32::synchapi::CreateMutexW;
-use windows_sys::Win32::synchapi::SetEvent;
 use windows_sys::Win32::synchapi::WaitForMultipleObjects;
 use windows_sys::Win32::winbase::INFINITE;
 use windows_sys::Win32::winbase::WAIT_FAILED;
@@ -16,12 +16,31 @@ use windows_sys::Win32::winerror::ERROR_ALREADY_EXISTS;
 use windows_sys::Win32::winerror::WAIT_TIMEOUT;
 
 /// An unnamed event that can be shared between threads and used in a wait set.
-#[derive(Debug)]
-pub struct Event(OwnedHandle);
+pub struct Event(winsafe::guard::CloseHandleGuard<winsafe::HEVENT>);
+
+#[expect(
+    unsafe_code,
+    reason = "Windows events can be signaled and waited on concurrently"
+)]
+// SAFETY: Shared references only signal or borrow the event. Neither operation
+// mutates the guard, and dropping it requires exclusive ownership.
+unsafe impl Sync for Event {}
+
+impl fmt::Debug for Event {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&*self.0, formatter)
+    }
+}
 
 impl AsHandle for Event {
+    #[expect(
+        unsafe_code,
+        reason = "borrow the winsafe event for the lifetime of its guard"
+    )]
     fn as_handle(&self) -> BorrowedHandle<'_> {
-        self.0.as_handle()
+        // SAFETY: The private guard owns the event and stays live for this
+        // borrow.
+        unsafe { BorrowedHandle::borrow_raw(self.0.ptr()) }
     }
 }
 
@@ -30,30 +49,20 @@ impl Event {
     ///
     /// # Errors
     /// Returns the Windows event creation error.
-    #[expect(
-        unsafe_code,
-        reason = "transfer a uniquely owned winsafe event to OwnedHandle"
-    )]
     pub fn new(manual_reset: bool) -> io::Result<Self> {
-        let mut event = winsafe::HEVENT::CreateEvent(None, manual_reset, false, None)
-            .map_err(|error| io::Error::from_raw_os_error(error.raw().cast_signed()))?;
-        let raw = event.leak().ptr();
-        // SAFETY: leak transfers the valid CloseHandle-owned event exactly
-        // once.
-        Ok(Self(unsafe { OwnedHandle::from_raw_handle(raw) }))
+        winsafe::HEVENT::CreateEvent(None, manual_reset, false, None)
+            .map(Self)
+            .map_err(|error| io::Error::from_raw_os_error(error.raw().cast_signed()))
     }
 
     /// Signal the event.
     ///
     /// # Errors
     /// Returns the Windows event error.
-    #[expect(unsafe_code, reason = "signal an event owned for the entire call")]
     pub fn set(&self) -> io::Result<()> {
-        // SAFETY: The owned event remains valid throughout this call.
-        if unsafe { SetEvent(self.0.as_raw_handle()) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
+        self.0
+            .SetEvent()
+            .map_err(|error| io::Error::from_raw_os_error(error.raw().cast_signed()))
     }
 }
 

@@ -80,7 +80,7 @@ impl VersionInfo {
         reason = "VerQueryValueW returns a pointer into the caller's version buffer"
     )]
     fn query(&self, key: &str) -> Option<(&[u8], usize)> {
-        let key: Vec<u16> = key.encode_utf16().chain([0]).collect();
+        let key = winsafe::WString::from_str(key);
         let mut value = std::ptr::null_mut();
         let mut length = 0_u32;
         // SAFETY: The buffer holds the version information that

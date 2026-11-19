@@ -8,11 +8,6 @@ use windows_sys::Win32::windef::HICON;
 use windows_sys::Win32::winerror::ERROR_RESOURCE_DATA_NOT_FOUND;
 use windows_sys::Win32::winerror::ERROR_RESOURCE_TYPE_NOT_FOUND;
 use windows_sys::Win32::winerror::S_FALSE;
-use windows_sys::Win32::wingdi::BI_RGB;
-use windows_sys::Win32::wingdi::BITMAPINFO;
-use windows_sys::Win32::wingdi::BITMAPINFOHEADER;
-use windows_sys::Win32::wingdi::DIB_RGB_COLORS;
-use windows_sys::Win32::wingdi::GetDIBits;
 use winsafe::co;
 use winsafe::guard::DeleteObjectGuard;
 use winsafe::guard::DestroyIconGuard;
@@ -117,34 +112,27 @@ impl Bitmap {
             .zip(usize::try_from(height).ok())
             .and_then(|(width, height)| width.checked_mul(height)?.checked_mul(4))
             .ok_or_else(|| io::Error::other("icon bitmap size is out of range"))?;
-        let mut info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: u32::try_from(size_of::<BITMAPINFOHEADER>()).map_err(io::Error::other)?,
-                biWidth: width,
-                biHeight: -height,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.cast_unsigned(),
-                ..BITMAPINFOHEADER::default()
-            },
-            ..BITMAPINFO::default()
-        };
+        let mut info = winsafe::BITMAPINFO::default();
+        info.bmiHeader.biWidth = width;
+        info.bmiHeader.biHeight = -height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = co::BI::RGB;
         let mut pixels = vec![0_u8; length];
         // SAFETY: The context and bitmap are live, the bitmap is not selected
         // into a context, and the buffer holds `height` top-down rows of
         // `width` 32-bit pixels, the format the header requests.
         let copied = unsafe {
-            GetDIBits(
-                context.ptr().cast(),
-                self.0.ptr().cast(),
+            context.GetDIBits(
+                &self.0,
                 0,
                 lines,
-                pixels.as_mut_ptr().cast(),
-                &raw mut info,
-                DIB_RGB_COLORS.cast_unsigned(),
+                Some(&mut pixels),
+                &mut info,
+                co::DIB::RGB_COLORS,
             )
         };
-        if copied != height {
+        if copied.ok() != Some(height) {
             return Err(io::Error::other("reading the icon bitmap failed"));
         }
         Ok((width.unsigned_abs(), lines, pixels))
