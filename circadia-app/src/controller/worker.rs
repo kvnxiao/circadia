@@ -199,11 +199,11 @@ impl ControllerCommand {
                     .saturating_add(path.as_os_str().len())
                     .saturating_add(title.as_ref().map_or(0, String::len)),
                 Self::Foreground {
-                    foreground: Foreground::Unknown | Foreground::Shell,
+                    foreground: Foreground::Unknown | Foreground::Shell | Foreground::Transient,
                     ..
                 }
                 | Self::Resume {
-                    foreground: Foreground::Unknown | Foreground::Shell,
+                    foreground: Foreground::Unknown | Foreground::Shell | Foreground::Transient,
                     ..
                 }
                 | Self::Configure { .. }

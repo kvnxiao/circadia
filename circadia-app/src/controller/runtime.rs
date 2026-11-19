@@ -395,6 +395,7 @@ impl ControlRuntime {
     ///
     /// - A title update of the same window is a foreground change only when it
     ///   changes whether the window matches.
+    /// - A `Transient` read changes nothing.
     /// - `previous` is the previous foreground window's executable and the
     ///   title it had when focus moved from it to a window of another
     ///   executable.
@@ -407,6 +408,9 @@ impl ControlRuntime {
         previous: Option<&PreviousWindow>,
         now: RuntimeTime,
     ) -> Result<(), ControlError> {
+        if *foreground == Foreground::Transient {
+            return Ok(());
+        }
         self.foreground.observe(foreground, previous, now.uptime);
         self.recent.take();
         let Some(config) = &self.config else {
@@ -802,6 +806,7 @@ fn record_foreground(foreground: &Foreground, focus: Option<Focus>) {
     let (executable, title) = match foreground {
         Foreground::Unknown => ("unknown", None),
         Foreground::Shell => ("shell", None),
+        Foreground::Transient => ("transient", None),
         Foreground::Application {
             executable, title, ..
         } => (executable.as_str(), title.as_deref()),

@@ -40,7 +40,8 @@ pub(crate) fn run(arguments: &[OsString]) -> io::Result<()> {
             ..ConfigInput::default()
         },
     )?;
-    let mut application = Process::start(&fs_err::canonicalize(executable)?, directory.path())?;
+    let mut application =
+        Process::start_verbose(&fs_err::canonicalize(executable)?, directory.path())?;
     let process = application.id();
     let settings = wait("identity settings window", || {
         crate::support::app::settings_window(process)
@@ -106,12 +107,112 @@ pub(crate) fn run(arguments: &[OsString]) -> io::Result<()> {
                 .is_some_and(|entry| entry.executable == first.name))
         .then_some(()))
     })?;
+    hold_alt_tab(&automation, &settings, process, &first, &second)?;
     crate::support::app::quit(&automation, &settings, process)?;
     application.wait_exit()?;
+    transient_records(directory.path())?;
     report(
-        "PASS: recent actions and candidate checkboxes preserve native identity, focus and selection through history reorder; Add targets the retained executable; Night light was not managed",
+        "PASS: recent actions and candidate checkboxes preserve native identity, focus and selection through history reorder; Add targets the retained executable; a held Alt+Tab switcher did not enter recent history and was logged as a transient window; Night light was not managed",
     );
     Ok(())
+}
+
+fn transient_records(directory: &std::path::Path) -> io::Result<()> {
+    let log = crate::support::log::read(directory)?;
+    let transient = crate::support::log::transient_windows(&log);
+    for (executable, class) in &transient {
+        report(&format!(
+            "Transient window record: executable={} class={}",
+            executable.unwrap_or("unreadable"),
+            class.unwrap_or("unreadable")
+        ));
+    }
+    require(
+        transient
+            .iter()
+            .any(|(executable, _)| *executable == Some("explorer.exe")),
+        "the verbose log has no transient window record for explorer.exe",
+    )
+}
+
+fn hold_alt_tab(
+    automation: &Automation,
+    settings: &HWND,
+    process: u32,
+    first: &Fixture,
+    second: &Fixture,
+) -> io::Result<()> {
+    activate(&first.window, first.process.id())?;
+    activate(&second.window, second.process.id())?;
+    crate::support::automation::send_input(&keys([
+        (winsafe::co::VK::MENU, winsafe::co::KEYEVENTF::NoValue),
+        (winsafe::co::VK::TAB, winsafe::co::KEYEVENTF::NoValue),
+        (winsafe::co::VK::TAB, winsafe::co::KEYEVENTF::KEYUP),
+    ]))?;
+    std::thread::sleep(Duration::from_secs(2));
+    crate::support::automation::send_input(&keys([(
+        winsafe::co::VK::MENU,
+        winsafe::co::KEYEVENTF::KEYUP,
+    )]))?;
+    wait("releasing Alt+Tab returns to app A", || {
+        Ok((HWND::GetForegroundWindow().as_ref() == Some(&first.window)).then_some(()))
+    })?;
+    require_foreground(&first.window)?;
+    let expected = [
+        automation_id::identity(first.identity.as_str()),
+        automation_id::identity(second.identity.as_str()),
+    ];
+    let mut observed = Vec::new();
+    wait(
+        "app A and then app B lead recent history after Alt+Tab",
+        || {
+            observed = automation
+                .controls_with_parents(settings, process)?
+                .into_iter()
+                .map(|(control, _)| control.id)
+                .filter(|id| id.starts_with("recent-"))
+                .collect();
+            let rows: Vec<&str> = observed
+                .iter()
+                .filter(|id| id.starts_with("recent-add:") || id.starts_with("recent-remove:"))
+                .filter_map(|id| id.split_once(':').map(|(_, identity)| identity))
+                .collect();
+            Ok(rows
+                .iter()
+                .take(2)
+                .copied()
+                .eq(expected.iter().map(String::as_str))
+                .then_some(()))
+        },
+    )
+    .map_err(|error| {
+        io::Error::other(format!(
+            "{error}; expected {expected:?} first; observed {observed:?}"
+        ))
+    })?;
+    let paths: Vec<String> = observed.iter().filter_map(|id| decoded(id)).collect();
+    require(
+        !paths
+            .iter()
+            .any(|path| path.to_lowercase().contains("explorer.exe")),
+        &format!("recent history has an explorer.exe entry after Alt+Tab: {paths:?}"),
+    )?;
+    activate(settings, process)?;
+    crate::support::capture::Capture::window(settings, process)?.snapshot(
+        &crate::support::run::image(
+            "recent-after-alt-tab.png",
+            "Recently focused apps after a held Alt+Tab returned to app A",
+        )?,
+    )
+}
+
+fn decoded(id: &str) -> Option<String> {
+    let (_, hex) = id.split_once(':')?;
+    let bytes = (0..hex.len())
+        .step_by(2)
+        .map(|start| u8::from_str_radix(hex.get(start..start + 2)?, 16).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    String::from_utf8(bytes).ok()
 }
 
 fn observed(
@@ -343,24 +444,28 @@ pub(crate) fn require_foreground(window: &HWND) -> io::Result<()> {
 }
 
 pub(crate) fn return_to(window: &HWND) -> io::Result<()> {
-    let inputs = [
+    crate::support::automation::send_input(&keys([
         (winsafe::co::VK::MENU, winsafe::co::KEYEVENTF::NoValue),
         (winsafe::co::VK::TAB, winsafe::co::KEYEVENTF::NoValue),
         (winsafe::co::VK::TAB, winsafe::co::KEYEVENTF::KEYUP),
         (winsafe::co::VK::MENU, winsafe::co::KEYEVENTF::KEYUP),
-    ]
-    .map(|(key, flags)| {
+    ]))?;
+    wait("Alt+Tab restores Settings foreground", || {
+        Ok((HWND::GetForegroundWindow().as_ref() == Some(window)).then_some(()))
+    })?;
+    require_foreground(window)
+}
+
+fn keys<const N: usize>(
+    inputs: [(winsafe::co::VK, winsafe::co::KEYEVENTF); N],
+) -> [winsafe::HwKbMouse; N] {
+    inputs.map(|(key, flags)| {
         winsafe::HwKbMouse::Kb(winsafe::KEYBDINPUT {
             wVk: key,
             dwFlags: flags,
             ..winsafe::KEYBDINPUT::default()
         })
-    });
-    crate::support::automation::send_input(&inputs)?;
-    wait("Alt+Tab restores Settings foreground", || {
-        Ok((HWND::GetForegroundWindow().as_ref() == Some(window)).then_some(()))
-    })?;
-    require_foreground(window)
+    })
 }
 
 struct Fixture {

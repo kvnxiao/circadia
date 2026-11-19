@@ -1,5 +1,5 @@
 ---
-date: 2026-11-16
+date: 2026-11-19
 questions:
   - Which published windows-rs and Reactor versions support Circadia's settings and tray requirements?
   - Can Rust code draw and edit a temperature curve with native WinUI 3 controls?
@@ -7,7 +7,9 @@ questions:
   - How closely can Reactor match the native Windows 11 Settings appearance?
   - Can the graph support point insertion, reanchoring (changing the reference time that a point's signed offset is measured from), 10 K point increments, and a temperature background?
   - Which Reactor behavior at the current reference pin affects Circadia, how does its failure policy end the process, and when do its text inputs report edits?
+  - Can code outside a Reactor component run a short timer on the UI thread?
 observed-in:
+  - Windowless Reactor application probe with Win32 timers attached to the UI thread instead of a window, windows-rs dedbc8b, on Windows 11 build 26300.9974, x86_64, on 2026-11-19
   - microsoft/windows-rs master dedbc8b2efb869cca8bd7e3635668c273a304c8e (committed 2026-11-16); source inspection, regenerated Circadia composition bindings, automated workspace checks, and graph desktop checks with a simulated Night light backend on Windows 11 build 26300.9974, x86_64, Rust 1.100.0, on 2026-11-16
   - windows-rs runtime type name probes at 27abacf, c0297e5, dca9053, and f37e2f9, and the settings startup failure in a graph desktop check at f37e2f9, on Windows 11 build 26300.9711, x86_64, Rust 1.100.0, on 2026-11-14
   - GitHub pull requests microsoft/windows-rs 5362 and 5397 retrieved 2026-11-16
@@ -123,6 +125,14 @@ The application uses one explicit Git pin while Reactor is in preview. [Dependen
 ## API gaps
 
 **Source inspection of windows-rs `27abacf`:** the generated API has no programmatic Flyout closure, no automation name for list items (`DataItem`), and no window-minimized event. The [time-picker evidence](settings-design-support.md#time-picker-flyout) explains the tested alternatives. Reactor tracks native child order during reconciliation, but repeated interactive rows need stable application keys to keep their native controls.
+
+## UI-thread timers for code outside Reactor components
+
+**Source inspection of windows-rs `dedbc8b`:** Reactor's public timer, `ComponentContext::set_timeout`, delivers a message to a component (a type that implements Reactor's `Component` trait, owns UI state, and receives messages) through a WinUI `DispatcherQueueTimer`. Code that runs outside a component, such as a callback that Windows calls for an event registered with `SetWinEventHook`, has no Reactor timer to call.
+
+**Probe with windows-rs `dedbc8b` on Windows 11 build 26300.9974:** A Reactor application without windows armed two 100 ms Win32 thread timers (`SetTimer` without a window and with a timer procedure) from its `create` callback, and cancelled the first one with `KillTimer`. In three runs, the WinUI message loop that `App::run_application` starts ran the second timer's procedure 139 to 145 ms after it was armed, and never ran the cancelled timer's procedure. The probe armed the timers during application startup, so the measured delay also includes startup work on the same thread; the timer's own delay was at most that long.
+
+**Inference:** Code outside a Reactor component can schedule a short delay on the UI thread with a Win32 timer that has no window, because the WinUI message loop runs its timer procedure and does not run it after `KillTimer`.
 
 ## Failure policy
 

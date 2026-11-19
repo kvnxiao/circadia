@@ -12,8 +12,11 @@ use thiserror::Error;
 pub enum Foreground {
     /// Treat missing, inaccessible, or ambiguous identity as nonmatching.
     Unknown,
-    /// Ignore desktop and taskbar interactions when retaining recent apps.
+    /// Treat the desktop as nonmatching, and do not retain it as a recent app.
     Shell,
+    /// Keep the focused app after a read finds a transient window or no
+    /// window.
+    Transient,
     /// Use the resolved application's executable.
     Application {
         /// Executable file name used for matching.
@@ -115,6 +118,8 @@ impl ForegroundApps {
 
     /// Replace current identity and retain eligible recent applications.
     ///
+    /// - A `Transient` read changes neither the current identity nor the
+    ///   history.
     /// - `previous` is the previous foreground window's executable and the
     ///   title it had when focus moved from it to a window of another
     ///   executable; the history keeps that title in place of the title the
@@ -127,6 +132,9 @@ impl ForegroundApps {
         previous: Option<&PreviousWindow>,
         now: Duration,
     ) {
+        if *foreground == Foreground::Transient {
+            return;
+        }
         let application = match foreground {
             Foreground::Application {
                 executable,
@@ -140,7 +148,7 @@ impl ForegroundApps {
                     title.clone(),
                 )
             }),
-            Foreground::Unknown | Foreground::Shell => None,
+            Foreground::Unknown | Foreground::Shell | Foreground::Transient => None,
         };
         if let Some(previous) = previous
             && let Some(path) = previous
@@ -712,6 +720,35 @@ mod tests {
             apps.observe(&foreground, None, milliseconds(0));
             assert_eq!(executables(&apps), ["game.exe"]);
         }
+    }
+
+    #[test]
+    fn a_transient_read_between_two_apps_adds_no_entry_and_does_not_end_the_first_apps_focus() {
+        let mut apps = ForegroundApps::new("circadia.exe").expect("own name");
+        apps.observe(
+            &Foreground::application("game.exe"),
+            None,
+            Duration::from_secs(1),
+        );
+        apps.observe(&Foreground::Transient, None, Duration::from_secs(2));
+        assert_eq!(apps.current(), Some("game.exe"));
+        apps.observe(
+            &Foreground::application("browser.exe"),
+            None,
+            Duration::from_secs(3),
+        );
+        let recent = apps.recent(&Config::default());
+        let listed: Vec<(&str, Option<Duration>)> = recent
+            .iter()
+            .map(|app| (app.executable.as_str(), app.focus_ended))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("browser.exe", None),
+                ("game.exe", Some(Duration::from_secs(3))),
+            ]
+        );
     }
 
     #[test]

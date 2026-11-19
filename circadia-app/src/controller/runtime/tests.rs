@@ -1272,3 +1272,140 @@ fn foreground_and_title_changes_record_the_executable_and_window_title_at_debug_
         ]
     );
 }
+
+fn uptime(milliseconds: u64) -> RuntimeTime {
+    RuntimeTime {
+        uptime: Duration::from_millis(milliseconds),
+        ..time(1000)
+    }
+}
+
+fn resume_with(runtime: &mut ControlRuntime, foreground: &Foreground, now: RuntimeTime) {
+    let Resumed::Processed(Some(request)) = runtime.resume(1, foreground, now).expect("resume")
+    else {
+        panic!("resume requests a calculation");
+    };
+    runtime.expect_calculation(2);
+    runtime
+        .calculated(result(2, request, 3400), now)
+        .expect("resumed calculation");
+}
+
+#[test]
+fn a_transient_read_keeps_active_automatic_suppression_without_a_fade() {
+    let session = Some(listed("game.exe"));
+    let mut runtime = initialize(session.as_ref(), &Foreground::application("game.exe"), 3400);
+    store(&mut runtime, 3400, time(0));
+    assert_eq!(store(&mut runtime, 3400, time(500)), 6500);
+    runtime
+        .foreground(&Foreground::Transient, None, time(1000))
+        .expect("transient read");
+    runtime.advance(time(2000)).expect("focus delay passes");
+    assert!(runtime.suppression().automatic);
+    assert_eq!(runtime.output().fade_deadline(), None);
+    assert_eq!(
+        runtime.logical_deadline(time(2000)).expect("deadline"),
+        None
+    );
+}
+
+#[test]
+fn a_transient_read_does_not_restart_a_pending_focus_delay() {
+    let session = Some(listed("game.exe"));
+    let mut runtime = initialize(session.as_ref(), &Foreground::Unknown, 3400);
+    runtime
+        .foreground(&Foreground::application("game.exe"), None, time(100))
+        .expect("matching focus");
+    runtime
+        .foreground(&Foreground::Transient, None, time(200))
+        .expect("transient read");
+    runtime.advance(time(349)).expect("before the delay");
+    assert!(!runtime.suppression().automatic);
+    runtime.advance(time(350)).expect("delay complete");
+    assert!(runtime.suppression().automatic);
+    runtime
+        .foreground(&Foreground::application("browser.exe"), None, time(400))
+        .expect("nonmatching focus");
+    runtime.advance(time(649)).expect("before the delay");
+    assert!(runtime.suppression().automatic);
+    runtime.advance(time(650)).expect("delay complete");
+    assert!(!runtime.suppression().automatic);
+}
+
+#[test]
+fn startup_with_only_a_transient_read_initializes_automatic_suppression_as_inactive() {
+    let session = Some(listed("game.exe"));
+    let mut runtime = initialize(session.as_ref(), &Foreground::Transient, 3400);
+    assert!(!runtime.suppression().automatic);
+    runtime
+        .foreground(&Foreground::application("game.exe"), None, time(100))
+        .expect("matching focus");
+    runtime.advance(time(349)).expect("before the delay");
+    assert!(!runtime.suppression().automatic);
+    runtime.advance(time(350)).expect("delay complete");
+    assert!(runtime.suppression().automatic);
+}
+
+#[test]
+fn resume_with_a_transient_read_keeps_the_focused_game_and_active_suppression() {
+    let session = Some(listed("game.exe"));
+    let mut runtime = initialize(session.as_ref(), &Foreground::application("game.exe"), 3400);
+    assert!(runtime.suppression().automatic);
+    runtime.suspend(time(100));
+    resume_with(&mut runtime, &Foreground::Transient, uptime(50_000));
+    assert_eq!(runtime.foreground.current(), Some("game.exe"));
+    runtime.advance(uptime(60_000)).expect("focus delay passes");
+    assert!(runtime.suppression().automatic);
+}
+
+#[test]
+fn resume_with_a_transient_read_rearms_the_focus_delay_from_the_retained_game() {
+    let session = Some(listed("game.exe"));
+    let mut runtime = initialize(session.as_ref(), &Foreground::Unknown, 3400);
+    runtime
+        .foreground(&Foreground::application("game.exe"), None, time(100))
+        .expect("matching focus");
+    runtime.suspend(time(200));
+    resume_with(&mut runtime, &Foreground::Transient, uptime(50_000));
+    runtime.advance(uptime(50_249)).expect("before the delay");
+    assert!(!runtime.suppression().automatic);
+    runtime.advance(uptime(50_250)).expect("delay complete");
+    assert!(runtime.suppression().automatic);
+}
+
+#[test]
+fn time_zone_recovery_during_a_transient_read_initializes_suppression_from_the_retained_game() {
+    let config = ConfigInput {
+        suppression: vec![crate::AppEntry::new("game.exe", "game.exe")],
+        focus_delay_ms: 5000,
+        ..managed()
+    }
+    .validate()
+    .expect("config");
+    let session = Some(config);
+    let mut runtime = initialize(session.as_ref(), &Foreground::Unknown, 3400);
+    runtime
+        .foreground(&Foreground::application("game.exe"), None, time(100))
+        .expect("matching focus");
+    fail(
+        &mut runtime,
+        session.as_ref(),
+        2,
+        OutputUpdate::Fade,
+        time(150),
+    );
+    assert_eq!(runtime.state(), SchedulingState::Stopped);
+    assert!(!runtime.suppression().automatic);
+    let request = runtime
+        .configure(session.as_ref(), OutputUpdate::Fade, time(200))
+        .expect("configure")
+        .expect("request");
+    runtime
+        .foreground(&Foreground::Transient, None, time(200))
+        .expect("transient read");
+    runtime.expect_calculation(3);
+    runtime
+        .calculated(result(3, request, 3400), time(200))
+        .expect("recovered calculation");
+    assert!(runtime.suppression().automatic);
+}
