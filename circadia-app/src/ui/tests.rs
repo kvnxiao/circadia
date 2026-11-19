@@ -4,7 +4,7 @@ use crate::NativeSettings;
 use crate::ObservationMode;
 use crate::TemperatureMode;
 use crate::native::NativeBackend;
-use std::os::windows::io::BorrowedHandle;
+use circadia_winsafe::sync::WaitEvent;
 use std::time::Instant;
 use win_nightlight_lib::ColorTemperature;
 
@@ -1520,7 +1520,7 @@ impl NativeBackend for RecordingBackend {
         NativeNotifications::default()
     }
 
-    fn handles(&self) -> Vec<BorrowedHandle<'_>> {
+    fn handles(&self) -> Vec<WaitEvent<'_>> {
         Vec::new()
     }
 

@@ -1,10 +1,8 @@
-//! Own synchronization objects and wait on borrowed handles.
+//! Own synchronization objects and wait on event notifications.
 
 use std::fmt;
 use std::io;
-use std::os::windows::io::AsHandle;
 use std::os::windows::io::AsRawHandle;
-use std::os::windows::io::BorrowedHandle;
 use std::os::windows::io::FromRawHandle;
 use std::os::windows::io::OwnedHandle;
 use std::time::Duration;
@@ -32,16 +30,13 @@ impl fmt::Debug for Event {
     }
 }
 
-impl AsHandle for Event {
-    #[expect(
-        unsafe_code,
-        reason = "borrow the winsafe event for the lifetime of its guard"
-    )]
-    fn as_handle(&self) -> BorrowedHandle<'_> {
-        // SAFETY: The private guard owns the event and stays live for this
-        // borrow.
-        unsafe { BorrowedHandle::borrow_raw(self.0.ptr()) }
-    }
+/// An event that can wake the controller without transferring mutex ownership.
+#[derive(Clone, Copy, Debug)]
+pub enum WaitEvent<'a> {
+    /// An event created by Circadia.
+    Event(&'a Event),
+    /// The notification event owned by a Night light watcher.
+    Watcher(&'a win_nightlight_watch::Watcher),
 }
 
 impl Event {
@@ -66,19 +61,29 @@ impl Event {
     }
 }
 
-/// Wait for any distinct borrowed object. Return its index, or None on timeout.
+/// Wait for the first signaled event and return its index, or None on timeout.
+///
+/// ```compile_fail,E0271
+/// use circadia_winsafe::sync::{named_mutex, wait_any};
+/// use std::os::windows::io::AsHandle;
+/// let (mutex, _) = named_mutex("Circadia.WaitExample").unwrap();
+/// wait_any([mutex.as_handle()], None).unwrap();
+/// ```
 ///
 /// # Errors
-/// Returns an error for an invalid wait set or timeout, an abandoned mutex or a
+/// Returns an error for an invalid wait set, an unsupported timeout, or a
 /// failed wait.
 #[expect(unsafe_code, reason = "wait while every borrowed event remains owned")]
 pub fn wait_any<'a>(
-    objects: impl IntoIterator<Item = BorrowedHandle<'a>>,
+    events: impl IntoIterator<Item = WaitEvent<'a>>,
     timeout: Option<Duration>,
 ) -> io::Result<Option<u32>> {
-    let handles: Vec<_> = objects
+    let handles: Vec<_> = events
         .into_iter()
-        .map(|object| object.as_raw_handle())
+        .map(|event| match event {
+            WaitEvent::Event(event) => event.0.ptr(),
+            WaitEvent::Watcher(watcher) => watcher.as_raw_handle(),
+        })
         .collect();
     if handles.is_empty()
         || handles.len() > 64

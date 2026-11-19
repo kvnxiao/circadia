@@ -16,7 +16,7 @@ use crate::NativeExit;
 use crate::NativeFailure;
 use crate::NativeNotifications;
 use crate::ObservationMode;
-use std::os::windows::io::BorrowedHandle;
+use circadia_winsafe::sync::WaitEvent;
 use std::time::Duration;
 
 #[cfg(test)]
@@ -106,7 +106,7 @@ impl NativeDriver {
     }
 
     /// Borrow native notification handles for the worker's event wait.
-    pub fn handles(&self) -> Vec<BorrowedHandle<'_>> {
+    pub fn handles(&self) -> Vec<WaitEvent<'_>> {
         self.native.handles()
     }
 

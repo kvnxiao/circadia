@@ -7,8 +7,8 @@ use crate::NativeSnapshot;
 use crate::ObservationMode;
 use crate::TemperatureMode;
 use crate::native::NativeBackend;
+use circadia_winsafe::sync::WaitEvent;
 use std::collections::BTreeSet;
-use std::os::windows::io::BorrowedHandle;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -158,7 +158,7 @@ impl NativeBackend for Backend {
         NativeNotifications::default()
     }
 
-    fn handles(&self) -> Vec<BorrowedHandle<'_>> {
+    fn handles(&self) -> Vec<WaitEvent<'_>> {
         Vec::new()
     }
 

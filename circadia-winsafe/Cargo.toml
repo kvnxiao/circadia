@@ -17,6 +17,7 @@ windows-future = { workspace = true, optional = true }
 windows-window.workspace = true
 windows-result.workspace = true
 windows-sys = { workspace = true, features = ["datetimeapi", "errhandlingapi", "minwinbase", "ntstatus", "powerbase", "realtimeapiset", "shlobj_core", "stringapiset", "synchapi", "timezoneapi", "verrsrc", "winbase", "windef", "winerror", "winevt", "winnls", "winnt", "winternl", "winuser", "winver", "wtsapi32"] }
+win-nightlight-watch.workspace = true
 winsafe.workspace = true
 
 [dev-dependencies]

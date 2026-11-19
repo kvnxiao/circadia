@@ -9,7 +9,7 @@ use crate::SchedulingState;
 use crate::TemperatureMode;
 use crate::controller::managed;
 use crate::native::NativeBackend;
-use std::os::windows::io::BorrowedHandle;
+use circadia_winsafe::sync::WaitEvent;
 use std::sync::mpsc;
 use tempfile::TempDir;
 use test_case::test_case;
@@ -152,7 +152,7 @@ impl NativeBackend for Backend {
         NativeNotifications::default()
     }
 
-    fn handles(&self) -> Vec<BorrowedHandle<'_>> {
+    fn handles(&self) -> Vec<WaitEvent<'_>> {
         Vec::new()
     }
 

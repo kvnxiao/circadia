@@ -42,7 +42,7 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 circadia-bindings.workspace = true
 circadia-winsafe.workspace = true
 win-nightlight-lib.workspace = true
-win-nightlight-watch = "0.5.0"
+win-nightlight-watch.workspace = true
 windows-result.workspace = true
 windows = { workspace = true, features = ["Devices_Geolocation", "Foundation", "Security_Authorization_AppCapabilityAccess", "UI_ViewManagement"] }
 windows-future.workspace = true

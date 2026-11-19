@@ -478,6 +478,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "syn 2.0.119",
+ "win-nightlight-watch",
  "windows-core 0.101.0",
  "windows-future 0.101.0",
  "windows-result 0.100.1",

@@ -117,7 +117,7 @@ impl NativeBackend for Backend {
         std::mem::take(&mut records.notifications)
     }
 
-    fn handles(&self) -> Vec<BorrowedHandle<'_>> {
+    fn handles(&self) -> Vec<WaitEvent<'_>> {
         Vec::new()
     }
 

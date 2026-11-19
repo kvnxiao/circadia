@@ -7,7 +7,7 @@ This crate provides safe Windows APIs for Circadia and contains its handwritten 
 - Add a wrapper only when no maintained public crate provides the operation through a safe API with the results the caller needs. Check crates the workspace does not use yet as well as `winsafe`, `windows-window`, and `uiautomation`; for example, the harness captures screen pixels with `xcap`.
 - When an `unsafe` method in `winsafe` accepts the required handles and buffers, call it inside the safe wrapper. For example, `Bitmap::pixels` checks the buffer size before calling `HDC::GetDIBits`.
 - Wrap one Windows operation per function and keep the caller's logic in the calling crate. For example, `process::system_processes` returns the raw records, and the harness parses them.
-- Make the signature enforce the safety precondition. For example, `message::send` accepts only `Message` variants whose parameters are integers, so a caller cannot pass a pointer to another window.
+- Make the signature enforce the Windows object type and ownership contract. For example, the wait set accepts only Circadia events and Night light watchers because waiting on a mutex can acquire ownership.
 - Take and return `winsafe` and windows-rs types, such as `HWND`.
 - Put each block under `#[expect(unsafe_code, reason = "...")]` with a `SAFETY` comment that states why the call meets the API's requirements.
 
@@ -27,7 +27,7 @@ The table counts `unsafe` keywords written in Rust source, including macro argum
 | `src/notification.rs` | 4 |
 | `src/ordinal.rs` | 1 |
 | `src/process.rs` | 1 |
-| `src/sync.rs` | 5 |
+| `src/sync.rs` | 4 |
 | `src/test_support.rs` | 1 |
 | `src/version.rs` | 3 |
 | `src/win_event.rs` | 2 |
@@ -47,6 +47,6 @@ The table counts `unsafe` keywords written in Rust source, including macro argum
 | `icon` | Extract a sized icon by resource index and copy its pixels | Suppression list | Upstream `GetIconInfo` returns bitmap handles. Circadia puts each owned handle in a `DeleteObjectGuard`. Upstream lacks `SHDefExtractIconW`, and its `GetDIBits` requires the caller to size the buffer and keep the bitmap out of device contexts. |
 | `nls` and `ordinal` | Read Windows language preferences and regional formats, and compare UTF-16 text | Localization and executable identity | Upstream lacks the preferred-language, locale formatting, and ordinal UTF-16 comparison APIs used here. |
 | `notification` and `win_event` | Register for power, session, and accessibility notifications | Lifecycle, foreground tracking, and settings | Upstream lacks the registration APIs for power notifications, Windows session changes, and accessibility events. |
-| `sync` | Own waitable events, wait on borrowed handles, and report named mutex creation status | Worker wakeups and single-instance activation | Circadia uses upstream APIs to create, signal, and close the event. Circadia shares it across threads and waits on it alongside borrowed Night light watcher handles. Upstream lacks multiple-object waits and named mutex creation. |
+| `sync` | Wait on typed event handles and report named mutex creation status | Worker wakeups and single-instance activation | Circadia uses upstream APIs to create, signal, and close the event. Circadia shares it across threads and waits on it alongside borrowed Night light watcher handles. Upstream lacks multiple-object waits and named mutex creation. |
 | `test_support` | Count location request cancellations and raise a native exception | Windows application tests | Upstream lacks the WinRT cancellation fixture and `RaiseException`. The `test-fixtures` feature enables these operations. |
 | `version` | Read localized executable version strings | Suppression list | `winsafe` 0.0.29 returns error text as a successful result for malformed UTF-16 and leaks the version buffer if the read fails after allocation. |

@@ -4,9 +4,9 @@ mod tests;
 
 use crate::DiagnosticFailure;
 use crate::DiagnosticOperation;
+use circadia_winsafe::sync::WaitEvent;
 use std::error::Error;
 use std::fmt;
-use std::os::windows::io::BorrowedHandle;
 use win_nightlight_lib::ColorTemperature;
 
 /// Select the native preview state and whether application is mandatory.
@@ -191,7 +191,7 @@ pub(crate) trait NativeBackend: Send {
     fn restore_watchers(&mut self) -> Vec<NativeFailure>;
     fn release_watchers(&mut self);
     fn notifications(&mut self, mode: ObservationMode) -> NativeNotifications;
-    fn handles(&self) -> Vec<BorrowedHandle<'_>>;
+    fn handles(&self) -> Vec<WaitEvent<'_>>;
     fn settings(&mut self) -> Result<NativeSettings, NativeFailure>;
     fn active(&mut self) -> Result<bool, NativeFailure>;
     fn disable_schedule(&mut self) -> Result<(), NativeFailure>;
@@ -452,7 +452,7 @@ impl Native {
     }
 
     /// Borrow notification events for external waits without resetting them.
-    pub fn handles(&self) -> Vec<BorrowedHandle<'_>> {
+    pub fn handles(&self) -> Vec<WaitEvent<'_>> {
         if self.exited {
             Vec::new()
         } else {

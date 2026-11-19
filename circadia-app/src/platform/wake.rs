@@ -1,7 +1,6 @@
 use circadia_winsafe::sync::Event;
+use circadia_winsafe::sync::WaitEvent;
 use std::io;
-use std::os::windows::io::AsHandle;
-use std::os::windows::io::BorrowedHandle;
 use std::time::Duration;
 
 /// Wake a native worker for commands while preserving watcher notification
@@ -50,10 +49,10 @@ impl NativeWake {
     /// failed Windows waits.
     pub fn wait(
         &self,
-        watchers: &[BorrowedHandle<'_>],
+        watchers: &[WaitEvent<'_>],
         timeout: Option<Duration>,
     ) -> io::Result<WakeReason> {
-        let handles = std::iter::once(self.0.as_handle()).chain(watchers.iter().copied());
+        let handles = std::iter::once(WaitEvent::Event(&self.0)).chain(watchers.iter().copied());
         Ok(match circadia_winsafe::sync::wait_any(handles, timeout)? {
             Some(0) => WakeReason::Command,
             Some(_) => WakeReason::Observation,
@@ -105,7 +104,7 @@ mod tests {
         let wake = NativeWake::new().expect("command event");
         for _ in 0..2 {
             assert_eq!(
-                wake.wait(&[event.as_handle()], Some(Duration::ZERO))
+                wake.wait(&[WaitEvent::Event(&event)], Some(Duration::ZERO))
                     .expect("ready observation"),
                 WakeReason::Observation
             );
@@ -116,7 +115,7 @@ mod tests {
     fn invalid_wait_inputs_are_rejected_before_windows_access() {
         let wake = NativeWake::new().expect("event");
         assert_eq!(
-            wake.wait(&[wake.0.as_handle()], Some(Duration::ZERO))
+            wake.wait(&[WaitEvent::Event(&wake.0)], Some(Duration::ZERO))
                 .expect_err("duplicate")
                 .kind(),
             io::ErrorKind::InvalidInput
