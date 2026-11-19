@@ -316,16 +316,10 @@ impl Session {
         let focus_pending = Rc::new(Cell::new(true));
         let focused = Rc::clone(&focus_pending);
         let focus_wake = window.wake();
-        let follow_up_wake = window.wake();
-        let foreground = ForegroundEvents::listen(
-            move || {
-                focused.set(true);
-                let _notified = focus_wake.notify();
-            },
-            move || {
-                let _woken = follow_up_wake.notify();
-            },
-        )?;
+        let foreground = ForegroundEvents::listen(move || {
+            focused.set(true);
+            let _notified = focus_wake.notify();
+        })?;
         let wake = window.wake();
         let config = configuration.borrow().accepted().cloned();
         let controller = ControllerWorker::with_native(
@@ -1390,7 +1384,6 @@ impl Desktop {
             }
             Err(error) => tracing::warn!(%error, "reading the controller snapshot"),
         }
-        session.foreground.recheck();
         if self.pending.len() < COMMAND_QUEUE_CAPACITY && session.focus_pending.replace(false) {
             let config = self.configuration.borrow().accepted().cloned();
             let (foreground, previous) = session.foreground.read(|executable, path| {

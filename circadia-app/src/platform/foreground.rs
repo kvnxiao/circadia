@@ -9,10 +9,6 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
 use windows_sys::Win32::winuser::CHILDID_SELF;
 use windows_sys::Win32::winuser::EVENT_OBJECT_DESTROY;
 use windows_sys::Win32::winuser::EVENT_OBJECT_NAMECHANGE;
@@ -21,6 +17,7 @@ use windows_sys::Win32::winuser::OBJID_WINDOW;
 use winsafe::HPROCESS;
 use winsafe::HWND;
 use winsafe::co;
+use winsafe::prelude::Handle;
 
 trait WindowSource {
     type Window;
@@ -116,7 +113,7 @@ fn measured() -> Option<Foreground> {
 enum Kind {
     Desktop,
     Transient,
-    Focusable,
+    Focusable(Option<(u32, PathBuf)>),
 }
 
 fn shell_class(class: &str) -> Option<Kind> {
@@ -134,32 +131,31 @@ fn classify<S: WindowSource>(source: &S, window: &S::Window) -> Kind {
     if let Some(kind) = source.class(window).as_deref().and_then(shell_class) {
         return kind;
     }
-    if source.transient_styles(window)
-        || source
-            .owner(window)
-            .and_then(|owner| source.executable(owner))
-            .and_then(|path| file_name(&path))
-            .is_some_and(|name| crate::is_transient_host(&name))
+    if source.transient_styles(window) {
+        return Kind::Transient;
+    }
+    let process = source
+        .owner(window)
+        .and_then(|owner| Some((owner, source.executable(owner)?)));
+    if process
+        .as_ref()
+        .and_then(|(_, path)| file_name(path))
+        .is_some_and(|name| crate::is_transient_host(&name))
     {
         return Kind::Transient;
     }
-    Kind::Focusable
+    Kind::Focusable(process)
 }
 
 fn resolve_window<S: WindowSource>(source: &S, window: Option<&S::Window>) -> Foreground {
     let Some(window) = window else {
         return Foreground::Transient;
     };
-    match classify(source, window) {
+    let (owner, path) = match classify(source, window) {
         Kind::Transient => return Foreground::Transient,
         Kind::Desktop => return Foreground::Shell,
-        Kind::Focusable => {}
-    }
-    let Some(owner) = source.owner(window) else {
-        return Foreground::Unknown;
-    };
-    let Some(path) = source.executable(owner) else {
-        return Foreground::Unknown;
+        Kind::Focusable(None) => return Foreground::Unknown,
+        Kind::Focusable(Some(process)) => process,
     };
     let identity = match file_name(&path) {
         Some(name) if name == "applicationframehost.exe" => hosted_identity(source, window, owner),
@@ -220,12 +216,11 @@ enum Read<W> {
 enum EventChange {
     Unchanged,
     Focused,
-    FollowUp(u64),
+    FollowUp,
 }
 
 struct Tracking<W> {
     focused: Option<W>,
-    generation: u64,
 }
 
 impl<W: PartialEq> Tracking<W> {
@@ -235,14 +230,12 @@ impl<W: PartialEq> Tracking<W> {
                 Read::Window(window) => Some(window),
                 Read::Absent | Read::Transient => None,
             },
-            generation: 0,
         }
     }
 
     fn event(&mut self, read: Read<W>) -> EventChange {
-        self.generation = self.generation.wrapping_add(1);
         match read {
-            Read::Absent => EventChange::FollowUp(self.generation),
+            Read::Absent => EventChange::FollowUp,
             Read::Transient => EventChange::Unchanged,
             Read::Window(window) => {
                 if self.focus(window) {
@@ -254,11 +247,8 @@ impl<W: PartialEq> Tracking<W> {
         }
     }
 
-    fn follow_up(&mut self, generation: u64, read: impl FnOnce() -> Read<W>) -> bool {
-        if generation != self.generation {
-            return false;
-        }
-        match read() {
+    fn follow_up(&mut self, read: Read<W>) -> bool {
+        match read {
             Read::Window(window) => self.focus(window),
             Read::Absent | Read::Transient => false,
         }
@@ -312,8 +302,61 @@ fn foreground_read() -> Read<HWND> {
             }
             Read::Transient
         }
-        Kind::Desktop | Kind::Focusable => Read::Window(window),
+        Kind::Desktop | Kind::Focusable(_) => Read::Window(window),
     }
+}
+
+struct FollowUp {
+    timer: usize,
+    check: Box<dyn FnOnce()>,
+}
+
+thread_local! {
+    static FOLLOW_UP: RefCell<Option<FollowUp>> = const { RefCell::new(None) };
+}
+
+// A thread timer without a window posts WM_TIMER to this thread's queue;
+// the Reactor message loop dispatches it to `follow_up_due`.
+fn arm_follow_up(check: Box<dyn FnOnce()>) {
+    match HWND::NULL.SetTimer(0, 100, Some(follow_up_due)) {
+        Ok(timer) => {
+            FOLLOW_UP.with(|pending| *pending.borrow_mut() = Some(FollowUp { timer, check }));
+        }
+        Err(error) => tracing::warn!(%error, "starting the foreground follow-up check"),
+    }
+}
+
+fn cancel_follow_up() {
+    if let Some(pending) = FOLLOW_UP.with(|pending| pending.borrow_mut().take()) {
+        let _killed = HWND::NULL.KillTimer(pending.timer);
+    }
+}
+
+extern "system" fn follow_up_due(_: HWND, _: co::WM, timer: usize, _: u32) {
+    let check = FOLLOW_UP.with(|pending| {
+        pending
+            .borrow_mut()
+            .take_if(|pending| pending.timer == timer)
+            .map(|pending| pending.check)
+    });
+    let _killed = HWND::NULL.KillTimer(timer);
+    if let Some(check) = check {
+        check();
+    }
+}
+
+fn follow_up_check(
+    tracking: &Rc<RefCell<Tracking<HWND>>>,
+    notify: &Rc<dyn Fn()>,
+) -> Box<dyn FnOnce()> {
+    let tracking = Rc::clone(tracking);
+    let notify = Rc::clone(notify);
+    Box::new(move || {
+        let read = foreground_read();
+        if tracking.borrow_mut().follow_up(read) {
+            notify();
+        }
+    })
 }
 
 struct Previous {
@@ -345,7 +388,6 @@ pub struct ForegroundEvents {
     _foreground: WinEventHook,
     tracking: Rc<RefCell<Tracking<HWND>>>,
     notify: Rc<dyn Fn()>,
-    due: Arc<AtomicU64>,
     previous: Option<Previous>,
     titles: Option<Titles>,
     destruction: Option<Destruction>,
@@ -355,27 +397,18 @@ impl ForegroundEvents {
     /// Notify when the focused window changes, including focus entering this
     /// process.
     ///
-    /// - Call on a thread that pumps Windows messages; retain the returned
-    ///   guard.
+    /// - Call on a thread whose message loop dispatches window and thread
+    ///   messages, as the Reactor loop does; retain the returned guard.
     /// - `notify` runs on this thread; keep it nonblocking and free of panics.
-    /// - `wake` runs on a follow-up thread 100 ms after a foreground event
-    ///   whose read found no window; it must lead to a [`Self::recheck`] call
-    ///   on this thread.
     ///
     /// # Errors
     ///
     /// Report a failed Windows hook.
-    pub fn listen(
-        notify: impl Fn() + 'static,
-        wake: impl Fn() + Send + Sync + 'static,
-    ) -> io::Result<Self> {
+    pub fn listen(notify: impl Fn() + 'static) -> io::Result<Self> {
         let notify: Rc<dyn Fn()> = Rc::new(notify);
-        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
         let tracking = Rc::new(RefCell::new(Tracking::new(foreground_read())));
-        let due = Arc::new(AtomicU64::new(0));
         let event_tracking = Rc::clone(&tracking);
         let event_notify = Rc::clone(&notify);
-        let event_due = Arc::clone(&due);
         let hook = WinEventHook::listen(
             EVENT_SYSTEM_FOREGROUND..=EVENT_SYSTEM_FOREGROUND,
             0,
@@ -383,24 +416,15 @@ impl ForegroundEvents {
             move |_| {
                 #[cfg(feature = "graph-measurement")]
                 crate::activity::record(crate::ActivityEvent::ForegroundEvent);
+                cancel_follow_up();
                 let read = foreground_read();
                 let change = event_tracking.borrow_mut().event(read);
-                let generation = match change {
-                    EventChange::Unchanged => return,
-                    EventChange::Focused => return event_notify(),
-                    EventChange::FollowUp(generation) => generation,
-                };
-                let due = Arc::clone(&event_due);
-                let wake = Arc::clone(&wake);
-                if let Err(error) = std::thread::Builder::new()
-                    .name("circadia-foreground-follow-up".into())
-                    .spawn(move || {
-                        std::thread::sleep(Duration::from_millis(100));
-                        due.fetch_max(generation, Ordering::Relaxed);
-                        wake();
-                    })
-                {
-                    tracing::warn!(%error, "starting the foreground follow-up check");
+                match change {
+                    EventChange::Unchanged => {}
+                    EventChange::Focused => event_notify(),
+                    EventChange::FollowUp => {
+                        arm_follow_up(follow_up_check(&event_tracking, &event_notify));
+                    }
                 }
             },
         )?;
@@ -408,26 +432,10 @@ impl ForegroundEvents {
             _foreground: hook,
             tracking,
             notify,
-            due,
             previous: None,
             titles: None,
             destruction: None,
         })
-    }
-
-    /// Read the foreground window again when a follow-up is due for the
-    /// latest foreground event, and notify when that window becomes the
-    /// focused window.
-    pub fn recheck(&self) {
-        let generation = self.due.swap(0, Ordering::Relaxed);
-        if generation != 0
-            && self
-                .tracking
-                .borrow_mut()
-                .follow_up(generation, foreground_read)
-        {
-            (self.notify)();
-        }
     }
 
     /// Read the focused window, and the executable and title of the
@@ -611,6 +619,12 @@ impl ForegroundEvents {
             path,
             _hook: hook,
         })
+    }
+}
+
+impl Drop for ForegroundEvents {
+    fn drop(&mut self) {
+        cancel_follow_up();
     }
 }
 
@@ -860,7 +874,7 @@ mod tests {
     #[test]
     fn a_window_without_the_styles_and_an_unidentified_executable_is_focusable_but_unknown() {
         let source = fixture(&[(1, None)]);
-        assert_eq!(classify(&source, &1), Kind::Focusable);
+        assert_eq!(classify(&source, &1), Kind::Focusable(None));
         assert_eq!(resolve_window(&source, Some(&1)), Foreground::Unknown);
     }
 
@@ -897,12 +911,12 @@ mod tests {
         let token = Rc::new(());
         let lifetime = Rc::downgrade(&token);
         let mut first =
-            ForegroundEvents::listen(move || drop(Rc::clone(&token)), || {}).expect("first hook");
+            ForegroundEvents::listen(move || drop(Rc::clone(&token))).expect("first hook");
         let _read = first.read(|_, _| false);
         assert!(lifetime.upgrade().is_some());
         drop(first);
         assert!(lifetime.upgrade().is_none());
-        let second = ForegroundEvents::listen(|| {}, || {}).expect("replacement hook");
+        let second = ForegroundEvents::listen(|| {}).expect("replacement hook");
         drop(second);
     }
 
@@ -936,7 +950,7 @@ mod tests {
             (Read::Transient, EventChange::Unchanged),
             (Read::Window(2), EventChange::Focused),
             (Read::Transient, EventChange::Unchanged),
-            (Read::Absent, EventChange::FollowUp(6)),
+            (Read::Absent, EventChange::FollowUp),
         ] {
             assert_eq!(tracking.event(read), change);
         }
@@ -944,35 +958,44 @@ mod tests {
     }
 
     #[test]
-    fn an_absent_event_read_asks_for_one_follow_up_of_its_generation() {
+    fn an_armed_follow_up_runs_once_after_its_delay_and_a_cancelled_one_never_runs() {
+        let pump_for = |milliseconds| {
+            let started = std::time::Instant::now();
+            while started.elapsed() < std::time::Duration::from_millis(milliseconds) {
+                assert!(windows_window::pump());
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        };
+        let runs = Rc::new(Cell::new(0));
+        let cancelled = Rc::clone(&runs);
+        arm_follow_up(Box::new(move || cancelled.set(cancelled.get() + 10)));
+        cancel_follow_up();
+        pump_for(250);
+        assert_eq!(runs.get(), 0);
+        let armed = Rc::clone(&runs);
+        arm_follow_up(Box::new(move || armed.set(armed.get() + 1)));
+        assert!(windows_window::pump());
+        assert_eq!(runs.get(), 0);
+        pump_for(350);
+        assert_eq!(runs.get(), 1);
+    }
+
+    #[test]
+    fn an_absent_event_read_asks_for_a_follow_up() {
         let mut tracking = focused_on(1);
-        assert_eq!(tracking.event(Read::Absent), EventChange::FollowUp(2));
+        assert_eq!(tracking.event(Read::Absent), EventChange::FollowUp);
         assert_eq!(tracking.focused, Some(1));
-        assert!(tracking.follow_up(2, || Read::Window(2)));
+        assert!(tracking.follow_up(Read::Window(2)));
         assert_eq!(tracking.focused, Some(2));
-        assert!(!tracking.follow_up(2, || Read::Window(2)));
+        assert!(!tracking.follow_up(Read::Window(2)));
     }
 
     #[test]
     fn a_follow_up_that_finds_no_window_changes_nothing() {
         let mut tracking = focused_on(1);
-        assert_eq!(tracking.event(Read::Absent), EventChange::FollowUp(2));
-        assert!(!tracking.follow_up(2, || Read::Absent));
-        assert!(!tracking.follow_up(2, || Read::Transient));
-        assert_eq!(tracking.focused, Some(1));
-    }
-
-    #[test]
-    fn a_follow_up_older_than_the_latest_event_does_not_read() {
-        let mut tracking = focused_on(1);
-        assert_eq!(tracking.event(Read::Absent), EventChange::FollowUp(2));
-        assert_eq!(tracking.event(Read::Transient), EventChange::Unchanged);
-        let read = Cell::new(false);
-        assert!(!tracking.follow_up(2, || {
-            read.set(true);
-            Read::Window(2)
-        }));
-        assert!(!read.get());
+        assert_eq!(tracking.event(Read::Absent), EventChange::FollowUp);
+        assert!(!tracking.follow_up(Read::Absent));
+        assert!(!tracking.follow_up(Read::Transient));
         assert_eq!(tracking.focused, Some(1));
     }
 
