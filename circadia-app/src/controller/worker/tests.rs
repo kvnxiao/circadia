@@ -1612,15 +1612,13 @@ fn quit_does_not_replace_an_earlier_exit_request(earlier: ExitKind, expected: Ex
 }
 
 #[test]
-fn the_end_of_the_worker_run_replaces_only_no_request_and_quit_replaces_it() {
+fn quit_preserves_the_cleanup_for_an_unrequested_worker_exit() {
     let (client, calculation) = exit_client();
     assert_eq!(client.0.exit(), ExitRequest::None);
     client.0.request(ExitRequest::Stopped);
     assert_eq!(client.0.exit(), ExitRequest::Stopped);
     client.request_exit(ExitKind::Quit).expect("Quit requested");
-    assert_eq!(client.0.exit(), ExitRequest::Quit);
-    client.0.request(ExitRequest::Stopped);
-    assert_eq!(client.0.exit(), ExitRequest::Quit);
+    assert_eq!(client.0.exit(), ExitRequest::Stopped);
     client
         .request_exit(ExitKind::SessionEnd)
         .expect("session end requested");

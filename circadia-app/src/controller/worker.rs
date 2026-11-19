@@ -327,8 +327,7 @@ impl ExitRequest {
     fn replaces(self, current: Self) -> bool {
         match self {
             Self::None => false,
-            Self::Stopped => current == Self::None,
-            Self::Quit => matches!(current, Self::None | Self::Stopped),
+            Self::Stopped | Self::Quit => current == Self::None,
             Self::SessionEnd | Self::Panic => true,
         }
     }
@@ -410,6 +409,10 @@ impl fmt::Debug for ControllerClient {
 }
 
 impl ControllerClient {
+    pub(crate) fn is_stopping(&self) -> bool {
+        self.0.stopping()
+    }
+
     pub(crate) fn is_finished(&self) -> bool {
         self.0.finished.load(Ordering::Acquire)
     }

@@ -271,8 +271,10 @@ impl Runtime {
         let native = controller.native.map_or(Ok(()), |exit| {
             exit.preview.and(exit.off).map_err(io::Error::other)
         });
-        let result = requested
-            .and(controller.worker)
+        let workers_finished = controller.worker.is_ok() && controller.calculation.is_ok();
+        let result = controller
+            .worker
+            .and(requested)
             .and(controller.calculation)
             .and(native);
         tracing::info!(
@@ -280,7 +282,9 @@ impl Runtime {
             error = result.as_ref().err().map(tracing::field::display),
             "exit"
         );
-        crate::log::run::finish(&self.directory);
+        if workers_finished {
+            crate::log::run::finish(&self.directory);
+        }
         result
     }
 }
@@ -530,25 +534,23 @@ impl Application for Desktop {
     }
 
     fn update(&mut self, message: Message, context: &ApplicationContext<Self>) {
-        if self.exiting
-            && !matches!(
-                message,
-                Message::Opened | Message::Closed | Message::Native(DesktopEvent::WorkerChanged)
-            )
-        {
-            return;
-        }
-        match message {
-            Message::Start => self.start(context),
-            Message::Open => context.show_window("settings"),
-            Message::Opened => self.set_settings_open(true),
-            Message::Closed => self.settings_closed(),
-            Message::Edit(edits) => self.edit(edits),
-            Message::Write => self.configuration.borrow_mut().write(),
-            Message::RequestLocation => self.request_location(),
-            Message::Command(command) => self.command(command),
-            Message::Native(event) => self.native_event(event, context),
-            Message::Menu(key) => self.menu(&key, context),
+        let controller_stopped = self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.client.is_stopping());
+        if self.accepts_message(&message, controller_stopped) {
+            match message {
+                Message::Start => self.start(context),
+                Message::Open => context.show_window("settings"),
+                Message::Opened => self.set_settings_open(true),
+                Message::Closed => self.settings_closed(),
+                Message::Edit(edits) => self.edit(edits),
+                Message::Write => self.configuration.borrow_mut().write(),
+                Message::RequestLocation => self.request_location(),
+                Message::Command(command) => self.command(command),
+                Message::Native(event) => self.native_event(event, context),
+                Message::Menu(key) => self.menu(&key, context),
+            }
         }
         if let Some(error) = self.fatal.take() {
             if let Some(session) = &self.session {
@@ -1260,7 +1262,7 @@ impl Desktop {
                 // own cause. Session end stops it before this component
                 // learns of the exit.
                 Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
-                    self.pending.clear();
+                    self.quit();
                     break;
                 }
                 Err(error) => {
@@ -1429,6 +1431,13 @@ impl Desktop {
         }
         self.receive_files();
         self.release_location();
+    }
+
+    fn accepts_message(&mut self, message: &Message, controller_stopped: bool) -> bool {
+        if !self.exiting && controller_stopped {
+            self.quit();
+        }
+        !self.exiting || matches!(message, Message::Opened | Message::Closed)
     }
 
     fn begin_exit(&mut self) {
