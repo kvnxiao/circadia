@@ -28,7 +28,7 @@ The experiment starts from an identified executable path. [Hosted application id
 
 ### Reading a running application's executable
 
-**Observed in the measurement session:** Of 340 running processes, 185 opened with `PROCESS_QUERY_LIMITED_INFORMATION`, and `QueryFullProcessImageNameW` returned their paths, 103 distinct executables in all. The 155 processes that returned access denied had no visible window, so none of them was a foreground candidate during the session. All 16 processes with a visible window resolved, including `GenshinImpact.exe` running with its anti-cheat. All 103 executables opened for reading with `FILE_SHARE_READ` while their processes ran. The size and timestamp query, the version-information read, and the icon read succeeded on every one of them. Each read uses only the file path; none opens the running process.
+**Observed in the measurement session:** Of 340 running processes, 185 opened with `PROCESS_QUERY_LIMITED_INFORMATION`, and `QueryFullProcessImageNameW` returned their paths, 103 distinct executables in all. The 155 processes that returned access denied had no visible window, so none of them was a foreground candidate during the session. All 16 processes with a visible window resolved, including a game running with its anti-cheat software. All 103 executables opened for reading with `FILE_SHARE_READ` while their processes ran. The size and timestamp query, the version-information read, and the icon read succeeded on every one of them. Each read uses only the file path; none opens the running process.
 
 ### Cost of each read
 
@@ -37,7 +37,7 @@ The experiment starts from an identified executable path. [Hosted application id
 | Operation | First call | Repeated call, median |
 | :-- | :-- | :-- |
 | Size and last-write time with `GetFileAttributesExW` | 0.07–0.26 ms | 0.03 ms |
-| Version information (`FileDescription`) with `GetFileVersionInfoExW` | 0.3–34 ms; 890 ms for `HWiNFO64.exe` | 0.15–0.22 ms |
+| Version information (`FileDescription`) with `GetFileVersionInfoExW` | 0.3–34 ms; 890 ms for one third-party system utility | 0.15–0.22 ms |
 | 64-pixel icon with `PrivateExtractIconsW` | 0.4–1.7 ms | 0.13–0.54 ms |
 | Icon converted to a 32-bit bitmap with `GetIconInfo` and `GetDIBits` | about 0.1 ms | Not measured |
 | Icon through the shell with `SHGetFileInfoW` | 1.2–21 ms | about 1.3 ms |
@@ -50,7 +50,7 @@ The script read version information before the icon for each file, so the versio
 
 ### Executables without an icon resource
 
-**Observed in the measurement session:** 66 of the 103 running executables have an icon resource. The other 37 return "resource type not found" (Windows error 1813) or "resource data not found" (1812). They are almost all background processes: helpers such as `crashpad_handler.exe`, services, command-line tools, and Windows shell hosts. Among the 16 windowed processes, only `ApplicationFrameHost.exe`, `svchost.exe`, and `TextInputHost.exe` lack an icon.
+**Observed in the measurement session:** 66 of the 103 running executables have an icon resource. The other 37 return "resource type not found" (Windows error 1813) or "resource data not found" (1812). They are almost all background processes: crash-reporting helpers bundled with applications, services, command-line tools, and Windows shell hosts. Among the 16 windowed processes, only `ApplicationFrameHost.exe`, `svchost.exe`, and `TextInputHost.exe` lack an icon.
 
 Packaged Store applications vary. Using the executable named in each package's `AppxManifest.xml`:
 

@@ -1,6 +1,6 @@
 ---
 status: approved
-areas: [schedule.md, suppression.md, native-access.md, control.md, application.md, localization.md, interface.md, diagnostics.md]
+areas: [schedule.md, focus.md, suppression.md, native-access.md, control.md, application.md, localization.md, interface.md, diagnostics.md]
 ---
 
 # Circadia
@@ -63,7 +63,7 @@ Night light stores its schedule, temperature, and native preview flag in a setti
 
 Each record has a whole-second timestamp. The library stamps each write at least 2 s after the stored timestamp and after the same handle's earlier writes, so frequent writes move the timestamp ahead of real time. That difference is the timestamp lead; without writes, real time reduces it by 1 s per second. Windows behaves as if it ignores temperature changes stamped at or below the highest timestamp it has applied, so Circadia never moves a timestamp backward.
 
-The suppression list stores entries explicitly added by the user, each an executable file name with optional installation-path and window-title restrictions. Filename-only rules cover every installation with that name; a path restriction limits a rule to one executable location. A separate exclusion list overrides suppression for the windows it matches. Matching depends on current foreground identity and any title condition, not window geometry, fullscreen mode, monitor arrangement, or display scaling.
+The suppression list stores entries explicitly added by the user, each an executable file name with optional installation-path and window-title restrictions. Filename-only rules cover every installation with that name; a path restriction limits a rule to one executable location. A separate exclusion list overrides suppression for the windows it matches. Matching depends on the identity of the focused window and any title condition, not window geometry, fullscreen mode, monitor arrangement, or display scaling. Windows that appear over the app the user is working in, such as the Alt+Tab switcher, Start, or a game overlay, do not change the focused window.
 
 | Term | Meaning |
 | :-- | :-- |
@@ -76,8 +76,10 @@ The suppression list stores entries explicitly added by the user, each an execut
 | Scheduled temperature | The value obtained by evaluating the generated curve for the current instant. |
 | Wake/Bedtime-only curve | The curve with both solar targets omitted; Wake reaches Daytime and Bedtime reaches Sleep. After a solar calculation failure it is the solar fallback. |
 | Solar timing enabled | The solar timing switch is on and at least one of its Sunrise and Sunset inputs is selected. |
-| Matching app | The app of the current foreground window when a suppression-list entry matches that window and no exclusion-list entry does. |
-| Foreground change | A change of foreground window, including switches between two nonmatching apps, or a title change of the foreground window that changes whether it matches. It is an event before the focus delay is applied. |
+| Transient window | A window that receives the foreground without changing the app the user is working in, such as the Alt+Tab switcher, Start, Circadia's tray menu, or a game overlay. [REQ-skip-transient-windows](focus.md#req-skip-transient-windows--skip-transient-windows-when-tracking-focus) defines which windows are transient. |
+| Focused window | The latest foreground window that is not a transient window, until that window is destroyed. Matching, focus delays, and the recent-app history use it. An app is focused when it owns the focused window. Keyboard focus inside a window is a separate concept. |
+| Matching app | The app of the focused window when a suppression-list entry matches that window and no exclusion-list entry does. |
+| Focus change | A change of focused window, including switches between two nonmatching apps and the loss of the focused window, or a title change of the focused window that changes whether it matches. A transient window receiving the foreground is not a focus change. Suppression responds to a focus change only after the focus delay. |
 | Focus delay | The global duration for which matching or nonmatching focus persists before suppression changes. |
 | Automatic suppression | The suppression source established by matching focus. Startup initializes it from current focus; later changes wait for the focus delay. |
 | Manual suppression | The independent, runtime-only one-hour suppression source, started and stopped from the tray menu or settings. |
@@ -164,7 +166,8 @@ Circadia minimizes CPU use by scheduling work for input events, necessary output
 Constant output does not cause repeated temperature operations. Resume and taskbar recreation require discrete application refreshes, including at unchanged temperature. In long transitions, application refreshes replace some due output steps under REQ-temperature-refresh and do not add idle polling. Suppression stops underlying curve-output timers after reaching 6500 K. Schedule inputs are still recalculated on relevant configuration, date, clock, and resume events. Logging does not add timers or background threads. Other timed work is limited to:
 
 - Focus delays and manual suppression expiry.
-- Changing fades and Preview.
+- The single follow-up foreground check of REQ-skip-transient-windows after a foreground event whose read finds no foreground window.
+- Fades in progress and Preview playback.
 - Required date boundaries and visible graph time indicators.
 - A pending configuration write after a settings edit.
 - Relative focus times in the recent-app list while settings is visible.
@@ -235,11 +238,12 @@ Circadia runs with the user's standard rights and does not request elevation to 
 | Area | Scope |
 | :-- | :-- |
 | [Daily temperatures, Wake, Bedtime, and solar timing](schedule.md) | Pure schedule inputs, clock conversion, solar selection, and generated transitions. Read after the shared terms and invariants. |
-| [Automatic and manual suppression](suppression.md) | Executable identity, inclusion and exclusion lists with window-title conditions, app icons, focus delay, and one-hour manual suppression. Read after the root. |
-| [Native Night light access](native-access.md) | Short and gradual transition operations, observation, timestamp handling, cleanup, and access failures. Read after the root. |
+| [Focused window](focus.md) | Which foreground windows become the focused window, and which shell surfaces and overlays are transient. Read after this file. |
+| [Automatic and manual suppression](suppression.md) | Executable identity, inclusion and exclusion lists with window-title conditions, app icons, focus delay, and one-hour manual suppression. Read after the focused-window area. |
+| [Native Night light access](native-access.md) | Short and gradual transition operations, observation, timestamp handling, cleanup, and access failures. Read after this file. |
 | [Temperature control and lifecycle](control.md) | Management, startup, fades, schedule failures, recomputation, suspend/resume, and exit. Read after schedule, suppression, and native access. |
 | [Configuration, Preview, and launch](application.md) | Settings edits and persistence, defaults and startup recovery, Preview, sign-in startup, and resource use. Read after control and its dependencies. |
-| [Localization](localization.md) | Translatable text, interface language selection, regional formats, and translated layout. Read after the root. |
+| [Localization](localization.md) | Translatable text, interface language selection, regional formats, and translated layout. Read after this file. |
 | [Settings window and tray](interface.md) | Window and page structure, themes, status and error presentation, the schedule graph, time entry, consent and the management setting during a change, and the tray menu. Read after configuration and localization. |
 | [Log and crash records](diagnostics.md) | The local log, verbose logging, crash records, and the crash notice. Read after control and the settings window. |
 

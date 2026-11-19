@@ -40,18 +40,20 @@ The user decides what to share from the log. The personal-data reminder states t
 Starting Circadia with `--verbose` or `-V` raises that process's log detail. It then also records:
 
 - Each temperature operation and its duration.
-- Each foreground change and each window-title change that Circadia receives, with the executable name and window title.
+- Each focus change and each window-title change that Circadia receives, with the executable name and window title.
+- Each transient window that receives the foreground, with its executable name and window class.
 - Each suppression decision and each configuration write.
 - Each state transition of Preview, update checking, and Windows location requests.
 - The start and outcome of each exit step.
 
-The exit steps are the exit fade, preview cleanup, and the off attempt of [REQ-exit-night-light-off](control.md#req-exit-night-light-off--clear-native-preview-and-turn-night-light-off-on-graceful-exit), including steps that Quit shares with the turn-off sequence of [REQ-manage-night-light](control.md#req-manage-night-light--opt-in-to-managing-night-light) when management is turning off, and the cleanup after an internal error under [REQ-panic-cleanup](control.md#req-panic-cleanup--turn-night-light-off-after-an-internal-error). A transition record names the activity, its previous state, and its next state, using the state names of that activity's diagram. An exit-step record names the step and whether it succeeded or failed. These names stay the same across runs and interface languages. A location request that fails at once records its start and a transition from No request to No request. The flags affect only the process they start: when Circadia is already running, a launch with either flag activates the existing instance without changing its detail. The size bound of REQ-local-log still applies.
+The exit steps are the exit fade, preview cleanup, and the off attempt of [REQ-exit-night-light-off](control.md#req-exit-night-light-off--clear-native-preview-and-turn-night-light-off-on-graceful-exit), including steps that Quit shares with the turn-off sequence of [REQ-manage-night-light](control.md#req-manage-night-light--opt-in-to-managing-night-light) when management is turning off, and the cleanup after an internal error under [REQ-panic-cleanup](control.md#req-panic-cleanup--turn-night-light-off-after-an-internal-error). A transition record names the activity, its previous state, and its next state, using the state names in that activity's state diagram in its area specification. An exit-step record names the step and whether it succeeded or failed. These names stay the same across runs and interface languages. A location request that fails at once records its start and a transition from No request to No request. The flags affect only the process they start: when Circadia is already running, a launch with either flag activates the existing instance without changing its detail. The size bound of REQ-local-log still applies.
 
 **Scenarios:**
 
 - Circadia starts with `-V` and runs a one-hour scheduled transition: the log records each temperature operation.
 - Circadia is running without the flag, and the user launches it with `--verbose`: settings opens in the running instance, and its log detail does not change.
 - Circadia starts with `-V` and focus moves to a `javaw.exe` window titled "Minecraft 1.21.4": the log records the executable name and that title.
+- Circadia starts with `-V` and the user holds Alt+Tab over a focused app: the log records `explorer.exe` and the switcher's window class as a transient window, without a focus change.
 - Circadia starts with `-V` and the user starts Preview and lets it finish: the log records the transitions to Starting, to Playing, and back to Not previewing, with the same names under every interface language.
 - Circadia starts with `-V` and Use my Windows location on, and Windows allows access: the log records the request moving from No request to Finding your location and back to No request.
 - Circadia starts with `-V` and Use my Windows location on, and Windows does not allow access: the log records the request's start and its transition from No request to No request.
