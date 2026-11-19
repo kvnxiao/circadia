@@ -21,7 +21,7 @@ The table counts `unsafe` keywords written in Rust source, including macro argum
 | `src/crash.rs` | 4 |
 | `src/dialog.rs` | 1 |
 | `src/event_log.rs` | 4 |
-| `src/icon.rs` | 6 |
+| `src/icon.rs` | 5 |
 | `src/message.rs` | 3 |
 | `src/nls.rs` | 5 |
 | `src/notification.rs` | 4 |
@@ -44,7 +44,7 @@ The table counts `unsafe` keywords written in Rust source, including macro argum
 | `crash` | Install a process exception filter and capture return addresses | Crash reporting | Upstream has no unhandled-exception filter or stack-address capture API. |
 | `dialog` | Close a file picker with `HRESULT_FROM_WIN32(ERROR_CANCELLED)` | Settings file picker | `winsafe` takes a Win32 error code where the COM method requires an HRESULT. |
 | `event_log` | Query recent events with a timeout and render their XML | Crash reporting | Upstream has no Windows Event Log query or XML rendering API. |
-| `icon` | Extract a sized icon by resource index and copy its pixels | Suppression list | Upstream lacks `SHDefExtractIconW`. Its `GetDIBits` requires the caller to size the buffer and keep the bitmap out of device contexts. |
+| `icon` | Extract a sized icon by resource index and copy its pixels | Suppression list | Upstream `GetIconInfo` returns bitmap handles. Circadia puts each owned handle in a `DeleteObjectGuard`. Upstream lacks `SHDefExtractIconW`, and its `GetDIBits` requires the caller to size the buffer and keep the bitmap out of device contexts. |
 | `nls` and `ordinal` | Read Windows language preferences and regional formats, and compare UTF-16 text | Localization and executable identity | Upstream lacks the preferred-language, locale formatting, and ordinal UTF-16 comparison APIs used here. |
 | `notification` and `win_event` | Register for power, session, and accessibility notifications | Lifecycle, foreground tracking, and settings | Upstream lacks the registration APIs for power notifications, Windows session changes, and accessibility events. |
 | `sync` | Own waitable events, wait on borrowed handles, and report named mutex creation status | Worker wakeups and single-instance activation | Circadia uses upstream APIs to create, signal, and close the event. Circadia shares it across threads and waits on it alongside borrowed Night light watcher handles. Upstream lacks multiple-object waits and named mutex creation. |

@@ -84,13 +84,17 @@ pub fn bitmaps(icon: &winsafe::HICON) -> io::Result<(Option<Bitmap>, Bitmap)> {
     let info = icon
         .GetIconInfo()
         .map_err(|e| io::Error::from_raw_os_error(e.raw().cast_signed()))?;
-    // SAFETY: GetIconInfo transfers its mask bitmap to the caller.
-    let mask = Bitmap(unsafe { DeleteObjectGuard::new(info.hbmMask) });
-    let color = info.hbmColor.as_opt().is_some().then(|| {
-        // SAFETY: A non-null color bitmap is a second independently owned
-        // bitmap.
-        Bitmap(unsafe { DeleteObjectGuard::new(info.hbmColor) })
-    });
+    let own_bitmap = |handle| {
+        // SAFETY: GetIconInfo transfers each returned bitmap to the caller.
+        // Only its mask and non-null color bitmap are passed here, once each.
+        Bitmap(unsafe { DeleteObjectGuard::new(handle) })
+    };
+    let mask = own_bitmap(info.hbmMask);
+    let color = info
+        .hbmColor
+        .as_opt()
+        .is_some()
+        .then(|| own_bitmap(info.hbmColor));
     Ok((color, mask))
 }
 
@@ -136,5 +140,28 @@ impl Bitmap {
             return Err(io::Error::other("reading the icon bitmap failed"));
         }
         Ok((width.unsigned_abs(), lines, pixels))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monochrome_mask_outlives_its_icon() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/fixtures/monochrome.ico");
+        let (color, mask) = {
+            let icon = winsafe::HINSTANCE::NULL
+                .LoadImageIcon(
+                    winsafe::IdOicStr::Str(winsafe::WString::from_str(path)),
+                    winsafe::SIZE { cx: 16, cy: 16 },
+                    co::LR::LOADFROMFILE | co::LR::MONOCHROME,
+                )
+                .expect("load monochrome fixture");
+            bitmaps(&icon).expect("read icon bitmaps")
+        };
+        assert!(color.is_none());
+        let bitmap = mask.0.GetObject().expect("read owned mask");
+        assert_eq!((bitmap.bmWidth, bitmap.bmHeight), (16, 32));
     }
 }
