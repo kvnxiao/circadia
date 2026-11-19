@@ -658,10 +658,11 @@ impl ControlRuntime {
     /// off has a remaining step or preview cleanup.
     pub fn fading_out(&self, now: ControlTime) -> bool {
         (self.exiting() || !self.managing())
-            && self
-                .output
-                .deadlines(now)
-                .is_ok_and(|deadlines| deadlines.change.is_some() || deadlines.cleanup.is_some())
+            && self.output.deadlines(now).is_ok_and(|deadlines| {
+                deadlines.change.is_some()
+                    || deadlines.cleanup.is_some()
+                    || deadlines.setup.is_some()
+            })
     }
 
     /// Report successful completion of initial target application.
