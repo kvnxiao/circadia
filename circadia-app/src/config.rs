@@ -256,6 +256,14 @@ pub struct Membership {
 
 pub(crate) const SHARED_HOST: &str = "ApplicationFrameHost.exe";
 
+pub(crate) const TRANSIENT_HOSTS: [&str; 5] = [
+    "StartMenuExperienceHost.exe",
+    "SearchHost.exe",
+    "ShellExperienceHost.exe",
+    "ShellHost.exe",
+    "GameBar.exe",
+];
+
 impl Membership {
     /// Report whether at least one suppression rule covers the installation.
     pub fn included(&self) -> bool {
@@ -268,6 +276,15 @@ impl Membership {
 pub fn is_fixed_exclusion(executable: &str, running_executable: &str) -> bool {
     crate::same_executable(executable, SHARED_HOST)
         || crate::same_executable(executable, running_executable)
+}
+
+/// Report whether an executable file name is a shell host whose windows are
+/// transient: Start, Search, Notification Center, Quick Settings, or Game
+/// Bar.
+pub fn is_transient_host(executable: &str) -> bool {
+    TRANSIENT_HOSTS
+        .iter()
+        .any(|host| crate::same_executable(executable, host))
 }
 
 /// Collect settings before validating their complete state.

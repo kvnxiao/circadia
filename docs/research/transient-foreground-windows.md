@@ -1,18 +1,19 @@
 ---
-date: 2026-11-18
+date: 2026-11-19
 questions:
   - Which window has the foreground while the user holds Alt+Tab, and does Windows signal the start and end of the switch?
   - Which Windows shell surfaces and game overlays become the foreground window, and which window metadata recognizes them?
   - When must a tracker call `GetForegroundWindow` to identify the window the user returns to after a switch?
+  - Does a Windows event hook (`SetWinEventHook`) report the destruction of a window whose process is terminated, and how often does a destroy-event hook scoped to a whole process fire?
 observed-in:
-  - Windows 11 build 26300.9974 (26H2), scratch WinEvent probe with synthesized input and passive recording on 2026-11-18
+  - Windows 11 build 26300.9974 (26H2), scratch WinEvent probe with synthesized input and passive recording on 2026-11-18, and destroy-event probe on 2026-11-19
   - NVIDIA app overlay, NVIDIA Overlay.exe 128.4.13.34, observed 2026-11-18
   - Xbox Game Bar package Microsoft.XboxGamingOverlay 7.326.10141.0, observed 2026-11-18
   - windows-rs dedbc8b Reactor UI library transient menu source, inspected 2026-11-18
   - Circadia 1239b1c foreground resolver, source inspection on 2026-11-18
   - Steamworks overlay documentation, Discord support article 25289844838551, Epic Online Services overlay help, Overwolf exclusive-mode guide, and Microsoft Learn Game Bar and extended window style documentation, retrieved 2026-11-18
   - GameSentenceMiner commit 6a5eb9b window-occlusion code and test fixture, retrieved 2026-11-18
-recheck-when: A Windows 11 release changes the Alt+Tab switcher or the Start, Search, notification, Quick Settings, or Game Bar hosts; an overlay vendor changes how it creates its overlay window; or Circadia changes how it reads the foreground window.
+recheck-when: A Windows 11 release changes the Alt+Tab switcher, the Start, Search, notification, Quick Settings, or Game Bar hosts, or the `EVENT_OBJECT_DESTROY` events that Windows sends for destroyed windows; an overlay vendor changes how it creates its overlay window; or Circadia changes how it reads the foreground window.
 ---
 
 # Transient foreground windows
@@ -93,9 +94,15 @@ The table lists each surface's window on build 26300.9974. "Seen as foreground" 
 
 **Inference from the probe sequences:** Calling `GetForegroundWindow` when each foreground event arrives, and keeping the last result that is a window and is not transient, identifies the selected window in all eight recorded switches, because the selected window's own event found it in the foreground. The same calls ignore Game Bar's misleading event. If the tracker handles events late enough that every call falls in a period when `GetForegroundWindow` returns no window, one more call 100 ms after the empty result finds the selected window, because the recorded period lasted less than 10 ms. A gap longer than the follow-up delay leaves the earlier app as the last app until the next foreground event.
 
+## Destruction of the focused window
+
+**Probe on Windows 11 build 26300.9974:** An out-of-context `EVENT_OBJECT_DESTROY` hook received the event for a top-level window (`OBJID_WINDOW`, `CHILDID_SELF`) 2 to 3 ms after another process terminated the window's process. The event arrived with the same delay both when the hook was scoped to the window's process and when it was scoped to the window's thread. With a game in the foreground, a hook scoped to the whole `explorer.exe` process received 46 destroy events in 30 seconds; the same hook on an idle Circadia process received none.
+
+**Inference:** A destroy hook scoped to the thread of the last foreground window that is not transient detects that window's closing, including forced termination, without a foreground event and without polling. Scoping it to the thread instead of the process avoids callbacks for windows and other accessible objects that other threads of a busy process, such as `explorer.exe`, destroy.
+
 ## Method
 
-The probe was a standalone Rust program outside the repository. It registered out-of-context WinEvent hooks for `EVENT_SYSTEM_FOREGROUND`, the range from `EVENT_SYSTEM_SWITCHSTART` through `EVENT_SYSTEM_MINIMIZEEND`, and `EVENT_OBJECT_CLOAKED` and `EVENT_OBJECT_UNCLOAKED` for top-level windows of shell classes. Each event recorded the named window's executable, class, title, visibility, cloaked state, owner, and styles, together with `GetForegroundWindow` at that moment. A 50 ms timer also recorded every change of `GetForegroundWindow`. Synthesized input through `SendInput` held Alt+Tab for 1.5 s with Esc and with release, and opened Game Bar and the NVIDIA overlay only while the terminal had the foreground. A passive one-minute recording captured six switches made by hand and one taskbar click. Window listings used `EnumWindows` and `FindWindowExW`.
+The probe was a standalone Rust program outside the repository. It registered out-of-context WinEvent hooks for `EVENT_SYSTEM_FOREGROUND`, the range from `EVENT_SYSTEM_SWITCHSTART` through `EVENT_SYSTEM_MINIMIZEEND`, and `EVENT_OBJECT_CLOAKED` and `EVENT_OBJECT_UNCLOAKED` for top-level windows of shell classes. Each event recorded the named window's executable, class, title, visibility, cloaked state, owner, and styles, together with `GetForegroundWindow` at that moment. A 50 ms timer also recorded every change of `GetForegroundWindow`. Synthesized input through `SendInput` held Alt+Tab for 1.5 s with Esc and with release, and opened Game Bar and the NVIDIA overlay only while the terminal had the foreground. A passive one-minute recording captured six switches made by hand and one taskbar click. Window listings used `EnumWindows` and `FindWindowExW`. A second probe started a child process that created an ordinary top-level window without extended styles, hooked `EVENT_OBJECT_DESTROY` for that process or for the window's thread, and terminated the child after 500 ms. A passive run of the same probe counted the destroy events of the running `explorer.exe` and Circadia processes for 30 seconds without starting or terminating a process.
 
 ## Limitations
 

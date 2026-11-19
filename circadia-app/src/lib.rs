@@ -52,6 +52,7 @@ pub use config::Unusable;
 pub use config::ValidationError;
 pub use config::apply_inputs;
 pub use config::is_fixed_exclusion;
+pub use config::is_transient_host;
 pub use config::load;
 pub use config::normalize_executable;
 pub use config::solar_timing_enabled;

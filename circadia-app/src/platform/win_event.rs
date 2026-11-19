@@ -36,6 +36,7 @@ impl WinEventHook {
     pub(crate) fn listen(
         events: RangeInclusive<i32>,
         process: u32,
+        thread: u32,
         notify: impl Fn(WinEvent) + 'static,
     ) -> io::Result<Self> {
         // SAFETY: The callback has the required ABI and static lifetime.
@@ -48,7 +49,7 @@ impl WinEventHook {
                 std::ptr::null_mut(),
                 Some(dispatch),
                 process,
-                0,
+                thread,
                 WINEVENT_OUTOFCONTEXT.cast_unsigned(),
             )
         };

@@ -67,6 +67,7 @@ pub(crate) fn minimize_events(notify: impl Fn(bool) + 'static) -> io::Result<Win
     WinEventHook::listen(
         EVENT_SYSTEM_MINIMIZESTART..=EVENT_SYSTEM_MINIMIZEEND,
         std::process::id(),
+        0,
         move |event| notify(event.event.cast_signed() == EVENT_SYSTEM_MINIMIZESTART),
     )
 }

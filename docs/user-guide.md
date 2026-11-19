@@ -62,6 +62,8 @@ Exclusions override matching app rules. For example, a `javaw.exe` app rule with
 
 The focus delay prevents a brief switch between apps from changing suppression immediately. Settings lists five recent installations; the tray offers three. Complex rules with title conditions, installation restrictions, or overlapping scopes are edited in Settings. A tray check mark indicates that a rule covers the installation, independently of whether its title condition currently matches.
 
+Matching follows the last app you were in. Holding Alt+Tab, or opening Start, Search, Notification Center, Quick Settings, Game Bar, Circadia's tray menu, or an overlay over a game such as the NVIDIA overlay, does not end suppression and does not add an entry to the recently focused apps. Circadia recognizes an overlay when its window stays on top of other windows and has no taskbar button, so another app's always-on-top window without a taskbar button also leaves suppression unchanged. Focusing the desktop, switching to another app, or closing the focused app's window ends automatic suppression after the focus delay.
+
 **Suppress for 1 hour** starts a separate manual override, and **Stop suppressing** ends it. App exclusions do not cancel manual suppression. The hour includes sleep and hibernation, and exiting Circadia discards the timer. If either suppression source remains active, output stays at 6500 K.
 
 ## General preferences
@@ -120,6 +122,7 @@ General → Logs → Open folder opens the data directory's `logs` subfolder. `c
 
 - Each Night light temperature change and how long it took.
 - Each change of the focused window and its title.
+- Each transient window that receives the foreground, such as the Alt+Tab switcher, with its executable name and window class (the name Windows uses for that kind of window). These records have the message `transient window`.
 - Each save of the settings file.
 - Each change of state of Preview, of update checking, and of Windows location requests, with the previous and next state. Preview's states are `Not previewing`, `Starting`, and `Playing`; for example, a record names the move from `Starting` to `Playing` when playback begins. A location request's states are `No request` and `Finding your location`. A location request that fails at once writes a `request started` record and then a move from `No request` to `No request`, because it fails before Windows starts finding a position. State names are the same in every interface language.
 - Each step Circadia takes to turn Night light off when it exits: when the step starts, and whether it `succeeded` or `failed`. The steps are:

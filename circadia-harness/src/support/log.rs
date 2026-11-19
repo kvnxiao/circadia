@@ -53,6 +53,13 @@ pub(crate) fn exit_steps(log: &str) -> Vec<(&str, &str)> {
         .collect()
 }
 
+pub(crate) fn transient_windows(log: &str) -> Vec<(Option<&str>, Option<&str>)> {
+    log.lines()
+        .filter(|line| line.contains(": transient window"))
+        .map(|line| (field(line, "executable"), field(line, "class")))
+        .collect()
+}
+
 fn field<'a>(line: &'a str, name: &str) -> Option<&'a str> {
     let (_, value) = line.split_once(&format!(" {name}=\""))?;
     value.split_once('"').map(|(value, _)| value)
@@ -68,7 +75,10 @@ mod tests {
 2026-11-14T08:00:05.000001Z DEBUG circadia_app::log: exit step finished step="exit fade" outcome="failed"
 2026-11-14T08:00:06.000001Z DEBUG circadia_app::log: exit step started step="off attempt"
 2026-11-14T08:00:07.000001Z  WARN circadia_app::diagnostics: failure operation=native_activation_write category=access_denied code=5
-2026-11-14T08:00:08.000001Z DEBUG circadia_app::log: exit step finished step="off attempt" outcome="succeeded""#;
+2026-11-14T08:00:08.000001Z DEBUG circadia_app::log: exit step finished step="off attempt" outcome="succeeded"
+2026-11-14T08:00:09.000001Z DEBUG circadia_app::platform::foreground: transient window executable="explorer.exe" class="XamlExplorerHostIslandWindow"
+2026-11-14T08:00:10.000001Z DEBUG circadia_app::platform::foreground: transient window class="Shell_TrayWnd"
+2026-11-14T08:00:11.000001Z DEBUG circadia_app::controller::runtime: foreground executable=explorer.exe"#;
 
     #[test]
     fn transitions_select_one_activity_in_log_order() {
@@ -95,6 +105,17 @@ mod tests {
                 ("exit fade", "failed"),
                 ("off attempt", "started"),
                 ("off attempt", "succeeded"),
+            ]
+        );
+    }
+
+    #[test]
+    fn transient_windows_list_each_record_with_its_executable_and_class() {
+        assert_eq!(
+            super::transient_windows(LOG),
+            [
+                (Some("explorer.exe"), Some("XamlExplorerHostIslandWindow")),
+                (None, Some("Shell_TrayWnd")),
             ]
         );
     }

@@ -149,7 +149,9 @@ just accept identity --language qps-Ploc
 
 The check opens two temporary test windows and switches between them and Settings. It changes the recent-app order while an app's Add button or checkbox has keyboard focus. The same control must still target that app and preserve focus and selection. Invoking Add must save the intended executable. The test windows close when the run ends, including on failure.
 
-This check sends desktop input and requires 100% scaling; leave the desktop idle. It uses isolated configuration with Night light management off and saves screenshots in the run directory.
+After Add saves the first test app (app A), the check activates app A and then the second test app (app B), presses Alt+Tab, releases Tab, holds Alt for two seconds while the Windows Alt+Tab switcher is open, and releases Alt so that Windows returns to app A. App A's recent entry must then be first and app B's second, and no recent entry may name `explorer.exe`, the executable of the switcher. The check saves `recent-after-alt-tab.png` after it activates Settings again. Circadia starts with `-V` (`--verbose`) in this scenario. After Circadia exits, the check requires a `transient window` log record with `executable="explorer.exe"` and reports the executable and window class of every `transient window` record.
+
+This check sends desktop input, including the held Alt+Tab on the live desktop, and requires 100% scaling; leave the desktop idle. If another app takes the foreground during the run, rerun it with an idle desktop. It uses isolated configuration with Night light management off and saves screenshots in the run directory.
 
 ### Installation restrictions (`accept paths`)
 
