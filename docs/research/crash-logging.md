@@ -113,7 +113,7 @@ A filter cannot assume a usable heap after an access violation, so it should wri
 | WER events 1000 and 1001 | Written for every WER-reported crash; readable by the unelevated user (measured with `wevtutil qe Application`). | Yes. | Yes. Circadia can read them at its next launch. |
 | Reliability Monitor (`perfmon /rel`) | Shows application failures with "View technical details" and can save the reliability history to an XML file. | Yes. | Yes, as a user instruction. Its details include the full executable path. |
 
-The reference machine's `HKEY_CURRENT_USER\…\Windows Error Reporting\RuntimeExceptionHelperModules` lists `crashpad_wer.dll` and `sentry-wer.dll` entries registered by games and Discord, which confirms that applications register these modules per user without elevation.
+The reference machine's `HKEY_CURRENT_USER\…\Windows Error Reporting\RuntimeExceptionHelperModules` lists `crashpad_wer.dll` and `sentry-wer.dll` entries registered by installed games and other applications, which confirms that applications register these modules per user without elevation.
 
 ## Logging libraries
 
