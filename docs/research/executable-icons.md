@@ -1,20 +1,23 @@
 ---
-date: 2026-11-02
+date: 2026-11-19
 questions:
-  - Can Circadia read an application's icon and display name from its executable file, including while the application runs, without opening the running process for more than limited query?
+  - Can Circadia read an application's icon and display name from its executable file, including while the application runs, without opening the running process for more than limited-query access (`PROCESS_QUERY_LIMITED_INFORMATION`)?
   - What does each read cost, and can a key taken from file metadata let Circadia skip repeated reads across launches?
   - Which executables have no icon resource, and which documented Windows function extracts an icon at a chosen size?
+  - Which Windows source names an executable that has no version description?
 observed-in:
+  - Windows 11 Pro build 26300.9974, x64, standard (non-elevated) user session, with Counter-Strike 2 (Steam) running, 2026-11-19
+  - PowerShell 7 file version information, `tasklist /v`, `reg query`, and inline C# calls to `SHGetPropertyStoreForWindow` and `GetWindowTextW`, run outside the repository
   - Windows 11 Pro build 26300.9711, x64, standard (non-elevated) user session, 2026-10-24
   - Python 3.15.0 ctypes calls to kernel32, psapi, version, user32, and shell32 from a temporary script outside the repository, single runs
   - Microsoft Learn pages for PrivateExtractIconsW, SHDefExtractIconW, SHGetStockIconInfo, and GetFileAttributesExW, retrieved 2026-10-24
-  - Settings-design probe display of an extracted icon through Reactor's Image at windows-rs 0496ec1, Windows 11 Pro x64 build 26300, 100% scaling, dark theme, Rust 1.99.0, debug build with installed Windows App SDK runtime, 2026-10-27
+  - Settings-design probe display of an extracted icon through the `Image` element of Reactor, the Windows UI library Circadia uses, at windows-rs 0496ec1, Windows 11 Pro x64 build 26300, 100% scaling, dark theme, Rust 1.99.0, debug build with installed Windows App SDK runtime, 2026-10-27
 recheck-when: Circadia changes how it identifies or reads executables; Windows documents a change to icon extraction; or users report generic icons for a category of applications, such as games protected by an anti-cheat product that was not running in these measurements.
 ---
 
 # Executable icons and display names
 
-Circadia can show an application's own icon in settings by reading the icon resource from the application's executable file. The read works while the application runs: in one session, every one of 103 distinct running executables could be opened for reading, including a game running with its anti-cheat. Every process with a visible window resolved its executable path with limited-query access. Reading an icon costs about 0.5 ms once Windows has the file in memory. The expensive step is the first open of a file, which took up to 890 ms for one executable's version information. The file's size and last-write time, which `GetFileAttributesExW` returns in about 0.03 ms, can key a persistent icon cache, so a later launch does not need to open the file again. About a third of running executables have no icon resource. Almost all of them are background helpers, but two built-in Store apps checked separately, Calculator and Photos, also have none, so a generic icon remains necessary. The documented `SHDefExtractIconW` returns the same results as `PrivateExtractIconsW`, whose documentation says it is not intended for general use.
+Circadia can show an application's own icon in settings by reading the icon resource from the application's executable file. The read works while the application runs: in one session, every one of 103 distinct running executables could be opened for reading, including a game running with its anti-cheat. Every process with a visible window resolved its executable path with limited-query access (`PROCESS_QUERY_LIMITED_INFORMATION`). Reading an icon costs about 0.5 ms once Windows has the file in memory. The expensive step is the first open of a file, which took up to 890 ms for one executable's version information. The file's size and last-write time, which `GetFileAttributesExW` returns in about 0.03 ms, can serve as the lookup key of a persistent icon cache, so a later launch does not need to open the file again. About a third of running executables have no icon resource. Almost all of them are background helpers, but two built-in Store apps checked separately, Calculator and Photos, also have none, so a generic icon remains necessary. The documented `SHDefExtractIconW` returns the same results as `PrivateExtractIconsW`, whose documentation says it is not intended for general use. Some games have no version description, and Windows' own metadata then names them by filename. The window title is then the only Windows source with the app's name, such as "Counter-Strike 2", and reading it costs about 0.1 µs.
 
 ## Scope and applicability
 
@@ -42,7 +45,7 @@ The experiment starts from an identified executable path. [Hosted application id
 | Icon converted to a 32-bit bitmap with `GetIconInfo` and `GetDIBits` | about 0.1 ms | Not measured |
 | Icon through the shell with `SHGetFileInfoW` | 1.2–21 ms | about 1.3 ms |
 
-The script read version information before the icon for each file, so the version read absorbed each file's first open. The icon reads that followed cost about 1 ms. In the pass over all 103 running executables, which read each file's version information before its icon, no first version-information or icon read exceeded 20 ms. A later `SHDefExtractIconW` pass over the same files took a median of 0.50 ms and at most 8.22 ms. The one 890 ms read shows that a first open can take long enough to stall whichever thread makes it. The inferred causes are a cold disk read or an antivirus scan; the run did not distinguish them.
+The script read version information before the icon for each file, so the version read paid the cost of each file's first open. The icon reads that followed cost about 1 ms. In the pass over all 103 running executables, which read each file's version information before its icon, no first version-information or icon read exceeded 20 ms. A later `SHDefExtractIconW` pass over the same files took a median of 0.50 ms and at most 8.22 ms. The one 890 ms read shows that a first open can take long enough to stall whichever thread makes it. The inferred causes are a cold disk read or an antivirus scan; the run did not distinguish them.
 
 ### A cache key from file metadata
 
@@ -64,6 +67,27 @@ Packaged Store applications vary. Using the executable named in each package's `
 
 A Store application's logo is stored in its package assets, not in its executable. Showing that logo would need the package's identity and a second source of images.
 
+### Names for executables without a version description
+
+**Observed in the Counter-Strike 2 session:**
+
+| Source | `cs2.exe` | `re2.exe` |
+| :-- | :-- | :-- |
+| Version resource `FileDescription` and `ProductName` | Empty | Empty |
+| Shell friendly-name cache: `FriendlyAppName` under `HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache` | `cs2.exe` | `re2.exe` |
+| Window shell properties from `SHGetPropertyStoreForWindow`, such as the AppUserModelID and relaunch display name | No properties | Not running |
+| Window title | "Counter-Strike 2" | Not running |
+
+Windows therefore names these executables by filename wherever it reads only the file, and the game's window title is the only Windows source with the game's name. `wezterm-gui.exe`, which has the description "WezTerm - Wez's Terminal Emulator", also has an empty window property store, and its title follows the open document.
+
+`GetWindowTextW` on the game's window took 0.10 µs per call, averaged over 10,000 calls in each of three runs.
+
+Steam records the game's name outside Windows' metadata: `steamapps\appmanifest_730.acf` has `"name" "Counter-Strike 2"`, and the Start menu shortcut `Counter-Strike 2.url` launches `steam://rungameid/730`, not the executable path. Reading either requires parsing Steam's own file formats.
+
+**Inference from the other windowed processes running at the time:** apps whose titles follow a document, such as terminals and editors, had a version description, so a title fallback mostly affects games and small tools. The sample was the 12 windowed processes running during the Counter-Strike 2 session on one desktop.
+
+**Applicability:** Circadia uses the window title recorded when focus last left the app as the display name of an executable without a readable description and keeps that title in the icon cache index, as the [suppression list requirement](../specs/suppression.md#req-edit-executable-list--edit-the-suppression-list) defines.
+
 ### Documented extraction functions
 
 **Observed in Microsoft Learn:**
@@ -83,8 +107,8 @@ A Store application's logo is stored in its package assets, not in its executabl
 | :-- | :-- | :-- | :-- | :-- |
 | `SHDefExtractIconW` on the executable path | Yes | Same icons as `PrivateExtractIconsW`; `S_FALSE` when absent | 0.50 ms | Requested pixel size; reads only the executable file and does not open the process |
 | `PrivateExtractIconsW` on the executable path | Marked not for general use | 66 icons, 37 absent | 0.13–0.54 ms | Same result; may change in later Windows versions |
-| `SHGetFileInfoW` through the shell | Yes | Not compared for absent icons | About 1.3 ms | Goes through the shell, where installed shell extensions can participate; system icon sizes only |
-| The Store package's logo | Yes, through package APIs | Not measured | Not measured | Gives Calculator and Photos their logos; needs package identity and asset selection |
+| `SHGetFileInfoW` through the shell | Yes | Not compared for absent icons | About 1.3 ms | Goes through the shell, where installed shell extensions can participate; only the shell's fixed small and large icon sizes |
+| The Store package's logo | Yes, through package APIs | Not measured | Not measured | Gives Calculator and Photos their logos; needs package identity and a choice among the package's logo images |
 
 | Caching | Repeated reads | Extra state |
 | :-- | :-- | :-- |
@@ -95,7 +119,7 @@ A Store application's logo is stored in its package assets, not in its executabl
 
 ## Recommendation
 
-Read icons with `SHDefExtractIconW` from the executable path, at the pixel size the display needs, on a thread that neither drives Night light nor runs the UI. Read display names on the same thread, because a first file open can take hundreds of milliseconds. Cache the resulting images persistently under Circadia's data folder, keyed by path, size, and last-write time, and delete cached images for apps that are no longer listed or recently focused. Persist metadata-source paths separately from optional matching restrictions. Use a cached image only for its own executable path; use the generic icon when no such image exists or the file has no icon resource. Leave package logos for Store applications to a later decision.
+Read icons with `SHDefExtractIconW` from the executable path, at the pixel size the display needs, on a thread that neither drives Night light nor runs the UI. Read display names on the same thread, because a first file open can take hundreds of milliseconds. Cache the resulting images persistently under Circadia's data folder, keyed by path, size, and last-write time, and delete cached images for apps that are no longer listed or recently focused. Persist the path that supplies a filename-only rule's icon and display name separately from optional matching restrictions. Use a cached image only for its own executable path; use the generic icon when no such image exists or the file has no icon resource. Leave package logos for Store applications to a later decision.
 
 ## Runtime icon rendering
 
@@ -103,9 +127,9 @@ Effective pixels (epx) are layout units that Windows converts to physical pixels
 
 **Observed at windows-rs `0496ec1` on Windows 11 Pro x64 build 26300 at 100% scaling (96 DPI), in a dark window theme, with Rust 1.99.0, a default debug build, and the installed Windows App SDK runtime:** An experimental probe of runtime icon rendering in Reactor displayed `notepad.exe` icons.
 
-A 32 px PNG extracted with `SHDefExtractIconW` matched all 1,024 pixels of a 32 epx `Image` through both in-memory and file sources. A 64 px extraction scaled to 32 epx matched 336 pixels, with a maximum channel difference of 169. Each source was compared with the 32 px PNG composited over the same black background. The separately drawn 32 px icon resource is the inferred cause of the difference; each display scale needs its own extraction.
+A 32 px PNG extracted with `SHDefExtractIconW` matched all 1,024 pixels of a 32 epx `Image` through both in-memory and file sources. A 64 px extraction scaled to 32 epx matched 336 of the 1,024 pixels, with a maximum channel difference of 169. Each source was compared with the 32 px PNG composited over the same black background. The icon resource's separately drawn 32 px image is the inferred cause of the difference; each display scale needs its own extraction.
 
-File sources kept the original image after file deletion or replacement and recreation of the image elements under new keys. The experiment did not distinguish Reactor's reuse of an image source with the same URI from WinUI's URI cache. Circadia uses in-memory sources and retains 32, 48, and 64 px extractions. These observations do not establish rendering at 150% or 200% scaling.
+File sources kept the original image after file deletion or replacement and recreation of the image elements under new Reactor element keys. The experiment did not distinguish Reactor's reuse of an image source with the same URI from WinUI's cache of images loaded by URI. Circadia uses in-memory sources and retains 32, 48, and 64 px extractions. These observations do not establish rendering at 150% or 200% scaling.
 
 ## Gaps
 
@@ -113,7 +137,7 @@ The measurements leave these boundaries unverified:
 
 - Display of extracted icons at 150% and 200% scaling; the [rendering observation above](#runtime-icon-rendering) covers 100%.
 - Whether an anti-cheat product denies reading its game's executable file. A protected game that was not running in these measurements could deny it; the result would then be the generic icon, not a failure.
-- First-open latency on a cold disk and under antivirus scanning, measured from the application's reader thread.
+- First-open latency on a cold disk and under antivirus scanning, measured from the application's file-reading thread.
 - Legibility of application icons in contrast themes, where Circadia shows them without recoloring.
 
 ## Sources

@@ -177,9 +177,22 @@ enum Reply {
     Generic(Option<IconImages>),
 }
 
+pub(super) fn display_names(
+    descriptions: &BTreeMap<ExecutablePath, Option<String>>,
+    titles: &BTreeMap<ExecutablePath, String>,
+) -> BTreeMap<ExecutablePath, String> {
+    descriptions
+        .iter()
+        .filter_map(|(path, description)| {
+            let name = description.as_ref().or_else(|| titles.get(path))?;
+            Some((path.clone(), name.clone()))
+        })
+        .collect()
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Received {
-    pub(super) names: Vec<(ExecutablePath, String)>,
+    pub(super) names: Vec<(ExecutablePath, Option<String>)>,
     pub(super) icons: Vec<(ExecutablePath, IconRead)>,
     pub(super) generic: Option<IconImages>,
 }
@@ -191,7 +204,7 @@ pub(super) struct FileInfoClient {
     in_flight: Option<Request>,
     requested: BTreeSet<ExecutablePath>,
     reading_icons: BTreeSet<ExecutablePath>,
-    names: BTreeMap<ExecutablePath, String>,
+    names: BTreeMap<ExecutablePath, Option<String>>,
     revision: u64,
 }
 
@@ -255,7 +268,7 @@ impl FileInfoClient {
         if let Ok(reply) = self.replies.try_recv() {
             self.in_flight = None;
             match reply {
-                Reply::Name(path, Some(name)) if self.requested.contains(&path) => {
+                Reply::Name(path, name) if self.requested.contains(&path) => {
                     received.names.push((path, name));
                 }
                 Reply::Icon(executable, read) if self.reading_icons.remove(&executable) => {
@@ -296,11 +309,7 @@ impl FileInfoClient {
         }
     }
 
-    pub(super) fn name(&self, path: &ExecutablePath) -> Option<&str> {
-        self.names.get(path).map(String::as_str)
-    }
-
-    pub(super) fn names(&self) -> &BTreeMap<ExecutablePath, String> {
+    pub(super) fn names(&self) -> &BTreeMap<ExecutablePath, Option<String>> {
         &self.names
     }
 
@@ -442,7 +451,10 @@ mod tests {
         replies
             .recv_timeout(Duration::from_secs(5))
             .expect("current reply");
-        assert_eq!(client.receive().names, [(current.clone(), "App".into())]);
+        assert_eq!(
+            client.receive().names,
+            [(current.clone(), Some("App".into()))]
+        );
         replies
             .recv_timeout(Duration::from_secs(5))
             .expect("icon reply");
@@ -512,11 +524,61 @@ mod tests {
         assert_eq!(
             names,
             [
-                (a.clone(), r"C:\A\browser.exe".into()),
-                (b.clone(), r"C:\B\browser.exe".into())
+                (a.clone(), Some(r"C:\A\browser.exe".into())),
+                (b.clone(), Some(r"C:\B\browser.exe".into()))
             ]
         );
-        assert_eq!(client.name(&a), Some(r"C:\A\browser.exe"));
-        assert_eq!(client.name(&b), Some(r"C:\B\browser.exe"));
+        assert_eq!(
+            client.names().get(&a),
+            Some(&Some(r"C:\A\browser.exe".into()))
+        );
+        assert_eq!(
+            client.names().get(&b),
+            Some(&Some(r"C:\B\browser.exe".into()))
+        );
+    }
+
+    #[test]
+    fn a_read_without_a_description_is_kept_as_a_finished_read() {
+        let (ready, received) = mpsc::channel();
+        let mut client = FileInfoClient::spawn(Names(|_: &Path| None), move || {
+            let _sent = ready.send(());
+        })
+        .expect("worker");
+        let game = ExecutablePath::new(r"C:\Games\cs2.exe").expect("game");
+        client.request("cs2.exe", game.as_path());
+        let mut names = Vec::new();
+        for _ in 0..2 {
+            received
+                .recv_timeout(Duration::from_secs(5))
+                .expect("generic and name replies");
+            names.extend(client.receive().names);
+        }
+        assert_eq!(names, [(game.clone(), None)]);
+        assert_eq!(client.names().get(&game), Some(&None));
+    }
+
+    #[test]
+    fn a_description_names_an_installation_before_its_title_and_a_title_only_after_a_finished_read()
+    {
+        let path =
+            |folder: &str| ExecutablePath::new(&format!(r"C:\{folder}\app.exe")).expect("path");
+        let descriptions = BTreeMap::from([
+            (path("Described"), Some("WezTerm".to_owned())),
+            (path("Untitled"), None),
+            (path("Titled"), None),
+        ]);
+        let titles = BTreeMap::from([
+            (path("Described"), "notes.txt - WezTerm".to_owned()),
+            (path("Titled"), "Counter-Strike 2".to_owned()),
+            (path("Pending"), "Loading".to_owned()),
+        ]);
+        assert_eq!(
+            display_names(&descriptions, &titles),
+            BTreeMap::from([
+                (path("Described"), "WezTerm".to_owned()),
+                (path("Titled"), "Counter-Strike 2".to_owned()),
+            ])
+        );
     }
 }

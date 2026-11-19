@@ -47,12 +47,15 @@ struct Index {
     version: u32,
     apps: Vec<Entry>,
     sources: BTreeMap<String, String>,
+    #[serde(default)]
+    titles: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct AppIcons {
     pub(super) apps: BTreeMap<ExecutablePath, IconImages>,
     pub(super) sources: BTreeMap<ExecutableName, ExecutablePath>,
+    pub(super) titles: BTreeMap<ExecutablePath, String>,
     pub(super) generic: Option<IconImages>,
 }
 
@@ -77,7 +80,8 @@ pub(super) struct IconCache {
     folder: PathBuf,
     icons: BTreeMap<ExecutablePath, (Entry, Option<IconImages>)>,
     sources: BTreeMap<ExecutableName, ExecutablePath>,
-    source_revision: u64,
+    titles: BTreeMap<ExecutablePath, String>,
+    revision: u64,
     last_image: u32,
     generic: Option<IconImages>,
     view: Rc<AppIcons>,
@@ -107,7 +111,11 @@ impl IconCache {
             .inspect_err(|error| tracing::debug!(%error, "no icon cache index"))
             .ok()
             .and_then(valid_index);
-        let (entries, sources) = loaded.unwrap_or_default();
+        let ValidIndex {
+            entries,
+            sources,
+            titles,
+        } = loaded.unwrap_or_default();
         let last_image = entries.values().map(|entry| entry.image).max().unwrap_or(0);
         let icons = entries
             .into_iter()
@@ -117,7 +125,8 @@ impl IconCache {
             folder,
             icons,
             sources,
-            source_revision: 0,
+            titles,
+            revision: 0,
             last_image,
             generic: None,
             view: Rc::default(),
@@ -132,8 +141,8 @@ impl IconCache {
         Rc::clone(&self.view)
     }
 
-    pub(super) fn source_revision(&self) -> u64 {
-        self.source_revision
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
     }
 
     fn update_view(&mut self) {
@@ -144,6 +153,7 @@ impl IconCache {
                 .filter_map(|(path, (_, images))| Some((path.clone(), images.clone()?)))
                 .collect(),
             sources: self.sources.clone(),
+            titles: self.titles.clone(),
             generic: self.generic.clone(),
         });
     }
@@ -159,7 +169,21 @@ impl IconCache {
             return;
         }
         self.sources.insert(name, path);
-        self.source_revision = self.source_revision.wrapping_add(1);
+        self.revision = self.revision.wrapping_add(1);
+        self.write_index();
+        self.update_view();
+    }
+
+    pub(super) fn record_title(&mut self, path: &ExecutablePath, title: &str) {
+        if self
+            .titles
+            .get(path)
+            .is_some_and(|recorded| recorded == title)
+        {
+            return;
+        }
+        self.titles.insert(path.clone(), title.to_owned());
+        self.revision = self.revision.wrapping_add(1);
         self.write_index();
         self.update_view();
     }
@@ -254,11 +278,14 @@ impl IconCache {
                 .any(|global| crate::same_executable(name.as_str(), global))
                 || keep.contains(path)
         });
-        if before != self.sources.len() {
-            self.source_revision = self.source_revision.wrapping_add(1);
-        }
         let referenced: BTreeSet<&ExecutablePath> =
             keep.iter().chain(self.sources.values()).collect();
+        let titles = self.titles.len();
+        self.titles.retain(|path, _| referenced.contains(path));
+        let names_changed = before != self.sources.len() || titles != self.titles.len();
+        if names_changed {
+            self.revision = self.revision.wrapping_add(1);
+        }
         let removed: Vec<ExecutablePath> = self
             .icons
             .keys()
@@ -270,7 +297,7 @@ impl IconCache {
                 self.delete_images(entry.image);
             }
         }
-        if !removed.is_empty() || before != self.sources.len() {
+        if !removed.is_empty() || names_changed {
             self.write_index();
             self.update_view();
         }
@@ -326,6 +353,11 @@ impl IconCache {
                 .iter()
                 .map(|(name, path)| (name.as_str().to_owned(), path.as_str().to_owned()))
                 .collect(),
+            titles: self
+                .titles
+                .iter()
+                .map(|(path, title)| (path.as_str().to_owned(), title.clone()))
+                .collect(),
         };
         writer.submit(index, std::mem::take(&mut self.pending));
     }
@@ -341,12 +373,14 @@ impl Drop for IconCache {
     }
 }
 
-fn valid_index(
-    index: Index,
-) -> Option<(
-    BTreeMap<ExecutablePath, Entry>,
-    BTreeMap<ExecutableName, ExecutablePath>,
-)> {
+#[derive(Default)]
+struct ValidIndex {
+    entries: BTreeMap<ExecutablePath, Entry>,
+    sources: BTreeMap<ExecutableName, ExecutablePath>,
+    titles: BTreeMap<ExecutablePath, String>,
+}
+
+fn valid_index(index: Index) -> Option<ValidIndex> {
     if index.version != 1 {
         return None;
     }
@@ -371,7 +405,20 @@ fn valid_index(
             return None;
         }
     }
-    Some((entries, sources))
+    let mut titles = BTreeMap::new();
+    for (path, title) in index.titles {
+        if titles
+            .insert(ExecutablePath::new(&path).ok()?, title)
+            .is_some()
+        {
+            return None;
+        }
+    }
+    Some(ValidIndex {
+        entries,
+        sources,
+        titles,
+    })
 }
 
 fn image_path(folder: &Path, image: u32, pixels: u16) -> PathBuf {

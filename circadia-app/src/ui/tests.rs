@@ -1076,6 +1076,134 @@ fn cached_names_follow_source_changes_and_new_rules_without_another_reply() {
     assert!(desktop.pending.is_empty());
 }
 
+fn desktop_with_focused_game_and_terminal() -> (tempfile::TempDir, Desktop) {
+    let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
+    let added = desktop.configuration.borrow_mut().add(
+        Field::Suppression,
+        vec![crate::AppEntry::new("cs2.exe", "cs2.exe")],
+    );
+    desktop.configure(added.expect("rule added"));
+    desktop.file_info = Some(
+        FileInfoClient::spawn(
+            file_info::Names(|path: &Path| {
+                path.ends_with("wezterm-gui.exe")
+                    .then(|| "WezTerm - Wez's Terminal Emulator".to_owned())
+            }),
+            || {},
+        )
+        .expect("file-information worker"),
+    );
+    let recent = |path: &str, title: &str, focus_ended: Option<Duration>| crate::RecentApp {
+        executable: Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("fixture filename")
+            .to_owned(),
+        path: PathBuf::from(path),
+        focus_ended,
+        title: Some(title.to_owned()),
+        included: false,
+        covering: 0,
+        removable: false,
+        condition: String::new(),
+        excluded: false,
+    };
+    desktop.snapshot = Some(Arc::new(ControllerSnapshot {
+        accepted: None,
+        last_scheduled: None,
+        scheduling: crate::SchedulingState::Available,
+        management: crate::ManagementState::On,
+        preview: None,
+        origin: Instant::now(),
+        calculation: None,
+        preview_active: false,
+        preview_deadline: None,
+        suppression: crate::SuppressionState {
+            automatic: false,
+            manual_deadline: None,
+        },
+        recent: vec![
+            recent(r"C:\Games\cs2.exe", "Counter-Strike 2", None),
+            recent(
+                r"C:\Apps\wezterm-gui.exe",
+                "notes.txt - WezTerm",
+                Some(Duration::from_secs(10)),
+            ),
+        ],
+        command: None,
+        native_errors: BTreeMap::new(),
+        configured_revision: 0,
+        control_error: None,
+        stopped: false,
+    }));
+    desktop.request_names();
+    receive_name(&mut desktop, "cs2.exe");
+    receive_name(&mut desktop, "wezterm-gui.exe");
+    (directory, desktop)
+}
+
+fn recent_game(desktop: &mut Desktop) -> &mut crate::RecentApp {
+    let snapshot =
+        Arc::get_mut(desktop.snapshot.as_mut().expect("snapshot")).expect("owned snapshot");
+    &mut snapshot.recent[0]
+}
+
+#[test]
+fn a_window_title_names_an_app_without_a_description_after_focus_leaves_it() {
+    let (directory, mut desktop) = desktop_with_focused_game_and_terminal();
+    desktop.record_names();
+    assert!(desktop.icons.view().titles.is_empty());
+    assert_eq!(
+        suppression_list(&desktop),
+        [crate::AppEntry::new("cs2.exe", "cs2.exe")]
+    );
+    recent_game(&mut desktop).focus_ended = Some(Duration::from_secs(20));
+    desktop.record_names();
+    let game = crate::ExecutablePath::new(r"C:\Games\cs2.exe").expect("game");
+    assert_eq!(
+        desktop.icons.view().titles,
+        BTreeMap::from([(game.clone(), "Counter-Strike 2".to_owned())])
+    );
+    assert_eq!(
+        desktop.display_names(),
+        BTreeMap::from([
+            (game, "Counter-Strike 2".to_owned()),
+            (
+                crate::ExecutablePath::new(r"C:\Apps\wezterm-gui.exe").expect("terminal"),
+                "WezTerm - Wez's Terminal Emulator".to_owned()
+            ),
+        ])
+    );
+    assert_eq!(
+        suppression_list(&desktop),
+        [crate::AppEntry::new("cs2.exe", "Counter-Strike 2")]
+    );
+    let written = saved(&directory).expect("a recorded name writes at once");
+    assert!(written.contains("name = \"Counter-Strike 2\""), "{written}");
+}
+
+#[test]
+fn a_newer_window_title_replaces_the_name_with_one_configure() {
+    let (_directory, mut desktop) = desktop_with_focused_game_and_terminal();
+    recent_game(&mut desktop).focus_ended = Some(Duration::from_secs(20));
+    desktop.record_names();
+    assert_eq!(
+        suppression_list(&desktop),
+        [crate::AppEntry::new("cs2.exe", "Counter-Strike 2")]
+    );
+    recent_game(&mut desktop).title = Some("Counter-Strike 2 Beta".into());
+    desktop.pending.clear();
+    desktop.record_names();
+    assert_eq!(configures(&desktop), 1);
+    assert_eq!(
+        suppression_list(&desktop),
+        [crate::AppEntry::new("cs2.exe", "Counter-Strike 2 Beta")]
+    );
+    desktop.pending.clear();
+    desktop.record_names();
+    assert_eq!(configures(&desktop), 0);
+}
+
 #[test]
 fn a_name_that_arrives_after_the_entry_was_removed_changes_nothing() {
     let (directory, mut desktop) = desktop_with(Some(&configuration_file("23:00")));
@@ -1187,7 +1315,7 @@ fn a_blocked_display_name_read_does_not_delay_a_configure_round_trip() {
     }
     assert_eq!(
         file_info.receive().names,
-        Vec::<(crate::ExecutablePath, String)>::new()
+        Vec::<(crate::ExecutablePath, Option<String>)>::new()
     );
     release.send(()).expect("release name read");
     replies

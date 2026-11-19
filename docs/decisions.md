@@ -152,6 +152,30 @@ Evaluated directions that affected Circadia's behavior or feasibility. The [spec
 
 **Reevaluate when:** A user reports an app on the suppression list whose window has both styles. The fix then amends the specification and the code together in its own change.
 
+### DEC-store-manifest-names — Read game names from the files a game store writes for each installed game
+
+**Disposition:** Not selected
+
+**Requirement impact:** The display name of an executable that has no version description, such as `cs2.exe`.
+
+**Reason:** A store's records, such as Steam's `appmanifest_730.acf`, name a game before it has had focus, but reading them requires parsing that is specific to each store and a wider rule for which files Circadia reads. They also do not cover games from other stores. The game's window title gives the same name once the game has had focus, through window metadata that Circadia already reads.
+
+**Basis:** [Names for executables without a version description](research/executable-icons.md#names-for-executables-without-a-version-description) compares the version resource, Windows' friendly-name cache, window properties, the window title, and Steam's records.
+
+**Reevaluate when:** Users commonly add games that have never had focus and then see their filenames as names.
+
+### DEC-stable-title-names — Use a window title as a name only when it is the same at focus gain and focus loss
+
+**Disposition:** Not selected
+
+**Requirement impact:** Which recorded window title becomes the display name of an executable without a version description.
+
+**Reason:** Requiring the same title when the window gains focus and when it loses focus rejects titles that change while the app has focus. It also gives no name to a game whose window closes while it has focus, because Circadia then has no focus-loss title to compare. The name changes only the label, not matching, and a newer title replaces a wrong one the next time the app loses focus.
+
+**Basis:** [REQ-edit-executable-list](specs/suppression.md#req-edit-executable-list--edit-the-suppression-list) defines which title the recent-app history records.
+
+**Reevaluate when:** Apps without a version description commonly show a document name or a status message as their names.
+
 ## Native code ownership
 
 ### DEC-first-party-wrappers-for-maintained-crates — Wrap Windows operations that maintained crates already provide

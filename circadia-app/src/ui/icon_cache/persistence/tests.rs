@@ -22,6 +22,7 @@ fn a_blocked_writer_coalesces_replacements_and_preserves_pending_images() {
                 version: 1,
                 apps: vec![entry(image)],
                 sources: BTreeMap::new(),
+                titles: BTreeMap::new(),
             },
             Pending {
                 dirty: true,
@@ -34,6 +35,7 @@ fn a_blocked_writer_coalesces_replacements_and_preserves_pending_images() {
             version: 1,
             apps: vec![entry(100), entry(101)],
             sources: BTreeMap::new(),
+            titles: BTreeMap::new(),
         },
         Pending {
             dirty: true,
@@ -126,6 +128,7 @@ fn sources(game: u32) -> Index {
             format!("game{game}.exe"),
             format!(r"C:\Apps\game{game}.exe"),
         )]),
+        titles: BTreeMap::new(),
     }
 }
 
