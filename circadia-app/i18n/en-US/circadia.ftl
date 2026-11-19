@@ -309,6 +309,7 @@ list-empty-title = No apps yet
 list-empty-description = Add a game, video player or photo editor to keep its colors accurate.
 entry-remove-name = Remove { $name }
 entry-inactive = Inactive because this app is excluded.
+entry-inactive-transient-host = Inactive because this app never becomes the focused app.
 entry-invalid = Invalid file name. This entry matches nothing until you remove it.
 entry-expression = Invalid window title pattern. This entry matches nothing until you fix it.
 entry-duplicate = { $executable } is on this list twice. Remove one entry.
@@ -362,6 +363,7 @@ dialog-browse = Browse
 dialog-file-types = Apps (*.exe)
 dialog-already-listed = This rule for { $executable } is already on your list. Change “Only this installation” to add a different installation, or edit the existing rule. To match several window titles, use a regular expression such as minecraft|terraria.
 dialog-fixed = { $executable } is always excluded from automatic suppression, so it can't be added to either list.
+dialog-transient-host = { $executable } shows { -windows } panels over other apps and never becomes the focused app, so it can't be added to either list.
 dialog-add =
     { $count ->
         [0] Add
